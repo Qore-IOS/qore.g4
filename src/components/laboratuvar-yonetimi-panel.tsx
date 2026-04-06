@@ -1,7 +1,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Card, CardHeader, CardTitle, CardDescription, CardContent
@@ -13,11 +13,65 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where } from 'firebase/firestore';
-import type { DepoStokItem, Laboratory, ProductCode } from '@/lib/types';
-import { Loader2, Search, ChevronUp, ChevronDown, ListChecks, History } from 'lucide-react';
+import { collection, getDocs, query, where, doc, writeBatch, Timestamp, deleteDoc } from 'firebase/firestore';
+import type { DepoStokItem, Laboratory, ProductCode, MinMaxRule } from '@/lib/types';
+import { Loader2, Search, ChevronUp, ChevronDown, ListChecks, History, PackageX, FileText } from 'lucide-react';
+import { useMinMaxRules, touchStockMetadata } from '@/hooks/useFirebaseQueries';
+import { useAuth } from '@/contexts/auth-context';
+import { useToast } from '@/hooks/use-toast';
+import LabIrsaliyeOcrModal, { type LabOcrResult } from '@/components/lab/LabIrsaliyeOcrModal';
+import { normalizeMiad } from '@/lib/date';
 import { formatMiad } from '@/lib/date';
+import { differenceInDays, parse, isValid } from 'date-fns';
+import { cn } from '@/lib/utils';
+
+type MiadSeverity = 'normal' | 'notice' | 'caution' | 'warning' | 'critical' | 'expired';
+
+function getMiadInfoFromString(miadStr: string): { days: number; severity: MiadSeverity } {
+  if (!miadStr) return { days: Infinity, severity: 'normal' };
+  const miadDate = parse(miadStr, 'dd.MM.yyyy', new Date());
+  if (!isValid(miadDate)) return { days: Infinity, severity: 'normal' };
+  const days = differenceInDays(miadDate, new Date());
+  if (days < 0) return { days, severity: 'expired' };
+  if (days <= 3) return { days, severity: 'critical' };
+  if (days <= 10) return { days, severity: 'warning' };
+  if (days < 45) return { days, severity: 'caution' };
+  if (days < 60) return { days, severity: 'notice' };
+  return { days, severity: 'normal' };
+}
+
+function getRowStripeColor(miadSeverity: MiadSeverity): string {
+  if (miadSeverity === 'expired' || miadSeverity === 'critical') return 'bg-red-500';
+  if (miadSeverity === 'warning' || miadSeverity === 'caution') return 'bg-amber-500';
+  if (miadSeverity === 'notice') return 'bg-yellow-400';
+  return 'bg-transparent';
+}
+
+function normalizeKey(key: string): string {
+  return key
+    .replace(/\s+/g, '')
+    .replace(/İ/g, 'i').replace(/I/g, 'i')
+    .replace(/Ş/g, 's').replace(/ş/g, 's')
+    .replace(/Ç/g, 'c').replace(/ç/g, 'c')
+    .replace(/Ğ/g, 'g').replace(/ğ/g, 'g')
+    .replace(/Ü/g, 'u').replace(/ü/g, 'u')
+    .replace(/Ö/g, 'o').replace(/ö/g, 'o')
+    .replace(/ı/g, 'i')
+    .toLowerCase();
+}
+
+type ParsedExcelRow = {
+  stokKodu: string;
+  stokAdi: string;
+  lotNumarasi: string;
+  miad: string;
+  seriNumarasi: string;
+  adet: number;
+  valid: boolean;
+  error?: string;
+};
 
 const SortableHeader: React.FC<{
   label: string;
@@ -50,16 +104,31 @@ type GroupedStockItem = {
 
 export default function LaboratuvarYonetimiPanel() {
   const router = useRouter();
+  const { currentUser, currentUserProfile } = useAuth();
+  const { toast } = useToast();
   const [laboratories, setLaboratories] = useState<Laboratory[]>([]);
   const [selectedLabId, setSelectedLabId] = useState<string>('');
-  const [depoStok, setDepoStok] = useState<DepoStokItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<keyof GroupedStockItem>('stokAdi');
   const [sortAsc, setSortAsc] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
   const [productNames, setProductNames] = useState<Record<string, string>>({});
+  const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
+  const [showOutOfStock, setShowOutOfStock] = useState(false);
+  const [isOcrModalOpen, setIsOcrModalOpen] = useState(false);
+  const [isOcrProcessing, setIsOcrProcessing] = useState(false);
+  const { data: minMaxRulesData } = useMinMaxRules(selectedLabId || null);
+
+  const minMaxMap = useMemo(() => {
+    const map: Record<string, MinMaxRule> = {};
+    if (minMaxRulesData) {
+      minMaxRulesData.forEach(rule => {
+        map[rule.stokKodu] = rule;
+      });
+    }
+    return map;
+  }, [minMaxRulesData]);
 
   useEffect(() => {
     async function fetchData() {
@@ -73,11 +142,14 @@ export default function LaboratuvarYonetimiPanel() {
       setDepoStok(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)));
       
       const names: Record<string, string> = {};
+      const codes: ProductCode[] = [];
       productsSnap.docs.forEach(d => {
-        const p = d.data() as ProductCode;
+        const p = { id: d.id, ...d.data() } as ProductCode;
+        codes.push(p);
         if (p.stokKodu) names[p.stokKodu] = p.stokAdi || p.stokKodu;
       });
       setProductNames(names);
+      setProductCodes(codes);
 
       setIsLoading(false);
     }
@@ -132,19 +204,40 @@ export default function LaboratuvarYonetimiPanel() {
     [groupedMap]
   );
 
+  const outOfStockItems = useMemo(() => {
+    if (!showOutOfStock || !minMaxRulesData) return [];
+    const inStockCodes = new Set(summaryList.map(r => r.stokKodu));
+    return minMaxRulesData
+      .filter(rule => !inStockCodes.has(rule.stokKodu))
+      .map(rule => ({
+        groupKey: `__oos__${rule.stokKodu}`,
+        stokKodu: rule.stokKodu,
+        stokAdi: productNames[rule.stokKodu] || rule.stokKodu,
+        lot: '',
+        miad: '',
+        quantity: 0,
+        firstId: '',
+      }));
+  }, [showOutOfStock, minMaxRulesData, summaryList, productNames]);
+
+  const combinedList = useMemo(
+    () => [...summaryList, ...outOfStockItems],
+    [summaryList, outOfStockItems]
+  );
+
   const filtered = useMemo(() => {
-    if (!searchQuery) return summaryList;
+    if (!searchQuery) return combinedList;
     const q = searchQuery.toLowerCase();
-    return summaryList.filter(row =>
+    return combinedList.filter(row =>
       row.stokKodu.toLowerCase().includes(q) ||
       row.stokAdi.toLowerCase().includes(q) ||
       row.lot.toLowerCase().includes(q) ||
       row.miad.toLowerCase().includes(q) ||
-      groupedMap[row.groupKey].items.some(item =>
+      (groupedMap[row.groupKey]?.items.some(item =>
         item.seriNumarasi?.toLowerCase().includes(q)
-      )
+      ) ?? false)
     );
-  }, [searchQuery, summaryList, groupedMap]);
+  }, [searchQuery, combinedList, groupedMap]);
 
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
@@ -172,10 +265,243 @@ export default function LaboratuvarYonetimiPanel() {
     setCurrentPage(1);
   };
   const goToDetail = (id: string) => router.push(`/laboratuvar-yonetimi/${id}`);
-  
+
   const selectedLabName = useMemo(() => {
-    return laboratories.find(l => l.id === selectedLabId)?.name || '';
-  }, [laboratories, selectedLabId]);
+    return allLaboratories.find(l => l.id === selectedLabId)?.name || '';
+  }, [allLaboratories, selectedLabId]);
+
+  const stockIsLoading = isLoading || labPoolsLoading || labStockLoading;
+
+  // --- Excel Import Logic ---
+
+  const handleFileSelect = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsParsingExcel(true);
+    setParsedRows([]);
+
+    try {
+      const XLSX = await import('xlsx');
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: 'array' });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const jsonData = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, { raw: false, dateNF: 'dd.mm.yyyy' });
+
+      // Build product lookup
+      const productMap = new Map<string, ProductCode>();
+      products.forEach(p => {
+        if (p.stokKodu) productMap.set(p.stokKodu.trim().toUpperCase(), p);
+      });
+
+      const rows: ParsedExcelRow[] = [];
+
+      for (const rawRow of jsonData) {
+        // Normalize keys for Turkish character handling
+        const row: Record<string, any> = {};
+        for (const key of Object.keys(rawRow)) {
+          row[normalizeKey(key)] = rawRow[key];
+        }
+
+        const stokKodu = String(row['stokkodu'] || '').trim();
+        if (!stokKodu) continue;
+
+        const product = productMap.get(stokKodu.toUpperCase());
+        const stokAdi = String(row['stokadi'] || row['stokadı'] || product?.stokAdi || stokKodu).trim();
+        const lotNumarasi = String(row['lotnumarasi'] || row['lotno'] || row['lot'] || '').trim();
+        const miadRaw = String(row['miad'] || row['sonkullanmatarihi'] || row['skt'] || '').trim();
+        const seriNumarasi = String(row['serinumarasi'] || row['serino'] || row['seri'] || '').trim();
+        const adetRaw = row['adet'] || row['miktar'] || row['quantity'] || '1';
+        const adet = Math.max(1, Math.floor(Number(adetRaw) || 1));
+
+        // Validate stokKodu exists in productCodes
+        let valid = true;
+        let error: string | undefined;
+        if (!product) {
+          valid = false;
+          error = `"${stokKodu}" stok kodu tanımlı değil`;
+        }
+
+        // If serial number provided, quantity must be 1
+        if (seriNumarasi && adet > 1) {
+          valid = false;
+          error = 'Seri numarası girildiğinde adet 1 olmalıdır';
+        }
+
+        rows.push({
+          stokKodu: product?.stokKodu || stokKodu,
+          stokAdi: product?.stokAdi || stokAdi,
+          lotNumarasi,
+          miad: miadRaw,
+          seriNumarasi,
+          adet: seriNumarasi ? 1 : adet,
+          valid,
+          error,
+        });
+      }
+
+      setParsedRows(rows);
+      setIsImportModalOpen(true);
+    } catch (error) {
+      toast({ title: 'Excel Okuma Hatası', description: 'Dosya işlenirken bir hata oluştu.', variant: 'destructive' });
+    } finally {
+      setIsParsingExcel(false);
+      if (event.target) event.target.value = '';
+    }
+  }, [products, toast]);
+
+  const validRows = useMemo(() => parsedRows.filter(r => r.valid), [parsedRows]);
+  const invalidRows = useMemo(() => parsedRows.filter(r => !r.valid), [parsedRows]);
+
+  const handleImportConfirm = useCallback(async () => {
+    if (validRows.length === 0 || !selectedLabId) return;
+
+    setIsImporting(true);
+    setImportProgress('Stok ekleniyor...');
+
+    try {
+      const BATCH_SIZE = 450;
+      let written = 0;
+      const totalDocs = validRows.reduce((sum, r) => sum + r.adet, 0);
+
+      // Flatten rows: for each row, create `adet` number of depoStok documents
+      const docsToWrite: Array<{
+        stokKodu: string;
+        stokAdi: string;
+        lotNumarasi: string;
+        miad: string;
+        seriNumarasi: string;
+      }> = [];
+
+      for (const row of validRows) {
+        for (let i = 0; i < row.adet; i++) {
+          docsToWrite.push({
+            stokKodu: row.stokKodu,
+            stokAdi: row.stokAdi,
+            lotNumarasi: row.lotNumarasi,
+            miad: row.miad,
+            seriNumarasi: row.seriNumarasi,
+          });
+        }
+      }
+
+      for (let i = 0; i < docsToWrite.length; i += BATCH_SIZE) {
+        const chunk = docsToWrite.slice(i, i + BATCH_SIZE);
+        const batch = writeBatch(db);
+
+        for (const item of chunk) {
+          const docRef = doc(collection(db, 'depoStok'));
+          batch.set(docRef, {
+            stokKodu: item.stokKodu,
+            stokAdi: item.stokAdi,
+            lotNumarasi: item.lotNumarasi || null,
+            miad: item.miad || null,
+            seriNumarasi: item.seriNumarasi || null,
+            isShipped: true,
+            hedefKurumId: selectedLabId,
+            hedefKurum: selectedLabName,
+            eklenmeTarihi: Timestamp.now(),
+            sevkTarihi: Timestamp.now(),
+            kaynak: 'excel_import',
+          });
+        }
+
+        await batch.commit();
+        written += chunk.length;
+        setImportProgress(`Stok ekleniyor... (${written}/${totalDocs})`);
+      }
+
+      // Invalidate cache and touch metadata
+      await touchStockMetadata();
+      invalidateDepoStok();
+
+      toast({
+        title: 'Stok Ekleme Başarılı',
+        description: `${totalDocs} adet ürün laboratuvar stoğuna eklendi.`,
+      });
+
+      setIsImportModalOpen(false);
+      setParsedRows([]);
+    } catch (error) {
+      toast({ title: 'Stok Ekleme Hatası', description: 'Kayıt sırasında bir hata oluştu.', variant: 'destructive' });
+    } finally {
+      setIsImporting(false);
+      setImportProgress('');
+    }
+  }, [validRows, selectedLabId, selectedLabName, toast, invalidateDepoStok]);
+
+  const handleOcrResults = useCallback(async (
+    results: LabOcrResult[],
+    file: { id: string; storagePath: string; fileName: string }
+  ) => {
+    if (!selectedLabId) return;
+    setIsOcrProcessing(true);
+
+    try {
+      const selectedLab = laboratories.find(l => l.id === selectedLabId);
+      const labName = selectedLab?.name || '';
+      const batch = writeBatch(db);
+      let totalDocs = 0;
+
+      for (const item of results) {
+        const product = productCodes.find(p => p.stokKodu === item.stokKodu);
+        if (!product) continue;
+
+        const qty = Math.max(1, item.quantity || 1);
+        for (let i = 0; i < qty; i++) {
+          const ref = doc(collection(db, 'depoStok'));
+          batch.set(ref, {
+            depotId: '',
+            depotName: '',
+            stokKodu: item.stokKodu,
+            stokAdi: product.stokAdi || '',
+            lotNumarasi: item.lot || '',
+            miad: item.miad ? normalizeMiad(item.miad) : '',
+            seriNumarasi: '',
+            rafAdresi: '',
+            irsaliyeNumarasi: '',
+            eklenmeTarihi: Timestamp.now(),
+            isShipped: true,
+            hedefKurumId: selectedLabId,
+            hedefKurum: labName,
+            createdByName: currentUserProfile?.name || currentUser?.email || 'Unknown',
+            createdByUid: currentUser?.uid || null,
+          });
+          totalDocs++;
+        }
+      }
+
+      await batch.commit();
+      await touchStockMetadata();
+
+      // Delete the file from Firestore and storage
+      await deleteDoc(doc(db, 'irsaliyeDosyalari', file.id));
+      await fetch('/api/storage/delete-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storagePath: file.storagePath }),
+      });
+
+      // Refresh local stock data
+      const stokSnap = await getDocs(query(collection(db, 'depoStok'), where('isShipped', '==', true)));
+      setDepoStok(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)));
+
+      toast({
+        title: 'Stok girişi tamamlandı',
+        description: `${totalDocs} adet ürün laboratuvar stoğuna eklendi. İrsaliye dosyası (${file.fileName}) silindi.`,
+      });
+    } catch (error: any) {
+      console.error('Lab OCR stock entry error:', error);
+      toast({
+        title: 'Hata',
+        description: error?.message || 'Stok girişi sırasında bir hata oluştu.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsOcrProcessing(false);
+    }
+  }, [selectedLabId, laboratories, productCodes, currentUser, currentUserProfile, toast]);
 
   return (
     <div className="space-y-6">
@@ -216,6 +542,18 @@ export default function LaboratuvarYonetimiPanel() {
                         >
                         <History className="mr-2 h-5 w-5" /> Sayım Geçmişi
                     </Button>
+                    <Button
+                        onClick={() => setIsOcrModalOpen(true)}
+                        disabled={!selectedLabId || isOcrProcessing}
+                        variant="outline"
+                        className="w-full sm:w-auto"
+                        >
+                        {isOcrProcessing
+                          ? <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                          : <FileText className="mr-2 h-5 w-5" />
+                        }
+                        İrsaliye ile Giriş
+                    </Button>
                 </div>
             )}
             <div className="flex-grow">
@@ -234,11 +572,19 @@ export default function LaboratuvarYonetimiPanel() {
 
           {selectedLabId && (
             <Card className="shadow mt-4">
-              <CardHeader>
+              <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle>{selectedLabName} - Özet Stok Durumu</CardTitle>
+                <Button
+                  variant={showOutOfStock ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => { setShowOutOfStock(v => !v); setCurrentPage(1); }}
+                >
+                  <PackageX className="mr-2 h-4 w-4" />
+                  {showOutOfStock ? 'Stokta Olmayanları Gizle' : 'Stokta Olmayanları Göster'}
+                </Button>
               </CardHeader>
               <CardContent>
-                {isLoading ? (
+                {stockIsLoading ? (
                   <div className="flex justify-center items-center h-64">
                     <Loader2 className="h-8 w-8 animate-spin" />
                   </div>
@@ -248,30 +594,75 @@ export default function LaboratuvarYonetimiPanel() {
                       <Table>
                         <TableHeader className="sticky top-0 bg-background/95 backdrop-blur-sm">
                           <TableRow>
+                            <TableHead className="w-1.5 p-0" />
                             <SortableHeader label="Stok Kodu" field="stokKodu" sortField={sortField} sortAsc={sortAsc} onClick={onHeaderClick} />
                             <SortableHeader label="Stok Adı" field="stokAdi" sortField={sortField} sortAsc={sortAsc} onClick={onHeaderClick} />
                             <SortableHeader label="Lot" field="lot" sortField={sortField} sortAsc={sortAsc} onClick={onHeaderClick} />
                             <SortableHeader label="Miad" field="miad" sortField={sortField} sortAsc={sortAsc} onClick={onHeaderClick} />
                             <SortableHeader label="Adet" field="quantity" sortField={sortField} sortAsc={sortAsc} onClick={onHeaderClick} />
+                            <TableHead className="text-center">Min</TableHead>
+                            <TableHead className="text-center">Max</TableHead>
+                            <TableHead className="text-center">Ort. Tüketim Süresi</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {paginated.map(row => (
+                          {paginated.map(row => {
+                            const isOutOfStock = row.groupKey.startsWith('__oos__');
+                            const miadInfo = getMiadInfoFromString(row.miad);
+                            const stripeColor = isOutOfStock ? 'bg-slate-400' : getRowStripeColor(miadInfo.severity);
+                            return (
                             <TableRow
                               key={row.groupKey}
-                              onClick={() => goToDetail(row.firstId)}
-                              className="cursor-pointer hover:bg-muted"
+                              onClick={isOutOfStock ? undefined : () => goToDetail(row.firstId)}
+                              className={cn(
+                                !isOutOfStock && "cursor-pointer hover:bg-muted",
+                                isOutOfStock && 'bg-slate-50 dark:bg-slate-900/30 text-muted-foreground',
+                                !isOutOfStock && (miadInfo.severity === 'critical' || miadInfo.severity === 'expired') && 'bg-red-500/[0.04]',
+                                !isOutOfStock && miadInfo.severity === 'caution' && 'bg-amber-500/[0.04]',
+                              )}
                             >
+                              {/* Color strip */}
+                              <TableCell className="w-1.5 p-0">
+                                <div className={cn("w-1 h-full min-h-[40px] rounded-r", stripeColor)} />
+                              </TableCell>
                               <TableCell>{row.stokKodu}</TableCell>
                               <TableCell>{row.stokAdi}</TableCell>
                               <TableCell>{row.lot}</TableCell>
-                              <TableCell>{row.miad}</TableCell>
-                              <TableCell className="text-right font-semibold">{row.quantity}</TableCell>
+                              <TableCell>
+                                <div className="flex flex-col gap-0.5">
+                                  <span className="text-xs">{row.miad}</span>
+                                  {miadInfo.severity !== 'normal' && miadInfo.days !== Infinity && (
+                                    <span className={cn(
+                                      "inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold w-fit",
+                                      miadInfo.severity === 'expired' && 'bg-red-100 text-red-700',
+                                      miadInfo.severity === 'critical' && 'bg-red-100 text-red-700',
+                                      miadInfo.severity === 'warning' && 'bg-orange-100 text-orange-700',
+                                      miadInfo.severity === 'caution' && 'bg-amber-100 text-amber-700',
+                                      miadInfo.severity === 'notice' && 'bg-yellow-100 text-yellow-700',
+                                    )}>
+                                      {miadInfo.days < 0 ? 'Süresi dolmuş' : `${miadInfo.days} gün kaldı`}
+                                    </span>
+                                  )}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-right font-semibold">
+                                {isOutOfStock
+                                  ? <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300">Stokta Yok</span>
+                                  : row.quantity}
+                              </TableCell>
+                              <TableCell className="text-center">{minMaxMap[row.stokKodu]?.min ?? '-'}</TableCell>
+                              <TableCell className="text-center">{minMaxMap[row.stokKodu]?.max ?? '-'}</TableCell>
+                              <TableCell className="text-center">
+                                {minMaxMap[row.stokKodu]?.ortalamaTuketimSuresi != null
+                                  ? `${minMaxMap[row.stokKodu].ortalamaTuketimSuresi} ${minMaxMap[row.stokKodu].tuketimSuresiBirimi === 'saat' ? 'saat' : 'gün'}`
+                                  : '-'}
+                              </TableCell>
                             </TableRow>
-                          ))}
+                            );
+                          })}
                           {paginated.length === 0 && (
                             <TableRow>
-                              <TableCell colSpan={5} className="text-center py-4 text-muted-foreground">
+                              <TableCell colSpan={9} className="text-center py-4 text-muted-foreground">
                                 Kayıt bulunamadı.
                               </TableCell>
                             </TableRow>
@@ -320,6 +711,12 @@ export default function LaboratuvarYonetimiPanel() {
           )}
         </CardContent>
       </Card>
+      <LabIrsaliyeOcrModal
+        isOpen={isOcrModalOpen}
+        onClose={() => setIsOcrModalOpen(false)}
+        productCodes={productCodes}
+        onResults={handleOcrResults}
+      />
     </div>
   );
 }

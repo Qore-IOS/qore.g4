@@ -1,8 +1,8 @@
 
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  collection, getDocs, setDoc, doc, deleteDoc, addDoc, serverTimestamp, query, where, Timestamp
+  collection, getDocs, setDoc, doc, deleteDoc, addDoc, serverTimestamp, query, where, Timestamp, updateDoc
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Device, Hospital, MaintenancePlan, MaintenancePeriodUnit, MaintenanceType, ProductCode, PeriodicPartChange, PeriodicPartResponsibility } from '@/lib/types';
@@ -23,13 +23,14 @@ import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { ScrollArea } from './ui/scroll-area';
-import { Calendar, Plus, Trash2, Wrench, FlaskConical, Loader2, Package, ChevronsUpDown, Check as CheckIcon, FileDown, ClipboardList, Building2, Search, Settings, Server, Pencil, Boxes, Upload } from 'lucide-react';
+import { Calendar, Plus, Trash2, Wrench, FlaskConical, Loader2, Package, ChevronsUpDown, Check as CheckIcon, FileDown, ClipboardList, Building2, Search, Settings, Server, Pencil, Boxes, Upload, Download, Image as ImageIcon } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { cn, exportDevicesToPdf } from '@/lib/utils';
+import { cn, exportDevicesToPdf, exportDataToExcel } from '@/lib/utils';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/contexts/auth-context';
 import DeviceLabPoolModal from '@/components/DeviceLabPoolModal';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
@@ -88,6 +89,7 @@ type DeviceModelDefinition = {
   id: string;
   brand: string;
   model: string;
+  imageUrl?: string | null;
 };
 
 export default function CihazTanimlamaClient({ images, hospitals }: Props) {
@@ -124,6 +126,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
   const [showPeriodicPartSection, setShowPeriodicPartSection] = useState(false);
   const [exportPdfLoading, setExportPdfLoading] = useState(false);
+  const [exportExcelLoading, setExportExcelLoading] = useState(false);
   const [plannedDeviceIds, setPlannedDeviceIds] = useState<Set<string>>(new Set());
 
   // Marka/Model tanım state'leri
@@ -131,6 +134,9 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   const [definitionModalOpen, setDefinitionModalOpen] = useState(false);
   const [newDefinitionBrand, setNewDefinitionBrand] = useState('');
   const [newDefinitionModel, setNewDefinitionModel] = useState('');
+  const [newDefinitionImageUrl, setNewDefinitionImageUrl] = useState('');
+  const [newDefinitionCustomImagePath, setNewDefinitionCustomImagePath] = useState('');
+  const [editingDefinitionId, setEditingDefinitionId] = useState<string | null>(null);
   const [isSavingDefinition, setIsSavingDefinition] = useState(false);
 
   // Toplu Bakım Planı State'leri
@@ -141,6 +147,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   const [bulkPeriodicPartRows, setBulkPeriodicPartRows] = useState<BulkPeriodicPartRow[]>([]);
   const [bulkShowPeriodicParts, setBulkShowPeriodicParts] = useState(false);
   const [isSavingBulk, setIsSavingBulk] = useState(false);
+  const deviceExcelInputRef = useRef<HTMLInputElement | null>(null);
 
   // Laboratuvar ve cihaz seçimi state'leri
   const [labSelectionModalOpen, setLabSelectionModalOpen] = useState(false);
@@ -207,7 +214,10 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   }, []);
 
   const save = async () => {
-    const imageUrl = current.imageUrl || customPath.trim();
+    const selectedModelImage = modelDefinitions.find(
+      row => row.brand === current.brand && row.model === current.model
+    )?.imageUrl || '';
+    const imageUrl = current.imageUrl || customPath.trim() || selectedModelImage;
     if (!current.brand || !current.model || !imageUrl || !current.seriNumarasi || !current.hospitalId || !current.order) {
       toast({
         title: 'Eksik bilgi',
@@ -226,7 +236,11 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       cihazAdi: current.cihazAdi,
       seriNumarasi: current.seriNumarasi,
       hospitalId: current.hospitalId,
-      order: current.order
+      order: current.order,
+      mulkiyet: current.mulkiyet || '',
+      kurulumTarihi: current.kurulumTarihi || '',
+      kurulumPersonelleri: current.kurulumPersonelleri || '',
+      aciklama: current.aciklama || ''
     }, currentUserProfile?.companyId), { merge: true });
 
     toast({ title: 'Kaydedildi', description: 'Cihaz tanımı kaydedildi.' });
@@ -743,36 +757,153 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     }
   };
 
+  const handleExportDevicesExcel = async () => {
+    if (devices.length === 0) {
+      toast({ title: 'Veri Yok', description: 'Dışa aktarılacak cihaz verisi yok.', variant: 'default' });
+      return;
+    }
+    setExportExcelLoading(true);
+    try {
+      const [allPlansSnap, allPartsSnap] = await Promise.all([
+        getDocs(collection(db, 'maintenancePlans')),
+        getDocs(collection(db, 'periodicPartChanges')),
+      ]);
+      const allPlans = filterByCompanyScope(
+        allPlansSnap.docs.map(d => ({ id: d.id, ...d.data() }) as MaintenancePlan),
+        currentCompanyId,
+        isSuperAdmin
+      );
+      const allParts = filterByCompanyScope(
+        allPartsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as PeriodicPartChange),
+        currentCompanyId,
+        isSuperAdmin
+      );
+
+      const cihazlarRows = devices.map(dev => {
+        const hospitalName = hospitals.find(h => h.id === dev.hospitalId)?.name || '';
+        return {
+          'Marka': dev.brand || '',
+          'Model': dev.model || '',
+          'Cihaz Adı': dev.cihazAdi || '',
+          'Seri Numarası': dev.seriNumarasi || '',
+          'Laboratuvar': hospitalName,
+          'Dizilim Sırası': dev.order || '',
+        };
+      });
+
+      const bakimPlanlariRows = devices.flatMap(dev => {
+        const devicePlans = allPlans.filter(p => p.deviceId === dev.id);
+        return devicePlans.map(p => ({
+          'Cihaz': `${dev.brand} ${dev.model}${dev.cihazAdi ? ` - ${dev.cihazAdi}` : ''}`,
+          'İş Adı': p.taskName,
+          'Periyot': `${p.periodValue} ${PERIOD_UNIT_LABELS[p.periodUnit]}`,
+          'Tip': p.type === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon',
+        }));
+      });
+
+      const parcaDegisimRows = devices.flatMap(dev => {
+        const deviceParts = allParts.filter(p => p.deviceId === dev.id);
+        return deviceParts.map(p => ({
+          'Cihaz': `${dev.brand} ${dev.model}${dev.cihazAdi ? ` - ${dev.cihazAdi}` : ''}`,
+          'Parça Adı': p.stokAdi,
+          'Stok Kodu': p.stokKodu,
+          'Periyot': p.periodDays ? `${p.periodDays} gün` : (p.nextDueDate?.toDate ? new Date(p.nextDueDate.toDate()).toLocaleDateString('tr-TR') : `${p.periodValue} ${PERIOD_UNIT_LABELS[p.periodUnit]}`),
+          'Sorumluluk': RESPONSIBILITY_LABELS[p.responsibilityType],
+        }));
+      });
+
+      const sheets: Record<string, any[]> = { 'Cihazlar': cihazlarRows };
+      if (bakimPlanlariRows.length > 0) sheets['Bakım Planları'] = bakimPlanlariRows;
+      if (parcaDegisimRows.length > 0) sheets['Periyodik Parça Değişim'] = parcaDegisimRows;
+
+      exportDataToExcel(sheets, 'Cihaz_Tanimlamalari', toast);
+    } catch (err) {
+      console.error('Excel export error:', err);
+      toast({ title: 'Hata', description: 'Excel oluşturulurken bir hata oluştu.', variant: 'destructive' });
+    } finally {
+      setExportExcelLoading(false);
+    }
+  };
+
   const saveModelDefinition = async () => {
     if (!newDefinitionBrand.trim() || !newDefinitionModel.trim()) {
       toast({ title: 'Eksik Bilgi', description: 'Marka ve model zorunludur.', variant: 'destructive' });
       return;
     }
-    const duplicate = modelDefinitions.some(
-      row =>
-        row.brand.trim().toLowerCase() === newDefinitionBrand.trim().toLowerCase() &&
-        row.model.trim().toLowerCase() === newDefinitionModel.trim().toLowerCase()
-    );
-    if (duplicate) {
-      toast({ title: 'Mevcut Tanım', description: 'Bu marka/model zaten tanımlı.', variant: 'destructive' });
-      return;
-    }
+    const selectedDefinitionImageUrl = newDefinitionImageUrl || newDefinitionCustomImagePath.trim();
+    const duplicate = editingDefinitionId
+      ? modelDefinitions.find(row => row.id === editingDefinitionId)
+      : modelDefinitions.find(
+        row =>
+          row.brand.trim().toLowerCase() === newDefinitionBrand.trim().toLowerCase() &&
+          row.model.trim().toLowerCase() === newDefinitionModel.trim().toLowerCase()
+      );
     setIsSavingDefinition(true);
     try {
-      await addDoc(collection(db, 'deviceModelDefinitions'), withCompanyScope({
-        brand: newDefinitionBrand.trim(),
-        model: newDefinitionModel.trim(),
-        createdAt: serverTimestamp(),
-      }, currentUserProfile?.companyId));
+      if (duplicate) {
+        await updateDoc(doc(db, 'deviceModelDefinitions', duplicate.id), {
+          imageUrl: selectedDefinitionImageUrl || null,
+        });
+      } else {
+        await addDoc(collection(db, 'deviceModelDefinitions'), withCompanyScope({
+          brand: newDefinitionBrand.trim(),
+          model: newDefinitionModel.trim(),
+          imageUrl: selectedDefinitionImageUrl || null,
+          createdAt: serverTimestamp(),
+        }, currentUserProfile?.companyId));
+      }
+      if (selectedDefinitionImageUrl) {
+        const deviceSnap = await getDocs(collection(db, 'devices'));
+        const scopedDevices = filterByCompanyScope(
+          deviceSnap.docs.map(d => ({ id: d.id, ...d.data() } as Device)),
+          currentCompanyId,
+          isSuperAdmin
+        );
+        const matchedDevices = scopedDevices.filter(
+          device =>
+            (device.brand || '').trim().toLowerCase() === newDefinitionBrand.trim().toLowerCase() &&
+            (device.model || '').trim().toLowerCase() === newDefinitionModel.trim().toLowerCase()
+        );
+        await Promise.all(
+          matchedDevices.map(device =>
+            updateDoc(doc(db, 'devices', device.id), { imageUrl: selectedDefinitionImageUrl })
+          )
+        );
+      }
       setNewDefinitionBrand('');
       setNewDefinitionModel('');
+      setNewDefinitionImageUrl('');
+      setNewDefinitionCustomImagePath('');
+      setEditingDefinitionId(null);
       await fetchModelDefinitions();
-      toast({ title: 'Başarılı', description: 'Marka/model tanımı eklendi.' });
+      await fetchDevices();
+      toast({
+        title: 'Başarılı',
+        description: duplicate
+          ? 'Marka/model görseli güncellendi ve ilgili cihazlara uygulandı.'
+          : 'Marka/model tanımı eklendi ve görsel ilgili cihazlara uygulandı.'
+      });
     } catch (error) {
       console.error('Model tanımı kaydedilemedi:', error);
       toast({ title: 'Hata', description: 'Model tanımı kaydedilemedi.', variant: 'destructive' });
     } finally {
       setIsSavingDefinition(false);
+    }
+  };
+
+  const [deletingDefinitionId, setDeletingDefinitionId] = useState<string | null>(null);
+
+  const deleteModelDefinition = async (defId: string) => {
+    try {
+      setDeletingDefinitionId(defId);
+      await deleteDoc(doc(db, 'deviceModelDefinitions', defId));
+      await fetchModelDefinitions();
+      toast({ title: 'Başarılı', description: 'Marka/model tanımı silindi.' });
+    } catch (error) {
+      console.error('Model tanımı silinemedi:', error);
+      toast({ title: 'Hata', description: 'Model tanımı silinemedi.', variant: 'destructive' });
+    } finally {
+      setDeletingDefinitionId(null);
     }
   };
 
@@ -789,6 +920,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
         .map(row => ({
           brand: (row.Marka || row.marka || '').trim(),
           model: (row.Model || row.model || '').trim(),
+          imageUrl: (row.Gorsel || row.gorsel || row.ImageUrl || row.imageUrl || '').trim(),
         }))
         .filter(row => row.brand && row.model);
 
@@ -797,8 +929,11 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
         return;
       }
 
+      const seenInFile = new Set<string>();
       let added = 0;
       for (const row of normalized) {
+        const fileKey = `${row.brand.toLocaleLowerCase('tr')}::${row.model.toLocaleLowerCase('tr')}`;
+        if (seenInFile.has(fileKey)) continue;
         const exists = modelDefinitions.some(
           item =>
             item.brand.toLowerCase() === row.brand.toLowerCase() &&
@@ -808,8 +943,10 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
         await addDoc(collection(db, 'deviceModelDefinitions'), withCompanyScope({
           brand: row.brand,
           model: row.model,
+          imageUrl: row.imageUrl || null,
           createdAt: serverTimestamp(),
         }, currentUserProfile?.companyId));
+        seenInFile.add(fileKey);
         added++;
       }
       await fetchModelDefinitions();
@@ -822,10 +959,112 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     }
   };
 
+  const handleDeviceTemplateDownload = () => {
+    const templateRows = [
+      {
+        Marka: 'Roche',
+        Model: 'Cobas c 311',
+        CihazAdi: 'Biyokimya-1',
+        SeriNumarasi: 'SN-001',
+        Laboratuvar: hospitals[0]?.name || 'Merkez Lab',
+        DizilimSirasi: 1,
+        Mulkiyet: 'kurum',
+        KurulumTarihi: '2026-01-15',
+        KuranPersoneller: 'Ahmet Yılmaz, Ayşe Demir',
+        Aciklama: 'Acil servis hattı için ayrıldı',
+      }
+    ];
+    exportDataToExcel(templateRows, 'Cihaz_Tanim_Sablon', 'Cihazlar', toast);
+    toast({ title: 'Şablon İndirildi', description: 'Görsel hariç cihaz alanlarını doldurup Excel ile yükleyebilirsiniz.' });
+  };
+
+  const handleDeviceExcelImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const XLSX = await import('xlsx');
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: 'array' });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, { raw: false });
+
+      const normalized = rows.map(row => {
+        const hospitalRaw = String(row.Laboratuvar || row.laboratuvar || row.hospitalId || row.HospitalId || '').trim();
+        const hospitalId = hospitals.find(h => (h.id === hospitalRaw || h.name?.toLowerCase() === hospitalRaw.toLowerCase()))?.id || '';
+        return {
+          brand: String(row.Marka || row.marka || '').trim(),
+          model: String(row.Model || row.model || '').trim(),
+          cihazAdi: String(row.CihazAdi || row.cihazAdi || '').trim(),
+          seriNumarasi: String(row.SeriNumarasi || row.seriNumarasi || '').trim(),
+          hospitalId,
+          order: Number(row.DizilimSirasi || row.dizilimSirasi || 0),
+          mulkiyet: String(row.Mulkiyet || row.mulkiyet || '').trim(),
+          kurulumTarihi: String(row.KurulumTarihi || row.kurulumTarihi || '').trim(),
+          kurulumPersonelleri: String(row.KuranPersoneller || row.kuranPersoneller || '').trim(),
+          aciklama: String(row.Aciklama || row.aciklama || '').trim(),
+        };
+      }).filter(row =>
+        row.brand && row.model && row.cihazAdi && row.seriNumarasi && row.hospitalId && row.order > 0
+      );
+
+      if (normalized.length === 0) {
+        toast({ title: 'Veri Bulunamadı', description: 'Excel içinde zorunlu alanlar dolu olmalı.', variant: 'destructive' });
+        return;
+      }
+
+      const seenInFile = new Set<string>();
+      const existing = new Set(devices.map(d => `${(d.brand || '').toLowerCase()}::${(d.model || '').toLowerCase()}::${(d.seriNumarasi || '').toLowerCase()}`));
+      let added = 0;
+
+      for (const row of normalized) {
+        const key = `${row.brand.toLowerCase()}::${row.model.toLowerCase()}::${row.seriNumarasi.toLowerCase()}`;
+        if (seenInFile.has(key) || existing.has(key)) continue;
+        const id = `${row.brand}-${row.model}-${row.seriNumarasi}`.toLowerCase().replace(/\s+/g, '-');
+        await setDoc(doc(db, 'devices', id), withCompanyScope({
+          brand: row.brand,
+          model: row.model,
+          cihazAdi: row.cihazAdi,
+          seriNumarasi: row.seriNumarasi,
+          hospitalId: row.hospitalId,
+          order: row.order,
+          mulkiyet: row.mulkiyet,
+          kurulumTarihi: row.kurulumTarihi,
+          kurulumPersonelleri: row.kurulumPersonelleri,
+          aciklama: row.aciklama,
+          imageUrl: '',
+        }, currentUserProfile?.companyId), { merge: true });
+        seenInFile.add(key);
+        added++;
+      }
+
+      await fetchDevices();
+      toast({ title: 'Tamamlandı', description: `${added} cihaz başarıyla içe aktarıldı.` });
+    } catch (error) {
+      console.error('Cihaz Excel import hatası:', error);
+      toast({ title: 'Hata', description: 'Cihaz Excel dosyası işlenemedi.', variant: 'destructive' });
+    } finally {
+      event.target.value = '';
+    }
+  };
+
+  const handleDefinitionTemplateDownload = () => {
+    const templateRows = [
+      { Marka: 'X Marka', Model: 'A Model', Gorsel: 'devices/ornek-a-model.png' },
+      { Marka: 'X Marka', Model: 'Z Model', Gorsel: '' },
+      { Marka: 'X Marka', Model: 'C Model', Gorsel: '' },
+    ];
+    exportDataToExcel(templateRows, 'Marka_Model_Sablon', 'Sablon', toast);
+    toast({ title: 'Şablon İndirildi', description: 'Şablonu doldurup Excel ile Yükle alanından içe aktarabilirsiniz.' });
+  };
+
   const brands = Array.from(new Set(modelDefinitions.map(row => row.brand))).sort((a, b) => a.localeCompare(b, 'tr'));
-  const availableModels = modelDefinitions
-    .filter(row => row.brand === (current.brand || ''))
-    .map(row => row.model);
+  const availableModels = Array.from(
+    new Set(
+      modelDefinitions
+        .filter(row => row.brand === (current.brand || ''))
+        .map(row => row.model)
+    )
+  ).sort((a, b) => a.localeCompare(b, 'tr'));
 
   const filteredDevices = devices
     .filter(device => {
@@ -917,6 +1156,29 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
         <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="secondary"
+            onClick={handleDeviceTemplateDownload}
+            className="bg-[var(--dashboard-surface-2)]"
+          >
+            <Download className="h-4 w-4 mr-2" />
+            Cihaz Şablonu İndir
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => deviceExcelInputRef.current?.click()}
+            className="bg-[var(--dashboard-surface-2)]"
+          >
+            <Upload className="h-4 w-4 mr-2" />
+            Excel ile Cihaz Yükle
+          </Button>
+          <input
+            ref={deviceExcelInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={handleDeviceExcelImport}
+          />
+          <Button
+            variant="secondary"
             onClick={() => setDeviceLabPoolModalOpen(true)}
             className="bg-[var(--dashboard-surface-2)]"
           >
@@ -951,6 +1213,19 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
               <FileDown className="h-4 w-4 mr-2" />
             )}
             PDF Döküm
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={handleExportDevicesExcel}
+            disabled={exportExcelLoading || devices.length === 0}
+            className="bg-[var(--dashboard-surface-2)]"
+          >
+            {exportExcelLoading ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <FileDown className="h-4 w-4 mr-2" />
+            )}
+            Excel Döküm
           </Button>
           <Button variant="outline" onClick={() => setDefinitionModalOpen(true)} className="bg-[var(--dashboard-surface-2)]">
             <Boxes className="h-4 w-4 mr-2" />
@@ -1050,7 +1325,10 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                   <Label>Model</Label>
                   <Select
                     value={current.model || ''}
-                    onValueChange={val => setCurrent({ ...current, model: val })}
+                    onValueChange={val => {
+                      const modelImage = modelDefinitions.find(row => row.brand === current.brand && row.model === val)?.imageUrl || '';
+                      setCurrent({ ...current, model: val, imageUrl: current.imageUrl || modelImage || undefined });
+                    }}
                     disabled={!current.brand}
                   >
                     <SelectTrigger><SelectValue placeholder={current.brand ? 'Model seçin' : 'Önce marka seçin'} /></SelectTrigger>
@@ -1065,6 +1343,38 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                   <Label>Seri Numarası</Label>
                   <Input placeholder="Örn: 13A1-20" value={current.seriNumarasi || ''} onChange={e => setCurrent({ ...current, seriNumarasi: e.target.value })} />
                 </div>
+                <div className="space-y-1">
+                  <Label>Mülkiyet</Label>
+                  <Select value={String(current.mulkiyet || '')} onValueChange={val => setCurrent({ ...current, mulkiyet: val })}>
+                    <SelectTrigger><SelectValue placeholder="Mülkiyet seçin" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="kurum">Kurum</SelectItem>
+                      <SelectItem value="kiralik">Kiralık</SelectItem>
+                      <SelectItem value="demirbas">Demirbaş</SelectItem>
+                      <SelectItem value="diger">Diğer</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label>Kurulum Tarihi</Label>
+                  <Input type="date" value={String(current.kurulumTarihi || '')} onChange={e => setCurrent({ ...current, kurulumTarihi: e.target.value })} />
+                </div>
+              </div>
+              <div className="space-y-1">
+                <Label>Kuran Personel(ler)</Label>
+                <Textarea
+                  placeholder="Birden fazla isim için virgül kullanın"
+                  value={String(current.kurulumPersonelleri || '')}
+                  onChange={e => setCurrent({ ...current, kurulumPersonelleri: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Açıklama</Label>
+                <Textarea
+                  placeholder="Cihaza özel notlar..."
+                  value={String(current.aciklama || '')}
+                  onChange={e => setCurrent({ ...current, aciklama: e.target.value })}
+                />
               </div>
             </div>
             <div className="cihaz-card p-4 space-y-3">
@@ -1145,12 +1455,61 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
           <div className="grid md:grid-cols-2 gap-4">
             <div className="cihaz-card p-4 space-y-3">
               <p className="cihaz-section-label">Yeni Tanım</p>
-              <Input value={newDefinitionBrand} onChange={e => setNewDefinitionBrand(e.target.value)} placeholder="Marka" />
-              <Input value={newDefinitionModel} onChange={e => setNewDefinitionModel(e.target.value)} placeholder="Model" />
+              <Input
+                value={newDefinitionBrand}
+                onChange={e => setNewDefinitionBrand(e.target.value)}
+                placeholder="Marka"
+                disabled={!!editingDefinitionId}
+              />
+              <Input
+                value={newDefinitionModel}
+                onChange={e => setNewDefinitionModel(e.target.value)}
+                placeholder="Model"
+                disabled={!!editingDefinitionId}
+              />
+              <Select
+                value={newDefinitionImageUrl || 'none'}
+                onValueChange={val => {
+                  setNewDefinitionImageUrl(val === 'none' ? '' : val);
+                  if (val !== 'none') setNewDefinitionCustomImagePath('');
+                }}
+              >
+                <SelectTrigger><SelectValue placeholder="Model görseli (opsiyonel)" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Görsel seçme</SelectItem>
+                  {images.map(img => <SelectItem key={img} value={img}>{img}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Input
+                value={newDefinitionCustomImagePath}
+                onChange={e => {
+                  setNewDefinitionCustomImagePath(e.target.value);
+                  if (e.target.value.trim()) setNewDefinitionImageUrl('');
+                }}
+                placeholder="Özel model görsel yolu (opsiyonel)"
+              />
               <div className="flex gap-2">
                 <Button onClick={saveModelDefinition} disabled={isSavingDefinition}>
                   {isSavingDefinition ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Plus className="h-4 w-4 mr-2" />}
-                  Tanım Ekle
+                  {editingDefinitionId ? 'Güncelle' : 'Tanım Ekle'}
+                </Button>
+                {editingDefinitionId && (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setEditingDefinitionId(null);
+                      setNewDefinitionBrand('');
+                      setNewDefinitionModel('');
+                      setNewDefinitionImageUrl('');
+                      setNewDefinitionCustomImagePath('');
+                    }}
+                  >
+                    Vazgeç
+                  </Button>
+                )}
+                <Button variant="outline" onClick={handleDefinitionTemplateDownload}>
+                  <Download className="h-4 w-4 mr-2" />
+                  Şablon İndir
                 </Button>
                 <Button asChild variant="outline">
                   <label className="cursor-pointer">
@@ -1168,7 +1527,42 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                   {modelDefinitions.map(def => (
                     <div key={def.id} className="flex items-center justify-between rounded-lg border px-3 py-2">
                       <span className="font-medium">{def.brand}</span>
-                      <span className="text-sm text-[var(--dashboard-muted)]">{def.model}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-[var(--dashboard-muted)]">{def.model}</span>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7"
+                          onClick={() => {
+                            setEditingDefinitionId(def.id);
+                            setNewDefinitionBrand(def.brand);
+                            setNewDefinitionModel(def.model);
+                            if (def.imageUrl) {
+                              const hasPresetImage = images.includes(def.imageUrl);
+                              setNewDefinitionImageUrl(hasPresetImage ? def.imageUrl : '');
+                              setNewDefinitionCustomImagePath(hasPresetImage ? '' : def.imageUrl);
+                            } else {
+                              setNewDefinitionImageUrl('');
+                              setNewDefinitionCustomImagePath('');
+                            }
+                          }}
+                        >
+                          {def.imageUrl ? <ImageIcon className="h-3.5 w-3.5 text-emerald-600" /> : <Pencil className="h-3.5 w-3.5" />}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-destructive hover:text-destructive"
+                          disabled={deletingDefinitionId === def.id}
+                          onClick={() => deleteModelDefinition(def.id)}
+                        >
+                          {deletingDefinitionId === def.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                      </div>
                     </div>
                   ))}
                 </div>

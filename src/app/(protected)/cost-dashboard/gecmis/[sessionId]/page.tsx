@@ -1,0 +1,671 @@
+
+'use client';
+
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import type { ProductCode, Currency } from '@/lib/types';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  Loader2, ArrowLeft, Calendar, User, MapPin, Package,
+  ChevronRight, ChevronDown, Search, X, Building2, TestTube,
+  Wallet, Tag, Users, Clock, History,
+} from 'lucide-react';
+import { format, isValid } from 'date-fns';
+import { tr } from 'date-fns/locale';
+import { cn } from '@/lib/utils';
+import { useFirebaseQueries } from '@/hooks/useFirebaseQueries';
+import { useAuth } from '@/contexts/auth-context';
+import { matchesCompanyScope } from '@/lib/company-scope';
+
+// ============================================================================
+// TYPES
+// ============================================================================
+
+interface CellUpdate {
+  uid: string;
+  name: string;
+  field: string;
+  value: string | number | boolean;
+  timestamp: any;
+}
+
+interface SayimSessionItem {
+  stokKodu: string;
+  stokAdi: string;
+  marka: string;
+  stokAdedi: number;
+  cihazUstuAdedi: number;
+}
+
+interface DetailedSessionItem extends SayimSessionItem {
+  counted: boolean;
+  countedByUid?: string;
+  countedByName?: string;
+  updates: CellUpdate[];
+}
+
+interface SessionParticipantInfo {
+  uid: string;
+  name: string;
+}
+
+interface SayimSession {
+  id: string;
+  locationType: 'lab' | 'depot';
+  locationId: string;
+  locationName: string;
+  createdAt: any;
+  createdByUid?: string;
+  createdByName?: string;
+  items: SayimSessionItem[];
+  itemsDetailed?: DetailedSessionItem[];
+  participants?: SessionParticipantInfo[];
+  sessionId?: string; // reference to maliyetSayimOturumlar
+  totalBrands: number;
+  totalProducts: number;
+}
+
+const CURRENCY_SYMBOLS: Record<Currency, string> = {
+  EUR: '\u20AC',
+  USD: '$',
+  TRY: '\u20BA',
+};
+
+const PARTICIPANT_COLORS = [
+  '#F2994A', '#6FCF97', '#56CCF2', '#BB6BD9', '#F2C94C',
+  '#EB5757', '#2F80ED', '#27AE60', '#9B51E0', '#2D9CDB',
+];
+
+const CACHE_TTL = 1000 * 60 * 60;
+const PRIMARY_API_KEY = 'e69314b14644080788775553';
+
+async function fetchExchangeRates(): Promise<Record<Currency, number>> {
+  const cacheKey = 'exchange_rates_cache';
+  try {
+    const cached = localStorage.getItem(cacheKey);
+    if (cached) {
+      const { data, timestamp } = JSON.parse(cached);
+      if (Date.now() - timestamp < CACHE_TTL) return data;
+    }
+  } catch {}
+
+  try {
+    const res = await fetch(`https://v6.exchangerate-api.com/v6/${PRIMARY_API_KEY}/latest/EUR`);
+    if (!res.ok) throw new Error('Primary failed');
+    const data = await res.json();
+    const rates = { EUR: 1, USD: data.conversion_rates.USD, TRY: data.conversion_rates.TRY };
+    localStorage.setItem(cacheKey, JSON.stringify({ data: rates, timestamp: Date.now() }));
+    return rates;
+  } catch {
+    try {
+      const res = await fetch(`https://api.frankfurter.app/latest?from=EUR&to=USD,TRY`);
+      if (!res.ok) throw new Error('Backup failed');
+      const data = await res.json();
+      const rates = { EUR: 1, USD: data.rates.USD, TRY: data.rates.TRY };
+      localStorage.setItem(cacheKey, JSON.stringify({ data: rates, timestamp: Date.now() }));
+      return rates;
+    } catch {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) return JSON.parse(cached).data;
+      return { EUR: 1, USD: 1.08, TRY: 38.5 };
+    }
+  }
+}
+
+function getSessionDate(session: SayimSession): Date | null {
+  if (!session.createdAt) return null;
+  if (session.createdAt.toDate) return session.createdAt.toDate();
+  if (session.createdAt.seconds) return new Date(session.createdAt.seconds * 1000);
+  const d = new Date(session.createdAt);
+  return isValid(d) ? d : null;
+}
+
+function formatCurrency(value: number, symbol: string): string {
+  return `${symbol}${value.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
+
+function formatCurrencyDetailed(value: number, symbol: string): string {
+  return `${symbol}${value.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function getParticipantColor(uid: string, participants: SessionParticipantInfo[]): string {
+  const idx = participants.findIndex(p => p.uid === uid);
+  return PARTICIPANT_COLORS[idx >= 0 ? idx % PARTICIPANT_COLORS.length : 0];
+}
+
+// ============================================================================
+// UPDATE LOG COMPONENT
+// ============================================================================
+
+function UpdateLog({ updates, participants }: { updates: CellUpdate[]; participants: SessionParticipantInfo[] }) {
+  const [open, setOpen] = useState(false);
+
+  if (!updates || updates.length === 0) return null;
+
+  const fieldLabels: Record<string, string> = {
+    stokAdedi: 'Stok',
+    cihazUstuAdedi: 'Cihaz Ustu',
+    counted: 'Sayildi',
+  };
+
+  return (
+    <div className="mt-2 border-t border-[var(--dashboard-stroke)]/50 pt-2">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1.5 text-[11px] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-colors"
+      >
+        <History className="w-3 h-3" />
+        <span>{updates.length} degisiklik</span>
+        <ChevronDown className={cn('w-3 h-3 transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div className="mt-1.5 space-y-1 max-h-32 overflow-y-auto">
+          {[...updates].reverse().map((u, i) => {
+            const color = getParticipantColor(u.uid, participants);
+            const ts = u.timestamp ? (typeof u.timestamp === 'string' ? new Date(u.timestamp) : (u.timestamp.toDate ? u.timestamp.toDate() : new Date(u.timestamp.seconds * 1000))) : null;
+            return (
+              <div key={i} className="flex items-center gap-2 text-[10px] px-2 py-1 rounded-lg bg-[var(--dashboard-surface-2)]/50">
+                <span
+                  className="w-2 h-2 rounded-full shrink-0"
+                  style={{ backgroundColor: color }}
+                />
+                <span className="font-medium text-[var(--dashboard-text)]">{u.name}</span>
+                <span className="text-[var(--dashboard-muted)]">
+                  {fieldLabels[u.field] || u.field}: {String(u.value)}
+                </span>
+                {ts && isValid(ts) && (
+                  <span className="text-[var(--dashboard-muted)] ml-auto shrink-0">
+                    {format(ts, 'HH:mm', { locale: tr })}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// MAIN PAGE
+// ============================================================================
+
+export default function MaliyetSayimDetayPage() {
+  const params = useParams();
+  const sessionId = Array.isArray(params?.sessionId) ? params.sessionId[0] : params?.sessionId;
+  const router = useRouter();
+  const { productCodes } = useFirebaseQueries();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+
+  const [session, setSession] = useState<SayimSession | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [rates, setRates] = useState<Record<Currency, number> | null>(null);
+  const [currency, setCurrency] = useState<Currency>('TRY');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [expandedBrands, setExpandedBrands] = useState<Set<string>>(new Set());
+  const [showAttribution, setShowAttribution] = useState(true);
+
+  // Fetch session and rates
+  useEffect(() => {
+    if (!sessionId) return;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const [sessionSnap, ratesData] = await Promise.all([
+          getDoc(doc(db, 'maliyetSayimSessions', sessionId)),
+          fetchExchangeRates(),
+        ]);
+        setRates(ratesData);
+        if (sessionSnap.exists()) {
+          const sessionData = { id: sessionSnap.id, ...sessionSnap.data() } as SayimSession;
+          if (!matchesCompanyScope(sessionData as any, currentCompanyId, isSuperAdmin)) {
+            router.push('/cost-dashboard/gecmis');
+            return;
+          }
+          setSession(sessionData);
+        }
+      } catch (err) {
+        console.error('Error loading session:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, [sessionId]);
+
+  // Product map for cost lookup
+  const productMap = useMemo(() => {
+    const map = new Map<string, ProductCode>();
+    (productCodes || []).forEach(p => map.set(p.stokKodu, p));
+    return map;
+  }, [productCodes]);
+
+  // Calculate cost for a product
+  const getProductCost = useCallback((stokKodu: string, quantity: number, cihazUstu: number) => {
+    if (!rates) return 0;
+    const product = productMap.get(stokKodu);
+    if (!product?.cost || !product?.ambalajDegeri) return 0;
+
+    const totalTest = (quantity * product.ambalajDegeri) + cihazUstu;
+    const costPerTest = product.cost / product.ambalajDegeri;
+    const totalCostNative = costPerTest * totalTest;
+    const productCurrency = (product.currency || 'TRY') as Currency;
+
+    let costEUR: number;
+    switch (productCurrency) {
+      case 'EUR': costEUR = totalCostNative; break;
+      case 'USD': costEUR = totalCostNative / (rates.USD || 1); break;
+      case 'TRY': costEUR = totalCostNative / (rates.TRY || 1); break;
+      default: costEUR = totalCostNative / (rates.TRY || 1);
+    }
+
+    return costEUR * (rates[currency] || 1);
+  }, [rates, productMap, currency]);
+
+  // Use detailed items if available, otherwise fall back to basic items
+  const hasDetailedItems = !!session?.itemsDetailed && session.itemsDetailed.length > 0;
+  const displayItems: (SayimSessionItem & { countedByUid?: string; countedByName?: string; updates?: CellUpdate[] })[] = useMemo(() => {
+    if (!session) return [];
+    if (hasDetailedItems) return session.itemsDetailed!;
+    return session.items;
+  }, [session, hasDetailedItems]);
+
+  const sessionParticipants = session?.participants || [];
+  const isMultiUser = sessionParticipants.length > 1;
+
+  // Group items by brand
+  const brandGroups = useMemo(() => {
+    const map = new Map<string, { brand: string; items: typeof displayItems; totalCost: number }>();
+
+    displayItems.forEach(item => {
+      const brand = item.marka || 'Diger';
+      if (!map.has(brand)) map.set(brand, { brand, items: [], totalCost: 0 });
+      const group = map.get(brand)!;
+      group.items.push(item);
+      group.totalCost += getProductCost(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi);
+    });
+
+    return Array.from(map.values()).sort((a, b) => b.totalCost - a.totalCost);
+  }, [displayItems, getProductCost]);
+
+  // Filtered brand groups
+  const filteredBrandGroups = useMemo(() => {
+    if (!searchQuery) return brandGroups;
+    const q = searchQuery.toLowerCase();
+    return brandGroups
+      .map(group => ({
+        ...group,
+        items: group.items.filter(item =>
+          item.stokAdi.toLowerCase().includes(q) ||
+          item.stokKodu.toLowerCase().includes(q) ||
+          item.marka.toLowerCase().includes(q)
+        ),
+      }))
+      .filter(group => group.items.length > 0 || group.brand.toLowerCase().includes(q));
+  }, [brandGroups, searchQuery]);
+
+  // Total cost
+  const totalCost = useMemo(() => {
+    return brandGroups.reduce((sum, g) => sum + g.totalCost, 0);
+  }, [brandGroups]);
+
+  const toggleBrand = (brand: string) => {
+    setExpandedBrands(prev => {
+      const next = new Set(prev);
+      if (next.has(brand)) next.delete(brand);
+      else next.add(brand);
+      return next;
+    });
+  };
+
+  const expandAll = () => setExpandedBrands(new Set(brandGroups.map(g => g.brand)));
+  const collapseAll = () => setExpandedBrands(new Set());
+
+  const sym = CURRENCY_SYMBOLS[currency];
+
+  if (loading) {
+    return (
+      <div className="flex h-full w-full items-center justify-center min-h-screen">
+        <Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)]" />
+      </div>
+    );
+  }
+
+  if (!session) {
+    return (
+      <div className="cihaz-shell min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-sm text-[var(--dashboard-muted)] mb-4">Sayim oturumu bulunamadi.</p>
+          <button
+            onClick={() => router.push('/cost-dashboard/gecmis')}
+            className="text-sm text-[var(--dashboard-accent)] hover:underline"
+          >
+            Gecmise Don
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const sessionDate = getSessionDate(session);
+
+  return (
+    <div className="cihaz-shell min-h-screen">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-6 sm:pt-8 pb-24">
+
+        {/* Header */}
+        <div className="flex items-center gap-3 mb-6">
+          <button
+            onClick={() => router.push('/cost-dashboard/gecmis')}
+            className="flex items-center justify-center w-10 h-10 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-colors shrink-0"
+          >
+            <ArrowLeft className="w-5 h-5" />
+          </button>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-0.5">
+              <span className={cn(
+                'inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-semibold uppercase tracking-wider',
+                session.locationType === 'lab'
+                  ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                  : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+              )}>
+                {session.locationType === 'lab' ? (
+                  <><TestTube className="w-3 h-3" /> Lab</>
+                ) : (
+                  <><Building2 className="w-3 h-3" /> Depo</>
+                )}
+              </span>
+              <h1 className="text-xl sm:text-2xl font-bold text-[var(--dashboard-text)] truncate">
+                {session.locationName}
+              </h1>
+            </div>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--dashboard-muted)]">
+              {sessionDate && (
+                <span className="flex items-center gap-1">
+                  <Calendar className="w-3.5 h-3.5" />
+                  {format(sessionDate, 'dd MMMM yyyy HH:mm', { locale: tr })}
+                </span>
+              )}
+              {session.createdByName && (
+                <span className="flex items-center gap-1">
+                  <User className="w-3.5 h-3.5" />
+                  {session.createdByName}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Participants bar (for multi-user sessions) */}
+        {isMultiUser && (
+          <div className="cihaz-card-strong rounded-2xl p-4 mb-5">
+            <div className="flex items-center gap-2 mb-3">
+              <Users className="w-4 h-4 text-[var(--dashboard-accent)]" />
+              <span className="text-xs font-semibold text-[var(--dashboard-text)]">
+                Katilimcilar ({sessionParticipants.length})
+              </span>
+              <button
+                onClick={() => setShowAttribution(!showAttribution)}
+                className={cn(
+                  'ml-auto px-2.5 py-1 rounded-lg text-[10px] font-medium transition-colors',
+                  showAttribution
+                    ? 'bg-[var(--dashboard-accent)]/10 text-[var(--dashboard-accent)]'
+                    : 'bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)]'
+                )}
+              >
+                {showAttribution ? 'Atif Goster' : 'Atif Gizle'}
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {sessionParticipants.map((p, i) => (
+                <div
+                  key={p.uid}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[var(--dashboard-surface-2)]/50"
+                >
+                  <span
+                    className="w-3 h-3 rounded-full shrink-0"
+                    style={{ backgroundColor: PARTICIPANT_COLORS[i % PARTICIPANT_COLORS.length] }}
+                  />
+                  <span className="text-xs font-medium text-[var(--dashboard-text)]">{p.name}</span>
+                  {p.uid === session.createdByUid && (
+                    <span className="text-[9px] text-[var(--dashboard-muted)] bg-[var(--dashboard-surface-2)] px-1.5 py-0.5 rounded">
+                      olusturan
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Stats Row */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+          <div className="cihaz-pressed px-4 py-3 flex flex-col items-center text-center">
+            <span className="text-lg font-bold text-[var(--dashboard-accent)]">{formatCurrency(totalCost, sym)}</span>
+            <span className="text-[10px] text-[var(--dashboard-muted)]">Toplam Maliyet</span>
+          </div>
+          <div className="cihaz-pressed px-4 py-3 flex flex-col items-center text-center">
+            <span className="text-lg font-bold text-[var(--dashboard-text)]">{brandGroups.length}</span>
+            <span className="text-[10px] text-[var(--dashboard-muted)]">Marka</span>
+          </div>
+          <div className="cihaz-pressed px-4 py-3 flex flex-col items-center text-center">
+            <span className="text-lg font-bold text-[var(--dashboard-text)]">{displayItems.length}</span>
+            <span className="text-[10px] text-[var(--dashboard-muted)]">Urun</span>
+          </div>
+          <div className="cihaz-pressed px-4 py-3 flex flex-col items-center text-center">
+            <span className="text-lg font-bold text-[var(--dashboard-text)]">
+              {displayItems.reduce((sum, i) => sum + i.stokAdedi, 0)}
+            </span>
+            <span className="text-[10px] text-[var(--dashboard-muted)]">Toplam Stok</span>
+          </div>
+        </div>
+
+        {/* Toolbar */}
+        <div className="cihaz-card-strong rounded-2xl p-4 mb-5">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+            {/* Search */}
+            <div className="flex-1 w-full flex items-center gap-2 px-3 py-2 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
+              <Search className="w-4 h-4 text-[var(--dashboard-muted)] shrink-0" />
+              <input
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                placeholder="Urun veya marka ara..."
+                className="flex-1 bg-transparent text-sm text-[var(--dashboard-text)] placeholder:text-[var(--dashboard-muted)] outline-none"
+              />
+              {searchQuery && (
+                <button onClick={() => setSearchQuery('')} className="text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]">
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+
+            {/* Controls */}
+            <div className="flex items-center gap-2">
+              {/* Currency switcher */}
+              <div className="flex items-center gap-1">
+                {(['EUR', 'USD', 'TRY'] as Currency[]).map(cur => (
+                  <button
+                    key={cur}
+                    onClick={() => setCurrency(cur)}
+                    className={cn(
+                      'px-2.5 py-1.5 rounded-xl text-[11px] font-semibold transition-all duration-200',
+                      currency === cur
+                        ? 'bg-[var(--dashboard-accent)] text-white shadow-md'
+                        : 'bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]'
+                    )}
+                  >
+                    {CURRENCY_SYMBOLS[cur]}
+                  </button>
+                ))}
+              </div>
+
+              {/* Expand/Collapse */}
+              <button
+                onClick={expandedBrands.size > 0 ? collapseAll : expandAll}
+                className="px-3 py-1.5 rounded-xl text-[11px] font-medium bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-colors"
+              >
+                {expandedBrands.size > 0 ? 'Daralt' : 'Genislet'}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Brand Groups */}
+        <div className="space-y-3">
+          {filteredBrandGroups.map(group => {
+            const isExpanded = expandedBrands.has(group.brand);
+
+            return (
+              <div key={group.brand} className="cihaz-card-strong rounded-2xl overflow-hidden">
+                {/* Brand Header */}
+                <button
+                  onClick={() => toggleBrand(group.brand)}
+                  className="w-full flex items-center justify-between px-5 py-4 text-left group hover:bg-[var(--dashboard-surface-2)]/30 transition-colors"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Tag className="w-4 h-4 text-[var(--dashboard-accent)] shrink-0" />
+                    <div className="min-w-0">
+                      <span className="text-sm font-semibold text-[var(--dashboard-text)]">{group.brand}</span>
+                      <span className="text-[11px] text-[var(--dashboard-muted)] ml-2">
+                        {group.items.length} urun
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <span className="text-sm font-bold text-[var(--dashboard-accent)]">
+                      {formatCurrency(group.totalCost, sym)}
+                    </span>
+                    <ChevronDown className={cn(
+                      'w-4 h-4 text-[var(--dashboard-muted)] transition-transform duration-200',
+                      isExpanded && 'rotate-180'
+                    )} />
+                  </div>
+                </button>
+
+                {/* Product List */}
+                {isExpanded && (
+                  <div className="border-t border-[var(--dashboard-stroke)]">
+                    {/* Table Header */}
+                    <div className="hidden sm:grid grid-cols-12 gap-2 px-5 py-2.5 bg-[var(--dashboard-surface-2)]/50 text-[10px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider">
+                      <div className="col-span-1">Kod</div>
+                      <div className={cn("col-span-4", isMultiUser && showAttribution ? "col-span-3" : "col-span-4")}>Urun Adi</div>
+                      <div className="col-span-2 text-center">Stok</div>
+                      <div className="col-span-2 text-center">Cihaz Ustu</div>
+                      <div className="col-span-2 text-right">Maliyet</div>
+                      {isMultiUser && showAttribution && <div className="col-span-2 text-right">Sayan</div>}
+                    </div>
+
+                    {/* Items */}
+                    <div className="divide-y divide-[var(--dashboard-stroke)]">
+                      {group.items.map((item, idx) => {
+                        const cost = getProductCost(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi);
+                        const product = productMap.get(item.stokKodu);
+                        const nativeCurrency = (product?.currency || 'TRY') as Currency;
+                        const detailedItem = item as DetailedSessionItem;
+                        const hasUpdates = detailedItem.updates && detailedItem.updates.length > 0;
+
+                        return (
+                          <div
+                            key={`${item.stokKodu}-${idx}`}
+                            className="px-5 py-3 hover:bg-[var(--dashboard-surface-2)]/30 transition-colors"
+                          >
+                            {/* Desktop */}
+                            <div className="hidden sm:grid grid-cols-12 gap-2 items-center">
+                              <div className="col-span-1 text-[11px] font-mono text-[var(--dashboard-muted)] truncate">
+                                {item.stokKodu}
+                              </div>
+                              <div className={cn("text-sm text-[var(--dashboard-text)] truncate", isMultiUser && showAttribution ? "col-span-3" : "col-span-4")}>
+                                {item.stokAdi}
+                              </div>
+                              <div className="col-span-2 text-sm text-[var(--dashboard-text)] text-center">
+                                {item.stokAdedi}
+                              </div>
+                              <div className="col-span-2 text-sm text-[var(--dashboard-text)] text-center">
+                                {item.cihazUstuAdedi || 0}
+                              </div>
+                              <div className="col-span-2 text-right">
+                                <span className="text-sm font-semibold text-[var(--dashboard-accent)]">
+                                  {formatCurrencyDetailed(cost, sym)}
+                                </span>
+                                {nativeCurrency !== currency && cost > 0 && (
+                                  <p className="text-[9px] text-[var(--dashboard-muted)]">
+                                    {CURRENCY_SYMBOLS[nativeCurrency]}{nativeCurrency}
+                                  </p>
+                                )}
+                              </div>
+                              {isMultiUser && showAttribution && (
+                                <div className="col-span-2 text-right">
+                                  {detailedItem.countedByName ? (
+                                    <div className="flex items-center justify-end gap-1.5">
+                                      <span
+                                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                                        style={{ backgroundColor: getParticipantColor(detailedItem.countedByUid || '', sessionParticipants) }}
+                                      />
+                                      <span className="text-[11px] text-[var(--dashboard-muted)] truncate">
+                                        {detailedItem.countedByName}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-[11px] text-[var(--dashboard-muted)]">-</span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Mobile */}
+                            <div className="sm:hidden">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="text-sm font-medium text-[var(--dashboard-text)] leading-snug">
+                                    {item.stokAdi}
+                                  </p>
+                                  <p className="text-[11px] text-[var(--dashboard-muted)] mt-0.5">
+                                    {item.stokKodu} · Stok: {item.stokAdedi}
+                                    {item.cihazUstuAdedi > 0 && ` · CU: ${item.cihazUstuAdedi}`}
+                                  </p>
+                                  {isMultiUser && showAttribution && detailedItem.countedByName && (
+                                    <div className="flex items-center gap-1 mt-1">
+                                      <span
+                                        className="w-2 h-2 rounded-full"
+                                        style={{ backgroundColor: getParticipantColor(detailedItem.countedByUid || '', sessionParticipants) }}
+                                      />
+                                      <span className="text-[10px] text-[var(--dashboard-muted)]">
+                                        {detailedItem.countedByName}
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                                <span className="text-sm font-semibold text-[var(--dashboard-accent)] shrink-0">
+                                  {formatCurrencyDetailed(cost, sym)}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Update log (for detailed items with multi-user) */}
+                            {isMultiUser && showAttribution && hasUpdates && (
+                              <UpdateLog updates={detailedItem.updates} participants={sessionParticipants} />
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {filteredBrandGroups.length === 0 && searchQuery && (
+          <div className="cihaz-card-strong rounded-2xl p-12 text-center">
+            <Search className="w-10 h-10 text-[var(--dashboard-muted)] mx-auto mb-3 opacity-40" />
+            <p className="text-sm text-[var(--dashboard-muted)]">Aramanizla eslesen urun bulunamadi.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

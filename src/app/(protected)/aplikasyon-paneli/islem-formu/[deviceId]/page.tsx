@@ -27,6 +27,7 @@ import SignaturePad from '@/components/SignaturePad';
 import type { SignaturePadRef } from '@/components/SignaturePad';
 import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
 import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
+import { filterByCompanyScope } from '@/lib/company-scope';
 
 // Operation types (Yapılan İşlem)
 type OperationType =
@@ -76,6 +77,7 @@ type ActionItem = {
   serialNumber?: string;
   hucreNumarasi?: string;
   removedHucreNumarasi?: string;
+  channelSelections?: ('CH1' | 'CH2')[];
   // Removed/replaced part info (from device)
   removedPartStokKodu?: string;
   removedPartStokAdi?: string;
@@ -85,6 +87,17 @@ type ActionItem = {
   // Periodic part change info
   periodicPartChangeId?: string;
   isPeriodicPartChange?: boolean;
+};
+
+type HucreDegisimiDraftRow = {
+  id: string;
+  stockSourceTab: 'personal' | 'depot';
+  selectedPersonalItem: PersonalStockItem | null;
+  selectedDepotItem: DepotSelectableStockItem | null;
+  searchQuery: string;
+  removedHucreNumarasi: string;
+  description: string;
+  selectedChannel?: 'CH1' | 'CH2';
 };
 
 type ActionFormRecord = {
@@ -137,7 +150,7 @@ export default function AplikasyonIslemFormuPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const draftIdFromUrl = searchParams?.get('draftId') || null;
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
 
   const [device, setDevice] = useState<Device | null>(null);
@@ -211,13 +224,18 @@ export default function AplikasyonIslemFormuPage() {
 
   // Hücre değişimi state
   const [isHucreDegisimiModalOpen, setIsHucreDegisimiModalOpen] = useState(false);
-  const [hucreDegisimiSelectedItem, setHucreDegisimiSelectedItem] = useState<PersonalStockItem | null>(null);
-  const [hucreDegisimiSelectedDepotItem, setHucreDegisimiSelectedDepotItem] = useState<DepotSelectableStockItem | null>(null);
   const [showHucreDegisimiInIslemTuru, setShowHucreDegisimiInIslemTuru] = useState(false);
-  const [hucreStockSourceTab, setHucreStockSourceTab] = useState<'personal' | 'depot'>('personal');
-  const [hucreDegisimiRemovedHucre, setHucreDegisimiRemovedHucre] = useState('');
-  const [hucreDegisimiDescription, setHucreDegisimiDescription] = useState('');
-  const [hucreDegisimiSearchQuery, setHucreDegisimiSearchQuery] = useState('');
+  const [hucreDegisimiRows, setHucreDegisimiRows] = useState<HucreDegisimiDraftRow[]>([
+    {
+      id: `hucre_row_${Date.now()}`,
+      stockSourceTab: 'personal',
+      selectedPersonalItem: null,
+      selectedDepotItem: null,
+      searchQuery: '',
+      removedHucreNumarasi: '',
+      description: '',
+    },
+  ]);
 
   // Maintenance plans for periyodik bakım
   const [maintenancePlans, setMaintenancePlans] = useState<MaintenancePlan[]>([]);
@@ -349,12 +367,12 @@ export default function AplikasyonIslemFormuPage() {
             createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
           } as YedekParcaDepoStokItem;
         });
-        setDepotStockItems(items);
+        setDepotStockItems(filterByCompanyScope(items, currentCompanyId, isSuperAdmin));
       } catch (err) {
         console.error('Error fetching depot stock:', err);
       }
     })();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   // Fetch pool warehouse stock for lab groups connected to this device's hospital
   useEffect(() => {
@@ -369,20 +387,28 @@ export default function AplikasyonIslemFormuPage() {
 
         const poolsSnap = await getDocs(collection(db, 'deviceLabPools'));
         const matchingPoolIds: string[] = [];
-        poolsSnap.docs.forEach(d => {
-          const pool = d.data() as DeviceLabPool;
+        const companyScopedPools = filterByCompanyScope(
+          poolsSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as DeviceLabPool),
+          currentCompanyId,
+          isSuperAdmin
+        );
+        companyScopedPools.forEach((pool) => {
           if (pool.memberIds?.includes(hospitalId)) {
-            matchingPoolIds.push(d.id);
+            matchingPoolIds.push(pool.id);
           }
         });
         if (matchingPoolIds.length === 0) return;
 
         const depotsSnap = await getDocs(collection(db, 'depots'));
         const poolWarehouseIds: string[] = [];
-        depotsSnap.docs.forEach(d => {
-          const depot = d.data() as Depot;
+        const companyScopedDepots = filterByCompanyScope(
+          depotsSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as Depot),
+          currentCompanyId,
+          isSuperAdmin
+        );
+        companyScopedDepots.forEach((depot) => {
           if (depot.isPoolWarehouse && depot.linkedDeviceLabPoolIds?.some(id => matchingPoolIds.includes(id))) {
-            poolWarehouseIds.push(d.id);
+            poolWarehouseIds.push(depot.id);
           }
         });
         if (poolWarehouseIds.length === 0) return;
@@ -404,26 +430,30 @@ export default function AplikasyonIslemFormuPage() {
             } as PoolWarehouseStockItem);
           });
         }
-        setPoolStockItems(allPoolStock);
+        setPoolStockItems(filterByCompanyScope(allPoolStock, currentCompanyId, isSuperAdmin));
       } catch (err) {
         console.error("Error fetching pool stock:", err);
       }
     })();
-  }, [deviceId]);
+  }, [deviceId, currentCompanyId, isSuperAdmin]);
 
   // Fetch users for accompanying personnel
   useEffect(() => {
     (async () => {
       try {
         const snap = await getDocs(collection(db, 'users'));
-        const users = snap.docs.map(d => ({ uid: d.id, ...d.data() }) as User);
-        // Aplikasyon formu için sadece aplikasyon personelini göster
-        setAllUsers(users.filter(u => u.role === 'aplikasyon'));
+        const users = filterByCompanyScope(
+          snap.docs.map(d => ({ uid: d.id, ...d.data() }) as User),
+          currentCompanyId,
+          isSuperAdmin
+        );
+        // Teknik/Aplikasyon personellerinin tamamını göster
+        setAllUsers(users.filter(u => u.role === 'teknik_servis' || u.role === 'aplikasyon'));
       } catch (err) {
         console.error("Error fetching users:", err);
       }
     })();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   // Fetch maintenance plans and logs for this device (aplikasyon type)
   useEffect(() => {
@@ -2765,44 +2795,105 @@ export default function AplikasyonIslemFormuPage() {
         );
 
       case 'hucre_degisimi': {
-        const hucreStockItems = personalStock
-          .filter(p => !usedPersonalStockIds.has(p.id) && (p as any).hucreNumarasi && p.status === 'in_stock')
-          .filter(p => {
-            if (!hucreDegisimiSearchQuery.trim()) return true;
-            const q = hucreDegisimiSearchQuery.trim().toLowerCase();
-            return p.stokKodu.toLowerCase().includes(q) || p.stokAdi.toLowerCase().includes(q) || ((p as any).hucreNumarasi || '').toLowerCase().includes(q);
-          });
-
-        const validateHucreFormat = (v: string) => !v || /^[A-Za-z]\d{4}$/.test(v);
-
-        const addHucreDegisimi = () => {
-          if (!hucreDegisimiSelectedItem) return;
-          const removedHn = hucreDegisimiRemovedHucre.trim().toUpperCase();
-          if (removedHn && !validateHucreFormat(removedHn)) {
-            toast({ title: 'Geçersiz Format', description: 'Çıkan hücre numarası 1 harf + 4 rakamdan oluşmalıdır.', variant: 'destructive' });
+        const validateHucreFormat = (v: string) => /^[A-Za-z]\d{4}$/.test(v);
+        const getSelectedItem = (row: HucreDegisimiDraftRow) => row.stockSourceTab === 'depot' ? row.selectedDepotItem : row.selectedPersonalItem;
+        const getLockedChannelForRow = (rowIndex: number): 'CH1' | 'CH2' | undefined => {
+          if (rowIndex === 1) {
+            const first = hucreDegisimiRows[0]?.selectedChannel;
+            if (first === 'CH1') return 'CH2';
+            if (first === 'CH2') return 'CH1';
+          }
+          return undefined;
+        };
+        const updateRow = (rowId: string, updater: (row: HucreDegisimiDraftRow) => HucreDegisimiDraftRow) => {
+          setHucreDegisimiRows(prev => prev.map(row => (row.id === rowId ? updater(row) : row)));
+        };
+        const addHucreRow = () => {
+          setHucreDegisimiRows(prev => [...prev, {
+            id: `hucre_row_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            stockSourceTab: 'personal',
+            selectedPersonalItem: null,
+            selectedDepotItem: null,
+            searchQuery: '',
+            removedHucreNumarasi: '',
+            description: '',
+          }]);
+        };
+        const saveHucreDegisimiRows = () => {
+          if (!hucreDegisimiRows.length) return;
+          const activeRows = hucreDegisimiRows.filter((row) => (
+            !!getSelectedItem(row)
+            || !!row.removedHucreNumarasi.trim()
+            || !!row.description.trim()
+            || !!row.selectedChannel
+          ));
+          if (activeRows.length === 0) {
+            toast({ title: 'Eksik Bilgi', description: 'Kaydedilecek en az bir hücre değişimi satırı doldurun.', variant: 'destructive' });
             return;
           }
-          const item = hucreDegisimiSelectedItem;
-          const newAction: ActionItem = {
-            id: `hucre_${Date.now()}`,
-            type: 'hucre_degisimi',
-            action: `Hücre Değişimi: ${(item as any).hucreNumarasi}`,
-            stokKodu: item.stokKodu,
-            stokAdi: item.stokAdi,
-            anaBirim: item.anaBirim,
-            quantity: 1,
-            personalStockId: item.id,
-            serialNumber: item.serialNumber,
-            hucreNumarasi: (item as any).hucreNumarasi || '',
-            removedHucreNumarasi: removedHn || '',
-            description: hucreDegisimiDescription.trim() || '',
-          };
-          setActions(prev => [...prev, newAction]);
-          setHucreDegisimiSelectedItem(null);
-          setHucreDegisimiRemovedHucre('');
-          setHucreDegisimiDescription('');
-          setHucreDegisimiSearchQuery('');
-          toast({ title: 'Hücre Değişimi Eklendi', description: `${item.stokAdi} - H:${(item as any).hucreNumarasi}` });
+          const newActions: ActionItem[] = [];
+          const seenPersonalIds = new Set<string>();
+          const seenDepotIds = new Set<string>();
+          for (let i = 0; i < activeRows.length; i++) {
+            const row = activeRows[i];
+            const selectedItem = getSelectedItem(row);
+            if (!selectedItem) {
+              toast({ title: 'Eksik Bilgi', description: `${i + 1}. satır için takılacak hücre seçin.`, variant: 'destructive' });
+              return;
+            }
+            if (row.stockSourceTab === 'personal') {
+              if (seenPersonalIds.has(selectedItem.id)) {
+                toast({ title: 'Mükerrer Seçim', description: `${i + 1}. satırda aynı şahsi stok hücresi tekrar seçilemez.`, variant: 'destructive' });
+                return;
+              }
+              seenPersonalIds.add(selectedItem.id);
+            } else if (row.stockSourceTab === 'depot') {
+              if (seenDepotIds.has(selectedItem.id)) {
+                toast({ title: 'Mükerrer Seçim', description: `${i + 1}. satırda aynı depo stok hücresi tekrar seçilemez.`, variant: 'destructive' });
+                return;
+              }
+              seenDepotIds.add(selectedItem.id);
+            }
+            const removedHn = row.removedHucreNumarasi.trim().toUpperCase();
+            if (!validateHucreFormat(removedHn)) {
+              toast({ title: 'Geçersiz Format', description: `${i + 1}. satırdaki çıkan hücre numarası hatalı.`, variant: 'destructive' });
+              return;
+            }
+            if (i < 2 && !row.selectedChannel) {
+              toast({ title: 'Eksik Bilgi', description: `${i + 1}. satır için kanal seçimi zorunludur.`, variant: 'destructive' });
+              return;
+            }
+            newActions.push({
+              id: `hucre_${Date.now()}_${i}`,
+              type: 'hucre_degisimi',
+              action: `Hücre Değişimi: ${selectedItem.hucreNumarasi}`,
+              stokKodu: selectedItem.stokKodu,
+              stokAdi: selectedItem.stokAdi,
+              anaBirim: selectedItem.anaBirim,
+              quantity: 1,
+              personalStockId: row.stockSourceTab === 'personal' ? selectedItem.id : undefined,
+              depotStockId: row.stockSourceTab === 'depot' ? selectedItem.id : undefined,
+              isDepotSelection: row.stockSourceTab === 'depot',
+              serialNumber: selectedItem.serialNumber,
+              hucreNumarasi: selectedItem.hucreNumarasi || '',
+              removedHucreNumarasi: removedHn,
+              channelSelections: row.selectedChannel ? [row.selectedChannel] : [],
+              removedPartStokKodu: selectedItem.stokKodu,
+              removedPartStokAdi: selectedItem.stokAdi,
+              description: row.description.trim() || '',
+            });
+          }
+          setActions(prev => [...prev, ...newActions]);
+          setHucreDegisimiRows([{
+            id: `hucre_row_${Date.now()}`,
+            stockSourceTab: 'personal',
+            selectedPersonalItem: null,
+            selectedDepotItem: null,
+            searchQuery: '',
+            removedHucreNumarasi: '',
+            description: '',
+          }]);
+          toast({ title: 'Hücre Değişimleri Kaydedildi', description: `${newActions.length} satır hücre değişimi eklendi.` });
         };
 
         return (
@@ -2815,6 +2906,7 @@ export default function AplikasyonIslemFormuPage() {
                       <div className="wizard-action-item-label">{item.stokAdi}</div>
                       <div className="wizard-action-item-sub">
                         Takılan: H:{item.hucreNumarasi} {item.removedHucreNumarasi ? `· Çıkan: H:${item.removedHucreNumarasi}` : ''}
+                        {item.channelSelections?.length ? ` · Kanal: ${item.channelSelections.join(', ')}` : ''}
                         {item.description ? ` · ${item.description}` : ''}
                       </div>
                     </div>
@@ -2825,39 +2917,84 @@ export default function AplikasyonIslemFormuPage() {
                 ))}
               </div>
             )}
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontSize: '15px', fontWeight: 600, color: 'var(--wz-text)', marginBottom: '12px' }}>1. Hücre Numaralı Ürün Seçin</label>
-              <div style={{ position: 'relative', marginBottom: '8px' }}>
-                <Search style={{ position: 'absolute', left: '12px', top: '12px', width: '16px', height: '16px', color: 'var(--wz-text-secondary)' }} />
-                <input type="text" placeholder="Hücre no veya ürün ile ara..." value={hucreDegisimiSearchQuery} onChange={(e) => setHucreDegisimiSearchQuery(e.target.value)} style={{ paddingLeft: '36px', background: 'var(--wz-input-bg)', border: '1px solid var(--wz-input-border)', color: 'var(--wz-text)', borderRadius: '12px', padding: '10px 14px 10px 36px', fontSize: '15px', width: '100%', outline: 'none' }} />
-              </div>
-              <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid var(--wz-border)', borderRadius: '12px' }}>
-                {hucreStockItems.length === 0 ? (
-                  <div style={{ padding: '20px', textAlign: 'center', color: 'var(--wz-text-secondary)', fontSize: '14px' }}>Şahsi stokunuzda hücre numaralı ürün bulunmuyor.</div>
-                ) : hucreStockItems.map(item => (
-                  <div key={item.id} onClick={() => setHucreDegisimiSelectedItem(item)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', borderBottom: '1px solid var(--wz-table-border)', cursor: 'pointer', background: hucreDegisimiSelectedItem?.id === item.id ? 'var(--wz-selected-bg)' : 'transparent', borderLeft: hucreDegisimiSelectedItem?.id === item.id ? '3px solid var(--wz-accent)' : '3px solid transparent' }}>
-                    <div>
-                      <div style={{ fontSize: '14px', fontWeight: 600, color: 'var(--wz-text)' }}>{item.stokAdi}</div>
-                      <div style={{ fontSize: '12px', color: 'var(--wz-text-secondary)', fontFamily: 'monospace' }}>{item.stokKodu} · <span style={{ color: '#7C3AED', fontWeight: 700 }}>H:{(item as any).hucreNumarasi}</span>{item.serialNumber ? ` · SN:${item.serialNumber}` : ''}</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              {hucreDegisimiRows.map((row, rowIndex) => {
+                const selectedPersonalIdsInOtherRows = new Set(
+                  hucreDegisimiRows
+                    .filter(r => r.id !== row.id)
+                    .map(r => r.selectedPersonalItem?.id)
+                    .filter(Boolean) as string[]
+                );
+                const selectedDepotIdsInOtherRows = new Set(
+                  hucreDegisimiRows
+                    .filter(r => r.id !== row.id)
+                    .map(r => r.selectedDepotItem?.id)
+                    .filter(Boolean) as string[]
+                );
+                const personalCandidates = personalStock
+                  .filter(p => !usedPersonalStockIds.has(p.id) && (p as any).hucreNumarasi && p.status === 'in_stock')
+                  .filter(p => !selectedPersonalIdsInOtherRows.has(p.id) || row.selectedPersonalItem?.id === p.id)
+                  .filter(p => {
+                    if (!row.searchQuery.trim()) return true;
+                    const q = row.searchQuery.trim().toLowerCase();
+                    return p.stokKodu.toLowerCase().includes(q) || p.stokAdi.toLowerCase().includes(q) || ((p as any).hucreNumarasi || '').toLowerCase().includes(q);
+                  });
+                const depotCandidates = selectableDepotHucreStock.filter(item => {
+                  if (selectedDepotIdsInOtherRows.has(item.id) && row.selectedDepotItem?.id !== item.id) return false;
+                  if (!row.searchQuery.trim()) return true;
+                  const q = row.searchQuery.trim().toLowerCase();
+                  return item.stokKodu.toLowerCase().includes(q) || item.stokAdi.toLowerCase().includes(q) || (item.hucreNumarasi || '').toLowerCase().includes(q);
+                });
+                const selectedItem = getSelectedItem(row);
+                const lockedChannel = getLockedChannelForRow(rowIndex);
+                return (
+                  <details key={row.id} open style={{ border: '1px solid var(--wz-border)', borderRadius: '12px', padding: '10px' }}>
+                    <summary style={{ cursor: 'pointer', fontWeight: 600 }}>{rowIndex + 1}. Hücre Değişimi Satırı</summary>
+                    <div style={{ marginTop: '10px' }}>
+                      <div className="wizard-sub-tabs" style={{ paddingLeft: 0, marginBottom: '8px' }}>
+                        <button className={`wizard-sub-tab ${row.stockSourceTab === 'personal' ? 'active' : ''}`} onClick={() => updateRow(row.id, r => ({ ...r, stockSourceTab: 'personal', selectedDepotItem: null }))}>ŞAHSİ STOK</button>
+                        <button className={`wizard-sub-tab ${row.stockSourceTab === 'depot' ? 'active' : ''}`} onClick={() => updateRow(row.id, r => ({ ...r, stockSourceTab: 'depot', selectedPersonalItem: null }))}>DEPO STOK</button>
+                      </div>
+                      <div style={{ position: 'relative', marginBottom: '8px' }}>
+                        <Search style={{ position: 'absolute', left: '12px', top: '12px', width: '16px', height: '16px', color: 'var(--wz-text-secondary)' }} />
+                        <input type="text" placeholder="Hücre no veya ürün ara..." value={row.searchQuery} onChange={(e) => updateRow(row.id, r => ({ ...r, searchQuery: e.target.value }))} style={{ paddingLeft: '36px', background: 'var(--wz-input-bg)', border: '1px solid var(--wz-input-border)', color: 'var(--wz-text)', borderRadius: '12px', padding: '10px 14px 10px 36px', fontSize: '15px', width: '100%', outline: 'none' }} />
+                      </div>
+                      <div style={{ maxHeight: '180px', overflowY: 'auto', border: '1px solid var(--wz-border)', borderRadius: '12px', marginBottom: '8px' }}>
+                        {(row.stockSourceTab === 'personal' ? personalCandidates : depotCandidates).map(item => (
+                          <div key={item.id || `${item.stokKodu}-${item.hucreNumarasi}`} onClick={() => updateRow(row.id, r => r.stockSourceTab === 'personal' ? { ...r, selectedPersonalItem: item as PersonalStockItem } : { ...r, selectedDepotItem: item as DepotSelectableStockItem })} style={{ padding: '10px 12px', borderBottom: '1px solid var(--wz-table-border)', cursor: 'pointer', background: selectedItem?.id === item.id ? 'var(--wz-selected-bg)' : 'transparent' }}>
+                            <div style={{ fontWeight: 600 }}>{item.stokAdi}</div>
+                            <div style={{ fontSize: '12px', fontFamily: 'monospace' }}>{item.stokKodu} · H:{item.hucreNumarasi}</div>
+                          </div>
+                        ))}
+                      </div>
+                      {selectedItem && (
+                        <div style={{ display: 'grid', gap: '8px' }}>
+                          <input type="text" value={selectedItem.stokKodu || ''} readOnly style={{ opacity: 0.7 }} />
+                          <input type="text" value={selectedItem.stokAdi || ''} readOnly style={{ opacity: 0.7 }} />
+                          <input type="text" placeholder="Çıkan hücre no (örn: A1234)" value={row.removedHucreNumarasi} onChange={(e) => updateRow(row.id, r => ({ ...r, removedHucreNumarasi: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5) }))} />
+                          {rowIndex < 2 && (
+                            <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                              <span style={{ fontSize: '13px' }}>Kanal:</span>
+                              {(['CH1', 'CH2'] as const).map(ch => (
+                                <label key={ch} style={{ opacity: lockedChannel && lockedChannel !== ch ? 0.4 : 1 }}>
+                                  <input type="radio" name={`channel_${row.id}`} disabled={!!lockedChannel && lockedChannel !== ch} checked={row.selectedChannel === ch} onChange={() => updateRow(row.id, r => ({ ...r, selectedChannel: ch }))} /> {ch}
+                                </label>
+                              ))}
+                            </div>
+                          )}
+                          {rowIndex >= 2 && <p style={{ fontSize: '12px', color: 'var(--wz-text-secondary)' }}>3. satır ve sonrası için kanal seçimi istenmez.</p>}
+                          <textarea placeholder="Açıklama (opsiyonel)" value={row.description} onChange={(e) => updateRow(row.id, r => ({ ...r, description: e.target.value }))} rows={2} />
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
-              </div>
+                  </details>
+                );
+              })}
             </div>
-            {hucreDegisimiSelectedItem && (
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', fontSize: '15px', fontWeight: 600, color: 'var(--wz-text)', marginBottom: '8px' }}>2. Çıkan Hücre Numarası</label>
-                <input type="text" placeholder="Örn: B5678" value={hucreDegisimiRemovedHucre} onChange={(e) => setHucreDegisimiRemovedHucre(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 5))} maxLength={5} style={{ background: 'var(--wz-input-bg)', border: '1px solid var(--wz-input-border)', color: 'var(--wz-text)', borderRadius: '12px', padding: '10px 14px', fontSize: '15px', width: '100%', outline: 'none', fontFamily: 'monospace' }} />
-                {hucreDegisimiRemovedHucre && !validateHucreFormat(hucreDegisimiRemovedHucre) && (<p style={{ fontSize: '12px', color: '#B91C1C', marginTop: '4px' }}>1 harf + 4 rakam formatında olmalıdır</p>)}
-              </div>
-            )}
-            {hucreDegisimiSelectedItem && (
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', fontSize: '15px', fontWeight: 600, color: 'var(--wz-text)', marginBottom: '8px' }}>3. Açıklama (Opsiyonel)</label>
-                <textarea placeholder="Hücre değişimi hakkında açıklama..." value={hucreDegisimiDescription} onChange={(e) => setHucreDegisimiDescription(e.target.value)} rows={2} style={{ background: 'var(--wz-input-bg)', border: '1px solid var(--wz-input-border)', color: 'var(--wz-text)', borderRadius: '12px', padding: '10px 14px', fontSize: '15px', width: '100%', outline: 'none', resize: 'vertical' }} />
-              </div>
-            )}
-            <button className="wizard-btn-main" disabled={!hucreDegisimiSelectedItem} onClick={addHucreDegisimi} style={{ marginTop: '8px' }}>Hücre Değişimi Ekle</button>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+              <button className="wizard-btn-main" onClick={addHucreRow} style={{ marginTop: 0 }}>+ Satır Ekle</button>
+              <button className="wizard-btn-main" onClick={saveHucreDegisimiRows} style={{ marginTop: 0 }}>Hücre Değişim Bilgilerini Kaydet</button>
+            </div>
           </div>
         );
       }

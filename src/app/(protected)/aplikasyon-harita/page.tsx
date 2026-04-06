@@ -8,6 +8,8 @@ import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Loader2 } from 'lucide-react';
 import BackButton from '@/components/BackButton';
+import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 
 const DeviceMapPanel = dynamic(() => import('@/components/DeviceMapPanel'), { ssr: false });
 
@@ -15,12 +17,14 @@ export default function AplikasyonHaritaPage() {
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
+  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   useEffect(() => {
     const unsub = onSnapshot(
       query(collection(db, 'hospitals'), orderBy('name', 'asc')),
       (snap) => {
-        setHospitals(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Hospital));
+        const all = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Hospital);
+        setHospitals(filterByCompanyScope(all, currentCompanyId, isSuperAdmin));
         setIsLoading(false);
       },
       (err) => {
@@ -30,7 +34,7 @@ export default function AplikasyonHaritaPage() {
       }
     );
     return () => unsub();
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   if (isLoading) {
     return (
