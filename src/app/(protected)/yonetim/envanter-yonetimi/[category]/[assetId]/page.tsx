@@ -103,6 +103,13 @@ export default function AssetDetailPage() {
   const [assignmentPerson, setAssignmentPerson] = useState('');
   const [assignmentSignature, setAssignmentSignature] = useState('');
   const [assignmentNote, setAssignmentNote] = useState('');
+  // Editable financial/maintenance fields
+  const [editAlimFiyati, setEditAlimFiyati] = useState<number | ''>('');
+  const [editPlanliOmur, setEditPlanliOmur] = useState<number | ''>('');
+  const [editGarantiBitis, setEditGarantiBitis] = useState('');
+  const [editSonrakiBakim, setEditSonrakiBakim] = useState('');
+  const [editSonrakiKalibrasyon, setEditSonrakiKalibrasyon] = useState('');
+  const [isSavingFinancial, setIsSavingFinancial] = useState(false);
 
   useEffect(() => {
     if (!assetId) { router.back(); return; }
@@ -121,6 +128,11 @@ export default function AssetDetailPage() {
           setNewPersonel(data.teslimEdilenPersonel);
           setAssignmentPerson(data.zimmetliKisi || data.teslimEdilenPersonel || '');
           setAssignmentSignature(data.dijitalImza || '');
+          setEditAlimFiyati(data.alimFiyatiTl ?? '');
+          setEditPlanliOmur(data.planliKullanimOmruYil ?? '');
+          setEditGarantiBitis(data.garantiBitisTarihi || '');
+          setEditSonrakiBakim(data.sonrakiBakimTarihi || '');
+          setEditSonrakiKalibrasyon(data.sonrakiKalibrasyonTarihi || '');
         } else {
           toast({ title: 'Bulunamadı', variant: 'destructive' });
         }
@@ -179,6 +191,27 @@ export default function AssetDetailPage() {
       toast({ title: 'Hata', variant: 'destructive' });
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleSaveFinancial = async () => {
+    if (!asset) return;
+    setIsSavingFinancial(true);
+    try {
+      const updates: Record<string, any> = {
+        alimFiyatiTl: editAlimFiyati === '' ? 0 : editAlimFiyati,
+        planliKullanimOmruYil: editPlanliOmur === '' ? 0 : editPlanliOmur,
+        garantiBitisTarihi: editGarantiBitis,
+        sonrakiBakimTarihi: editSonrakiBakim,
+        sonrakiKalibrasyonTarihi: editSonrakiKalibrasyon,
+      };
+      await updateDoc(doc(db, 'assets', asset.id), updates);
+      setAsset(prev => prev ? { ...prev, ...updates } : prev);
+      toast({ title: 'Mali & Bakım Bilgileri Kaydedildi' });
+    } catch {
+      toast({ title: 'Hata', variant: 'destructive' });
+    } finally {
+      setIsSavingFinancial(false);
     }
   };
 
@@ -338,11 +371,12 @@ export default function AssetDetailPage() {
           </div>
         </div>
 
-        {/* MIDDLE GRID: Update + Custody */}
+        {/* MIDDLE GRID: Location/Personnel + Custody */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
-          {/* Info Update */}
+          {/* Location & Personnel Update */}
           <div className="cihaz-card p-5">
-            <p className="text-[11px] font-semibold text-[var(--dashboard-accent)] uppercase tracking-wider mb-3">Bilgi Güncelle</p>
+            <p className="text-[11px] font-semibold text-[var(--dashboard-accent)] uppercase tracking-wider mb-1">Konum & Personel Güncelle</p>
+            <p className="text-[10px] text-[var(--dashboard-muted)] mb-3">Ürünün bulunduğu konumu ve sorumlu personeli değiştirin. Değişiklikler hareket geçmişine kaydedilir.</p>
             <div className="space-y-3">
               <div>
                 <label className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider mb-1 block">Konum</label>
@@ -352,8 +386,8 @@ export default function AssetDetailPage() {
                 </Select>
               </div>
               <div>
-                <label className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider mb-1 block">Personel</label>
-                <input className={inputClass} value={newPersonel} onChange={e => setNewPersonel(e.target.value)} />
+                <label className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider mb-1 block">Sorumlu Personel</label>
+                <input className={inputClass} placeholder="Ad Soyad" value={newPersonel} onChange={e => setNewPersonel(e.target.value)} />
               </div>
               <button onClick={handleSaveChanges} disabled={isSaving} className="h-9 px-4 rounded-xl text-xs font-semibold bg-[var(--dashboard-accent)] text-white shadow-md hover:opacity-90 transition-all flex items-center gap-1.5 disabled:opacity-50">
                 {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
@@ -362,24 +396,68 @@ export default function AssetDetailPage() {
             </div>
           </div>
 
-          {/* Custody */}
+          {/* Formal Custody (Zimmet) */}
           <div className="cihaz-card p-5">
-            <p className="text-[11px] font-semibold text-[var(--dashboard-accent)] uppercase tracking-wider mb-3">Zimmet & Hareket</p>
+            <p className="text-[11px] font-semibold text-[var(--dashboard-accent)] uppercase tracking-wider mb-1">Resmi Zimmet İşlemi</p>
+            <p className="text-[10px] text-[var(--dashboard-muted)] mb-3">Demirbaş zimmet devri. Check-Out ile kişiye zimmetlenir, Check-In ile iade alınır. Fiş numarası otomatik oluşturulur.</p>
             <div className="space-y-3">
-              <input className={inputClass} placeholder="Personel" value={assignmentPerson} onChange={e => setAssignmentPerson(e.target.value)} />
-              <input className={inputClass} placeholder="Dijital İmza (Ad Soyad)" value={assignmentSignature} onChange={e => setAssignmentSignature(e.target.value)} />
-              <input className={inputClass} placeholder="Not" value={assignmentNote} onChange={e => setAssignmentNote(e.target.value)} />
+              <div>
+                <label className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider mb-1 block">Zimmetli Kişi</label>
+                <input className={inputClass} placeholder="Ad Soyad" value={assignmentPerson} onChange={e => setAssignmentPerson(e.target.value)} />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider mb-1 block">Dijital İmza</label>
+                <input className={inputClass} placeholder="Ad Soyad (onay)" value={assignmentSignature} onChange={e => setAssignmentSignature(e.target.value)} />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider mb-1 block">Not</label>
+                <input className={inputClass} placeholder="Opsiyonel not" value={assignmentNote} onChange={e => setAssignmentNote(e.target.value)} />
+              </div>
               <div className="flex gap-2">
                 <button onClick={handleCheckOut} disabled={isSaving} className="h-9 px-3 rounded-xl text-xs font-semibold bg-[var(--dashboard-accent)] text-white shadow-md hover:opacity-90 transition-all flex items-center gap-1.5 disabled:opacity-50">
-                  <UserCheck className="w-3.5 h-3.5" /> Check-Out
+                  <UserCheck className="w-3.5 h-3.5" /> Zimmetle
                 </button>
                 <button onClick={handleCheckIn} disabled={isSaving} className="h-9 px-3 rounded-xl text-xs font-semibold bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-colors flex items-center gap-1.5 disabled:opacity-50">
-                  <ShieldCheck className="w-3.5 h-3.5" /> Check-In
+                  <ShieldCheck className="w-3.5 h-3.5" /> İade Al
                 </button>
               </div>
               <p className="text-[10px] text-[var(--dashboard-muted)]">
-                Check-Out: {asset.checkOutTarihi || '-'} · Check-In: {asset.checkInTarihi || '-'} · Fiş: {asset.zimmetFisNo || '-'}
+                Zimmet: {asset.checkOutTarihi || '-'} · İade: {asset.checkInTarihi || '-'} · Fiş: {asset.zimmetFisNo || '-'}
               </p>
+            </div>
+          </div>
+        </div>
+
+        {/* FINANCIAL & MAINTENANCE EDITABLE */}
+        <div className="cihaz-card p-5 sm:p-6 mb-5">
+          <p className="text-[11px] font-semibold text-[var(--dashboard-accent)] uppercase tracking-wider mb-1">Mali & Bakım Bilgileri</p>
+          <p className="text-[10px] text-[var(--dashboard-muted)] mb-4">Alım fiyatı, garanti, bakım ve kalibrasyon tarihlerini güncelleyin.</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <div>
+              <label className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider mb-1 block">Alım Fiyatı (₺)</label>
+              <input className={inputClass} type="number" min={0} step="0.01" placeholder="0" value={editAlimFiyati} onChange={e => setEditAlimFiyati(e.target.value === '' ? '' : Number(e.target.value))} />
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider mb-1 block">Planlı Ömür (Yıl)</label>
+              <input className={inputClass} type="number" min={0} placeholder="0" value={editPlanliOmur} onChange={e => setEditPlanliOmur(e.target.value === '' ? '' : Number(e.target.value))} />
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider mb-1 block">Garanti Bitiş</label>
+              <input className={inputClass} type="date" value={editGarantiBitis} onChange={e => setEditGarantiBitis(e.target.value)} />
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider mb-1 block">Sonraki Bakım</label>
+              <input className={inputClass} type="date" value={editSonrakiBakim} onChange={e => setEditSonrakiBakim(e.target.value)} />
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider mb-1 block">Sonraki Kalibrasyon</label>
+              <input className={inputClass} type="date" value={editSonrakiKalibrasyon} onChange={e => setEditSonrakiKalibrasyon(e.target.value)} />
+            </div>
+            <div className="flex items-end">
+              <button onClick={handleSaveFinancial} disabled={isSavingFinancial} className="h-9 px-4 rounded-xl text-xs font-semibold bg-[var(--dashboard-accent)] text-white shadow-md hover:opacity-90 transition-all flex items-center gap-1.5 disabled:opacity-50">
+                {isSavingFinancial ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                Kaydet
+              </button>
             </div>
           </div>
         </div>
