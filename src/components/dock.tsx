@@ -695,7 +695,7 @@ const DockItem = ({
               onClick={(e) => handleNavigate(e, item.href)}
             >
               {customIcon ? (
-                <Image src={getIconSrc(customIcon)} alt={item.label} width={31} height={31} className="dock-item-icon object-contain" />
+                <Image src={getIconSrc(customIcon)} alt={item.label} width={34} height={34} className="dock-item-icon object-contain" />
               ) : (
                 <item.icon className="dock-item-icon" style={iconGradientStyle} />
               )}
@@ -738,7 +738,7 @@ const DockItem = ({
         onClick={(e) => handleNavigate(e, item.href)}
       >
         {customIcon ? (
-          <Image src={getIconSrc(customIcon)} alt={item.label} width={31} height={31} className="dock-item-icon object-contain" />
+          <Image src={getIconSrc(customIcon)} alt={item.label} width={34} height={34} className="dock-item-icon object-contain" />
         ) : (
           <item.icon className="dock-item-icon" style={iconGradientStyle} />
         )}
