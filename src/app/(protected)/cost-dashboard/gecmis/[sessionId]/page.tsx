@@ -16,6 +16,8 @@ import { format, isValid } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { useFirebaseQueries } from '@/hooks/useFirebaseQueries';
+import { useAuth } from '@/contexts/auth-context';
+import { matchesCompanyScope } from '@/lib/company-scope';
 
 // ============================================================================
 // TYPES
@@ -196,6 +198,7 @@ export default function MaliyetSayimDetayPage() {
   const sessionId = Array.isArray(params?.sessionId) ? params.sessionId[0] : params?.sessionId;
   const router = useRouter();
   const { productCodes } = useFirebaseQueries();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   const [session, setSession] = useState<SayimSession | null>(null);
   const [loading, setLoading] = useState(true);
@@ -217,7 +220,12 @@ export default function MaliyetSayimDetayPage() {
         ]);
         setRates(ratesData);
         if (sessionSnap.exists()) {
-          setSession({ id: sessionSnap.id, ...sessionSnap.data() } as SayimSession);
+          const sessionData = { id: sessionSnap.id, ...sessionSnap.data() } as SayimSession;
+          if (!matchesCompanyScope(sessionData as any, currentCompanyId, isSuperAdmin)) {
+            router.push('/cost-dashboard/gecmis');
+            return;
+          }
+          setSession(sessionData);
         }
       } catch (err) {
         console.error('Error loading session:', err);

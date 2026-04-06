@@ -14,6 +14,8 @@ import {
 import { format, isValid } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 
 // ============================================================================
 // TYPES
@@ -267,6 +269,7 @@ function DateRangeFilter({ startDate, endDate, onStartChange, onEndChange, onCle
 
 export default function MaliyetSayimGecmisPage() {
   const router = useRouter();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [sessions, setSessions] = useState<SayimSession[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -285,7 +288,8 @@ export default function MaliyetSayimGecmisPage() {
       setLoading(true);
       try {
         const snap = await getDocs(query(collection(db, 'maliyetSayimSessions'), orderBy('createdAt', 'desc')));
-        setSessions(snap.docs.map(d => ({ id: d.id, ...d.data() } as SayimSession)));
+        const allSessions = snap.docs.map(d => ({ id: d.id, ...d.data() } as SayimSession));
+        setSessions(filterByCompanyScope(allSessions, currentCompanyId, isSuperAdmin));
       } catch (err) {
         console.error('Error loading sessions:', err);
       } finally {
@@ -293,7 +297,7 @@ export default function MaliyetSayimGecmisPage() {
       }
     };
     load();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   // Extract unique filter options
   const filterOptions = useMemo(() => {
