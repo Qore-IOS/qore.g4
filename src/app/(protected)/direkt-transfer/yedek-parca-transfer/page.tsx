@@ -4013,53 +4013,44 @@ export default function YedekParcaTransferPage() {
                 {/* Target personnel selector */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold uppercase" style={{ color: 'var(--dashboard-muted)' }}>Hedef Personel</label>
-                  <Popover open={pTransferSearchOpen} onOpenChange={setPTransferSearchOpen}>
-                    <PopoverTrigger asChild>
-                      <button
-                        className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm border transition-all"
-                        style={{
-                          background: 'var(--dashboard-pressed)',
-                          color: pTransferTargetUid ? 'var(--dashboard-text)' : 'var(--dashboard-muted)',
-                          borderColor: 'var(--dashboard-stroke)',
-                        }}
-                      >
-                        <span className="truncate">{pTransferTargetName || 'Personel seçin...'}</span>
-                        <ChevronDown className="h-4 w-4 shrink-0 ml-2" />
-                      </button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-72 p-0 z-[300]" align="start">
-                      <Command>
-                        <CommandInput
+                  {pTransferTargetUid ? (
+                    <div className="flex items-center justify-between px-3 py-2 rounded-xl border" style={{ background: 'var(--dashboard-pressed)', borderColor: 'var(--dashboard-stroke)' }}>
+                      <span className="text-sm font-medium" style={{ color: 'var(--dashboard-text)' }}>{pTransferTargetName}</span>
+                      <button onClick={() => { setPTransferTargetUid(''); setPTransferTargetName(''); setPTransferSearchQuery(''); }} className="text-xs px-2 py-0.5 rounded-lg transition-all active:scale-95 hover:bg-black/5" style={{ color: '#B91C1C' }}>Değiştir</button>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border overflow-hidden" style={{ borderColor: 'var(--dashboard-stroke)' }}>
+                      <div className="px-3 py-2" style={{ background: 'var(--dashboard-pressed)' }}>
+                        <Input
                           placeholder="Personel ara..."
                           value={pTransferSearchQuery}
-                          onValueChange={setPTransferSearchQuery}
+                          onChange={(e) => setPTransferSearchQuery(e.target.value)}
+                          className="!border-0 !ring-0 h-8 text-sm bg-transparent px-0"
                         />
-                        <CommandList>
-                          <CommandEmpty>Personel bulunamadı.</CommandEmpty>
-                          <CommandGroup>
-                            {filteredTargetUsers.map(u => (
-                              <CommandItem
-                                key={u.uid}
-                                onSelect={() => {
-                                  setPTransferTargetUid(u.uid);
-                                  setPTransferTargetName(u.name || u.uid);
-                                  setPTransferSearchOpen(false);
-                                  setPTransferSearchQuery('');
-                                }}
-                              >
-                                <div className="flex flex-col">
-                                  <span className="text-sm font-medium">{u.name}</span>
-                                  <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>
-                                    {u.role === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'}
-                                  </span>
-                                </div>
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
+                      </div>
+                      <div className="max-h-40 overflow-y-auto">
+                        {filteredTargetUsers.length === 0 ? (
+                          <p className="text-xs text-center py-3" style={{ color: 'var(--dashboard-muted)' }}>Personel bulunamadı.</p>
+                        ) : filteredTargetUsers.map(u => (
+                          <button
+                            key={u.uid}
+                            onClick={() => {
+                              setPTransferTargetUid(u.uid);
+                              setPTransferTargetName(u.name || u.uid);
+                              setPTransferSearchQuery('');
+                            }}
+                            className="w-full flex flex-col px-3 py-2 text-left transition-all hover:bg-black/5"
+                            style={{ borderTop: '1px solid var(--dashboard-stroke)' }}
+                          >
+                            <span className="text-sm font-medium" style={{ color: 'var(--dashboard-text)' }}>{u.name}</span>
+                            <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>
+                              {u.role === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Quantity selector — only for non-serial items with multiple units */}
