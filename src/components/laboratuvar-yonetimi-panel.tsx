@@ -15,13 +15,14 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { db } from '@/lib/firebase';
-import { collection, doc, writeBatch, Timestamp } from 'firebase/firestore';
-import type { DepoStokItem, Laboratory, MinMaxRule, ProductCode } from '@/lib/types';
-import { Loader2, Search, ChevronUp, ChevronDown, ListChecks, History, PackageX, Upload, FileSpreadsheet, AlertTriangle, CheckCircle } from 'lucide-react';
-import { useMinMaxRules, useLabStock, useLabPools, useInvalidateQueries, touchStockMetadata } from '@/hooks/useFirebaseQueries';
-import { useLightDashboardData } from './dashboard/useDashboardData';
+import { collection, getDocs, query, where, doc, writeBatch, Timestamp, deleteDoc } from 'firebase/firestore';
+import type { DepoStokItem, Laboratory, ProductCode, MinMaxRule } from '@/lib/types';
+import { Loader2, Search, ChevronUp, ChevronDown, ListChecks, History, PackageX, FileText } from 'lucide-react';
+import { useMinMaxRules, touchStockMetadata } from '@/hooks/useFirebaseQueries';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
+import LabIrsaliyeOcrModal, { type LabOcrResult } from '@/components/lab/LabIrsaliyeOcrModal';
+import { normalizeMiad } from '@/lib/date';
 import { formatMiad } from '@/lib/date';
 import { differenceInDays, parse, isValid } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -103,73 +104,20 @@ type GroupedStockItem = {
 
 export default function LaboratuvarYonetimiPanel() {
   const router = useRouter();
-  const { currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile } = useAuth();
   const { toast } = useToast();
+  const [laboratories, setLaboratories] = useState<Laboratory[]>([]);
   const [selectedLabId, setSelectedLabId] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<keyof GroupedStockItem>('stokAdi');
   const [sortAsc, setSortAsc] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
+  const [productNames, setProductNames] = useState<Record<string, string>>({});
+  const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
   const [showOutOfStock, setShowOutOfStock] = useState(false);
-
-  // Excel import states
-  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
-  const [parsedRows, setParsedRows] = useState<ParsedExcelRow[]>([]);
-  const [isParsingExcel, setIsParsingExcel] = useState(false);
-  const [isImporting, setIsImporting] = useState(false);
-  const [importProgress, setImportProgress] = useState('');
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const {
-    hospitals: allLaboratories,
-    productCodes: products,
-    isLoading,
-  } = useLightDashboardData();
-
-  const { data: labPools = [], isLoading: labPoolsLoading } = useLabPools();
-  const { invalidateDepoStok } = useInvalidateQueries();
-
-  // Filter laboratories by user's assignedLaboratories
-  const laboratories = useMemo(() => {
-    const allLabs = allLaboratories.filter(l => !l.isConsumablesHospital);
-    if (currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'super_admin' || currentUserProfile?.role === 'admin_developer') return allLabs;
-    if (currentUserProfile?.assignedLaboratories && currentUserProfile.assignedLaboratories.length > 0) {
-      return allLabs.filter(h => currentUserProfile?.assignedLaboratories?.includes(h.id));
-    }
-    return allLabs;
-  }, [currentUserProfile, allLaboratories]);
-
-  // Auto-select lab if user has only one assigned
-  useEffect(() => {
-    if (selectedLabId) return;
-    if (laboratories.length === 1) {
-      setSelectedLabId(laboratories[0].id);
-    }
-  }, [laboratories, selectedLabId]);
-
-  // Product names lookup
-  const productNames = useMemo(() => {
-    const names: Record<string, string> = {};
-    products.forEach(p => {
-      if (p.stokKodu) names[p.stokKodu] = p.stokAdi || p.stokKodu;
-    });
-    return names;
-  }, [products]);
-
-  // Compute pool member IDs and names for lab stock query
-  const { poolMemberIds, poolMemberNames } = useMemo(() => {
-    const pool = labPools.find(p => p.memberIds.includes(selectedLabId));
-    const ids = pool?.memberIds || (selectedLabId ? [selectedLabId] : []);
-    const names = ids.map(id => allLaboratories.find(l => l.id === id)?.name).filter((n): n is string => !!n);
-    return { poolMemberIds: ids, poolMemberNames: names };
-  }, [labPools, selectedLabId, allLaboratories]);
-
-  // Use useLabStock hook instead of fetching ALL shipped stock
-  const { data: labStocks = [], isLoading: labStockLoading } = useLabStock(poolMemberIds, poolMemberNames, {
-    enabled: !labPoolsLoading && poolMemberIds.length > 0
-  });
-
+  const [isOcrModalOpen, setIsOcrModalOpen] = useState(false);
+  const [isOcrProcessing, setIsOcrProcessing] = useState(false);
   const { data: minMaxRulesData } = useMinMaxRules(selectedLabId || null);
 
   const minMaxMap = useMemo(() => {
@@ -181,6 +129,47 @@ export default function LaboratuvarYonetimiPanel() {
     }
     return map;
   }, [minMaxRulesData]);
+
+  useEffect(() => {
+    async function fetchData() {
+      setIsLoading(true);
+      const [labsSnap, stokSnap, productsSnap] = await Promise.all([
+        getDocs(collection(db, 'hospitals')),
+        getDocs(query(collection(db, 'depoStok'), where('isShipped', '==', true))),
+        getDocs(collection(db, 'productCodes'))
+      ]);
+      setLaboratories(labsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Laboratory)));
+      setDepoStok(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)));
+      
+      const names: Record<string, string> = {};
+      const codes: ProductCode[] = [];
+      productsSnap.docs.forEach(d => {
+        const p = { id: d.id, ...d.data() } as ProductCode;
+        codes.push(p);
+        if (p.stokKodu) names[p.stokKodu] = p.stokAdi || p.stokKodu;
+      });
+      setProductNames(names);
+      setProductCodes(codes);
+
+      setIsLoading(false);
+    }
+    fetchData();
+  }, []);
+
+  const labStocks = useMemo(() => {
+    if (!selectedLabId) return [];
+    const selectedLab = laboratories.find(l => l.id === selectedLabId);
+    const selectedLabName = selectedLab?.name || '';
+
+    // Filter by hedefKurumId OR by hedefKurum (name) for legacy records
+    // that may have hedefKurum set but hedefKurumId is null/undefined
+    // CRITICAL: Also check isShipped to ensure only transferred items are shown
+    return depoStok.filter(item =>
+      item.isShipped === true &&
+      (item.hedefKurumId === selectedLabId ||
+      (!item.hedefKurumId && item.hedefKurum === selectedLabName))
+    );
+  }, [depoStok, selectedLabId, laboratories]);
 
   const groupedMap = useMemo(() => {
     const map: Record<string, {
@@ -442,6 +431,78 @@ export default function LaboratuvarYonetimiPanel() {
     }
   }, [validRows, selectedLabId, selectedLabName, toast, invalidateDepoStok]);
 
+  const handleOcrResults = useCallback(async (
+    results: LabOcrResult[],
+    file: { id: string; storagePath: string; fileName: string }
+  ) => {
+    if (!selectedLabId) return;
+    setIsOcrProcessing(true);
+
+    try {
+      const selectedLab = laboratories.find(l => l.id === selectedLabId);
+      const labName = selectedLab?.name || '';
+      const batch = writeBatch(db);
+      let totalDocs = 0;
+
+      for (const item of results) {
+        const product = productCodes.find(p => p.stokKodu === item.stokKodu);
+        if (!product) continue;
+
+        const qty = Math.max(1, item.quantity || 1);
+        for (let i = 0; i < qty; i++) {
+          const ref = doc(collection(db, 'depoStok'));
+          batch.set(ref, {
+            depotId: '',
+            depotName: '',
+            stokKodu: item.stokKodu,
+            stokAdi: product.stokAdi || '',
+            lotNumarasi: item.lot || '',
+            miad: item.miad ? normalizeMiad(item.miad) : '',
+            seriNumarasi: '',
+            rafAdresi: '',
+            irsaliyeNumarasi: '',
+            eklenmeTarihi: Timestamp.now(),
+            isShipped: true,
+            hedefKurumId: selectedLabId,
+            hedefKurum: labName,
+            createdByName: currentUserProfile?.name || currentUser?.email || 'Unknown',
+            createdByUid: currentUser?.uid || null,
+          });
+          totalDocs++;
+        }
+      }
+
+      await batch.commit();
+      await touchStockMetadata();
+
+      // Delete the file from Firestore and storage
+      await deleteDoc(doc(db, 'irsaliyeDosyalari', file.id));
+      await fetch('/api/storage/delete-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storagePath: file.storagePath }),
+      });
+
+      // Refresh local stock data
+      const stokSnap = await getDocs(query(collection(db, 'depoStok'), where('isShipped', '==', true)));
+      setDepoStok(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)));
+
+      toast({
+        title: 'Stok girişi tamamlandı',
+        description: `${totalDocs} adet ürün laboratuvar stoğuna eklendi. İrsaliye dosyası (${file.fileName}) silindi.`,
+      });
+    } catch (error: any) {
+      console.error('Lab OCR stock entry error:', error);
+      toast({
+        title: 'Hata',
+        description: error?.message || 'Stok girişi sırasında bir hata oluştu.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsOcrProcessing(false);
+    }
+  }, [selectedLabId, laboratories, productCodes, currentUser, currentUserProfile, toast]);
+
   return (
     <div className="space-y-6">
       <Card>
@@ -482,21 +543,17 @@ export default function LaboratuvarYonetimiPanel() {
                         <History className="mr-2 h-5 w-5" /> Sayım Geçmişi
                     </Button>
                     <Button
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={!selectedLabId || isParsingExcel}
+                        onClick={() => setIsOcrModalOpen(true)}
+                        disabled={!selectedLabId || isOcrProcessing}
                         variant="outline"
                         className="w-full sm:w-auto"
                         >
-                        {isParsingExcel ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Upload className="mr-2 h-5 w-5" />}
-                        Excel ile Stok Ekle
+                        {isOcrProcessing
+                          ? <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                          : <FileText className="mr-2 h-5 w-5" />
+                        }
+                        İrsaliye ile Giriş
                     </Button>
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept=".xlsx,.xls"
-                      className="hidden"
-                      onChange={handleFileSelect}
-                    />
                 </div>
             )}
             <div className="flex-grow">
@@ -654,95 +711,12 @@ export default function LaboratuvarYonetimiPanel() {
           )}
         </CardContent>
       </Card>
-
-      {/* Excel Import Preview Modal */}
-      <Dialog open={isImportModalOpen} onOpenChange={(open) => { if (!isImporting) setIsImportModalOpen(open); }}>
-        <DialogContent className="max-w-3xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <FileSpreadsheet className="h-5 w-5 text-primary" />
-              Excel ile Stok Ekleme - Önizleme
-            </DialogTitle>
-            <DialogDescription>
-              {selectedLabName} laboratuvarına eklenecek stok verilerini kontrol edin.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            {/* Summary */}
-            <div className="flex gap-4">
-              <div className="flex items-center gap-2 text-sm">
-                <CheckCircle className="h-4 w-4 text-green-500" />
-                <span className="font-medium">{validRows.length} geçerli satır</span>
-                <span className="text-muted-foreground">({validRows.reduce((s, r) => s + r.adet, 0)} adet ürün)</span>
-              </div>
-              {invalidRows.length > 0 && (
-                <div className="flex items-center gap-2 text-sm text-destructive">
-                  <AlertTriangle className="h-4 w-4" />
-                  <span className="font-medium">{invalidRows.length} hatalı satır (atlanacak)</span>
-                </div>
-              )}
-            </div>
-
-            {/* Expected format hint */}
-            <div className="text-xs text-muted-foreground bg-muted/50 rounded-md px-3 py-2">
-              Beklenen sütunlar: <strong>Stok Kodu</strong> (zorunlu), Stok Adı, Lot Numarası, Miad, Seri Numarası, Adet
-            </div>
-
-            {/* Preview table */}
-            <ScrollArea className="h-[350px] border rounded-md">
-              <Table>
-                <TableHeader className="sticky top-0 bg-background/95 backdrop-blur-sm">
-                  <TableRow>
-                    <TableHead className="w-8">#</TableHead>
-                    <TableHead>Stok Kodu</TableHead>
-                    <TableHead>Stok Adı</TableHead>
-                    <TableHead>Lot</TableHead>
-                    <TableHead>Miad</TableHead>
-                    <TableHead>Seri No</TableHead>
-                    <TableHead className="text-right">Adet</TableHead>
-                    <TableHead>Durum</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {parsedRows.map((row, idx) => (
-                    <TableRow key={idx} className={cn(!row.valid && 'bg-destructive/5')}>
-                      <TableCell className="text-muted-foreground text-xs">{idx + 1}</TableCell>
-                      <TableCell className="font-mono text-xs">{row.stokKodu}</TableCell>
-                      <TableCell className="text-sm">{row.stokAdi}</TableCell>
-                      <TableCell className="text-xs">{row.lotNumarasi || '-'}</TableCell>
-                      <TableCell className="text-xs">{row.miad || '-'}</TableCell>
-                      <TableCell className="text-xs">{row.seriNumarasi || '-'}</TableCell>
-                      <TableCell className="text-right font-semibold">{row.adet}</TableCell>
-                      <TableCell>
-                        {row.valid ? (
-                          <CheckCircle className="h-4 w-4 text-green-500" />
-                        ) : (
-                          <span className="text-xs text-destructive">{row.error}</span>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </ScrollArea>
-          </div>
-
-          <DialogFooter className="gap-2">
-            {importProgress && <span className="text-sm text-muted-foreground mr-auto">{importProgress}</span>}
-            <Button variant="outline" onClick={() => setIsImportModalOpen(false)} disabled={isImporting}>
-              İptal
-            </Button>
-            <Button onClick={handleImportConfirm} disabled={isImporting || validRows.length === 0}>
-              {isImporting ? (
-                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Ekleniyor...</>
-              ) : (
-                <><Upload className="mr-2 h-4 w-4" /> {validRows.reduce((s, r) => s + r.adet, 0)} Adet Stok Ekle</>
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <LabIrsaliyeOcrModal
+        isOpen={isOcrModalOpen}
+        onClose={() => setIsOcrModalOpen(false)}
+        productCodes={productCodes}
+        onResults={handleOcrResults}
+      />
     </div>
   );
 }
