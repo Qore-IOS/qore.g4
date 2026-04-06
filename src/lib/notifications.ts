@@ -496,3 +496,26 @@ export async function emitUserRequestCompleted(params: {
     },
   });
 }
+
+export async function emitMaliyetSayimInvitation(params: {
+  actor: Actor;
+  sessionId: string;
+  locationName: string;
+  invitedUserUids: string[];
+}) {
+  const targets = params.invitedUserUids.map((uid) => `user:${uid}`);
+
+  await createNotification({
+    type: "custom",
+    title: "Maliyet Sayım Daveti",
+    message: `${params.actor.name}, ${params.locationName} için maliyet sayımına sizi davet etti.`,
+    href: `/maliyet-sayim?session=${params.sessionId}`,
+    actor: params.actor,
+    targets,
+    meta: {
+      sessionId: params.sessionId,
+      locationName: params.locationName,
+      invitedBy: params.actor.name,
+    },
+  });
+}

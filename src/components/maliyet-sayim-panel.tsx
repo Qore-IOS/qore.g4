@@ -33,6 +33,11 @@ import {
   Plus,
   Mic,
   MicOff,
+  Users,
+  UserPlus,
+  Mail,
+  ShieldCheck,
+  Bell,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
@@ -40,6 +45,15 @@ import useHidScanner from '@/hooks/useHidScanner';
 import { parseAndResolveBarcode } from '@/lib/barcode';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import {
+  createSession, joinSession, declineSession, updatePresence, removePresence,
+  updateSessionCountData, completeSession, subscribeToSession, subscribeToUserSessions,
+  getUsersForLocation, getPresenceColor,
+  type MaliyetSayimOturum, type SessionParticipant, type PresenceData,
+} from '@/lib/maliyet-session';
+import { emitMaliyetSayimInvitation } from '@/lib/notifications';
+import { format } from 'date-fns';
+import { tr } from 'date-fns/locale';
 
 // ============================================================================
 // TYPES
@@ -278,6 +292,8 @@ function ProductCountCard({
   onAddExpiryWarning,
   onRemoveExpiryWarning,
   showCost,
+  countedByName,
+  activeUsers,
 }: {
   product: ProductCode;
   entry: ProductCountEntry;
@@ -287,6 +303,8 @@ function ProductCountCard({
   onAddExpiryWarning: (miad: string) => void;
   onRemoveExpiryWarning: (id: string) => void;
   showCost: boolean;
+  countedByName?: string;
+  activeUsers?: { name: string; color: string }[];
 }) {
   const [accordionOpen, setAccordionOpen] = useState(false);
 
@@ -322,6 +340,17 @@ function ProductCountCard({
         cardExpiryClass && `ring-1 ${cardExpiryClass}`
       )}
     >
+      {/* Active users indicator */}
+      {activeUsers && activeUsers.length > 0 && (
+        <div className="flex items-center gap-1 mb-2">
+          {activeUsers.map((u, i) => (
+            <span key={i} className="flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-medium text-white" style={{ backgroundColor: u.color }}>
+              {u.name.split(' ')[0]}
+            </span>
+          ))}
+        </div>
+      )}
+
       <div className="flex items-start justify-between gap-3">
         {/* Product info */}
         <div className="flex-1 min-w-0">
@@ -360,17 +389,22 @@ function ProductCountCard({
               }}
             />
           </label>
-          <button
-            onClick={onMarkCounted}
-            className={cn(
-              'w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-200',
-              entry.counted
-                ? 'bg-emerald-500 text-white shadow-md'
-                : 'bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-accent)]'
+          <div className="flex flex-col items-center gap-0.5">
+            <button
+              onClick={onMarkCounted}
+              className={cn(
+                'w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-200',
+                entry.counted
+                  ? 'bg-emerald-500 text-white shadow-md'
+                  : 'bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-accent)]'
+              )}
+            >
+              <Check className="w-4 h-4" />
+            </button>
+            {countedByName && entry.counted && (
+              <span className="text-[8px] text-emerald-600 font-medium truncate max-w-[60px]">{countedByName}</span>
             )}
-          >
-            <Check className="w-4 h-4" />
-          </button>
+          </div>
         </div>
       </div>
 
@@ -520,6 +554,25 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
   });
   const [selectedLocationId, setSelectedLocationId] = useState<string | null>(() => searchParams.get('id'));
 
+  // ---- COLLABORATIVE SESSION STATE ----
+  const [preScreenTab, setPreScreenTab] = useState<'new' | 'invitations'>('new');
+  const [showParticipantSelection, setShowParticipantSelection] = useState(false);
+  const [locationUsers, setLocationUsers] = useState<{ uid: string; name: string; email: string; role: string }[]>([]);
+  const [selectedParticipants, setSelectedParticipants] = useState<Set<string>>(new Set());
+  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+  const [isCreatingSession, setIsCreatingSession] = useState(false);
+
+  // Active session
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(() => searchParams.get('session'));
+  const [activeSession, setActiveSession] = useState<MaliyetSayimOturum | null>(null);
+  const [sessionMode, setSessionMode] = useState<'solo' | 'collaborative'>('solo');
+
+  // Pending invitations
+  const [pendingInvitations, setPendingInvitations] = useState<MaliyetSayimOturum[]>([]);
+
+  // Presence tracking
+  const presenceIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   // MinMaxRules fetched from Firestore sub-collection
   const [locationMinMaxRules, setLocationMinMaxRules] = useState<MinMaxRule[]>([]);
   const [isLoadingRules, setIsLoadingRules] = useState(false);
@@ -548,6 +601,97 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
   const [showFinishModal, setShowFinishModal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const { toast } = useToast();
+
+  // ---- COLLABORATIVE SESSION SUBSCRIPTIONS ----
+
+  // Subscribe to pending invitations for current user
+  useEffect(() => {
+    if (!currentUserProfile?.uid) return;
+    const unsub = subscribeToUserSessions(currentUserProfile.uid, (sessions) => {
+      setPendingInvitations(sessions);
+
+      // Auto-join if URL has ?session=xxx
+      if (activeSessionId && !activeSession) {
+        const target = sessions.find(s => s.id === activeSessionId);
+        if (target) {
+          const participant = target.participants.find(p => p.uid === currentUserProfile.uid);
+          if (participant && participant.status === 'invited') {
+            joinSession(activeSessionId, currentUserProfile.uid, currentUserProfile.name || '').catch(console.error);
+          }
+          setActiveSession(target);
+          setSessionMode('collaborative');
+          setLocationType(target.locationType);
+          setSelectedLocationId(target.locationId);
+        }
+      }
+    });
+    return () => unsub();
+  }, [currentUserProfile?.uid, activeSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Subscribe to active session for real-time updates
+  useEffect(() => {
+    if (!activeSessionId || sessionMode !== 'collaborative') return;
+    const unsub = subscribeToSession(activeSessionId, (session) => {
+      if (session) {
+        setActiveSession(session);
+        // Merge remote count data into local state
+        if (session.countData) {
+          setCountData(prev => {
+            const next = { ...prev };
+            Object.entries(session.countData!).forEach(([stokKodu, remote]) => {
+              if (!next[stokKodu]) {
+                next[stokKodu] = {
+                  stokKodu: remote.stokKodu,
+                  stokAdi: remote.stokAdi,
+                  marka: remote.marka,
+                  stokAdedi: String(remote.stokAdedi),
+                  cihazUstuAdedi: String(remote.cihazUstuAdedi),
+                  counted: remote.counted,
+                  lots: [],
+                  serials: [],
+                  expiryWarnings: [],
+                };
+              } else {
+                // Only update if remote is newer (simple merge - last write wins)
+                next[stokKodu] = {
+                  ...next[stokKodu],
+                  stokAdedi: String(remote.stokAdedi),
+                  cihazUstuAdedi: String(remote.cihazUstuAdedi),
+                  counted: remote.counted,
+                };
+              }
+            });
+            return next;
+          });
+        }
+      }
+    });
+    return () => unsub();
+  }, [activeSessionId, sessionMode]);
+
+  // Presence update interval
+  useEffect(() => {
+    if (!activeSessionId || sessionMode !== 'collaborative' || !currentUserProfile?.uid) return;
+
+    const myIdx = activeSession?.participants.findIndex(p => p.uid === currentUserProfile.uid) ?? 0;
+
+    const doUpdate = () => {
+      updatePresence(activeSessionId, currentUserProfile.uid, {
+        activeBrand: activeBrand,
+        activeProduct: null,
+        name: currentUserProfile.name || '',
+        color: getPresenceColor(myIdx),
+      }).catch(console.error);
+    };
+
+    doUpdate();
+    presenceIntervalRef.current = setInterval(doUpdate, 15000);
+
+    return () => {
+      if (presenceIntervalRef.current) clearInterval(presenceIntervalRef.current);
+      removePresence(activeSessionId, currentUserProfile.uid).catch(console.error);
+    };
+  }, [activeSessionId, sessionMode, currentUserProfile?.uid, activeBrand]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const scanFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -674,26 +818,50 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
 
   // ---- Handlers ----
 
+  // Sync a field change to Firestore session (collaborative mode)
+  const syncToSession = useCallback((stokKodu: string, field: string, value: string | number | boolean, entry: ProductCountEntry) => {
+    if (sessionMode !== 'collaborative' || !activeSessionId || !currentUserProfile?.uid) return;
+    updateSessionCountData(
+      activeSessionId,
+      stokKodu,
+      field,
+      value,
+      { uid: currentUserProfile.uid, name: currentUserProfile.name || '' },
+      {
+        stokKodu: entry.stokKodu,
+        stokAdi: entry.stokAdi,
+        marka: entry.marka,
+        stokAdedi: parseInt(entry.stokAdedi) || 0,
+        cihazUstuAdedi: parseInt(entry.cihazUstuAdedi) || 0,
+        counted: entry.counted,
+      }
+    ).catch(console.error);
+  }, [sessionMode, activeSessionId, currentUserProfile]);
+
   const handleStokChange = useCallback((stokKodu: string, val: string) => {
-    setCountData(prev => ({
-      ...prev,
-      [stokKodu]: { ...prev[stokKodu], stokAdedi: val },
-    }));
-  }, []);
+    setCountData(prev => {
+      const updated = { ...prev, [stokKodu]: { ...prev[stokKodu], stokAdedi: val } };
+      syncToSession(stokKodu, 'stokAdedi', parseInt(val) || 0, updated[stokKodu]);
+      return updated;
+    });
+  }, [syncToSession]);
 
   const handleCihazChange = useCallback((stokKodu: string, val: string) => {
-    setCountData(prev => ({
-      ...prev,
-      [stokKodu]: { ...prev[stokKodu], cihazUstuAdedi: val },
-    }));
-  }, []);
+    setCountData(prev => {
+      const updated = { ...prev, [stokKodu]: { ...prev[stokKodu], cihazUstuAdedi: val } };
+      syncToSession(stokKodu, 'cihazUstuAdedi', parseInt(val) || 0, updated[stokKodu]);
+      return updated;
+    });
+  }, [syncToSession]);
 
   const handleMarkCounted = useCallback((stokKodu: string) => {
-    setCountData(prev => ({
-      ...prev,
-      [stokKodu]: { ...prev[stokKodu], counted: !prev[stokKodu]?.counted },
-    }));
-  }, []);
+    setCountData(prev => {
+      const newCounted = !prev[stokKodu]?.counted;
+      const updated = { ...prev, [stokKodu]: { ...prev[stokKodu], counted: newCounted } };
+      syncToSession(stokKodu, 'counted', newCounted, updated[stokKodu]);
+      return updated;
+    });
+  }, [syncToSession]);
 
   const handleAddExpiryWarning = useCallback((stokKodu: string, miad: string) => {
     setCountData(prev => {
@@ -748,9 +916,36 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
     setIsSaving(true);
     try {
       const entries = Object.values(countData) as ProductCountEntry[];
-      const items = entries
-        .filter(entry => entry.counted)
-        .map(entry => ({
+      const countedEntries = entries.filter(entry => entry.counted);
+
+      if (sessionMode === 'collaborative' && activeSessionId && activeSession) {
+        // Collaborative mode: use completeSession to save with attribution
+        const finalItems = countedEntries.map(entry => {
+          const sessionItem = activeSession.countData?.[entry.stokKodu];
+          return {
+            stokKodu: entry.stokKodu,
+            stokAdi: entry.stokAdi,
+            marka: entry.marka,
+            stokAdedi: parseInt(entry.stokAdedi) || 0,
+            cihazUstuAdedi: parseInt(entry.cihazUstuAdedi) || 0,
+            countedByUid: sessionItem?.countedByUid || currentUserProfile?.uid || '',
+            countedByName: sessionItem?.countedByName || currentUserProfile?.name || '',
+            updates: sessionItem?.updates || [],
+          };
+        });
+
+        await completeSession(activeSessionId, finalItems, {
+          locationType,
+          locationId: selectedLocationId,
+          locationName,
+          createdByUid: activeSession.createdByUid,
+          createdByName: activeSession.createdByName,
+          totalBrands,
+          participants: activeSession.participants,
+        });
+      } else {
+        // Solo mode: legacy save
+        const items = countedEntries.map(entry => ({
           stokKodu: entry.stokKodu,
           stokAdi: entry.stokAdi,
           marka: entry.marka,
@@ -758,26 +953,27 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
           cihazUstuAdedi: parseInt(entry.cihazUstuAdedi) || 0,
         }));
 
-      await addDoc(collection(db, 'maliyetSayimSessions'), {
-        locationType,
-        locationId: selectedLocationId,
-        locationName,
-        createdAt: serverTimestamp(),
-        createdByUid: currentUserProfile?.uid ?? '',
-        createdByName: currentUserProfile?.displayName ?? '',
-        items,
-        totalBrands,
-        totalProducts: items.length,
-      });
+        await addDoc(collection(db, 'maliyetSayimSessions'), {
+          locationType,
+          locationId: selectedLocationId,
+          locationName,
+          createdAt: serverTimestamp(),
+          createdByUid: currentUserProfile?.uid ?? '',
+          createdByName: currentUserProfile?.name ?? '',
+          items,
+          totalBrands,
+          totalProducts: items.length,
+        });
+      }
 
-      toast({ title: 'Sayım kaydedildi', description: `${items.length} ürün ${locationName} için kaydedildi.` });
+      toast({ title: 'Sayım kaydedildi', description: `${countedEntries.length} ürün ${locationName} için kaydedildi.` });
     } catch (err) {
       console.error('Error saving session:', err);
       toast({ title: 'Hata', description: 'Sayım kaydedilemedi.', variant: 'destructive' });
     } finally {
       setIsSaving(false);
     }
-  }, [locationType, selectedLocationId, locationName, countData, currentUserProfile, totalBrands, isSaving, toast]);
+  }, [locationType, selectedLocationId, locationName, countData, currentUserProfile, totalBrands, isSaving, toast, sessionMode, activeSessionId, activeSession]);
 
   const flashFeedback = useCallback((type: 'success' | 'error', message: string) => {
     if (scanFeedbackTimer.current) clearTimeout(scanFeedbackTimer.current);
@@ -1119,7 +1315,7 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
     };
   }, []);
 
-  const handleSelectLocation = useCallback((type: LocationType, id: string) => {
+  const handleSelectLocation = useCallback(async (type: LocationType, id: string) => {
     setLocationType(type);
     setSelectedLocationId(id);
     setActiveBrand(null);
@@ -1133,8 +1329,97 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
     }
     setVoiceActive(false);
     setVoiceTranscript('');
-    router.replace(`/maliyet-sayim?type=${type}&id=${id}`, { scroll: false });
-  }, [router]);
+
+    // Show participant selection step
+    setShowParticipantSelection(true);
+    setIsLoadingUsers(true);
+    try {
+      const users = await getUsersForLocation(type, id);
+      // Exclude current user from the list
+      setLocationUsers(users.filter(u => u.uid !== currentUserProfile?.uid));
+    } catch (err) {
+      console.error('Error fetching users:', err);
+      setLocationUsers([]);
+    } finally {
+      setIsLoadingUsers(false);
+    }
+  }, [currentUserProfile?.uid]);
+
+  const handleStartSolo = useCallback(() => {
+    setShowParticipantSelection(false);
+    setSessionMode('solo');
+    router.replace(`/maliyet-sayim?type=${locationType}&id=${selectedLocationId}`, { scroll: false });
+  }, [router, locationType, selectedLocationId]);
+
+  const handleStartCollaborative = useCallback(async () => {
+    if (!locationType || !selectedLocationId || !currentUserProfile?.uid) return;
+    setIsCreatingSession(true);
+    try {
+      const locationName = locationType === 'lab'
+        ? hospitals.find(h => h.id === selectedLocationId)?.name ?? ''
+        : depots.find(d => d.id === selectedLocationId)?.name ?? '';
+
+      const invitedUsers = locationUsers
+        .filter(u => selectedParticipants.has(u.uid))
+        .map(u => ({ uid: u.uid, name: u.name }));
+
+      const sessionId = await createSession({
+        locationType,
+        locationId: selectedLocationId,
+        locationName,
+        creatorUid: currentUserProfile.uid,
+        creatorName: currentUserProfile.name || '',
+        invitedUsers,
+      });
+
+      // Send notifications to invited users
+      if (invitedUsers.length > 0) {
+        await emitMaliyetSayimInvitation({
+          actor: { uid: currentUserProfile.uid, name: currentUserProfile.name || '' },
+          sessionId,
+          locationName,
+          invitedUserUids: invitedUsers.map(u => u.uid),
+        });
+      }
+
+      setActiveSessionId(sessionId);
+      setSessionMode('collaborative');
+      setShowParticipantSelection(false);
+      router.replace(`/maliyet-sayim?type=${locationType}&id=${selectedLocationId}&session=${sessionId}`, { scroll: false });
+
+      toast({ title: 'Oturum oluşturuldu', description: `${invitedUsers.length} kişiye davet gönderildi.` });
+    } catch (err) {
+      console.error('Error creating session:', err);
+      toast({ title: 'Hata', description: 'Oturum oluşturulamadı.', variant: 'destructive' });
+    } finally {
+      setIsCreatingSession(false);
+    }
+  }, [locationType, selectedLocationId, currentUserProfile, locationUsers, selectedParticipants, hospitals, depots, router, toast]);
+
+  const handleJoinInvitation = useCallback(async (session: MaliyetSayimOturum) => {
+    if (!currentUserProfile?.uid) return;
+    try {
+      await joinSession(session.id, currentUserProfile.uid, currentUserProfile.name || '');
+      setActiveSessionId(session.id);
+      setSessionMode('collaborative');
+      setLocationType(session.locationType);
+      setSelectedLocationId(session.locationId);
+      router.replace(`/maliyet-sayim?type=${session.locationType}&id=${session.locationId}&session=${session.id}`, { scroll: false });
+      toast({ title: 'Oturuma katıldınız', description: session.locationName });
+    } catch (err) {
+      toast({ title: 'Hata', description: 'Oturuma katılınamadı.', variant: 'destructive' });
+    }
+  }, [currentUserProfile, router, toast]);
+
+  const handleDeclineInvitation = useCallback(async (session: MaliyetSayimOturum) => {
+    if (!currentUserProfile?.uid) return;
+    try {
+      await declineSession(session.id, currentUserProfile.uid);
+      toast({ title: 'Davet reddedildi' });
+    } catch (err) {
+      toast({ title: 'Hata', variant: 'destructive' });
+    }
+  }, [currentUserProfile, toast]);
 
   // Auto-select first incomplete brand when brands load
   useEffect(() => {
@@ -1143,76 +1428,339 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
     }
   }, [brands, activeBrand]);
 
-  // ---- RENDER: Location Selection ----
-  if (!locationType || !selectedLocationId) {
+  // ---- RENDER: Participant Selection (after location is chosen) ----
+  if (showParticipantSelection && locationType && selectedLocationId) {
+    const selectedLocName = locationType === 'lab'
+      ? hospitals.find(h => h.id === selectedLocationId)?.name ?? ''
+      : depots.find(d => d.id === selectedLocationId)?.name ?? '';
+
     return (
       <div className="cihaz-shell min-h-screen">
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 pt-8 sm:pt-16 pb-24">
+        <div className="max-w-2xl mx-auto px-4 sm:px-6 pt-8 sm:pt-12 pb-24">
           {/* Header */}
-          <div className="flex items-center gap-3 mb-8 sm:mb-12 px-1">
+          <div className="flex items-center gap-3 mb-8">
+            <button
+              onClick={() => { setShowParticipantSelection(false); setSelectedLocationId(null); setLocationType(null); }}
+              className="flex items-center justify-center w-10 h-10 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-colors shrink-0"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            <div>
+              <h1 className="text-xl font-bold text-[var(--dashboard-text)]">Katılımcı Seçimi</h1>
+              <p className="text-xs text-[var(--dashboard-muted)]">{selectedLocName} — Sayıma davet edeceğiniz kişileri seçin</p>
+            </div>
+          </div>
+
+          {/* User list */}
+          <div className="cihaz-card-strong rounded-2xl overflow-hidden mb-4">
+            <div className="px-5 py-3 border-b border-[var(--dashboard-stroke)] flex items-center gap-2">
+              <Users className="w-4 h-4 text-[var(--dashboard-accent)]" />
+              <span className="text-xs font-semibold text-[var(--dashboard-text)]">Lokasyona Tanımlı Kullanıcılar</span>
+              {selectedParticipants.size > 0 && (
+                <span className="ml-auto text-[11px] font-medium text-[var(--dashboard-accent)]">
+                  {selectedParticipants.size} seçili
+                </span>
+              )}
+            </div>
+
+            {isLoadingUsers ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-6 h-6 animate-spin text-[var(--dashboard-accent)]" />
+              </div>
+            ) : locationUsers.length === 0 ? (
+              <div className="text-center py-12 text-xs text-[var(--dashboard-muted)]">
+                Bu lokasyona tanımlı başka kullanıcı bulunamadı.
+              </div>
+            ) : (
+              <ScrollArea className="max-h-[400px]">
+                <div className="divide-y divide-[var(--dashboard-stroke)]">
+                  {locationUsers.map(user => {
+                    const isSelected = selectedParticipants.has(user.uid);
+                    const isAdmin = ['admin', 'admin_developer', 'super_admin'].includes(user.role);
+                    return (
+                      <button
+                        key={user.uid}
+                        onClick={() => {
+                          setSelectedParticipants(prev => {
+                            const next = new Set(prev);
+                            if (next.has(user.uid)) next.delete(user.uid);
+                            else next.add(user.uid);
+                            return next;
+                          });
+                        }}
+                        className={cn(
+                          'w-full flex items-center gap-3 px-5 py-3.5 text-left transition-colors',
+                          isSelected ? 'bg-[var(--dashboard-accent)]/5' : 'hover:bg-[var(--dashboard-surface-2)]/50'
+                        )}
+                      >
+                        <span className={cn(
+                          'w-5 h-5 rounded-md border-2 flex items-center justify-center shrink-0 transition-colors',
+                          isSelected
+                            ? 'border-[var(--dashboard-accent)] bg-[var(--dashboard-accent)]'
+                            : 'border-[var(--dashboard-muted)]/30'
+                        )}>
+                          {isSelected && (
+                            <svg className="w-3 h-3 text-white" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2"><path d="M2 6l3 3 5-5" /></svg>
+                          )}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-medium text-[var(--dashboard-text)]">{user.name}</span>
+                            {isAdmin && (
+                              <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400">
+                                <ShieldCheck className="w-2.5 h-2.5" />
+                                Admin
+                              </span>
+                            )}
+                          </div>
+                          {user.email && (
+                            <p className="text-[11px] text-[var(--dashboard-muted)] truncate">{user.email}</p>
+                          )}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </ScrollArea>
+            )}
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex gap-3">
+            <button
+              onClick={handleStartSolo}
+              className="flex-1 h-11 rounded-xl text-sm font-semibold bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-colors"
+            >
+              Solo Sayım
+            </button>
+            <button
+              onClick={handleStartCollaborative}
+              disabled={selectedParticipants.size === 0 || isCreatingSession}
+              className={cn(
+                'flex-1 h-11 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2',
+                selectedParticipants.size > 0
+                  ? 'bg-[var(--dashboard-accent)] text-white shadow-md hover:opacity-90'
+                  : 'bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] cursor-not-allowed opacity-50'
+              )}
+            >
+              {isCreatingSession ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserPlus className="w-4 h-4" />}
+              Oturum Oluştur & Başla
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ---- RENDER: Location Selection (with tabs for invitations) ----
+  if (!locationType || !selectedLocationId) {
+    const myPendingInvitations = pendingInvitations.filter(s =>
+      s.participants.some(p => p.uid === currentUserProfile?.uid && (p.status === 'invited' || p.status === 'joined'))
+    );
+
+    return (
+      <div className="cihaz-shell min-h-screen">
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 pt-8 sm:pt-12 pb-24">
+          {/* Header */}
+          <div className="flex items-center gap-3 mb-6 px-1">
             <span className="flex items-center justify-center w-10 h-10 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
               <ClipboardCheck className="h-5 w-5 text-[var(--dashboard-accent)]" />
             </span>
             <div>
               <h1 className="text-xl sm:text-2xl font-bold text-[var(--dashboard-text)]">Maliyet Sayım</h1>
-              <p className="text-xs sm:text-sm text-[var(--dashboard-muted)]">Sayım yapılacak lokasyonu seçin</p>
+              <p className="text-xs sm:text-sm text-[var(--dashboard-muted)]">Yeni sayım başlatın veya davetleri görüntüleyin</p>
             </div>
           </div>
 
-          {/* Location type selection */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
+          {/* Tabs */}
+          <div className="flex gap-2 mb-6">
             <button
-              onClick={() => setLocationType('lab')}
+              onClick={() => setPreScreenTab('new')}
               className={cn(
-                'cihaz-action-tile cihaz-focus-ring flex flex-col items-center justify-center gap-3 p-6 sm:p-8 min-h-[160px]',
-                locationType === 'lab' && 'ring-2 ring-[var(--dashboard-accent)]'
+                'flex-1 sm:flex-none px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200',
+                preScreenTab === 'new'
+                  ? 'bg-[var(--dashboard-accent)] text-white shadow-md'
+                  : 'bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]'
               )}
             >
-              <span className="flex items-center justify-center w-14 h-14 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
-                <TestTube className="h-7 w-7 text-[var(--dashboard-accent)]" />
-              </span>
-              <span className="text-base font-semibold text-[var(--dashboard-text)]">Laboratuvar</span>
-              <span className="text-xs text-[var(--dashboard-muted)]">{hospitals.length} laboratuvar</span>
+              Yeni Sayım
             </button>
-
             <button
-              onClick={() => setLocationType('depot')}
+              onClick={() => setPreScreenTab('invitations')}
               className={cn(
-                'cihaz-action-tile cihaz-focus-ring flex flex-col items-center justify-center gap-3 p-6 sm:p-8 min-h-[160px]',
-                locationType === 'depot' && 'ring-2 ring-[var(--dashboard-accent)]'
+                'flex-1 sm:flex-none px-5 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200 relative',
+                preScreenTab === 'invitations'
+                  ? 'bg-[var(--dashboard-accent)] text-white shadow-md'
+                  : 'bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]'
               )}
             >
-              <span className="flex items-center justify-center w-14 h-14 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
-                <Building2 className="h-7 w-7 text-[var(--dashboard-accent)]" />
-              </span>
-              <span className="text-base font-semibold text-[var(--dashboard-text)]">Depo</span>
-              <span className="text-xs text-[var(--dashboard-muted)]">{depots.length} depo</span>
+              <Bell className="w-4 h-4 inline mr-1.5" />
+              Bekleyen Davetler
+              {myPendingInvitations.filter(s => s.participants.some(p => p.uid === currentUserProfile?.uid && p.status === 'invited')).length > 0 && (
+                <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                  {myPendingInvitations.filter(s => s.participants.some(p => p.uid === currentUserProfile?.uid && p.status === 'invited')).length}
+                </span>
+              )}
             </button>
           </div>
 
-          {/* Location list */}
-          {locationType && (
-            <div className="space-y-2">
-              <p className="text-xs font-medium text-[var(--dashboard-muted)] uppercase tracking-wider px-1 mb-3">
-                {locationType === 'lab' ? 'Laboratuvar Seçin' : 'Depo Seçin'}
-              </p>
-              {(locationType === 'lab' ? hospitals : depots).map(loc => (
+          {preScreenTab === 'new' ? (
+            <>
+              {/* Location type selection */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
                 <button
-                  key={loc.id}
-                  onClick={() => handleSelectLocation(locationType, loc.id)}
-                  className="cihaz-tool-item cihaz-focus-ring flex items-center gap-3 px-4 py-3.5 w-full text-left"
+                  onClick={() => setLocationType('lab')}
+                  className={cn(
+                    'cihaz-action-tile cihaz-focus-ring flex flex-col items-center justify-center gap-3 p-6 sm:p-8 min-h-[160px]',
+                    locationType === 'lab' && 'ring-2 ring-[var(--dashboard-accent)]'
+                  )}
                 >
-                  <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] shrink-0">
-                    {locationType === 'lab' ? (
-                      <TestTube className="h-4 w-4 text-[var(--dashboard-accent)]" />
-                    ) : (
-                      <Building2 className="h-4 w-4 text-[var(--dashboard-accent)]" />
-                    )}
+                  <span className="flex items-center justify-center w-14 h-14 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
+                    <TestTube className="h-7 w-7 text-[var(--dashboard-accent)]" />
                   </span>
-                  <span className="text-sm font-medium text-[var(--dashboard-text)] flex-1">{loc.name}</span>
-                  <ChevronRight className="h-4 w-4 text-[var(--dashboard-muted)] shrink-0" />
+                  <span className="text-base font-semibold text-[var(--dashboard-text)]">Laboratuvar</span>
+                  <span className="text-xs text-[var(--dashboard-muted)]">{hospitals.length} laboratuvar</span>
                 </button>
-              ))}
+
+                <button
+                  onClick={() => setLocationType('depot')}
+                  className={cn(
+                    'cihaz-action-tile cihaz-focus-ring flex flex-col items-center justify-center gap-3 p-6 sm:p-8 min-h-[160px]',
+                    locationType === 'depot' && 'ring-2 ring-[var(--dashboard-accent)]'
+                  )}
+                >
+                  <span className="flex items-center justify-center w-14 h-14 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
+                    <Building2 className="h-7 w-7 text-[var(--dashboard-accent)]" />
+                  </span>
+                  <span className="text-base font-semibold text-[var(--dashboard-text)]">Depo</span>
+                  <span className="text-xs text-[var(--dashboard-muted)]">{depots.length} depo</span>
+                </button>
+              </div>
+
+              {/* Location list */}
+              {locationType && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium text-[var(--dashboard-muted)] uppercase tracking-wider px-1 mb-3">
+                    {locationType === 'lab' ? 'Laboratuvar Seçin' : 'Depo Seçin'}
+                  </p>
+                  {(locationType === 'lab' ? hospitals : depots).map(loc => (
+                    <button
+                      key={loc.id}
+                      onClick={() => handleSelectLocation(locationType, loc.id)}
+                      className="cihaz-tool-item cihaz-focus-ring flex items-center gap-3 px-4 py-3.5 w-full text-left"
+                    >
+                      <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] shrink-0">
+                        {locationType === 'lab' ? (
+                          <TestTube className="h-4 w-4 text-[var(--dashboard-accent)]" />
+                        ) : (
+                          <Building2 className="h-4 w-4 text-[var(--dashboard-accent)]" />
+                        )}
+                      </span>
+                      <span className="text-sm font-medium text-[var(--dashboard-text)] flex-1">{loc.name}</span>
+                      <ChevronRight className="h-4 w-4 text-[var(--dashboard-muted)] shrink-0" />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            /* ---- Pending Invitations Tab ---- */
+            <div className="space-y-3">
+              {myPendingInvitations.length === 0 ? (
+                <div className="cihaz-card-strong rounded-2xl p-12 text-center">
+                  <Bell className="w-10 h-10 text-[var(--dashboard-muted)] mx-auto mb-3 opacity-40" />
+                  <p className="text-sm font-medium text-[var(--dashboard-text)] mb-1">Bekleyen Davet Yok</p>
+                  <p className="text-xs text-[var(--dashboard-muted)]">Sayıma davet edildiğinizde burada görünür.</p>
+                </div>
+              ) : (
+                myPendingInvitations.map(session => {
+                  const myParticipant = session.participants.find(p => p.uid === currentUserProfile?.uid);
+                  const isInvited = myParticipant?.status === 'invited';
+                  const isJoined = myParticipant?.status === 'joined';
+                  const joinedCount = session.participants.filter(p => p.status === 'joined').length;
+                  const createdAt = session.createdAt?.toDate ? session.createdAt.toDate() : (session.createdAt?.seconds ? new Date(session.createdAt.seconds * 1000) : null);
+
+                  return (
+                    <div key={session.id} className="cihaz-card-strong rounded-2xl p-5">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1.5">
+                            <span className={cn(
+                              'inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-semibold uppercase tracking-wider',
+                              session.locationType === 'lab'
+                                ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                                : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                            )}>
+                              {session.locationType === 'lab' ? 'Lab' : 'Depo'}
+                            </span>
+                            <span className="text-sm font-semibold text-[var(--dashboard-text)]">{session.locationName}</span>
+                            {isInvited && (
+                              <span className="px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                                Davet
+                              </span>
+                            )}
+                            {isJoined && (
+                              <span className="px-2 py-0.5 rounded-lg text-[10px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+                                Katıldınız
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--dashboard-muted)]">
+                            <span>Oluşturan: {session.createdByName}</span>
+                            <span>{joinedCount}/{session.participants.length} katılımcı</span>
+                            {createdAt && <span>{format(createdAt, 'dd MMM HH:mm', { locale: tr })}</span>}
+                          </div>
+
+                          {/* Participant avatars */}
+                          <div className="flex items-center gap-1 mt-2">
+                            {session.participants.map((p, i) => (
+                              <span
+                                key={p.uid}
+                                title={`${p.name} (${p.status === 'joined' ? 'katıldı' : p.status === 'invited' ? 'davet edildi' : 'reddetti'})`}
+                                className={cn(
+                                  'w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white',
+                                  p.status === 'declined' && 'opacity-30'
+                                )}
+                                style={{ backgroundColor: getPresenceColor(i) }}
+                              >
+                                {p.name.charAt(0).toUpperCase()}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex flex-col gap-2 shrink-0">
+                          {isInvited && (
+                            <>
+                              <button
+                                onClick={() => handleJoinInvitation(session)}
+                                className="h-9 px-4 rounded-xl text-xs font-semibold bg-[var(--dashboard-accent)] text-white shadow-md hover:opacity-90 transition-all"
+                              >
+                                Katıl
+                              </button>
+                              <button
+                                onClick={() => handleDeclineInvitation(session)}
+                                className="h-9 px-4 rounded-xl text-xs font-semibold bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-red-500 transition-colors"
+                              >
+                                Reddet
+                              </button>
+                            </>
+                          )}
+                          {isJoined && (
+                            <button
+                              onClick={() => handleJoinInvitation(session)}
+                              className="h-9 px-4 rounded-xl text-xs font-semibold bg-[var(--dashboard-accent)] text-white shadow-md hover:opacity-90 transition-all"
+                            >
+                              Devam Et
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
           )}
         </div>
@@ -1339,6 +1887,46 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
           )}
         </div>
       </div>
+
+      {/* ===== COLLABORATIVE PARTICIPANT BAR ===== */}
+      {sessionMode === 'collaborative' && activeSession && (
+        <div className="px-4 sm:px-6 py-2 border-b border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)]/50">
+          <div className="flex items-center gap-3 flex-wrap">
+            <Users className="w-4 h-4 text-[var(--dashboard-accent)] shrink-0" />
+            {activeSession.participants.filter(p => p.status === 'joined').map((p, i) => {
+              const presence = activeSession.presence?.[p.uid];
+              const isOnline = presence && presence.lastSeen &&
+                (Date.now() - (typeof presence.lastSeen === 'object' && presence.lastSeen.seconds ? presence.lastSeen.seconds * 1000 : new Date(presence.lastSeen).getTime())) < 30000;
+              return (
+                <div key={p.uid} className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-[var(--dashboard-surface-2)]/50" title={presence?.activeBrand ? `${p.name}: ${presence.activeBrand}` : p.name}>
+                  <span className="relative">
+                    <span
+                      className="w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold text-white"
+                      style={{ backgroundColor: getPresenceColor(i) }}
+                    >
+                      {p.name.charAt(0).toUpperCase()}
+                    </span>
+                    {isOnline && (
+                      <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500 border border-[var(--dashboard-surface)]" />
+                    )}
+                  </span>
+                  <span className="text-[11px] text-[var(--dashboard-text)] font-medium">{p.name.split(' ')[0]}</span>
+                  {presence?.activeBrand && (
+                    <span className="text-[9px] text-[var(--dashboard-muted)] bg-[var(--dashboard-surface-2)] px-1.5 py-0.5 rounded">
+                      {presence.activeBrand}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+            {activeSession.participants.filter(p => p.status === 'invited').length > 0 && (
+              <span className="text-[10px] text-[var(--dashboard-muted)]">
+                +{activeSession.participants.filter(p => p.status === 'invited').length} davet bekliyor
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ===== MAIN CONTENT ===== */}
       <div className="flex-1 flex overflow-hidden">
@@ -1502,6 +2090,13 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
                         onAddExpiryWarning={(miad) => handleAddExpiryWarning(product.stokKodu, miad)}
                         onRemoveExpiryWarning={(id) => handleRemoveExpiryWarning(product.stokKodu, id)}
                         showCost={canSeeCost}
+                        countedByName={sessionMode === 'collaborative' ? activeSession?.countData?.[product.stokKodu]?.countedByName : undefined}
+                        activeUsers={sessionMode === 'collaborative' && activeSession?.presence
+                          ? Object.values(activeSession.presence)
+                              .filter(p => p.activeProduct === product.stokKodu)
+                              .map(p => ({ name: p.name, color: p.color }))
+                          : undefined
+                        }
                       />
                     ))
                   ) : (
