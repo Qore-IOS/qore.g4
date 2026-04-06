@@ -37,7 +37,6 @@ const ICON_COLORS: Record<string, [string, string]> = {
   'numune-arsivi':         ['#64748b', '#475569'],   // slate
   'cihazdan-cikan-kit':    ['#ef4444', '#dc2626'],   // red
   'is-analizi':            ['#0ea5e9', '#0284c7'],   // sky
-  'verimlilik-hesaplama':  ['#84cc16', '#65a30d'],   // lime
   'total-verimlilik':      ['#d946ef', '#c026d3'],   // fuchsia
   'cihaz-yonetimi-ana':    ['#eab308', '#ca8a04'],   // yellow
   'raporlama':             ['#60a5fa', '#4f46e5'],   // blue-indigo
@@ -78,7 +77,6 @@ const ICON_COLORS: Record<string, [string, string]> = {
   'kullanim-dogrulama':    ['#22c55e', '#16a34a'],   // green
   'mal-kabul-gecmis':      ['#64748b', '#475569'],   // slate
   'siparis-gecmis':        ['#f59e0b', '#d97706'],   // amber
-  'verimlilik-hesaplama-sub': ['#84cc16', '#65a30d'], // lime
   'cost-dashboard':        ['#eab308', '#ca8a04'],   // yellow
   'teknik-servis':         ['#f97316', '#ea580c'],   // orange
   'ariza-yonetimi':        ['#ef4444', '#dc2626'],   // red

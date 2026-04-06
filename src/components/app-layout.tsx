@@ -6,7 +6,6 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
 import { useTheme } from "next-themes";
 import { Dock } from "@/components/dock";
-import VerimlilikSwitch from "./VerimlilikSwitch";
 import TaskPlannerPanel from "./TaskPlannerPanel";
 import AutoRedirectOnLogin from "./AutoRedirectOnLogin";
 import OnlyUsageAutoRedirect from "./OnlyUsageAutoRedirect";
@@ -76,8 +75,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   const {
     dockItems,
-    isVerimlilikSwitchOpen,
-    setIsVerimlilikSwitchOpen,
     isPlannerPanelOpen,
     setIsPlannerPanelOpen,
     currentViewKey,
@@ -219,10 +216,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
         {!isTeknisyen && <MobileDock items={dockItems} />}
 
-        <VerimlilikSwitch
-          open={isVerimlilikSwitchOpen}
-          onClose={() => setIsVerimlilikSwitchOpen(false)}
-        />
 
         <TaskPlannerPanel
           open={isPlannerPanelOpen}
