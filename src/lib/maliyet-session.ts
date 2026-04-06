@@ -106,18 +106,19 @@ export async function createSession(params: {
   creatorName: string;
   invitedUsers: { uid: string; name: string }[];
 }): Promise<string> {
+  const now = new Date().toISOString();
   const participants: SessionParticipant[] = [
     {
       uid: params.creatorUid,
       name: params.creatorName,
       status: 'joined',
-      joinedAt: serverTimestamp(),
+      joinedAt: now,
     },
     ...params.invitedUsers.map(u => ({
       uid: u.uid,
       name: u.name,
       status: 'invited' as ParticipantStatus,
-      invitedAt: serverTimestamp(),
+      invitedAt: now,
     })),
   ];
 
@@ -145,7 +146,7 @@ export async function joinSession(sessionId: string, uid: string, name: string):
 
   const data = snap.data() as Omit<MaliyetSayimOturum, 'id'>;
   const updatedParticipants = data.participants.map(p =>
-    p.uid === uid ? { ...p, status: 'joined' as ParticipantStatus, joinedAt: serverTimestamp() } : p
+    p.uid === uid ? { ...p, status: 'joined' as ParticipantStatus, joinedAt: new Date().toISOString() } : p
   );
 
   await updateDoc(ref, { participants: updatedParticipants });
@@ -309,18 +310,21 @@ export function subscribeToUserSessions(
   uid: string,
   callback: (sessions: MaliyetSayimOturum[]) => void
 ): () => void {
-  // We query all active sessions and filter client-side since
-  // Firestore can't query inside arrays of objects
+  // Query only active sessions, sort client-side to avoid composite index requirement
   const q = query(
     collection(db, COLLECTION),
-    where('status', '==', 'active'),
-    orderBy('createdAt', 'desc')
+    where('status', '==', 'active')
   );
 
   return onSnapshot(q, (snap) => {
     const sessions = snap.docs
       .map(d => ({ id: d.id, ...d.data() } as MaliyetSayimOturum))
-      .filter(s => s.participants.some(p => p.uid === uid));
+      .filter(s => s.participants.some(p => p.uid === uid))
+      .sort((a, b) => {
+        const aTime = a.createdAt?.seconds || 0;
+        const bTime = b.createdAt?.seconds || 0;
+        return bTime - aTime;
+      });
     callback(sessions);
   }, (error) => {
     console.error('User sessions subscription error:', error);
