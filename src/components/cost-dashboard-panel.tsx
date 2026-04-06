@@ -2,21 +2,18 @@
 'use client';
 import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 import type { ProductCode, Currency } from '@/lib/types';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
 import { PieChart, ResponsiveContainer, Pie, Cell, Tooltip as RechartsTooltip, LineChart, Line, XAxis, YAxis } from 'recharts';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
-  Loader2, ChevronLeft, ChevronRight, TrendingUp, PieChart as PieChartIcon,
-  Wallet, BarChart3, Calendar, ArrowLeft, Package,
+  Loader2, TrendingUp, TrendingDown, PieChart as PieChartIcon,
+  Wallet, BarChart3, Calendar, ChevronRight, ArrowLeft,
+  MapPin, Layers,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { format, eachMonthOfInterval, endOfMonth, isValid } from 'date-fns';
+import { format, eachMonthOfInterval, endOfMonth, isValid, subMonths } from 'date-fns';
 import { tr } from 'date-fns/locale';
-import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
 
@@ -97,11 +94,11 @@ async function fetchExchangeRates(): Promise<Record<Currency, number>> {
 // HELPERS
 // ============================================================================
 
-function formatCurrency(value: number, symbol: string): string {
+function fmtCurrency(value: number, symbol: string): string {
   return `${symbol}${value.toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 
-function formatCurrencyDetailed(value: number, symbol: string): string {
+function fmtCurrencyDetailed(value: number, symbol: string): string {
   return `${symbol}${value.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
@@ -111,6 +108,43 @@ function getSessionDate(session: SayimSession): Date | null {
   if (session.createdAt.seconds) return new Date(session.createdAt.seconds * 1000);
   const d = new Date(session.createdAt);
   return isValid(d) ? d : null;
+}
+
+/** Get cost of a single session in the given currency */
+function getSessionCost(
+  session: SayimSession,
+  productMap: Map<string, ProductCode>,
+  rates: Record<Currency, number>,
+  currency: Currency
+): number {
+  return session.items.reduce((sum, item) => {
+    const product = productMap.get(item.stokKodu);
+    if (!product?.cost || !product?.ambalajDegeri) return sum;
+    const totalTest = (item.stokAdedi * product.ambalajDegeri) + item.cihazUstuAdedi;
+    const costPerTest = product.cost / product.ambalajDegeri;
+    const totalNative = costPerTest * totalTest;
+    const productCurrency = (product.currency || 'TRY') as Currency;
+
+    let costEUR: number;
+    switch (productCurrency) {
+      case 'EUR': costEUR = totalNative; break;
+      case 'USD': costEUR = totalNative / (rates.USD || 1); break;
+      case 'TRY': costEUR = totalNative / (rates.TRY || 1); break;
+      default: costEUR = totalNative / (rates.TRY || 1);
+    }
+    return sum + costEUR * (rates[currency] || 1);
+  }, 0);
+}
+
+/** Get latest session per location */
+function getLatestPerLocation(sessions: SayimSession[]): SayimSession[] {
+  const map = new Map<string, SayimSession>();
+  // sessions already sorted desc by createdAt
+  for (const s of sessions) {
+    const key = `${s.locationType}-${s.locationId}`;
+    if (!map.has(key)) map.set(key, s);
+  }
+  return Array.from(map.values());
 }
 
 // ============================================================================
@@ -123,6 +157,8 @@ interface CostDashboardPanelProps {
   tuketimKayitlari: any[];
 }
 
+type TimePeriod = 'latest' | '3m' | '6m' | '12m' | 'all';
+
 // ============================================================================
 // COMPONENT
 // ============================================================================
@@ -132,9 +168,8 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
   const [currency, setCurrency] = useState<Currency>('TRY');
   const [isLoading, setIsLoading] = useState(true);
   const [sessions, setSessions] = useState<SayimSession[]>([]);
-  const [detailView, setDetailView] = useState<'closed' | 'brands' | 'products'>('closed');
+  const [timePeriod, setTimePeriod] = useState<TimePeriod>('12m');
   const [selectedBrand, setSelectedBrand] = useState<string | null>(null);
-  const { toast } = useToast();
   const { currentCompanyId, isSuperAdmin } = useAuth();
 
   // Fetch exchange rates and sayım sessions
@@ -151,7 +186,6 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
         setSessions(filterByCompanyScope(allSessions, currentCompanyId, isSuperAdmin));
       } catch (err) {
         console.error('Error loading cost dashboard:', err);
-        // Still try to get rates even if sessions fail
         try {
           const ratesData = await fetchExchangeRates();
           setRates(ratesData);
@@ -169,169 +203,262 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
     return map;
   }, [productCodes]);
 
-  // Get cost in selected currency for a product
-  const getProductCost = useCallback((stokKodu: string, quantity: number, cihazUstu: number): { amount: number; currency: Currency } => {
-    if (!rates) return { amount: 0, currency: 'TRY' };
-    const product = productMap.get(stokKodu);
-    if (!product?.cost || !product?.ambalajDegeri) return { amount: 0, currency: (product?.currency || 'TRY') as Currency };
+  const sym = CURRENCY_SYMBOLS[currency];
 
-    const totalTest = (quantity * product.ambalajDegeri) + cihazUstu;
-    const costPerTest = product.cost / product.ambalajDegeri;
-    const totalCostNative = costPerTest * totalTest;
-    const productCurrency = (product.currency || 'TRY') as Currency;
+  // ---- Filter sessions by time period ----
+  const filteredSessions = useMemo(() => {
+    if (timePeriod === 'all' || timePeriod === 'latest') return sessions;
+    const now = new Date();
+    const months = timePeriod === '3m' ? 3 : timePeriod === '6m' ? 6 : 12;
+    const cutoff = subMonths(now, months);
+    return sessions.filter(s => {
+      const d = getSessionDate(s);
+      return d && d >= cutoff;
+    });
+  }, [sessions, timePeriod]);
 
-    // Convert to EUR first, then to selected currency
-    let costEUR: number;
-    switch (productCurrency) {
-      case 'EUR': costEUR = totalCostNative; break;
-      case 'USD': costEUR = totalCostNative / (rates.USD || 1); break;
-      case 'TRY': costEUR = totalCostNative / (rates.TRY || 1); break;
-      default: costEUR = totalCostNative / (rates.TRY || 1);
+  // ---- KONSOLIDE: latest session per location (real total across all locations) ----
+  const latestPerLocation = useMemo(() => {
+    return getLatestPerLocation(sessions);
+  }, [sessions]);
+
+  const consolidatedCost = useMemo(() => {
+    if (!rates) return 0;
+    return latestPerLocation.reduce((sum, s) => sum + getSessionCost(s, productMap, rates, currency), 0);
+  }, [latestPerLocation, productMap, rates, currency]);
+
+  // ---- Previous period cost for change indicator ----
+  const previousPeriodCost = useMemo(() => {
+    if (!rates || sessions.length < 2) return null;
+    // Compare latest per location vs the one before that
+    const previousMap = new Map<string, SayimSession>();
+    const latestKeys = new Set(latestPerLocation.map(s => `${s.locationType}-${s.locationId}`));
+
+    for (const s of sessions) {
+      const key = `${s.locationType}-${s.locationId}`;
+      if (latestKeys.has(key)) {
+        // skip the latest, take the second one
+        if (previousMap.has(key)) continue;
+        const latest = latestPerLocation.find(l => `${l.locationType}-${l.locationId}` === key);
+        if (latest && s.id !== latest.id && !previousMap.has(key)) {
+          previousMap.set(key, s);
+        }
+      }
     }
 
-    return { amount: costEUR * (rates[currency] || 1), currency: productCurrency };
-  }, [rates, productMap, currency]);
+    if (previousMap.size === 0) return null;
+    return Array.from(previousMap.values()).reduce(
+      (sum, s) => sum + getSessionCost(s, productMap, rates, currency), 0
+    );
+  }, [sessions, latestPerLocation, productMap, rates, currency]);
 
-  // Latest session (most recent completed sayım)
-  const latestSession = sessions[0] || null;
+  const costChange = useMemo(() => {
+    if (previousPeriodCost === null || previousPeriodCost === 0) return null;
+    const diff = consolidatedCost - previousPeriodCost;
+    const pct = (diff / previousPeriodCost) * 100;
+    return { diff, pct, direction: diff >= 0 ? 'up' as const : 'down' as const };
+  }, [consolidatedCost, previousPeriodCost]);
 
-  // ---- COMPUTED DATA FROM SESSIONS ----
+  // ---- Location breakdown ----
+  const locationBreakdown = useMemo(() => {
+    if (!rates) return [];
+    return latestPerLocation.map(s => {
+      const cost = getSessionCost(s, productMap, rates, currency);
+      const date = getSessionDate(s);
+      return {
+        id: s.locationId,
+        name: s.locationName,
+        type: s.locationType,
+        cost,
+        productCount: s.items.length,
+        date,
+      };
+    }).sort((a, b) => b.cost - a.cost);
+  }, [latestPerLocation, productMap, rates, currency]);
 
-  // Total cost from latest session
-  const totalCost = useMemo(() => {
-    if (!latestSession || !rates) return 0;
-    return latestSession.items.reduce((sum, item) => {
-      return sum + getProductCost(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi).amount;
-    }, 0);
-  }, [latestSession, rates, getProductCost]);
-
-  // Brand-based costs from latest session
+  // ---- Brand costs (from ALL latest-per-location, not just one session) ----
   const brandCosts = useMemo(() => {
-    if (!latestSession || !rates) return [];
-    const map = new Map<string, number>();
-    latestSession.items.forEach(item => {
-      const brand = item.marka || 'Diğer';
-      const cost = getProductCost(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi).amount;
-      map.set(brand, (map.get(brand) || 0) + cost);
+    if (!rates) return [];
+    const map = new Map<string, { cost: number; productCount: number }>();
+    latestPerLocation.forEach(session => {
+      session.items.forEach(item => {
+        const brand = item.marka || 'Diğer';
+        const product = productMap.get(item.stokKodu);
+        if (!product?.cost || !product?.ambalajDegeri) return;
+        const totalTest = (item.stokAdedi * product.ambalajDegeri) + item.cihazUstuAdedi;
+        const costPerTest = product.cost / product.ambalajDegeri;
+        const totalNative = costPerTest * totalTest;
+        const productCurrency = (product.currency || 'TRY') as Currency;
+
+        let costEUR: number;
+        switch (productCurrency) {
+          case 'EUR': costEUR = totalNative; break;
+          case 'USD': costEUR = totalNative / (rates.USD || 1); break;
+          case 'TRY': costEUR = totalNative / (rates.TRY || 1); break;
+          default: costEUR = totalNative / (rates.TRY || 1);
+        }
+        const cost = costEUR * (rates[currency] || 1);
+        const existing = map.get(brand) || { cost: 0, productCount: 0 };
+        map.set(brand, { cost: existing.cost + cost, productCount: existing.productCount + 1 });
+      });
     });
     return Array.from(map.entries())
-      .map(([name, value]) => ({ name, value }))
-      .filter(d => d.value > 0)
-      .sort((a, b) => b.value - a.value);
-  }, [latestSession, rates, getProductCost]);
-
-  // Product costs per brand from latest session (for drill-down)
-  const productCostsByBrand = useMemo(() => {
-    if (!latestSession || !rates || !selectedBrand) return [];
-    return latestSession.items
-      .filter(item => (item.marka || 'Diğer') === selectedBrand)
-      .map(item => ({
-        stokKodu: item.stokKodu,
-        stokAdi: item.stokAdi,
-        stokAdedi: item.stokAdedi,
-        cihazUstuAdedi: item.cihazUstuAdedi,
-        cost: getProductCost(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi).amount,
-        nativeCurrency: productMap.get(item.stokKodu)?.currency || 'TRY',
-      }))
-      .filter(p => p.cost > 0)
+      .map(([name, data]) => ({ name, ...data }))
+      .filter(d => d.cost > 0)
       .sort((a, b) => b.cost - a.cost);
-  }, [latestSession, rates, selectedBrand, getProductCost, productMap]);
+  }, [latestPerLocation, productMap, rates, currency]);
 
-  // Monthly cost trend from sessions
+  // ---- Product group breakdown (Kit / Sarf / Yedek Parça) ----
+  const groupBreakdown = useMemo(() => {
+    if (!rates) return [];
+    const map = new Map<string, number>();
+    latestPerLocation.forEach(session => {
+      session.items.forEach(item => {
+        const product = productMap.get(item.stokKodu);
+        if (!product?.cost || !product?.ambalajDegeri) return;
+        const group = product.urunGrubu === 'kit' ? 'Kit'
+          : product.urunGrubu === 'sarf' ? 'Sarf Malzeme'
+          : product.urunGrubu === 'yedek_parca' ? 'Yedek Parça'
+          : 'Diğer';
+        const totalTest = (item.stokAdedi * product.ambalajDegeri) + item.cihazUstuAdedi;
+        const costPerTest = product.cost / product.ambalajDegeri;
+        const totalNative = costPerTest * totalTest;
+        const productCurrency = (product.currency || 'TRY') as Currency;
+
+        let costEUR: number;
+        switch (productCurrency) {
+          case 'EUR': costEUR = totalNative; break;
+          case 'USD': costEUR = totalNative / (rates.USD || 1); break;
+          case 'TRY': costEUR = totalNative / (rates.TRY || 1); break;
+          default: costEUR = totalNative / (rates.TRY || 1);
+        }
+        const cost = costEUR * (rates[currency] || 1);
+        map.set(group, (map.get(group) || 0) + cost);
+      });
+    });
+    return Array.from(map.entries())
+      .map(([name, cost]) => ({ name, cost }))
+      .sort((a, b) => b.cost - a.cost);
+  }, [latestPerLocation, productMap, rates, currency]);
+
+  // ---- Monthly trend (using latest-per-location per month for consolidated view) ----
   const monthlyTrend = useMemo(() => {
     if (!rates || sessions.length === 0) return [];
+    const months = timePeriod === '3m' ? 3 : timePeriod === '6m' ? 6 : 12;
     const now = new Date();
-    const oneYearAgo = new Date(now.getFullYear() - 1, now.getMonth(), 1);
-    const months = eachMonthOfInterval({ start: oneYearAgo, end: now });
+    const startDate = subMonths(now, months);
+    const monthRange = eachMonthOfInterval({ start: startDate, end: now });
 
-    return months.map(monthStart => {
+    return monthRange.map(monthStart => {
       const monthEnd = endOfMonth(monthStart);
-      // Find sessions in this month
-      const monthSessions = sessions.filter(s => {
+      // Find sessions up to this month end
+      const sessionsUpToMonth = sessions.filter(s => {
         const d = getSessionDate(s);
-        return d && d >= monthStart && d <= monthEnd;
+        return d && d <= monthEnd;
       });
 
-      // Use latest session in the month for cost calculation
-      const latestInMonth = monthSessions[0]; // already sorted desc
-      let cost = 0;
-      if (latestInMonth) {
-        cost = latestInMonth.items.reduce((sum, item) => {
-          return sum + getProductCost(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi).amount;
-        }, 0);
-      }
+      // Get latest per location as of this month
+      const latestPerLoc = getLatestPerLocation(sessionsUpToMonth);
+      const cost = latestPerLoc.reduce((sum, s) => sum + getSessionCost(s, productMap, rates, currency), 0);
 
       return {
         month: format(monthStart, 'MMM yy', { locale: tr }),
         cost,
       };
     });
-  }, [sessions, rates, getProductCost]);
+  }, [sessions, rates, productMap, currency, timePeriod]);
 
-  // Quarterly costs from sessions
-  const quarterlyData = useMemo(() => {
-    if (!rates || sessions.length === 0) return [0, 0, 0, 0];
-    const currentYear = new Date().getFullYear();
-    const quarters = [0, 0, 0, 0];
-
-    // For each quarter, find sessions and take the latest one per month, then average/sum
-    for (let q = 0; q < 4; q++) {
-      const qStart = new Date(currentYear, q * 3, 1);
-      const qEnd = endOfMonth(new Date(currentYear, q * 3 + 2, 1));
-
-      const qSessions = sessions.filter(s => {
-        const d = getSessionDate(s);
-        return d && d >= qStart && d <= qEnd;
-      });
-
-      // Sum costs of all sessions in this quarter (each session = a snapshot)
-      // Use the latest session per location to avoid double counting
-      const latestByLocation = new Map<string, SayimSession>();
-      qSessions.forEach(s => {
-        const key = `${s.locationType}-${s.locationId}`;
-        if (!latestByLocation.has(key)) latestByLocation.set(key, s);
-      });
-
-      quarters[q] = Array.from(latestByLocation.values()).reduce((sum, session) => {
-        return sum + session.items.reduce((s, item) => {
-          return s + getProductCost(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi).amount;
-        }, 0);
-      }, 0);
-    }
-
-    return quarters;
-  }, [sessions, rates, getProductCost]);
-
-  // Session count and location stats
-  const stats = useMemo(() => {
-    const brands = new Set<string>();
-    const locations = new Set<string>();
-    if (latestSession) {
-      latestSession.items.forEach(item => {
-        if (item.marka) brands.add(item.marka);
-      });
-      locations.add(latestSession.locationName);
-    }
-    sessions.forEach(s => locations.add(s.locationName));
-    return {
-      sessionCount: sessions.length,
-      brandCount: brands.size,
-      locationCount: locations.size,
-      productCount: latestSession?.items.length || 0,
-    };
-  }, [sessions, latestSession]);
+  // ---- Brand detail products ----
+  const brandProducts = useMemo(() => {
+    if (!rates || !selectedBrand) return [];
+    const products: { stokKodu: string; stokAdi: string; stokAdedi: number; cihazUstuAdedi: number; cost: number; nativeCurrency: string; locationName: string }[] = [];
+    latestPerLocation.forEach(session => {
+      session.items
+        .filter(item => (item.marka || 'Diğer') === selectedBrand)
+        .forEach(item => {
+          const product = productMap.get(item.stokKodu);
+          if (!product?.cost || !product?.ambalajDegeri) return;
+          const totalTest = (item.stokAdedi * product.ambalajDegeri) + item.cihazUstuAdedi;
+          const costPerTest = product.cost / product.ambalajDegeri;
+          const totalNative = costPerTest * totalTest;
+          const productCurrency = (product.currency || 'TRY') as Currency;
+          let costEUR: number;
+          switch (productCurrency) {
+            case 'EUR': costEUR = totalNative; break;
+            case 'USD': costEUR = totalNative / (rates.USD || 1); break;
+            case 'TRY': costEUR = totalNative / (rates.TRY || 1); break;
+            default: costEUR = totalNative / (rates.TRY || 1);
+          }
+          products.push({
+            stokKodu: item.stokKodu,
+            stokAdi: item.stokAdi,
+            stokAdedi: item.stokAdedi,
+            cihazUstuAdedi: item.cihazUstuAdedi,
+            cost: costEUR * (rates[currency] || 1),
+            nativeCurrency: productCurrency,
+            locationName: session.locationName,
+          });
+        });
+    });
+    return products.filter(p => p.cost > 0).sort((a, b) => b.cost - a.cost);
+  }, [latestPerLocation, selectedBrand, productMap, rates, currency]);
 
   // ---- RENDER ----
 
   if (isLoading) {
     return (
-      <div className="flex h-full w-full items-center justify-center min-h-screen">
+      <div className="flex h-full w-full items-center justify-center min-h-screen cihaz-shell">
         <Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)]" />
       </div>
     );
   }
 
-  const sym = CURRENCY_SYMBOLS[currency];
+  // Brand detail view
+  if (selectedBrand) {
+    const brandTotal = brandProducts.reduce((s, p) => s + p.cost, 0);
+    return (
+      <div className="cihaz-shell min-h-screen">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-6 sm:pt-8 pb-24">
+          <div className="flex items-center gap-3 mb-6">
+            <button
+              onClick={() => setSelectedBrand(null)}
+              className="w-10 h-10 rounded-xl flex items-center justify-center bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-colors"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+            <div>
+              <h1 className="text-xl font-bold text-[var(--dashboard-text)]">{selectedBrand}</h1>
+              <p className="text-xs text-[var(--dashboard-muted)]">{brandProducts.length} ürün · Toplam {fmtCurrency(brandTotal, sym)}</p>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            {brandProducts.map((p, i) => (
+              <div key={`${p.stokKodu}-${p.locationName}-${i}`} className="cihaz-card p-4 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-[var(--dashboard-text)]">{p.stokAdi}</p>
+                  <p className="text-[11px] text-[var(--dashboard-muted)] mt-0.5">
+                    {p.stokKodu} · Stok: {p.stokAdedi}
+                    {p.cihazUstuAdedi > 0 && ` · Cihaz Üstü: ${p.cihazUstuAdedi}`}
+                    {latestPerLocation.length > 1 && ` · ${p.locationName}`}
+                  </p>
+                </div>
+                <div className="text-right shrink-0">
+                  <span className="text-sm font-semibold text-[var(--dashboard-accent)]">{fmtCurrencyDetailed(p.cost, sym)}</span>
+                  {p.nativeCurrency !== currency && (
+                    <p className="text-[10px] text-[var(--dashboard-muted)]">{CURRENCY_SYMBOLS[p.nativeCurrency as Currency]}{p.nativeCurrency}</p>
+                  )}
+                </div>
+              </div>
+            ))}
+            {brandProducts.length === 0 && (
+              <div className="cihaz-card p-8 text-center text-sm text-[var(--dashboard-muted)]">Bu markada veri yok.</div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="cihaz-shell min-h-screen">
@@ -368,339 +495,299 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
           </div>
         </div>
 
-        {/* ===== STATS ROW ===== */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-          {[
-            { label: 'Toplam Sayım', value: stats.sessionCount, icon: ClipboardIcon },
-            { label: 'Marka', value: stats.brandCount, icon: Package },
-            { label: 'Lokasyon', value: stats.locationCount, icon: MapPinIcon },
-            { label: 'Ürün', value: stats.productCount, icon: Package },
-          ].map((s, i) => (
-            <div key={i} className="cihaz-pressed px-4 py-3 flex items-center gap-3">
-              <span className="text-lg font-bold text-[var(--dashboard-text)]">{s.value}</span>
-              <span className="text-[11px] text-[var(--dashboard-muted)]">{s.label}</span>
-            </div>
-          ))}
-        </div>
-
-        {/* ===== MAIN GRID ===== */}
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-5">
-
-          {/* ---- TOP LEFT: Total Cost ---- */}
-          <div className="lg:col-span-2 cihaz-card-strong p-5 sm:p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <Wallet className="w-5 h-5 text-[var(--dashboard-accent)]" />
-              <h2 className="text-sm font-semibold text-[var(--dashboard-text)]">Toplam Envanter Maliyeti</h2>
-            </div>
-            <div className="text-3xl sm:text-4xl font-bold text-[var(--dashboard-accent)] mb-3">
-              {formatCurrency(totalCost, sym)}
-            </div>
-            {latestSession && (
-              <p className="text-[11px] text-[var(--dashboard-muted)] mb-4">
-                Son sayım: {latestSession.locationName}
-                {getSessionDate(latestSession) && ` · ${format(getSessionDate(latestSession)!, 'dd MMM yyyy', { locale: tr })}`}
-              </p>
-            )}
-            <Button
-              size="sm"
-              onClick={() => setDetailView('brands')}
-              className="h-9 text-xs rounded-xl bg-[var(--dashboard-accent)] hover:bg-[var(--dashboard-accent)]/90 text-white"
-            >
-              Detaylar
-              <ChevronRight className="w-3.5 h-3.5 ml-1" />
-            </Button>
+        {sessions.length === 0 ? (
+          <div className="cihaz-card-strong p-16 text-center">
+            <Wallet className="w-12 h-12 text-[var(--dashboard-muted)] mx-auto mb-4 opacity-40" />
+            <p className="text-sm font-medium text-[var(--dashboard-text)] mb-1">Henüz sayım verisi yok</p>
+            <p className="text-xs text-[var(--dashboard-muted)]">Maliyet sayımı yapıldıkça veriler burada görünecek.</p>
           </div>
+        ) : (
+          <>
+            {/* ===== CONSOLIDATED COST + CHANGE ===== */}
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-5 mb-5">
 
-          {/* ---- TOP RIGHT: Monthly Trend ---- */}
-          <div className="lg:col-span-3 cihaz-card-strong p-5 sm:p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <TrendingUp className="w-5 h-5 text-[var(--dashboard-accent)]" />
-              <h2 className="text-sm font-semibold text-[var(--dashboard-text)]">Aylık Maliyet Trendi</h2>
-            </div>
-            <div className="h-[220px]">
-              {monthlyTrend.some(m => m.cost > 0) ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={monthlyTrend}>
-                    <XAxis
-                      dataKey="month"
-                      stroke="var(--dashboard-muted)"
-                      fontSize={11}
-                      tickLine={false}
-                      axisLine={false}
-                    />
-                    <YAxis
-                      stroke="var(--dashboard-muted)"
-                      fontSize={11}
-                      tickLine={false}
-                      axisLine={false}
-                      tickFormatter={(v) => `${sym}${(v / 1000).toFixed(0)}k`}
-                      width={55}
-                    />
-                    <RechartsTooltip
-                      contentStyle={{
-                        background: 'var(--dashboard-surface)',
-                        border: '1px solid var(--dashboard-stroke)',
-                        borderRadius: '12px',
-                        fontSize: '12px',
-                        boxShadow: 'var(--dashboard-raised-soft)',
-                      }}
-                      formatter={(value: number) => [formatCurrencyDetailed(value, sym), 'Maliyet']}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="cost"
-                      stroke="var(--dashboard-accent)"
-                      strokeWidth={2.5}
-                      dot={{ r: 4, fill: 'var(--dashboard-accent)', stroke: 'var(--dashboard-surface)', strokeWidth: 2 }}
-                      activeDot={{ r: 6 }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="flex items-center justify-center h-full text-sm text-[var(--dashboard-muted)]">
-                  Henüz sayım verisi bulunmuyor.
+              {/* Total cost card */}
+              <div className="cihaz-card-strong p-5 sm:p-6">
+                <div className="flex items-center gap-2 mb-1">
+                  <Wallet className="w-4 h-4 text-[var(--dashboard-accent)]" />
+                  <span className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider">Toplam Envanter Maliyeti</span>
                 </div>
-              )}
-            </div>
-          </div>
+                <p className="text-[11px] text-[var(--dashboard-muted)] mb-3">
+                  {latestPerLocation.length} konumun en güncel sayım toplamı
+                </p>
 
-          {/* ---- MIDDLE LEFT: Pie Chart ---- */}
-          <div className="lg:col-span-2 cihaz-card-strong p-5 sm:p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <PieChartIcon className="w-5 h-5 text-[var(--dashboard-accent)]" />
-              <h2 className="text-sm font-semibold text-[var(--dashboard-text)]">Marka Bazlı Dağılım</h2>
-            </div>
-            <div className="h-[200px]">
-              {brandCosts.length > 0 ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={brandCosts}
-                      dataKey="value"
-                      nameKey="name"
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={45}
-                      outerRadius={75}
-                      paddingAngle={2}
-                      strokeWidth={0}
-                    >
-                      {brandCosts.map((_, i) => (
-                        <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <RechartsTooltip
-                      contentStyle={{
-                        background: 'var(--dashboard-surface)',
-                        border: '1px solid var(--dashboard-stroke)',
-                        borderRadius: '12px',
-                        fontSize: '12px',
-                        boxShadow: 'var(--dashboard-raised-soft)',
-                      }}
-                      formatter={(value: number) => [formatCurrencyDetailed(value, sym), '']}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="flex items-center justify-center h-full text-sm text-[var(--dashboard-muted)]">
-                  Veri yok
+                <div className="flex items-end gap-3 mb-3">
+                  <span className="text-3xl sm:text-4xl font-bold text-[var(--dashboard-accent)]">
+                    {fmtCurrency(consolidatedCost, sym)}
+                  </span>
+                  {costChange && (
+                    <span className={cn(
+                      'flex items-center gap-0.5 px-2 py-1 rounded-lg text-xs font-semibold mb-1',
+                      costChange.direction === 'up'
+                        ? 'bg-red-500/10 text-red-600'
+                        : 'bg-emerald-500/10 text-emerald-600'
+                    )}>
+                      {costChange.direction === 'up' ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                      %{Math.abs(costChange.pct).toFixed(1)}
+                      <span className="font-normal ml-0.5 text-[10px] opacity-70">önceki sayıma göre</span>
+                    </span>
+                  )}
                 </div>
-              )}
-            </div>
-            {/* Legend */}
-            {brandCosts.length > 0 && (
-              <div className="flex flex-wrap gap-x-3 gap-y-1 mt-3">
-                {brandCosts.slice(0, 8).map((b, i) => (
-                  <div key={b.name} className="flex items-center gap-1.5">
-                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }} />
-                    <span className="text-[10px] text-[var(--dashboard-muted)] truncate max-w-[80px]">{b.name}</span>
-                  </div>
-                ))}
-                {brandCosts.length > 8 && (
-                  <span className="text-[10px] text-[var(--dashboard-muted)]">+{brandCosts.length - 8} diğer</span>
+
+                {latestPerLocation.length > 0 && (
+                  <p className="text-[11px] text-[var(--dashboard-muted)]">
+                    Son güncelleme: {latestPerLocation.map(s => {
+                      const d = getSessionDate(s);
+                      return d ? format(d, 'dd MMM', { locale: tr }) : '';
+                    }).filter(Boolean).join(', ')}
+                  </p>
                 )}
               </div>
-            )}
-          </div>
 
-          {/* ---- MIDDLE RIGHT: Session List ---- */}
-          <div className="lg:col-span-3 cihaz-card-strong p-5 sm:p-6">
-            <div className="flex items-center gap-2 mb-4">
-              <Calendar className="w-5 h-5 text-[var(--dashboard-accent)]" />
-              <h2 className="text-sm font-semibold text-[var(--dashboard-text)]">Son Sayımlar</h2>
-            </div>
-            <ScrollArea className="h-[240px]">
-              {sessions.length > 0 ? (
-                <div className="space-y-2 pr-2">
-                  {sessions.slice(0, 10).map(session => {
-                    const date = getSessionDate(session);
-                    const sessionCost = session.items.reduce((sum, item) => {
-                      return sum + getProductCost(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi).amount;
-                    }, 0);
-                    return (
-                      <div
-                        key={session.id}
-                        className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-[var(--dashboard-surface-2)]/50 hover:bg-[var(--dashboard-surface-2)] transition-colors"
-                      >
+              {/* Location breakdown */}
+              <div className="cihaz-card-strong p-5 sm:p-6">
+                <div className="flex items-center gap-2 mb-3">
+                  <MapPin className="w-4 h-4 text-[var(--dashboard-accent)]" />
+                  <span className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider">Konum Bazlı Maliyet</span>
+                </div>
+                <ScrollArea className="h-[180px]">
+                  <div className="space-y-2 pr-2">
+                    {locationBreakdown.map(loc => (
+                      <div key={loc.id} className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-[var(--dashboard-surface-2)]/50">
                         <div className="min-w-0">
-                          <p className="text-sm font-medium text-[var(--dashboard-text)] truncate">
-                            {session.locationName}
-                          </p>
-                          <p className="text-[11px] text-[var(--dashboard-muted)]">
-                            {date ? format(date, 'dd MMM yyyy HH:mm', { locale: tr }) : '—'}
-                            {' · '}{session.items.length} ürün
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{loc.name}</span>
+                          </div>
+                          <p className="text-[10px] text-[var(--dashboard-muted)]">
+                            {loc.type === 'lab' ? 'Lab' : 'Depo'} · {loc.productCount} ürün
+                            {loc.date && ` · ${format(loc.date, 'dd MMM yyyy', { locale: tr })}`}
                           </p>
                         </div>
-                        <span className="text-sm font-semibold text-[var(--dashboard-accent)] shrink-0 ml-3">
-                          {formatCurrency(sessionCost, sym)}
-                        </span>
+                        <span className="text-sm font-bold text-[var(--dashboard-accent)] shrink-0 ml-3">{fmtCurrency(loc.cost, sym)}</span>
+                      </div>
+                    ))}
+                    {locationBreakdown.length === 0 && (
+                      <p className="text-center py-6 text-sm text-[var(--dashboard-muted)]">Veri yok</p>
+                    )}
+                  </div>
+                </ScrollArea>
+              </div>
+            </div>
+
+            {/* ===== TREND CHART ===== */}
+            <div className="cihaz-card-strong p-5 sm:p-6 mb-5">
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <div className="flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-[var(--dashboard-accent)]" />
+                  <span className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider">Aylık Maliyet Trendi</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  {([
+                    { key: '3m', label: '3 Ay' },
+                    { key: '6m', label: '6 Ay' },
+                    { key: '12m', label: '12 Ay' },
+                    { key: 'all', label: 'Tümü' },
+                  ] as { key: TimePeriod; label: string }[]).map(p => (
+                    <button
+                      key={p.key}
+                      onClick={() => setTimePeriod(p.key)}
+                      className={cn(
+                        'px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all',
+                        timePeriod === p.key
+                          ? 'bg-[var(--dashboard-accent)] text-white shadow-sm'
+                          : 'text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]'
+                      )}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="h-[240px]">
+                {monthlyTrend.some(m => m.cost > 0) ? (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={monthlyTrend}>
+                      <XAxis
+                        dataKey="month"
+                        stroke="var(--dashboard-muted)"
+                        fontSize={11}
+                        tickLine={false}
+                        axisLine={false}
+                      />
+                      <YAxis
+                        stroke="var(--dashboard-muted)"
+                        fontSize={11}
+                        tickLine={false}
+                        axisLine={false}
+                        tickFormatter={(v) => `${sym}${(v / 1000).toFixed(0)}k`}
+                        width={55}
+                      />
+                      <RechartsTooltip
+                        contentStyle={{
+                          background: 'var(--dashboard-surface)',
+                          border: '1px solid var(--dashboard-stroke)',
+                          borderRadius: '12px',
+                          fontSize: '12px',
+                          boxShadow: 'var(--dashboard-raised-soft)',
+                        }}
+                        formatter={(value: number) => [fmtCurrencyDetailed(value, sym), 'Maliyet']}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="cost"
+                        stroke="var(--dashboard-accent)"
+                        strokeWidth={2.5}
+                        dot={{ r: 4, fill: 'var(--dashboard-accent)', stroke: 'var(--dashboard-surface)', strokeWidth: 2 }}
+                        activeDot={{ r: 6 }}
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex items-center justify-center h-full text-sm text-[var(--dashboard-muted)]">
+                    Bu dönemde sayım verisi yok.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* ===== BOTTOM GRID: Brand Pie + Product Group + Recent Sessions ===== */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+
+              {/* Brand pie chart */}
+              <div className="cihaz-card-strong p-5 sm:p-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <PieChartIcon className="w-4 h-4 text-[var(--dashboard-accent)]" />
+                  <span className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider">Marka Dağılımı</span>
+                </div>
+                <div className="h-[200px]">
+                  {brandCosts.length > 0 ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={brandCosts}
+                          dataKey="cost"
+                          nameKey="name"
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={45}
+                          outerRadius={75}
+                          paddingAngle={2}
+                          strokeWidth={0}
+                        >
+                          {brandCosts.map((_, i) => (
+                            <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                          ))}
+                        </Pie>
+                        <RechartsTooltip
+                          contentStyle={{
+                            background: 'var(--dashboard-surface)',
+                            border: '1px solid var(--dashboard-stroke)',
+                            borderRadius: '12px',
+                            fontSize: '12px',
+                          }}
+                          formatter={(value: number) => [fmtCurrencyDetailed(value, sym), '']}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="flex items-center justify-center h-full text-sm text-[var(--dashboard-muted)]">Veri yok</div>
+                  )}
+                </div>
+                {/* Brand list (clickable) */}
+                <div className="space-y-1 mt-3">
+                  {brandCosts.slice(0, 6).map((b, i) => (
+                    <button
+                      key={b.name}
+                      onClick={() => setSelectedBrand(b.name)}
+                      className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg hover:bg-[var(--dashboard-surface-2)]/50 transition-colors group text-left"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }} />
+                        <span className="text-xs text-[var(--dashboard-text)] truncate">{b.name}</span>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span className="text-xs font-semibold text-[var(--dashboard-accent)]">{fmtCurrency(b.cost, sym)}</span>
+                        <ChevronRight className="w-3 h-3 text-[var(--dashboard-muted)] opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
+                    </button>
+                  ))}
+                  {brandCosts.length > 6 && (
+                    <p className="text-[10px] text-[var(--dashboard-muted)] text-center pt-1">+{brandCosts.length - 6} marka daha</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Product group breakdown */}
+              <div className="cihaz-card-strong p-5 sm:p-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <Layers className="w-4 h-4 text-[var(--dashboard-accent)]" />
+                  <span className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider">Ürün Grubu Kırılımı</span>
+                </div>
+                <div className="space-y-3 mt-6">
+                  {groupBreakdown.length > 0 ? groupBreakdown.map(g => {
+                    const pct = consolidatedCost > 0 ? (g.cost / consolidatedCost) * 100 : 0;
+                    return (
+                      <div key={g.name}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-sm font-medium text-[var(--dashboard-text)]">{g.name}</span>
+                          <span className="text-sm font-semibold text-[var(--dashboard-accent)]">{fmtCurrency(g.cost, sym)}</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-[var(--dashboard-surface-2)] overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-[var(--dashboard-accent)] transition-all duration-500"
+                            style={{ width: `${Math.min(pct, 100)}%` }}
+                          />
+                        </div>
+                        <p className="text-[10px] text-[var(--dashboard-muted)] mt-0.5">Toplam maliyetin %{pct.toFixed(1)}'i</p>
                       </div>
                     );
-                  })}
-                </div>
-              ) : (
-                <div className="flex items-center justify-center h-full text-sm text-[var(--dashboard-muted)]">
-                  Henüz sayım yapılmamış.
-                </div>
-              )}
-            </ScrollArea>
-          </div>
-
-          {/* ---- BOTTOM: Quarterly Cards ---- */}
-          <div className="lg:col-span-5 grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {quarterlyData.map((val, i) => (
-              <div key={i} className="cihaz-card p-4 sm:p-5 text-center">
-                <p className="text-xs font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider mb-2">
-                  Çeyrek {i + 1}
-                </p>
-                <p className={cn(
-                  'text-xl sm:text-2xl font-bold',
-                  val > 0 ? 'text-[var(--dashboard-accent)]' : 'text-[var(--dashboard-muted)]'
-                )}>
-                  {formatCurrency(val, sym)}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* ===== DETAIL DIALOG: Brand → Product drill-down ===== */}
-      <Dialog open={detailView !== 'closed'} onOpenChange={(open) => {
-        if (!open) { setDetailView('closed'); setSelectedBrand(null); }
-      }}>
-        <DialogContent className="max-w-lg max-h-[85vh] overflow-hidden flex flex-col cihaz-card-strong !rounded-3xl !p-0 !gap-0 border-0">
-          {/* Header */}
-          <div className="px-6 pt-6 pb-4 border-b border-[var(--dashboard-stroke)]">
-            <div className="flex items-center gap-3">
-              {detailView === 'products' && (
-                <button
-                  onClick={() => { setDetailView('brands'); setSelectedBrand(null); }}
-                  className="w-8 h-8 rounded-xl flex items-center justify-center bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-colors"
-                >
-                  <ArrowLeft className="w-4 h-4" />
-                </button>
-              )}
-              <div>
-                <DialogTitle className="text-base font-bold text-[var(--dashboard-text)]">
-                  {detailView === 'brands' ? 'Marka Bazlı Maliyet' : selectedBrand}
-                </DialogTitle>
-                <p className="text-xs text-[var(--dashboard-muted)] mt-0.5">
-                  {detailView === 'brands'
-                    ? `${brandCosts.length} marka · Toplam ${formatCurrency(totalCost, sym)}`
-                    : `${productCostsByBrand.length} ürün`
-                  }
-                </p>
-              </div>
-            </div>
-          </div>
-
-          {/* Content */}
-          <ScrollArea className="flex-1 min-h-0">
-            <div className="p-4 space-y-2">
-              {detailView === 'brands' ? (
-                brandCosts.map((brand, i) => (
-                  <button
-                    key={brand.name}
-                    onClick={() => { setSelectedBrand(brand.name); setDetailView('products'); }}
-                    className="w-full flex items-center justify-between px-4 py-3 rounded-2xl bg-[var(--dashboard-surface-2)]/50 hover:bg-[var(--dashboard-surface-2)] transition-all duration-200 text-left group"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span
-                        className="w-3 h-3 rounded-full shrink-0"
-                        style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }}
-                      />
-                      <span className="text-sm font-medium text-[var(--dashboard-text)] truncate">{brand.name}</span>
+                  }) : (
+                    <div className="text-center py-8 text-sm text-[var(--dashboard-muted)]">
+                      Ürün grubu bilgisi tanımlı değil.
+                      <p className="text-[10px] mt-1">Ürün tanımlarında "Ürün Grubu" alanını doldurun.</p>
                     </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-sm font-semibold text-[var(--dashboard-accent)]">
-                        {formatCurrency(brand.value, sym)}
-                      </span>
-                      <ChevronRight className="w-4 h-4 text-[var(--dashboard-muted)] opacity-0 group-hover:opacity-100 transition-opacity" />
-                    </div>
-                  </button>
-                ))
-              ) : (
-                productCostsByBrand.map(product => (
-                  <div
-                    key={product.stokKodu}
-                    className="px-4 py-3 rounded-2xl bg-[var(--dashboard-surface-2)]/50"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-[var(--dashboard-text)] leading-snug">
-                          {product.stokAdi}
-                        </p>
-                        <p className="text-[11px] text-[var(--dashboard-muted)] mt-0.5">
-                          {product.stokKodu}
-                          {' · '}Stok: {product.stokAdedi}
-                          {product.cihazUstuAdedi > 0 && ` · Cihaz Üstü: ${product.cihazUstuAdedi}`}
-                        </p>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <span className="text-sm font-semibold text-[var(--dashboard-accent)]">
-                          {formatCurrencyDetailed(product.cost, sym)}
-                        </span>
-                        {product.nativeCurrency !== currency && (
-                          <p className="text-[10px] text-[var(--dashboard-muted)]">
-                            {CURRENCY_SYMBOLS[product.nativeCurrency as Currency]}{product.nativeCurrency}
+                  )}
+                </div>
+              </div>
+
+              {/* Recent sessions */}
+              <div className="cihaz-card-strong p-5 sm:p-6">
+                <div className="flex items-center gap-2 mb-4">
+                  <Calendar className="w-4 h-4 text-[var(--dashboard-accent)]" />
+                  <span className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider">Son Sayımlar</span>
+                </div>
+                <ScrollArea className="h-[300px]">
+                  <div className="space-y-2 pr-2">
+                    {sessions.slice(0, 15).map(session => {
+                      const date = getSessionDate(session);
+                      const sessionCost = rates ? getSessionCost(session, productMap, rates, currency) : 0;
+                      return (
+                        <div
+                          key={session.id}
+                          className="px-3 py-2.5 rounded-xl bg-[var(--dashboard-surface-2)]/50"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-medium text-[var(--dashboard-text)] truncate">{session.locationName}</span>
+                            <span className="text-xs font-semibold text-[var(--dashboard-accent)] shrink-0 ml-2">{fmtCurrency(sessionCost, sym)}</span>
+                          </div>
+                          <p className="text-[10px] text-[var(--dashboard-muted)] mt-0.5">
+                            {date ? format(date, 'dd MMM yyyy HH:mm', { locale: tr }) : '—'}
+                            {' · '}{session.items.length} ürün
+                            {session.createdByName && ` · ${session.createdByName}`}
                           </p>
-                        )}
-                      </div>
-                    </div>
+                        </div>
+                      );
+                    })}
+                    {sessions.length === 0 && (
+                      <p className="text-center py-8 text-sm text-[var(--dashboard-muted)]">Henüz sayım yok.</p>
+                    )}
                   </div>
-                ))
-              )}
-
-              {((detailView === 'brands' && brandCosts.length === 0) ||
-                (detailView === 'products' && productCostsByBrand.length === 0)) && (
-                <div className="text-center py-12 text-sm text-[var(--dashboard-muted)]">
-                  Veri bulunamadı.
-                </div>
-              )}
+                </ScrollArea>
+              </div>
             </div>
-          </ScrollArea>
-
-          {/* Footer */}
-          <div className="px-6 py-4 border-t border-[var(--dashboard-stroke)]">
-            <Button
-              variant="outline"
-              onClick={() => { setDetailView('closed'); setSelectedBrand(null); }}
-              className="w-full h-10 rounded-xl"
-            >
-              Kapat
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+          </>
+        )}
+      </div>
     </div>
   );
-}
-
-// Mini icon components to avoid extra lucide imports
-function ClipboardIcon({ className }: { className?: string }) {
-  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>;
-}
-function MapPinIcon({ className }: { className?: string }) {
-  return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>;
 }
