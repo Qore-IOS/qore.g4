@@ -23,6 +23,7 @@ export type NotificationType =
   | "fault_opened"
   | "fault_transferred"
   | "fault_closed"
+  | "maliyet_sayim_davet"
   | "user_request_created"
   | "user_request_completed"
   | "custom";
@@ -493,6 +494,30 @@ export async function emitUserRequestCompleted(params: {
       requestTitle: params.title,
       requestCreatorUid: params.requestCreatorUid,
       requestCreatorName: params.requestCreatorName,
+    },
+  });
+}
+
+export async function emitMaliyetSayimDavet(params: {
+  actor: Actor;
+  targetUid: string;
+  targetName: string;
+  locationName: string;
+  sessionId?: string;
+}) {
+  await createNotification({
+    type: "maliyet_sayim_davet",
+    channel: "push",
+    title: "Maliyet Sayımına Davet Edildiniz",
+    message: `${params.actor.name} sizi "${params.locationName}" için maliyet sayımına davet etti.`,
+    href: "/maliyet-sayim",
+    actor: params.actor,
+    targets: [`user:${params.targetUid}`],
+    meta: {
+      targetUid: params.targetUid,
+      targetName: params.targetName,
+      locationName: params.locationName,
+      sessionId: params.sessionId,
     },
   });
 }
