@@ -83,7 +83,6 @@ export default function EnvanterYonetimiPage() {
   const envanterIcons = iconData?.mappings?.envanter || {};
 
   const assetFileInputRef = useRef<HTMLInputElement>(null);
-  const categoryFileInputRef = useRef<HTMLInputElement>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -239,32 +238,57 @@ export default function EnvanterYonetimiPage() {
   };
 
   const handleDownloadCurrentInventory = () => {
-    const allKeys = Array.from(
-      assets.reduce((set, asset) => {
-        Object.keys(asset).forEach((k) => set.add(k));
-        return set;
-      }, new Set<string>(['id']))
-    );
+    const mappedAssetKeys = new Set([
+      'category', 'demirbasNo', 'urunAdi', 'seriNumarasi', 'durum', 'marka', 'model', 'konum',
+      'teslimEdilenPersonel', 'alimFiyatiTl', 'satinAlmaTarihi', 'garantiBitisTarihi',
+      'planliKullanimOmruYil', 'amortismanYontemi', 'amortismanBaslangicTarihi', 'hurdaTarihi',
+      'imhaTarihi', 'satisTarihi', 'sonBakimTarihi', 'sonrakiBakimTarihi', 'sonKalibrasyonTarihi',
+      'sonrakiKalibrasyonTarihi', 'bakimMaliyetiTl', 'zimmetliKisi', 'checkOutTarihi', 'checkInTarihi',
+      'dijitalImza', 'zimmetFisNo', 'aciklama', 'id'
+    ]);
 
     const data = assets.map((asset) => {
-      const row: Record<string, unknown> = {};
-      for (const key of allKeys) {
-        const value = (asset as Record<string, unknown>)[key];
-        row[key] = value == null
-          ? ''
-          : typeof value === 'object'
-            ? JSON.stringify(value)
-            : value;
-      }
+      const row: Record<string, unknown> = {
+        Kategori: asset.category || '',
+        'Demirbaş No': asset.demirbasNo || '',
+        'Ürün Adı': asset.urunAdi || '',
+        'Seri Numarası': asset.seriNumarasi || '',
+        Durum: asset.durum || '',
+        Marka: asset.marka || '',
+        Model: asset.model || '',
+        Konum: asset.konum || '',
+        'Teslim Edilen Personel': asset.teslimEdilenPersonel || '',
+        'Alım Fiyatı (TL)': typeof asset.alimFiyatiTl === 'number' ? asset.alimFiyatiTl : '',
+        'Satın Alma Tarihi': asset.satinAlmaTarihi || '',
+        'Garanti Bitiş Tarihi': asset.garantiBitisTarihi || '',
+        'Planlı Kullanım Ömrü (Yıl)': asset.planliKullanimOmruYil ?? '',
+        'Amortisman Yöntemi': asset.amortismanYontemi || '',
+        'Amortisman Başlangıç Tarihi': asset.amortismanBaslangicTarihi || '',
+        'Hurda Tarihi': asset.hurdaTarihi || '',
+        'İmha Tarihi': asset.imhaTarihi || '',
+        'Satış Tarihi': asset.satisTarihi || '',
+        'Son Bakım Tarihi': asset.sonBakimTarihi || '',
+        'Sonraki Bakım Tarihi': asset.sonrakiBakimTarihi || '',
+        'Son Kalibrasyon Tarihi': asset.sonKalibrasyonTarihi || '',
+        'Sonraki Kalibrasyon Tarihi': asset.sonrakiKalibrasyonTarihi || '',
+        'Bakım Maliyeti (TL)': asset.bakimMaliyetiTl ?? '',
+        'Zimmetli Kişi': asset.zimmetliKisi || '',
+        'Check-Out Tarihi': asset.checkOutTarihi || '',
+        'Check-In Tarihi': asset.checkInTarihi || '',
+        'Dijital İmza': asset.dijitalImza || '',
+        'Zimmet Fiş No': asset.zimmetFisNo || '',
+        Açıklama: asset.aciklama || '',
+      };
+
+      Object.entries(asset as Record<string, unknown>).forEach(([key, value]) => {
+        if (mappedAssetKeys.has(key)) return;
+        row[`Ek Alan: ${key}`] = value == null ? '' : typeof value === 'object' ? JSON.stringify(value) : value;
+      });
+
       return row;
     });
 
     exportDataToExcel(data, 'Tum_Envanter_Detaylari', 'TumEnvanter', toast);
-  };
-
-  const handleDownloadCategoryTemplate = () => {
-    const templateData = [{ 'Kategori Adı': '' }];
-    exportDataToExcel(templateData, 'Kategori_Giris_Sablonu', 'Kategoriler', toast);
   };
 
   const handleAssetImport = async (e: ChangeEvent<HTMLInputElement>) => {
@@ -343,41 +367,6 @@ export default function EnvanterYonetimiPage() {
     }
   };
 
-  const handleCategoryImport = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setLoading(true);
-    try {
-      const data = await readExcelDataSmart(file, 'product', toast);
-      const existingCategoryNames = new Set(categories.map(c => c.name.toLowerCase()));
-      const batch = writeBatch(db);
-      let newCount = 0;
-
-      for (const row of data) {
-        const categoryName = String(row['Kategori Adı'] || Object.values(row)[0] || '').trim();
-        if (categoryName && !existingCategoryNames.has(categoryName.toLowerCase())) {
-          const newDocRef = doc(collection(db, 'assetCategories'));
-          batch.set(newDocRef, { name: categoryName });
-          existingCategoryNames.add(categoryName.toLowerCase());
-          newCount++;
-        }
-      }
-
-      if (newCount > 0) {
-        await batch.commit();
-        toast({ title: 'Basarili', description: `${newCount} yeni kategori eklendi.` });
-        fetchData();
-      } else {
-        toast({ title: 'Degisiklik Yok', description: 'Excel dosyasinda yeni bir kategori bulunamadi.', variant: 'default' });
-      }
-    } catch (err) {
-      toast({ title: 'Hata', description: 'Kategori Excel\'i islenirken bir sorun olustu.', variant: 'destructive' });
-    } finally {
-      setLoading(false);
-      if (e.target) e.target.value = '';
-    }
-  };
-
   // Filter items by search
   const filteredCategories = categories.filter(c =>
     c.name.toLowerCase().includes(searchQuery.toLowerCase())
@@ -389,7 +378,6 @@ export default function EnvanterYonetimiPage() {
   return (
     <>
       <input type="file" ref={assetFileInputRef} className="hidden" accept=".xlsx, .xls" onChange={handleAssetImport} />
-      <input type="file" ref={categoryFileInputRef} className="hidden" accept=".xlsx, .xls" onChange={handleCategoryImport} />
 
       <div className="cihaz-shell min-h-screen">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 sm:pt-8 pb-24">
@@ -443,15 +431,15 @@ export default function EnvanterYonetimiPage() {
           </div>
 
           {/* ===== BULK OPERATIONS ===== */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+          <div className="grid grid-cols-1 gap-3 mb-6">
             <div className="cihaz-card p-4">
               <p className="text-xs font-semibold text-[var(--dashboard-text)] mb-3 uppercase tracking-wider">Envanter Toplu Islemleri</p>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <button
                   onClick={() => assetFileInputRef.current?.click()}
                   className="cihaz-tool-item h-9 px-3 text-xs font-medium text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] flex items-center gap-1.5"
                 >
-                  <Upload className="w-3.5 h-3.5" /> Yukle
+                  <Upload className="w-3.5 h-3.5" /> Excel Yukle / Guncelle
                 </button>
                 <button
                   onClick={handleDownloadAssetTemplate}
@@ -466,23 +454,9 @@ export default function EnvanterYonetimiPage() {
                   <Download className="w-3.5 h-3.5" /> Tumunu Excel'e Aktar
                 </button>
               </div>
-            </div>
-            <div className="cihaz-card p-4">
-              <p className="text-xs font-semibold text-[var(--dashboard-text)] mb-3 uppercase tracking-wider">Kategori Toplu Islemleri</p>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => categoryFileInputRef.current?.click()}
-                  className="cihaz-tool-item h-9 px-3 text-xs font-medium text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] flex items-center gap-1.5"
-                >
-                  <Upload className="w-3.5 h-3.5" /> Yukle
-                </button>
-                <button
-                  onClick={handleDownloadCategoryTemplate}
-                  className="cihaz-tool-item h-9 px-3 text-xs font-medium text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] flex items-center gap-1.5"
-                >
-                  <Download className="w-3.5 h-3.5" /> Sablon
-                </button>
-              </div>
+              <p className="text-[11px] mt-2 text-[var(--dashboard-muted)]">
+                Ayni <strong>Demirbaş No</strong> ile yuklenen satirlar mevcut urunu gunceller, yeni Demirbaş No olan satirlar yeni kayit olarak eklenir.
+              </p>
             </div>
           </div>
 
