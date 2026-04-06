@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from '@/components/ui/table';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, doc, deleteDoc, getDocFromServer, writeBatch, Timestamp } from 'firebase/firestore';
+import { collection, getDocs, query, where, doc, deleteDoc, getDocFromServer, writeBatch, Timestamp, onSnapshot, orderBy } from 'firebase/firestore';
 import type { DepoStokItem, Laboratory, MinMaxRule } from '@/lib/types';
 import { Loader2, Search, ListChecks, History, FileSpreadsheet, MoreVertical, Eye, AlertCircle, AlertTriangle, Upload, CheckCircle } from 'lucide-react';
 import { touchStockMetadata, useLabStock, useLabPools, useHospitals, useProductCodes, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
@@ -24,6 +24,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { differenceInDays, isValid, parse } from 'date-fns';
 import { resolveDefaultTrackingMode } from '@/lib/tracking';
 import LabIrsaliyeOcrModal, { type LabOcrResult } from '@/components/lab/LabIrsaliyeOcrModal';
+import { matchesCompanyScope } from '@/lib/company-scope';
 
 function normalizeKey(key: string): string {
   return key
@@ -104,7 +105,7 @@ function getRiskyBoxes(miadInfo: { days: number }, coverageInfo: { severity: str
 export default function LaboratuvarYonetimiPanel() {
   const router = useRouter();
   const { toast } = useToast();
-  const { isSuperAdmin, currentUserProfile } = useAuth();
+  const { isSuperAdmin, currentUserProfile, currentCompanyId } = useAuth();
   const [selectedLabId, setSelectedLabId] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState<keyof GroupedStockItem>('stokAdi');
@@ -122,6 +123,7 @@ export default function LaboratuvarYonetimiPanel() {
   const [importProgress, setImportProgress] = useState('');
   const [isOcrModalOpen, setIsOcrModalOpen] = useState(false);
   const [isOcrProcessing, setIsOcrProcessing] = useState(false);
+  const [pendingIrsaliyeCount, setPendingIrsaliyeCount] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Use TanStack Query hooks for data fetching
@@ -203,6 +205,29 @@ export default function LaboratuvarYonetimiPanel() {
   const selectedLabName = useMemo(() => {
     return laboratories.find(l => l.id === selectedLabId)?.name || '';
   }, [laboratories, selectedLabId]);
+
+  useEffect(() => {
+    if (!selectedLabId) {
+      setPendingIrsaliyeCount(0);
+      return;
+    }
+    const unsub = onSnapshot(
+      query(collection(db, 'irsaliyeDosyalari'), orderBy('uploadedAt', 'desc')),
+      (snapshot) => {
+        let count = 0;
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data() as any;
+          const inScope = matchesCompanyScope(data, currentCompanyId, isSuperAdmin);
+          const notExpired = data?.expiresAt?.toMillis?.() > Date.now();
+          const labMatch = data?.locationType === 'hospital' && data?.locationId === selectedLabId;
+          if (inScope && notExpired && labMatch) count += 1;
+        });
+        setPendingIrsaliyeCount(count);
+      },
+      () => setPendingIrsaliyeCount(0)
+    );
+    return () => unsub();
+  }, [selectedLabId, currentCompanyId, isSuperAdmin]);
 
   const groupedMap = useMemo(() => {
     const map: Record<string, {
@@ -703,13 +728,18 @@ export default function LaboratuvarYonetimiPanel() {
                         onClick={() => setIsOcrModalOpen(true)}
                         disabled={!selectedLabId || isOcrProcessing}
                         variant="outline"
-                        className="w-full sm:w-auto"
+                        className="w-full sm:w-auto relative"
                         >
                         {isOcrProcessing
                           ? <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                           : <FileSpreadsheet className="mr-2 h-5 w-5" />
                         }
                         İrsaliye Seç
+                        {pendingIrsaliyeCount > 0 && (
+                          <span className="absolute -top-2 -right-2 min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                            {pendingIrsaliyeCount}
+                          </span>
+                        )}
                     </Button>
                     <input
                       ref={fileInputRef}

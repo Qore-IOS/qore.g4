@@ -44,7 +44,7 @@ import { Trash2, CheckSquare, PlusCircle, Loader2, Search, History, Camera, Scan
 
 // Firebase
 import { db } from '@/lib/firebase';
-import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot } from 'firebase/firestore';
+import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, orderBy } from 'firebase/firestore';
 
 // Utilities
 import { cn, generateId, playFeedback } from '@/lib/utils';
@@ -58,6 +58,7 @@ import { malKabulLogger, createCorrelationId } from '@/lib/logger';
 import { sanitizeBarcode, sanitizeStockCode, securityCheck } from '@/lib/mal-kabul/validation';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { formatQuantityWithUnit, formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
+import { matchesCompanyScope } from '@/lib/company-scope';
 
 // Child Components
 import ManualInlineAdder from '@/components/mal-kabul/ManualInlineAdder';
@@ -395,7 +396,7 @@ const enqueueSerialHistory = (
 export default function AnaPanel(props: AnaPanelProps) {
   const { toast } = useToast();
   const router = useRouter();
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
 
   // Use TanStack Query for static data - shared cache, 1 hour stale time
   const { data: depots = [], isLoading: depotsLoading } = useDepots();
@@ -430,6 +431,7 @@ export default function AnaPanel(props: AnaPanelProps) {
   const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
   const [isBatchScanning, setIsBatchScanning] = useState(false);
   const [isOcrModalOpen, setIsOcrModalOpen] = useState(false);
+  const [pendingIrsaliyeCount, setPendingIrsaliyeCount] = useState(0);
   const [isBulkBarcodeScanOpen, setIsBulkBarcodeScanOpen] = useState(false);
   const [isBulkScanMode, setIsBulkScanMode] = useState(false);
 
@@ -544,6 +546,29 @@ export default function AnaPanel(props: AnaPanelProps) {
     });
     return () => unsub();
   }, [activeSession]);
+
+  useEffect(() => {
+    if (!selectedDepotId) {
+      setPendingIrsaliyeCount(0);
+      return;
+    }
+    const unsub = onSnapshot(
+      query(collection(db, 'irsaliyeDosyalari'), orderBy('uploadedAt', 'desc')),
+      (snapshot) => {
+        let count = 0;
+        snapshot.forEach((docSnap) => {
+          const data = docSnap.data() as any;
+          const inScope = matchesCompanyScope(data, currentCompanyId, isSuperAdmin);
+          const notExpired = data?.expiresAt?.toMillis?.() > Date.now();
+          const depotMatch = data?.locationType === 'depot' && data?.locationId === selectedDepotId;
+          if (inScope && notExpired && depotMatch) count += 1;
+        });
+        setPendingIrsaliyeCount(count);
+      },
+      () => setPendingIrsaliyeCount(0)
+    );
+    return () => unsub();
+  }, [selectedDepotId, currentCompanyId, isSuperAdmin]);
 
   const processScan = useCallback(async (barcodeData: string, source: 'barcode' | 'bulk_item' = 'barcode') => {
     const scanCorrelationId = createCorrelationId();
@@ -1531,10 +1556,15 @@ export default function AnaPanel(props: AnaPanelProps) {
             </button>
             <button
               onClick={() => setIsOcrModalOpen(true)}
-              className="cihaz-action-tile flex flex-col items-center justify-center gap-1 py-2.5 text-center"
+              className="cihaz-action-tile relative flex flex-col items-center justify-center gap-1 py-2.5 text-center"
             >
               <ScanLine className="h-4 w-4 text-[var(--dashboard-accent)]" />
               <span className="text-[10px] sm:text-xs font-medium text-[var(--dashboard-text)]">İrsaliye Tara</span>
+              {pendingIrsaliyeCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                  {pendingIrsaliyeCount}
+                </span>
+              )}
             </button>
           </div>
         </div>
@@ -1756,10 +1786,15 @@ export default function AnaPanel(props: AnaPanelProps) {
                 </button>
                 <button
                   onClick={() => setIsOcrModalOpen(true)}
-                  className="cihaz-tool-item flex items-center gap-1.5 px-3 py-2 text-xs font-medium"
+                  className="cihaz-tool-item relative flex items-center gap-1.5 px-3 py-2 text-xs font-medium"
                 >
                   <ScanLine className="h-3.5 w-3.5 text-[var(--dashboard-accent)]" />
                   PDF İrsaliye Yükle
+                  {pendingIrsaliyeCount > 0 && (
+                    <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                      {pendingIrsaliyeCount}
+                    </span>
+                  )}
                 </button>
                 <button
                   onClick={() => setIsBulkBarcodeScanOpen(true)}
