@@ -9,7 +9,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Loader2, History, Search, ChevronRight, ArrowLeft,
   Calendar, User, MapPin, Tag, X, Filter, ChevronDown,
-  Building2, TestTube,
+  Building2, TestTube, Users,
 } from 'lucide-react';
 import { format, isValid } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -27,6 +27,11 @@ interface SayimSessionItem {
   cihazUstuAdedi: number;
 }
 
+interface SessionParticipantInfo {
+  uid: string;
+  name: string;
+}
+
 interface SayimSession {
   id: string;
   locationType: 'lab' | 'depot';
@@ -36,6 +41,7 @@ interface SayimSession {
   createdByUid?: string;
   createdByName?: string;
   items: SayimSessionItem[];
+  participants?: SessionParticipantInfo[];
   totalBrands: number;
   totalProducts: number;
 }
@@ -547,6 +553,12 @@ export default function MaliyetSayimGecmisPage() {
                           <span className="flex items-center gap-1">
                             <User className="w-3 h-3" />
                             {session.createdByName}
+                          </span>
+                        )}
+                        {session.participants && session.participants.length > 1 && (
+                          <span className="flex items-center gap-1">
+                            <Users className="w-3 h-3 text-[var(--dashboard-accent)]" />
+                            {session.participants.length} katilimci
                           </span>
                         )}
                         <span className="flex items-center gap-1">

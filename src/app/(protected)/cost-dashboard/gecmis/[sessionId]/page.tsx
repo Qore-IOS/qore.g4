@@ -10,7 +10,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Loader2, ArrowLeft, Calendar, User, MapPin, Package,
   ChevronRight, ChevronDown, Search, X, Building2, TestTube,
-  Wallet, Tag,
+  Wallet, Tag, Users, Clock, History,
 } from 'lucide-react';
 import { format, isValid } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -21,12 +21,32 @@ import { useFirebaseQueries } from '@/hooks/useFirebaseQueries';
 // TYPES
 // ============================================================================
 
+interface CellUpdate {
+  uid: string;
+  name: string;
+  field: string;
+  value: string | number | boolean;
+  timestamp: any;
+}
+
 interface SayimSessionItem {
   stokKodu: string;
   stokAdi: string;
   marka: string;
   stokAdedi: number;
   cihazUstuAdedi: number;
+}
+
+interface DetailedSessionItem extends SayimSessionItem {
+  counted: boolean;
+  countedByUid?: string;
+  countedByName?: string;
+  updates: CellUpdate[];
+}
+
+interface SessionParticipantInfo {
+  uid: string;
+  name: string;
 }
 
 interface SayimSession {
@@ -38,6 +58,9 @@ interface SayimSession {
   createdByUid?: string;
   createdByName?: string;
   items: SayimSessionItem[];
+  itemsDetailed?: DetailedSessionItem[];
+  participants?: SessionParticipantInfo[];
+  sessionId?: string; // reference to maliyetSayimOturumlar
   totalBrands: number;
   totalProducts: number;
 }
@@ -47,6 +70,11 @@ const CURRENCY_SYMBOLS: Record<Currency, string> = {
   USD: '$',
   TRY: '\u20BA',
 };
+
+const PARTICIPANT_COLORS = [
+  '#F2994A', '#6FCF97', '#56CCF2', '#BB6BD9', '#F2C94C',
+  '#EB5757', '#2F80ED', '#27AE60', '#9B51E0', '#2D9CDB',
+];
 
 const CACHE_TTL = 1000 * 60 * 60;
 const PRIMARY_API_KEY = 'e69314b14644080788775553';
@@ -100,6 +128,65 @@ function formatCurrencyDetailed(value: number, symbol: string): string {
   return `${symbol}${value.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function getParticipantColor(uid: string, participants: SessionParticipantInfo[]): string {
+  const idx = participants.findIndex(p => p.uid === uid);
+  return PARTICIPANT_COLORS[idx >= 0 ? idx % PARTICIPANT_COLORS.length : 0];
+}
+
+// ============================================================================
+// UPDATE LOG COMPONENT
+// ============================================================================
+
+function UpdateLog({ updates, participants }: { updates: CellUpdate[]; participants: SessionParticipantInfo[] }) {
+  const [open, setOpen] = useState(false);
+
+  if (!updates || updates.length === 0) return null;
+
+  const fieldLabels: Record<string, string> = {
+    stokAdedi: 'Stok',
+    cihazUstuAdedi: 'Cihaz Ustu',
+    counted: 'Sayildi',
+  };
+
+  return (
+    <div className="mt-2 border-t border-[var(--dashboard-stroke)]/50 pt-2">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1.5 text-[11px] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-colors"
+      >
+        <History className="w-3 h-3" />
+        <span>{updates.length} degisiklik</span>
+        <ChevronDown className={cn('w-3 h-3 transition-transform', open && 'rotate-180')} />
+      </button>
+      {open && (
+        <div className="mt-1.5 space-y-1 max-h-32 overflow-y-auto">
+          {[...updates].reverse().map((u, i) => {
+            const color = getParticipantColor(u.uid, participants);
+            const ts = u.timestamp ? (typeof u.timestamp === 'string' ? new Date(u.timestamp) : (u.timestamp.toDate ? u.timestamp.toDate() : new Date(u.timestamp.seconds * 1000))) : null;
+            return (
+              <div key={i} className="flex items-center gap-2 text-[10px] px-2 py-1 rounded-lg bg-[var(--dashboard-surface-2)]/50">
+                <span
+                  className="w-2 h-2 rounded-full shrink-0"
+                  style={{ backgroundColor: color }}
+                />
+                <span className="font-medium text-[var(--dashboard-text)]">{u.name}</span>
+                <span className="text-[var(--dashboard-muted)]">
+                  {fieldLabels[u.field] || u.field}: {String(u.value)}
+                </span>
+                {ts && isValid(ts) && (
+                  <span className="text-[var(--dashboard-muted)] ml-auto shrink-0">
+                    {format(ts, 'HH:mm', { locale: tr })}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ============================================================================
 // MAIN PAGE
 // ============================================================================
@@ -116,6 +203,7 @@ export default function MaliyetSayimDetayPage() {
   const [currency, setCurrency] = useState<Currency>('TRY');
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedBrands, setExpandedBrands] = useState<Set<string>>(new Set());
+  const [showAttribution, setShowAttribution] = useState(true);
 
   // Fetch session and rates
   useEffect(() => {
@@ -169,12 +257,22 @@ export default function MaliyetSayimDetayPage() {
     return costEUR * (rates[currency] || 1);
   }, [rates, productMap, currency]);
 
+  // Use detailed items if available, otherwise fall back to basic items
+  const hasDetailedItems = !!session?.itemsDetailed && session.itemsDetailed.length > 0;
+  const displayItems: (SayimSessionItem & { countedByUid?: string; countedByName?: string; updates?: CellUpdate[] })[] = useMemo(() => {
+    if (!session) return [];
+    if (hasDetailedItems) return session.itemsDetailed!;
+    return session.items;
+  }, [session, hasDetailedItems]);
+
+  const sessionParticipants = session?.participants || [];
+  const isMultiUser = sessionParticipants.length > 1;
+
   // Group items by brand
   const brandGroups = useMemo(() => {
-    if (!session) return [];
-    const map = new Map<string, { brand: string; items: SayimSessionItem[]; totalCost: number }>();
+    const map = new Map<string, { brand: string; items: typeof displayItems; totalCost: number }>();
 
-    session.items.forEach(item => {
+    displayItems.forEach(item => {
       const brand = item.marka || 'Diger';
       if (!map.has(brand)) map.set(brand, { brand, items: [], totalCost: 0 });
       const group = map.get(brand)!;
@@ -183,7 +281,7 @@ export default function MaliyetSayimDetayPage() {
     });
 
     return Array.from(map.values()).sort((a, b) => b.totalCost - a.totalCost);
-  }, [session, getProductCost]);
+  }, [displayItems, getProductCost]);
 
   // Filtered brand groups
   const filteredBrandGroups = useMemo(() => {
@@ -215,13 +313,8 @@ export default function MaliyetSayimDetayPage() {
     });
   };
 
-  const expandAll = () => {
-    setExpandedBrands(new Set(brandGroups.map(g => g.brand)));
-  };
-
-  const collapseAll = () => {
-    setExpandedBrands(new Set());
-  };
+  const expandAll = () => setExpandedBrands(new Set(brandGroups.map(g => g.brand)));
+  const collapseAll = () => setExpandedBrands(new Set());
 
   const sym = CURRENCY_SYMBOLS[currency];
 
@@ -298,6 +391,48 @@ export default function MaliyetSayimDetayPage() {
           </div>
         </div>
 
+        {/* Participants bar (for multi-user sessions) */}
+        {isMultiUser && (
+          <div className="cihaz-card-strong rounded-2xl p-4 mb-5">
+            <div className="flex items-center gap-2 mb-3">
+              <Users className="w-4 h-4 text-[var(--dashboard-accent)]" />
+              <span className="text-xs font-semibold text-[var(--dashboard-text)]">
+                Katilimcilar ({sessionParticipants.length})
+              </span>
+              <button
+                onClick={() => setShowAttribution(!showAttribution)}
+                className={cn(
+                  'ml-auto px-2.5 py-1 rounded-lg text-[10px] font-medium transition-colors',
+                  showAttribution
+                    ? 'bg-[var(--dashboard-accent)]/10 text-[var(--dashboard-accent)]'
+                    : 'bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)]'
+                )}
+              >
+                {showAttribution ? 'Atif Goster' : 'Atif Gizle'}
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {sessionParticipants.map((p, i) => (
+                <div
+                  key={p.uid}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[var(--dashboard-surface-2)]/50"
+                >
+                  <span
+                    className="w-3 h-3 rounded-full shrink-0"
+                    style={{ backgroundColor: PARTICIPANT_COLORS[i % PARTICIPANT_COLORS.length] }}
+                  />
+                  <span className="text-xs font-medium text-[var(--dashboard-text)]">{p.name}</span>
+                  {p.uid === session.createdByUid && (
+                    <span className="text-[9px] text-[var(--dashboard-muted)] bg-[var(--dashboard-surface-2)] px-1.5 py-0.5 rounded">
+                      olusturan
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Stats Row */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
           <div className="cihaz-pressed px-4 py-3 flex flex-col items-center text-center">
@@ -309,12 +444,12 @@ export default function MaliyetSayimDetayPage() {
             <span className="text-[10px] text-[var(--dashboard-muted)]">Marka</span>
           </div>
           <div className="cihaz-pressed px-4 py-3 flex flex-col items-center text-center">
-            <span className="text-lg font-bold text-[var(--dashboard-text)]">{session.items.length}</span>
+            <span className="text-lg font-bold text-[var(--dashboard-text)]">{displayItems.length}</span>
             <span className="text-[10px] text-[var(--dashboard-muted)]">Urun</span>
           </div>
           <div className="cihaz-pressed px-4 py-3 flex flex-col items-center text-center">
             <span className="text-lg font-bold text-[var(--dashboard-text)]">
-              {session.items.reduce((sum, i) => sum + i.stokAdedi, 0)}
+              {displayItems.reduce((sum, i) => sum + i.stokAdedi, 0)}
             </span>
             <span className="text-[10px] text-[var(--dashboard-muted)]">Toplam Stok</span>
           </div>
@@ -408,10 +543,11 @@ export default function MaliyetSayimDetayPage() {
                     {/* Table Header */}
                     <div className="hidden sm:grid grid-cols-12 gap-2 px-5 py-2.5 bg-[var(--dashboard-surface-2)]/50 text-[10px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider">
                       <div className="col-span-1">Kod</div>
-                      <div className="col-span-5">Urun Adi</div>
+                      <div className={cn("col-span-4", isMultiUser && showAttribution ? "col-span-3" : "col-span-4")}>Urun Adi</div>
                       <div className="col-span-2 text-center">Stok</div>
                       <div className="col-span-2 text-center">Cihaz Ustu</div>
                       <div className="col-span-2 text-right">Maliyet</div>
+                      {isMultiUser && showAttribution && <div className="col-span-2 text-right">Sayan</div>}
                     </div>
 
                     {/* Items */}
@@ -420,6 +556,8 @@ export default function MaliyetSayimDetayPage() {
                         const cost = getProductCost(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi);
                         const product = productMap.get(item.stokKodu);
                         const nativeCurrency = (product?.currency || 'TRY') as Currency;
+                        const detailedItem = item as DetailedSessionItem;
+                        const hasUpdates = detailedItem.updates && detailedItem.updates.length > 0;
 
                         return (
                           <div
@@ -431,7 +569,7 @@ export default function MaliyetSayimDetayPage() {
                               <div className="col-span-1 text-[11px] font-mono text-[var(--dashboard-muted)] truncate">
                                 {item.stokKodu}
                               </div>
-                              <div className="col-span-5 text-sm text-[var(--dashboard-text)] truncate">
+                              <div className={cn("text-sm text-[var(--dashboard-text)] truncate", isMultiUser && showAttribution ? "col-span-3" : "col-span-4")}>
                                 {item.stokAdi}
                               </div>
                               <div className="col-span-2 text-sm text-[var(--dashboard-text)] text-center">
@@ -450,6 +588,23 @@ export default function MaliyetSayimDetayPage() {
                                   </p>
                                 )}
                               </div>
+                              {isMultiUser && showAttribution && (
+                                <div className="col-span-2 text-right">
+                                  {detailedItem.countedByName ? (
+                                    <div className="flex items-center justify-end gap-1.5">
+                                      <span
+                                        className="w-2.5 h-2.5 rounded-full shrink-0"
+                                        style={{ backgroundColor: getParticipantColor(detailedItem.countedByUid || '', sessionParticipants) }}
+                                      />
+                                      <span className="text-[11px] text-[var(--dashboard-muted)] truncate">
+                                        {detailedItem.countedByName}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <span className="text-[11px] text-[var(--dashboard-muted)]">-</span>
+                                  )}
+                                </div>
+                              )}
                             </div>
 
                             {/* Mobile */}
@@ -463,12 +618,28 @@ export default function MaliyetSayimDetayPage() {
                                     {item.stokKodu} · Stok: {item.stokAdedi}
                                     {item.cihazUstuAdedi > 0 && ` · CU: ${item.cihazUstuAdedi}`}
                                   </p>
+                                  {isMultiUser && showAttribution && detailedItem.countedByName && (
+                                    <div className="flex items-center gap-1 mt-1">
+                                      <span
+                                        className="w-2 h-2 rounded-full"
+                                        style={{ backgroundColor: getParticipantColor(detailedItem.countedByUid || '', sessionParticipants) }}
+                                      />
+                                      <span className="text-[10px] text-[var(--dashboard-muted)]">
+                                        {detailedItem.countedByName}
+                                      </span>
+                                    </div>
+                                  )}
                                 </div>
                                 <span className="text-sm font-semibold text-[var(--dashboard-accent)] shrink-0">
                                   {formatCurrencyDetailed(cost, sym)}
                                 </span>
                               </div>
                             </div>
+
+                            {/* Update log (for detailed items with multi-user) */}
+                            {isMultiUser && showAttribution && hasUpdates && (
+                              <UpdateLog updates={detailedItem.updates} participants={sessionParticipants} />
+                            )}
                           </div>
                         );
                       })}
