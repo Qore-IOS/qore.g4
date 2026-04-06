@@ -682,6 +682,8 @@ export interface PersonalStockItem {
   createdAt: Date;
   transferredByUid?: string;   // Transfer eden kişi (lojistik)
   transferredByName?: string;
+  previousOwnerUid?: string;   // Personelden personele transferde önceki sahip
+  previousOwnerName?: string;
   usedAt?: Date;               // Kullanıldığı tarih
   usedOnDeviceId?: string;     // Kullanıldığı cihaz
   usedOnDeviceName?: string;

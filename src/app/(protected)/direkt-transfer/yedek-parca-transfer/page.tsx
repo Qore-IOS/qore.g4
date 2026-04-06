@@ -263,6 +263,16 @@ export default function YedekParcaTransferPage() {
   const [returnNote, setReturnNote] = useState('');
   const [isReturning, setIsReturning] = useState(false);
 
+  // Personnel-to-personnel transfer modal state
+  const [pTransferModalOpen, setPTransferModalOpen] = useState(false);
+  const [pTransferItem, setPTransferItem] = useState<PersonalStockItem | null>(null);
+  const [pTransferTargetUid, setPTransferTargetUid] = useState('');
+  const [pTransferTargetName, setPTransferTargetName] = useState('');
+  const [pTransferQuantity, setPTransferQuantity] = useState(1);
+  const [pTransferSearchOpen, setPTransferSearchOpen] = useState(false);
+  const [pTransferSearchQuery, setPTransferSearchQuery] = useState('');
+  const [isPersonnelTransferring, setIsPersonnelTransferring] = useState(false);
+
   // Check authorization
   const isAuthorized = currentUserProfile?.role === 'super_admin' || currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik' || currentUserProfile?.role === 'teknik_servis' || currentUserProfile?.role === 'aplikasyon';
   const isAdmin = currentUserProfile?.role === 'super_admin' || currentUserProfile?.role === 'admin';
@@ -1977,6 +1987,102 @@ export default function YedekParcaTransferPage() {
     }
   };
 
+  // Personnel-to-personnel transfer (owner initiates, target must approve)
+  const sendPersonnelTransfer = async () => {
+    if (!pTransferItem || !pTransferTargetUid || !pTransferTargetName) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen hedef personeli seçin.', variant: 'destructive' });
+      return;
+    }
+    if (pTransferTargetUid === currentUserProfile?.uid) {
+      toast({ title: 'Hata', description: 'Kendinize transfer yapamazsınız.', variant: 'destructive' });
+      return;
+    }
+
+    // Find all in_stock records for same owner + stokKodu
+    const availableItems = personnelStock.filter(
+      s => s.status === 'in_stock' &&
+        s.ownerUid === pTransferItem.ownerUid &&
+        s.stokKodu === pTransferItem.stokKodu
+    );
+    const qty = Math.min(pTransferQuantity, availableItems.length);
+    if (qty < 1) {
+      toast({ title: 'Hata', description: 'Transfer edilecek ürün bulunamadı.', variant: 'destructive' });
+      return;
+    }
+
+    setIsPersonnelTransferring(true);
+    try {
+      const now = new Date();
+      const batch = writeBatch(db);
+      const itemsToTransfer = availableItems.slice(0, qty);
+
+      for (const si of itemsToTransfer) {
+        batch.update(doc(db, 'personalStock', si.id), {
+          ownerUid: pTransferTargetUid,
+          ownerName: pTransferTargetName,
+          status: 'pending_approval',
+          previousOwnerUid: si.ownerUid,
+          previousOwnerName: si.ownerName,
+          transferredByUid: currentUserProfile?.uid || '',
+          transferredByName: currentUserProfile?.name || '',
+          transferredAt: Timestamp.fromDate(now),
+        });
+      }
+
+      // Transfer log
+      const logRef = doc(collection(db, 'sparePartTransferLogs'));
+      batch.set(logRef, withCompanyScope({
+        action: 'transfer_between_personnel',
+        productCodeId: pTransferItem.productCodeId,
+        stokKodu: pTransferItem.stokKodu,
+        stokAdi: pTransferItem.stokAdi,
+        anaBirim: pTransferItem.anaBirim || 'Adet',
+        serialNumber: pTransferItem.serialNumber || '',
+        quantity: qty,
+        fromUid: pTransferItem.ownerUid,
+        fromName: pTransferItem.ownerName,
+        toUid: pTransferTargetUid,
+        toName: pTransferTargetName,
+        status: 'pending_approval',
+        createdAt: Timestamp.fromDate(now),
+        createdByUid: currentUserProfile?.uid || '',
+        createdByName: currentUserProfile?.name || '',
+      }, currentCompanyId));
+
+      await batch.commit();
+
+      // Notifications
+      emitSparePartTransfer({
+        actor: { uid: currentUserProfile?.uid || '', name: currentUserProfile?.name || '' },
+        targetUid: pTransferTargetUid,
+        targetName: pTransferTargetName,
+        items: [{ stokKodu: pTransferItem.stokKodu, stokAdi: pTransferItem.stokAdi, quantity: qty }],
+      }).catch(e => console.error('Personnel transfer notification error:', e));
+
+      toast({
+        title: 'Transfer Gönderildi',
+        description: `${qty} adet ${pTransferItem.stokAdi}, ${pTransferTargetName} personelinin onayına gönderildi.`,
+      });
+
+      setPTransferModalOpen(false);
+      setPTransferItem(null);
+      setPTransferTargetUid('');
+      setPTransferTargetName('');
+      setPTransferQuantity(1);
+      setPTransferSearchQuery('');
+
+      if (menuSelection.personnelUid) {
+        await fetchPersonnelStock(menuSelection.personnelUid);
+      }
+      await loadRecentTransferLogs();
+    } catch (err) {
+      console.error('Error sending personnel transfer:', err);
+      toast({ title: 'Hata', description: 'Transfer sırasında hata oluştu.', variant: 'destructive' });
+    } finally {
+      setIsPersonnelTransferring(false);
+    }
+  };
+
   const takeOverPersonnelStock = async (item: PersonalStockItem) => {
     if (!currentUserProfile?.uid || !currentUserProfile?.name) {
       toast({ title: 'Hata', description: 'Kullanıcı bilgisi bulunamadı.', variant: 'destructive' });
@@ -2083,74 +2189,112 @@ export default function YedekParcaTransferPage() {
 
   // Reject pending transfer - return to depot
   const rejectTransfer = async (item: PersonnelStockViewItem) => {
-    const shouldReject = window.confirm(`${item.stokKodu} (${item.serialNumber || 'Seri No Yok'}) transferini reddetmek istediğinize emin misiniz? Ürün depoya geri gönderilecektir.`);
+    const hasPreviousOwner = !!(item as any).previousOwnerUid;
+    const returnLabel = hasPreviousOwner ? `${(item as any).previousOwnerName} adlı personele geri gönderilecektir` : 'depoya geri gönderilecektir';
+    const shouldReject = window.confirm(`${item.stokKodu} (${item.serialNumber || 'Seri No Yok'}) transferini reddetmek istediğinize emin misiniz? Ürün ${returnLabel}.`);
     if (!shouldReject) return;
 
     try {
       const now = new Date();
       const batch = writeBatch(db);
 
-      // Delete from personalStock
-      batch.delete(doc(db, 'personalStock', item.id));
+      if (hasPreviousOwner) {
+        // Return to previous owner (personnel-to-personnel transfer rejected)
+        batch.update(doc(db, 'personalStock', item.id), {
+          ownerUid: (item as any).previousOwnerUid,
+          ownerName: (item as any).previousOwnerName,
+          status: 'in_stock',
+          previousOwnerUid: null,
+          previousOwnerName: null,
+          transferredAt: null,
+        });
 
-      // Add back to depot stock
-      const depoRef = doc(collection(db, 'yedekParcaDepoStok'));
-      batch.set(depoRef, withCompanyScope({
-        productCodeId: item.productCodeId,
-        stokKodu: item.stokKodu,
-        stokAdi: item.stokAdi,
-        anaBirim: item.anaBirim || 'Adet',
-        serialNumber: item.serialNumber || '',
-        ...(item.hucreNumarasi ? { hucreNumarasi: item.hucreNumarasi } : {}),
-        quantity: 1,
-        createdAt: Timestamp.fromDate(now),
-        createdByUid: currentUserProfile?.uid || '',
-        createdByName: currentUserProfile?.name || '',
-      }, currentCompanyId));
+        const logRef = doc(collection(db, 'sparePartTransferLogs'));
+        batch.set(logRef, withCompanyScope({
+          action: 'transfer_rejected',
+          personalStockId: item.id,
+          productCodeId: item.productCodeId,
+          stokKodu: item.stokKodu,
+          stokAdi: item.stokAdi,
+          anaBirim: item.anaBirim || 'Adet',
+          serialNumber: item.serialNumber || '',
+          fromUid: item.ownerUid,
+          fromName: item.ownerName,
+          toUid: (item as any).previousOwnerUid,
+          toName: (item as any).previousOwnerName,
+          quantity: 1,
+          notes: `Transfer reddedildi: ${item.ownerName} -> ${(item as any).previousOwnerName}`,
+          createdAt: Timestamp.fromDate(now),
+          createdByUid: currentUserProfile?.uid || '',
+          createdByName: currentUserProfile?.name || '',
+        }, currentCompanyId));
 
-      // Transfer log
-      const logRef = doc(collection(db, 'sparePartTransferLogs'));
-      batch.set(logRef, withCompanyScope({
-        action: 'transfer_rejected',
-        personalStockId: item.id,
-        productCodeId: item.productCodeId,
-        stokKodu: item.stokKodu,
-        stokAdi: item.stokAdi,
-        anaBirim: item.anaBirim || 'Adet',
-        serialNumber: item.serialNumber || '',
-        fromUid: item.ownerUid,
-        fromName: item.ownerName,
-        quantity: 1,
-        notes: 'Transfer personel tarafından reddedildi, ürün depoya iade edildi.',
-        createdAt: Timestamp.fromDate(now),
-        createdByUid: currentUserProfile?.uid || '',
-        createdByName: currentUserProfile?.name || '',
-      }, currentCompanyId));
+        await batch.commit();
 
-      // Depo log
-      const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
-      batch.set(depoLogRef, {
-        action: 'iade_giris',
-        productCodeId: item.productCodeId,
-        stokKodu: item.stokKodu,
-        stokAdi: item.stokAdi,
-        anaBirim: item.anaBirim || 'Adet',
-        serialNumber: item.serialNumber || '',
-        quantity: 1,
-        relatedPersonnelUid: item.ownerUid,
-        relatedPersonnelName: item.ownerName,
-        notes: `Transfer reddedildi: ${item.ownerName} -> Depo`,
-        createdAt: Timestamp.fromDate(now),
-        createdByUid: currentUserProfile?.uid || '',
-        createdByName: currentUserProfile?.name || '',
-      });
+        toast({
+          title: 'Reddedildi',
+          description: `${item.stokAdi} transferi reddedildi, ürün ${(item as any).previousOwnerName} adlı personele geri gönderildi.`,
+        });
+      } else {
+        // Return to depot (lojistik → personnel transfer rejected)
+        batch.delete(doc(db, 'personalStock', item.id));
 
-      await batch.commit();
+        const depoRef = doc(collection(db, 'yedekParcaDepoStok'));
+        batch.set(depoRef, withCompanyScope({
+          productCodeId: item.productCodeId,
+          stokKodu: item.stokKodu,
+          stokAdi: item.stokAdi,
+          anaBirim: item.anaBirim || 'Adet',
+          serialNumber: item.serialNumber || '',
+          ...(item.hucreNumarasi ? { hucreNumarasi: item.hucreNumarasi } : {}),
+          quantity: 1,
+          createdAt: Timestamp.fromDate(now),
+          createdByUid: currentUserProfile?.uid || '',
+          createdByName: currentUserProfile?.name || '',
+        }, currentCompanyId));
 
-      toast({
-        title: 'Reddedildi',
-        description: `${item.stokAdi} (${item.serialNumber || item.stokKodu}) transferi reddedildi, ürün depoya iade edildi.`,
-      });
+        const logRef = doc(collection(db, 'sparePartTransferLogs'));
+        batch.set(logRef, withCompanyScope({
+          action: 'transfer_rejected',
+          personalStockId: item.id,
+          productCodeId: item.productCodeId,
+          stokKodu: item.stokKodu,
+          stokAdi: item.stokAdi,
+          anaBirim: item.anaBirim || 'Adet',
+          serialNumber: item.serialNumber || '',
+          fromUid: item.ownerUid,
+          fromName: item.ownerName,
+          quantity: 1,
+          notes: 'Transfer personel tarafından reddedildi, ürün depoya iade edildi.',
+          createdAt: Timestamp.fromDate(now),
+          createdByUid: currentUserProfile?.uid || '',
+          createdByName: currentUserProfile?.name || '',
+        }, currentCompanyId));
+
+        const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
+        batch.set(depoLogRef, {
+          action: 'iade_giris',
+          productCodeId: item.productCodeId,
+          stokKodu: item.stokKodu,
+          stokAdi: item.stokAdi,
+          anaBirim: item.anaBirim || 'Adet',
+          serialNumber: item.serialNumber || '',
+          quantity: 1,
+          relatedPersonnelUid: item.ownerUid,
+          relatedPersonnelName: item.ownerName,
+          notes: `Transfer reddedildi: ${item.ownerName} -> Depo`,
+          createdAt: Timestamp.fromDate(now),
+          createdByUid: currentUserProfile?.uid || '',
+          createdByName: currentUserProfile?.name || '',
+        });
+
+        await batch.commit();
+
+        toast({
+          title: 'Reddedildi',
+          description: `${item.stokAdi} (${item.serialNumber || item.stokKodu}) transferi reddedildi, ürün depoya iade edildi.`,
+        });
+      }
 
       if (menuSelection.personnelUid) {
         await fetchPersonnelStock(menuSelection.personnelUid);
@@ -2904,25 +3048,33 @@ export default function YedekParcaTransferPage() {
                               <Trash2 className="h-3.5 w-3.5" />
                               Stok Sil
                             </button>
-                          ) : canTakeOver ? (
-                            <button
-                              disabled={takingOverStockId === item.id}
-                              onClick={() => takeOverPersonnelStock(item)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all active:scale-95 disabled:opacity-50"
-                              style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
-                            >
-                              {takingOverStockId === item.id && <Loader2 className="h-3 w-3 animate-spin" />}
-                              Üzerime Al
-                            </button>
                           ) : (item.status === 'in_stock' && item.ownerUid === currentUserProfile?.uid) ? (
-                            <button
-                              onClick={() => { setReturnModalItem(item); setReturnCondition('iyi'); setReturnModalOpen(true); }}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all active:scale-95"
-                              style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
-                            >
-                              <Upload className="h-3.5 w-3.5" />
-                              İade Et
-                            </button>
+                            <div className="flex items-center justify-end gap-1.5">
+                              <button
+                                onClick={() => {
+                                  const maxQty = personnelStock.filter(s => s.status === 'in_stock' && s.ownerUid === item.ownerUid && s.stokKodu === item.stokKodu).length;
+                                  setPTransferItem(item);
+                                  setPTransferQuantity(Math.min(1, maxQty));
+                                  setPTransferTargetUid('');
+                                  setPTransferTargetName('');
+                                  setPTransferSearchQuery('');
+                                  setPTransferModalOpen(true);
+                                }}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all active:scale-95"
+                                style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
+                              >
+                                <Send className="h-3.5 w-3.5" />
+                                Transfer Et
+                              </button>
+                              <button
+                                onClick={() => { setReturnModalItem(item); setReturnCondition('iyi'); setReturnNote(''); setReturnModalOpen(true); }}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all active:scale-95"
+                                style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
+                              >
+                                <Upload className="h-3.5 w-3.5" />
+                                İade Et
+                              </button>
+                            </div>
                           ) : isUsed ? (
                             <span className="text-[11px] text-left inline-block max-w-[220px]" style={{ color: 'var(--dashboard-muted)' }}>
                               {(item.usageLabName || 'Lab bilgisi yok')} · {(item.usageDeviceName || item.usedOnDeviceName || 'Cihaz bilgisi yok')}
@@ -3009,25 +3161,33 @@ export default function YedekParcaTransferPage() {
                           <Trash2 className="h-3 w-3" />
                           Stok Sil
                         </button>
-                      ) : canTakeOver ? (
-                        <button
-                          disabled={takingOverStockId === item.id}
-                          onClick={() => takeOverPersonnelStock(item)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium rounded-lg transition-all active:scale-95 disabled:opacity-50"
-                          style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
-                        >
-                          {takingOverStockId === item.id && <Loader2 className="h-3 w-3 animate-spin" />}
-                          Üzerime Al
-                        </button>
                       ) : (item.status === 'in_stock' && item.ownerUid === currentUserProfile?.uid) ? (
-                        <button
-                          onClick={() => { setReturnModalItem(item); setReturnCondition('iyi'); setReturnModalOpen(true); }}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 text-[10px] font-medium rounded-lg transition-all active:scale-95"
-                          style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
-                        >
-                          <Upload className="h-3 w-3" />
-                          İade Et
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => {
+                              const maxQty = personnelStock.filter(s => s.status === 'in_stock' && s.ownerUid === item.ownerUid && s.stokKodu === item.stokKodu).length;
+                              setPTransferItem(item);
+                              setPTransferQuantity(Math.min(1, maxQty));
+                              setPTransferTargetUid('');
+                              setPTransferTargetName('');
+                              setPTransferSearchQuery('');
+                              setPTransferModalOpen(true);
+                            }}
+                            className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded-lg transition-all active:scale-95"
+                            style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
+                          >
+                            <Send className="h-3 w-3" />
+                            Transfer
+                          </button>
+                          <button
+                            onClick={() => { setReturnModalItem(item); setReturnCondition('iyi'); setReturnNote(''); setReturnModalOpen(true); }}
+                            className="inline-flex items-center gap-1 px-2 py-1 text-[10px] font-medium rounded-lg transition-all active:scale-95"
+                            style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
+                          >
+                            <Upload className="h-3 w-3" />
+                            İade
+                          </button>
+                        </div>
                       ) : isUsed ? (
                         <span className="text-[10px] text-right max-w-[52%]" style={{ color: 'var(--dashboard-muted)' }}>
                           {(item.usageLabName || 'Lab bilgisi yok')} · {(item.usageDeviceName || item.usedOnDeviceName || 'Cihaz bilgisi yok')}
@@ -3823,6 +3983,128 @@ export default function YedekParcaTransferPage() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Personele Transfer Et Dialog */}
+      <Dialog open={pTransferModalOpen} onOpenChange={(open) => { if (!isPersonnelTransferring) { setPTransferModalOpen(open); if (!open) { setPTransferItem(null); setPTransferTargetUid(''); setPTransferTargetName(''); setPTransferSearchQuery(''); } } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Send className="h-5 w-5" style={{ color: 'var(--dashboard-accent)' }} />
+              Personele Transfer Et
+            </DialogTitle>
+          </DialogHeader>
+          {pTransferItem && (() => {
+            const availableQty = personnelStock.filter(s => s.status === 'in_stock' && s.ownerUid === pTransferItem.ownerUid && s.stokKodu === pTransferItem.stokKodu).length;
+            const targetUsers = users.filter(u => u.uid !== pTransferItem.ownerUid);
+            const filteredTargetUsers = pTransferSearchQuery
+              ? targetUsers.filter(u => (u.name || '').toLowerCase().includes(pTransferSearchQuery.toLowerCase()))
+              : targetUsers;
+            return (
+              <div className="space-y-4">
+                <div className="cihaz-pressed p-3 rounded-xl">
+                  <p className="text-sm font-semibold" style={{ color: 'var(--dashboard-text)' }}>{pTransferItem.stokAdi}</p>
+                  <p className="text-xs font-mono mt-0.5" style={{ color: 'var(--dashboard-muted)' }}>
+                    {pTransferItem.stokKodu}{pTransferItem.serialNumber ? ` • SN: ${pTransferItem.serialNumber}` : ` • Mevcut: ${availableQty} adet`}
+                  </p>
+                </div>
+
+                {/* Target personnel selector */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold uppercase" style={{ color: 'var(--dashboard-muted)' }}>Hedef Personel</label>
+                  <Popover open={pTransferSearchOpen} onOpenChange={setPTransferSearchOpen}>
+                    <PopoverTrigger asChild>
+                      <button
+                        className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-sm border transition-all"
+                        style={{
+                          background: 'var(--dashboard-pressed)',
+                          color: pTransferTargetUid ? 'var(--dashboard-text)' : 'var(--dashboard-muted)',
+                          borderColor: 'var(--dashboard-stroke)',
+                        }}
+                      >
+                        <span className="truncate">{pTransferTargetName || 'Personel seçin...'}</span>
+                        <ChevronDown className="h-4 w-4 shrink-0 ml-2" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-72 p-0" align="start">
+                      <Command>
+                        <CommandInput
+                          placeholder="Personel ara..."
+                          value={pTransferSearchQuery}
+                          onValueChange={setPTransferSearchQuery}
+                        />
+                        <CommandList>
+                          <CommandEmpty>Personel bulunamadı.</CommandEmpty>
+                          <CommandGroup>
+                            {filteredTargetUsers.map(u => (
+                              <CommandItem
+                                key={u.uid}
+                                onSelect={() => {
+                                  setPTransferTargetUid(u.uid);
+                                  setPTransferTargetName(u.name || u.uid);
+                                  setPTransferSearchOpen(false);
+                                  setPTransferSearchQuery('');
+                                }}
+                              >
+                                <div className="flex flex-col">
+                                  <span className="text-sm font-medium">{u.name}</span>
+                                  <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>
+                                    {u.role === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'}
+                                  </span>
+                                </div>
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+
+                {/* Quantity selector — only for non-serial items with multiple units */}
+                {!pTransferItem.serialNumber && availableQty > 1 && (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-semibold uppercase" style={{ color: 'var(--dashboard-muted)' }}>
+                      Adet <span style={{ color: 'var(--dashboard-muted)', fontWeight: 400 }}>(maks. {availableQty})</span>
+                    </label>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => setPTransferQuantity(q => Math.max(1, q - 1))}
+                        className="w-8 h-8 rounded-lg flex items-center justify-center font-bold transition-all active:scale-95"
+                        style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-text)' }}
+                      >−</button>
+                      <span className="text-lg font-bold w-8 text-center" style={{ color: 'var(--dashboard-text)' }}>{pTransferQuantity}</span>
+                      <button
+                        onClick={() => setPTransferQuantity(q => Math.min(availableQty, q + 1))}
+                        className="w-8 h-8 rounded-lg flex items-center justify-center font-bold transition-all active:scale-95"
+                        style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-text)' }}
+                      >+</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+          <DialogFooter>
+            <button
+              onClick={() => setPTransferModalOpen(false)}
+              disabled={isPersonnelTransferring}
+              className="cihaz-tool-item px-4 py-2 text-sm"
+              style={{ color: 'var(--dashboard-muted)' }}
+            >
+              Vazgeç
+            </button>
+            <button
+              onClick={sendPersonnelTransfer}
+              disabled={isPersonnelTransferring || !pTransferTargetUid}
+              className="inline-flex items-center gap-1.5 px-5 py-2 rounded-xl text-sm font-semibold text-white disabled:opacity-40 transition-all active:scale-95"
+              style={{ background: 'var(--dashboard-accent)' }}
+            >
+              {isPersonnelTransferring && <Loader2 className="w-4 h-4 animate-spin" />}
+              Transferi Gönder
+            </button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
