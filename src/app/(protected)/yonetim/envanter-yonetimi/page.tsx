@@ -239,38 +239,27 @@ export default function EnvanterYonetimiPage() {
   };
 
   const handleDownloadCurrentInventory = () => {
-    const data = assets.map((asset) => ({
-      Kategori: asset.category || '',
-      'Demirbaş No': asset.demirbasNo || '',
-      'Ürün Adı': asset.urunAdi || '',
-      'Seri Numarası': asset.seriNumarasi || '',
-      Durum: asset.durum || '',
-      Marka: asset.marka || '',
-      Model: asset.model || '',
-      Konum: asset.konum || '',
-      'Teslim Edilen Personel': asset.teslimEdilenPersonel || '',
-      'Alım Fiyatı (TL)': typeof asset.alimFiyatiTl === 'number' ? asset.alimFiyatiTl : '',
-      'Satın Alma Tarihi': asset.satinAlmaTarihi || '',
-      'Garanti Bitiş Tarihi': asset.garantiBitisTarihi || '',
-      'Planlı Kullanım Ömrü (Yıl)': asset.planliKullanimOmruYil ?? '',
-      'Amortisman Yöntemi': asset.amortismanYontemi || '',
-      'Amortisman Başlangıç Tarihi': asset.amortismanBaslangicTarihi || '',
-      'Hurda Tarihi': asset.hurdaTarihi || '',
-      'İmha Tarihi': asset.imhaTarihi || '',
-      'Satış Tarihi': asset.satisTarihi || '',
-      'Son Bakım Tarihi': asset.sonBakimTarihi || '',
-      'Sonraki Bakım Tarihi': asset.sonrakiBakimTarihi || '',
-      'Son Kalibrasyon Tarihi': asset.sonKalibrasyonTarihi || '',
-      'Sonraki Kalibrasyon Tarihi': asset.sonrakiKalibrasyonTarihi || '',
-      'Bakım Maliyeti (TL)': asset.bakimMaliyetiTl ?? '',
-      'Zimmetli Kişi': asset.zimmetliKisi || '',
-      'Check-Out Tarihi': asset.checkOutTarihi || '',
-      'Check-In Tarihi': asset.checkInTarihi || '',
-      'Dijital İmza': asset.dijitalImza || '',
-      'Zimmet Fiş No': asset.zimmetFisNo || '',
-      Açıklama: asset.aciklama || '',
-    }));
-    exportDataToExcel(data, 'Mevcut_Envanter', 'Envanter', toast);
+    const allKeys = Array.from(
+      assets.reduce((set, asset) => {
+        Object.keys(asset).forEach((k) => set.add(k));
+        return set;
+      }, new Set<string>(['id']))
+    );
+
+    const data = assets.map((asset) => {
+      const row: Record<string, unknown> = {};
+      for (const key of allKeys) {
+        const value = (asset as Record<string, unknown>)[key];
+        row[key] = value == null
+          ? ''
+          : typeof value === 'object'
+            ? JSON.stringify(value)
+            : value;
+      }
+      return row;
+    });
+
+    exportDataToExcel(data, 'Tum_Envanter_Detaylari', 'TumEnvanter', toast);
   };
 
   const handleDownloadCategoryTemplate = () => {
@@ -470,6 +459,12 @@ export default function EnvanterYonetimiPage() {
                 >
                   <Download className="w-3.5 h-3.5" /> Sablon
                 </button>
+                <button
+                  onClick={handleDownloadCurrentInventory}
+                  className="cihaz-tool-item h-9 px-3 text-xs font-medium text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] flex items-center gap-1.5"
+                >
+                  <Download className="w-3.5 h-3.5" /> Tumunu Excel'e Aktar
+                </button>
               </div>
             </div>
             <div className="cihaz-card p-4">
@@ -555,12 +550,12 @@ export default function EnvanterYonetimiPage() {
                   return (
                     <div key={category.id} className="group relative">
                       <Link href={`/yonetim/envanter-yonetimi/${encodeURIComponent(category.name)}`} className="block">
-                        <div className="cihaz-action-tile relative p-5 flex flex-col items-center text-center min-h-[130px] justify-center">
-                          <div className="w-11 h-11 rounded-2xl bg-[var(--dashboard-surface-2)] flex items-center justify-center mb-3 overflow-hidden">
+                        <div className="cihaz-action-tile relative p-5 pt-12 flex flex-col items-center text-center min-h-[150px] justify-center overflow-visible">
+                          <div className="absolute -top-5 -left-4 w-20 h-20 flex items-center justify-center overflow-visible">
                             {envanterIcons[category.name] ? (
-                              <NextImage src={getIconSrc(envanterIcons[category.name])} alt="" width={28} height={28} className="object-contain" />
+                              <NextImage src={getIconSrc(envanterIcons[category.name])} alt="" width={72} height={72} className="object-contain" />
                             ) : (
-                              <Icon className="w-5 h-5 text-[var(--dashboard-muted)]" />
+                              <Icon className="w-10 h-10 text-[var(--dashboard-muted)]" />
                             )}
                           </div>
                           <p className="text-sm font-semibold text-[var(--dashboard-text)] leading-tight line-clamp-2">{category.name}</p>
@@ -571,7 +566,7 @@ export default function EnvanterYonetimiPage() {
                         </div>
                       </Link>
                       {/* Edit / Delete on hover */}
-                      <div className="absolute top-2 left-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                      <div className="absolute top-8 right-2 flex flex-col items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                         <button
                           onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleOpenModal(category); }}
                           className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface)] shadow-sm flex items-center justify-center text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-colors"
