@@ -20,6 +20,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { cn } from '@/lib/utils';
 import Link from 'next/link';
+import NextImage from 'next/image';
+import { useIconMappings, getIconSrc } from '@/hooks/useIconMappings';
 
 type FilterableColumn = keyof Omit<Asset, 'id' | 'aciklama'>;
 
@@ -92,6 +94,8 @@ export default function AssetCategoryPage() {
   const categoryName = decodeURIComponent(Array.isArray(params.category) ? params.category[0] : params.category || '');
   const { toast } = useToast();
   const { currentCompanyId, isSuperAdmin } = useAuth();
+  const iconData = useIconMappings();
+  const envanterIcons = iconData?.mappings?.envanter || {};
 
   const [assets, setAssets] = useState<Asset[]>([]);
   const [locations, setLocations] = useState<{ value: string; label: string }[]>([]);
@@ -248,6 +252,7 @@ export default function AssetCategoryPage() {
   }), [assets]);
 
   const set = (field: string, value: any) => setEditingAsset(prev => ({ ...prev, [field]: value }));
+  const categoryIcon = envanterIcons[categoryName];
 
   return (
     <>
@@ -263,9 +268,18 @@ export default function AssetCategoryPage() {
               >
                 <ChevronLeft className="w-5 h-5" />
               </Link>
-              <div>
-                <h1 className="text-xl sm:text-2xl font-bold text-[var(--dashboard-text)] capitalize">{categoryName}</h1>
-                <p className="text-xs sm:text-sm text-[var(--dashboard-muted)]">Bu kategoriye ait demirbaş envanteri</p>
+            </div>
+            <div className="flex-1 flex items-center justify-center">
+              <div className="relative pl-20 min-h-[76px] flex flex-col justify-center">
+                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-16 h-16 rounded-3xl bg-[var(--dashboard-surface)]/90 backdrop-blur-sm shadow-[0_14px_30px_rgba(0,0,0,0.16)] border border-white/40 flex items-center justify-center overflow-hidden">
+                  {categoryIcon ? (
+                    <NextImage src={getIconSrc(categoryIcon)} alt="" width={58} height={58} className="object-contain" />
+                  ) : (
+                    <Package className="w-9 h-9 text-[var(--dashboard-muted)]" />
+                  )}
+                </div>
+                <h1 className="text-xl sm:text-2xl font-bold text-[var(--dashboard-text)] capitalize text-center">{categoryName}</h1>
+                <p className="text-xs sm:text-sm text-[var(--dashboard-muted)] text-center">Bu kategoriye ait demirbaş envanteri</p>
               </div>
             </div>
             <button
