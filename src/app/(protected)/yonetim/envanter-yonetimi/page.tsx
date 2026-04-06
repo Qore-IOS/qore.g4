@@ -556,7 +556,7 @@ export default function EnvanterYonetimiPage() {
                     <div key={category.id} className="group relative">
                       <Link href={`/yonetim/envanter-yonetimi/${encodeURIComponent(category.name)}`} className="block">
                         <div className="cihaz-action-tile relative p-5 pt-12 flex flex-col items-center text-center min-h-[150px] justify-center overflow-visible">
-                          <div className="absolute -top-5 -left-4 w-20 h-20 rounded-3xl bg-[var(--dashboard-surface)]/90 backdrop-blur-sm shadow-[0_14px_30px_rgba(0,0,0,0.18)] flex items-center justify-center overflow-hidden border border-white/40">
+                          <div className="absolute -top-5 -left-4 w-20 h-20 flex items-center justify-center overflow-visible">
                             {envanterIcons[category.name] ? (
                               <NextImage src={getIconSrc(envanterIcons[category.name])} alt="" width={72} height={72} className="object-contain" />
                             ) : (
@@ -571,7 +571,7 @@ export default function EnvanterYonetimiPage() {
                         </div>
                       </Link>
                       {/* Edit / Delete on hover */}
-                      <div className="absolute top-2 left-2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                      <div className="absolute top-8 -left-1 flex flex-col items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
                         <button
                           onClick={(e) => { e.preventDefault(); e.stopPropagation(); handleOpenModal(category); }}
                           className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface)] shadow-sm flex items-center justify-center text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-colors"

@@ -271,7 +271,7 @@ export default function AssetCategoryPage() {
             </div>
             <div className="flex-1 flex items-center justify-center">
               <div className="relative pl-20 min-h-[76px] flex flex-col justify-center">
-                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-16 h-16 rounded-3xl bg-[var(--dashboard-surface)]/90 backdrop-blur-sm shadow-[0_14px_30px_rgba(0,0,0,0.16)] border border-white/40 flex items-center justify-center overflow-hidden">
+                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-16 h-16 flex items-center justify-center overflow-visible">
                   {categoryIcon ? (
                     <NextImage src={getIconSrc(categoryIcon)} alt="" width={58} height={58} className="object-contain" />
                   ) : (
