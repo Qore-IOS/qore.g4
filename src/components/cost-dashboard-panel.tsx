@@ -3,9 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, getDocs, orderBy, query } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
-import { Loader2, BarChart3 } from 'lucide-react';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 import type { ProductCode, Currency } from '@/lib/types';
 import { PieChart, ResponsiveContainer, Pie, Cell, Tooltip as RechartsTooltip, LineChart, Line, XAxis, YAxis } from 'recharts';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -43,6 +41,7 @@ import {
 } from '@/lib/cost-analytics';
 
 const CURRENCY_SYMBOLS: Record<Currency, string> = { EUR: '€', USD: '$', TRY: '₺' };
+const PIE_COLORS = ['#2563eb', '#7c3aed', '#db2777', '#ea580c', '#0891b2', '#16a34a', '#ca8a04', '#dc2626'];
 const PRIMARY_API_KEY = 'e69314b14644080788775553';
 const CACHE_TTL = 1000 * 60 * 60;
 
@@ -142,6 +141,7 @@ type TimePeriod = 'latest' | '3m' | '6m' | '12m' | 'all';
 export default function CostDashboardPanel({ productCodes }: CostDashboardPanelProps) {
   const router = useRouter();
   const { currentCompanyId, isSuperAdmin } = useAuth();
+  const [isLoading, setLoading] = useState(false);
   const [rates, setRates] = useState<Record<Currency, number> | null>(null);
   const [currency, setCurrency] = useState<Currency>('TRY');
   const [sessions, setSessions] = useState<SayimSession[]>([]);
@@ -155,10 +155,9 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
     const load = async () => {
       setLoading(true);
       try {
-        const [rateData, sessionSnap, depoSnap] = await Promise.all([
+        const [rateData, sessionSnap] = await Promise.all([
           fetchExchangeRates(),
           getDocs(query(collection(db, 'maliyetSayimSessions'), orderBy('createdAt', 'desc'))),
-          getDocs(collection(db, 'depoStok')),
         ]);
         setRates(ratesData);
         const allSessions = sessionsSnap.docs.map(d => ({ id: d.id, ...d.data() } as SayimSession));
@@ -1015,6 +1014,7 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
                     {sessions.slice(0, 15).map(session => {
                       const date = getSessionDate(session);
                       const sessionCost = rates ? getSessionCost(session, productMap, rates, currency) : 0;
+                      const createdByName = (session as { createdByName?: string }).createdByName;
                       return (
                         <div
                           key={session.id}
@@ -1027,7 +1027,7 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
                           <p className="text-[10px] text-[var(--dashboard-muted)] mt-0.5">
                             {date ? format(date, 'dd MMM yyyy HH:mm', { locale: tr }) : '—'}
                             {' · '}{session.items.length} ürün
-                            {session.createdByName && ` · ${session.createdByName}`}
+                            {createdByName && ` · ${createdByName}`}
                           </p>
                         </div>
                       );

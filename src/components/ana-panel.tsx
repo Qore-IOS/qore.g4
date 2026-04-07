@@ -327,6 +327,63 @@ function parseLabelText(
   };
 }
 
+const pickGeminiCandidates = (ocrText: string, productCodes: ProductCode[]): ProductCode[] => {
+  const normalizedText = turkishFold(ocrText || '');
+  if (!normalizedText.trim()) return productCodes.slice(0, 500);
+
+  const candidates = productCodes.filter((p) => {
+    const code = turkishFold((p.stokKodu || '').trim());
+    const name = turkishFold((p.stokAdi || '').trim()).replace(/[^A-Z0-9 ]/g, ' ');
+    if (!code && !name) return false;
+    return (code && normalizedText.includes(code)) || (name.length >= 4 && normalizedText.includes(name));
+  });
+
+  if (candidates.length > 0) return candidates.slice(0, 500);
+  return productCodes.slice(0, 500);
+};
+
+async function parseLabelWithGemini(
+  imageBlob: Blob,
+  ocrText: string,
+  productCodes: ProductCode[]
+): Promise<{ stokKodu: string; stokAdi: string; lotNumarasi: string; miad: string } | null> {
+  const candidates = pickGeminiCandidates(ocrText, productCodes);
+  if (candidates.length === 0) return null;
+
+  const formData = new FormData();
+  formData.append('image', imageBlob, 'label-capture.jpg');
+  formData.append('ocrText', ocrText || '');
+  formData.append(
+    'products',
+    JSON.stringify(
+      candidates.map((p) => ({
+        stokKodu: p.stokKodu || '',
+        stokAdi: p.stokAdi || '',
+      }))
+    )
+  );
+
+  const response = await fetch('/api/ai/label-scan', {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error('Etiket AI servisine erişilemedi');
+  }
+
+  const data = await response.json();
+  const parsed = data?.parsed;
+  if (!parsed?.stokKodu) return null;
+
+  return {
+    stokKodu: String(parsed.stokKodu || '').trim(),
+    stokAdi: String(parsed.stokAdi || '').trim(),
+    lotNumarasi: String(parsed.lotNumarasi || '').trim(),
+    miad: parseDateLike(String(parsed.miad || '').trim()),
+  };
+}
+
 
 interface AnaPanelProps {}
 
@@ -737,8 +794,18 @@ export default function AnaPanel(props: AnaPanelProps) {
     }
   };
 
-  const handleCameraOcrLabelScan = useCallback((ocrText: string) => {
-    const parsed = parseLabelText(ocrText, productCodes);
+  const handleCameraOcrLabelScan = useCallback(async ({ imageBlob, ocrText }: { imageBlob: Blob; ocrText: string }) => {
+    let parsed: { stokKodu: string; stokAdi: string; lotNumarasi: string; miad: string } | null = null;
+    try {
+      parsed = await parseLabelWithGemini(imageBlob, ocrText, productCodes);
+    } catch (error) {
+      malKabulLogger.warn('Gemini label parsing failed, falling back to OCR text parser', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    if (!parsed) {
+      parsed = parseLabelText(ocrText, productCodes);
+    }
     if (!parsed) {
       flashScanFeedback('error', 'Etiketten ürün kodu/adı tespit edilemedi.');
       playFeedback(true);
