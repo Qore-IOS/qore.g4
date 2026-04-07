@@ -14,7 +14,7 @@ import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from '@
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, doc, deleteDoc, getDocFromServer, writeBatch, Timestamp } from 'firebase/firestore';
 import type { DepoStokItem, Laboratory, MinMaxRule } from '@/lib/types';
-import { Loader2, Search, ListChecks, History, FileSpreadsheet, MoreVertical, Eye, AlertCircle, AlertTriangle, Upload, CheckCircle } from 'lucide-react';
+import { Loader2, Search, ListChecks, History, FileSpreadsheet, MoreVertical, Eye, AlertCircle, AlertTriangle, Upload, CheckCircle, Pencil, Check, X } from 'lucide-react';
 import { touchStockMetadata, useLabStock, useLabPools, useHospitals, useProductCodes, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { useToast } from '@/hooks/use-toast';
@@ -113,6 +113,11 @@ export default function LaboratuvarYonetimiPanel() {
   const [minMaxRules, setMinMaxRules] = useState<Record<string, MinMaxRule>>({});
   const [isDeletingGroup, setIsDeletingGroup] = useState<string | null>(null);
 
+  // Quantity edit states (admin only)
+  const [editingGroupKey, setEditingGroupKey] = useState<string | null>(null);
+  const [editQuantity, setEditQuantity] = useState<number>(0);
+  const [isSavingQuantity, setIsSavingQuantity] = useState(false);
+
   // Excel import states
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [parsedRows, setParsedRows] = useState<ParsedExcelRow[]>([]);
@@ -128,6 +133,7 @@ export default function LaboratuvarYonetimiPanel() {
   const { invalidateDepoStok } = useInvalidateQueries();
 
   const isLoading = labsLoading || productsLoading;
+  const isAdmin = isSuperAdmin || currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'admin_developer';
 
   // Derive product lookup maps from products query data
   const productNames = useMemo(() => {
@@ -370,6 +376,103 @@ export default function LaboratuvarYonetimiPanel() {
       });
     } finally {
       setIsDeletingGroup(null);
+    }
+  };
+
+  const handleStartEdit = (row: GroupedStockItem) => {
+    setEditingGroupKey(row.groupKey);
+    setEditQuantity(row.quantity);
+  };
+
+  const handleCancelEdit = () => {
+    setEditingGroupKey(null);
+    setEditQuantity(0);
+  };
+
+  const handleQuantityUpdate = async (groupKey: string) => {
+    const group = groupedMap[groupKey];
+    if (!group || !selectedLabId) return;
+
+    const currentQty = group.items.length;
+    const newQty = editQuantity;
+
+    if (newQty < 0 || !Number.isInteger(newQty)) {
+      toast({ title: 'Hata', description: 'Adet sıfır veya pozitif tam sayı olmalıdır.', variant: 'destructive' });
+      return;
+    }
+
+    if (newQty === currentQty) {
+      handleCancelEdit();
+      return;
+    }
+
+    setIsSavingQuantity(true);
+
+    try {
+      if (newQty > currentQty) {
+        // Add new documents
+        const toAdd = newQty - currentQty;
+        const referenceItem = group.items[0];
+        const BATCH_SIZE = 450;
+
+        for (let i = 0; i < toAdd; i += BATCH_SIZE) {
+          const batch = writeBatch(db);
+          const chunkSize = Math.min(BATCH_SIZE, toAdd - i);
+
+          for (let j = 0; j < chunkSize; j++) {
+            const docRef = doc(collection(db, 'depoStok'));
+            batch.set(docRef, {
+              stokKodu: referenceItem.stokKodu ?? group.stokKodu,
+              stokAdi: referenceItem.stokAdi ?? group.stokAdi,
+              lotNumarasi: referenceItem.lotNumarasi ?? group.lot ?? null,
+              miad: referenceItem.miad ?? null,
+              seriNumarasi: null,
+              isShipped: true,
+              hedefKurumId: selectedLabId,
+              hedefKurum: selectedLabName,
+              eklenmeTarihi: Timestamp.now(),
+              sevkTarihi: referenceItem.sevkTarihi ?? Timestamp.now(),
+              kaynak: 'admin_quantity_edit',
+            });
+          }
+          await batch.commit();
+        }
+
+        await touchStockMetadata();
+        await invalidateDepoStok();
+        toast({ title: 'Adet Güncellendi', description: `${toAdd} adet eklendi. Yeni toplam: ${newQty}` });
+      } else {
+        // Delete excess documents
+        const toRemove = currentQty - newQty;
+        const itemsToDelete = group.items.slice(0, toRemove).filter(item => item.id);
+
+        if (itemsToDelete.length === 0) {
+          toast({ title: 'Hata', description: 'Silinecek kayıt bulunamadı.', variant: 'destructive' });
+          return;
+        }
+
+        const BATCH_SIZE = 450;
+        for (let i = 0; i < itemsToDelete.length; i += BATCH_SIZE) {
+          const batch = writeBatch(db);
+          const chunk = itemsToDelete.slice(i, i + BATCH_SIZE);
+          for (const item of chunk) {
+            batch.delete(doc(db, 'depoStok', item.id!));
+          }
+          await batch.commit();
+        }
+
+        await touchStockMetadata();
+        await invalidateDepoStok();
+        toast({ title: 'Adet Güncellendi', description: `${toRemove} adet silindi. Yeni toplam: ${newQty}` });
+      }
+
+      handleCancelEdit();
+    } catch (err: unknown) {
+      const error = err as Error;
+      console.error('[QUANTITY-EDIT] Error:', error);
+      toast({ title: 'Güncelleme Hatası', description: error.message || 'Adet güncellenirken hata oluştu.', variant: 'destructive' });
+    } finally {
+      setIsSavingQuantity(false);
     }
   };
 
@@ -709,10 +812,48 @@ export default function LaboratuvarYonetimiPanel() {
                                   )}
                                 </div>
                               </td>
-                              <td onClick={() => { if (row.firstId) goToDetail(row.firstId); }} className={`px-3 py-3 text-center cursor-pointer ${row.firstId ? '' : 'opacity-60'}`}>
-                                <span className="inline-flex items-center justify-center min-w-[48px] px-2 py-1 rounded-lg bg-[var(--dashboard-surface)] border border-[var(--dashboard-stroke)] shadow-sm text-xs font-bold text-[var(--dashboard-text)]">
-                                  {row.quantity} {row.anaBirim}
-                                </span>
+                              <td className={`px-3 py-3 text-center ${editingGroupKey === row.groupKey ? '' : 'cursor-pointer'} ${row.firstId ? '' : 'opacity-60'}`}
+                                onClick={() => { if (editingGroupKey !== row.groupKey && row.firstId) goToDetail(row.firstId); }}
+                              >
+                                {editingGroupKey === row.groupKey ? (
+                                  <div className="inline-flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                                    <Input
+                                      type="number"
+                                      min={0}
+                                      value={editQuantity}
+                                      onChange={(e) => setEditQuantity(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+                                      className="w-20 h-8 text-center text-xs font-bold"
+                                      autoFocus
+                                      disabled={isSavingQuantity}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter') handleQuantityUpdate(row.groupKey);
+                                        if (e.key === 'Escape') handleCancelEdit();
+                                      }}
+                                    />
+                                    <Button
+                                      size="icon"
+                                      variant="ghost"
+                                      className="h-7 w-7 text-green-600 hover:text-green-700"
+                                      onClick={() => handleQuantityUpdate(row.groupKey)}
+                                      disabled={isSavingQuantity}
+                                    >
+                                      {isSavingQuantity ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                                    </Button>
+                                    <Button
+                                      size="icon"
+                                      variant="ghost"
+                                      className="h-7 w-7 text-red-600 hover:text-red-700"
+                                      onClick={handleCancelEdit}
+                                      disabled={isSavingQuantity}
+                                    >
+                                      <X className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </div>
+                                ) : (
+                                  <span className="inline-flex items-center justify-center min-w-[48px] px-2 py-1 rounded-lg bg-[var(--dashboard-surface)] border border-[var(--dashboard-stroke)] shadow-sm text-xs font-bold text-[var(--dashboard-text)]">
+                                    {row.quantity} {row.anaBirim}
+                                  </span>
+                                )}
                               </td>
                               <td className="px-3 py-3">
                                 <div className="flex items-center gap-1.5 flex-wrap">
@@ -748,6 +889,12 @@ export default function LaboratuvarYonetimiPanel() {
                                       <Eye className="mr-2 h-4 w-4" />
                                       Detayları Görüntüle
                                     </DropdownMenuItem>
+                                    {isAdmin && (
+                                      <DropdownMenuItem onClick={() => handleStartEdit(row)}>
+                                        <Pencil className="mr-2 h-4 w-4" />
+                                        Adet Düzenle
+                                      </DropdownMenuItem>
+                                    )}
                                     <DropdownMenuSeparator />
                                     <DropdownMenuItem
                                       onClick={() => handleDeleteGroup(row.groupKey)}
