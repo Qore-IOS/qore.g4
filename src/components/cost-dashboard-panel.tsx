@@ -147,7 +147,9 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
   const [sessions, setSessions] = useState<SayimSession[]>([]);
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('12m');
   const [selectedBrand, setSelectedBrand] = useState<string | null>(null);
-  const { currentCompanyId, isSuperAdmin } = useAuth();
+  const authCtx = useAuth();
+  const companyId = authCtx.currentCompanyId;
+  const superAdmin = authCtx.isSuperAdmin;
 
   useEffect(() => {
     const load = async () => {
@@ -160,7 +162,7 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
         ]);
         setRates(ratesData);
         const allSessions = sessionsSnap.docs.map(d => ({ id: d.id, ...d.data() } as SayimSession));
-        setSessions(filterByCompanyScope(allSessions, currentCompanyId, isSuperAdmin));
+        setSessions(filterByCompanyScope(allSessions, companyId, superAdmin));
       } catch (err) {
         console.error('Error loading cost dashboard:', err);
         try {
@@ -173,7 +175,7 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
     };
 
     load();
-  }, [currentCompanyId, isSuperAdmin]);
+  }, [companyId, superAdmin]);
 
   const productMap = useMemo(() => {
     const map = new Map<string, ProductCode>();
@@ -381,11 +383,139 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
     return products.filter(p => p.cost > 0).sort((a, b) => b.cost - a.cost);
   }, [latestPerLocation, selectedBrand, productMap, rates, currency]);
 
-  const monthlyBudget = useMemo(() => {
-    const local = Number(localStorage.getItem('cost_dashboard_budget') || 0);
-    if (local > 0) return local;
-    return totalCost * 0.9;
-  }, [totalCost]);
+  // ---- Brand detail: location breakdown ----
+  const brandLocationBreakdown = useMemo(() => {
+    if (!rates || !selectedBrand) return [];
+    return latestPerLocation.map(session => {
+      let cost = 0;
+      let productCount = 0;
+      session.items
+        .filter(item => (item.marka || 'Diğer') === selectedBrand)
+        .forEach(item => {
+          const product = productMap.get(item.stokKodu);
+          if (!product?.cost || !product?.ambalajDegeri) return;
+          const totalTest = (item.stokAdedi * product.ambalajDegeri) + item.cihazUstuAdedi;
+          const costPerTest = product.cost / product.ambalajDegeri;
+          const totalNative = costPerTest * totalTest;
+          const productCurrency = (product.currency || 'TRY') as Currency;
+          let costEUR: number;
+          switch (productCurrency) {
+            case 'EUR': costEUR = totalNative; break;
+            case 'USD': costEUR = totalNative / (rates.USD || 1); break;
+            case 'TRY': costEUR = totalNative / (rates.TRY || 1); break;
+            default: costEUR = totalNative / (rates.TRY || 1);
+          }
+          cost += costEUR * (rates[currency] || 1);
+          productCount++;
+        });
+      return { name: session.locationName, type: session.locationType, cost, productCount };
+    }).filter(l => l.cost > 0).sort((a, b) => b.cost - a.cost);
+  }, [latestPerLocation, selectedBrand, productMap, rates, currency]);
+
+  // ---- Brand detail: product group breakdown ----
+  const brandGroupBreakdown = useMemo(() => {
+    if (!rates || !selectedBrand) return [];
+    const map = new Map<string, number>();
+    latestPerLocation.forEach(session => {
+      session.items
+        .filter(item => (item.marka || 'Diğer') === selectedBrand)
+        .forEach(item => {
+          const product = productMap.get(item.stokKodu);
+          if (!product?.cost || !product?.ambalajDegeri) return;
+          const group = product.urunGrubu === 'kit' ? 'Kit'
+            : product.urunGrubu === 'sarf' ? 'Sarf Malzeme'
+            : product.urunGrubu === 'yedek_parca' ? 'Yedek Parça'
+            : 'Diğer';
+          const totalTest = (item.stokAdedi * product.ambalajDegeri) + item.cihazUstuAdedi;
+          const costPerTest = product.cost / product.ambalajDegeri;
+          const totalNative = costPerTest * totalTest;
+          const productCurrency = (product.currency || 'TRY') as Currency;
+          let costEUR: number;
+          switch (productCurrency) {
+            case 'EUR': costEUR = totalNative; break;
+            case 'USD': costEUR = totalNative / (rates.USD || 1); break;
+            case 'TRY': costEUR = totalNative / (rates.TRY || 1); break;
+            default: costEUR = totalNative / (rates.TRY || 1);
+          }
+          const cost = costEUR * (rates[currency] || 1);
+          map.set(group, (map.get(group) || 0) + cost);
+        });
+    });
+    return Array.from(map.entries())
+      .map(([name, cost]) => ({ name, cost }))
+      .sort((a, b) => b.cost - a.cost);
+  }, [latestPerLocation, selectedBrand, productMap, rates, currency]);
+
+  // ---- Brand detail: monthly trend ----
+  const brandMonthlyTrend = useMemo(() => {
+    if (!rates || !selectedBrand || sessions.length === 0) return [];
+    const now = new Date();
+    const startDate = subMonths(now, 12);
+    const monthRange = eachMonthOfInterval({ start: startDate, end: now });
+
+    return monthRange.map(monthStart => {
+      const monthEndDate = endOfMonth(monthStart);
+      const sessionsUpToMonth = sessions.filter(s => {
+        const d = getSessionDate(s);
+        return d && d <= monthEndDate;
+      });
+      const latestPerLoc = getLatestPerLocation(sessionsUpToMonth);
+
+      let cost = 0;
+      latestPerLoc.forEach(session => {
+        session.items
+          .filter(item => (item.marka || 'Diğer') === selectedBrand)
+          .forEach(item => {
+            const product = productMap.get(item.stokKodu);
+            if (!product?.cost || !product?.ambalajDegeri) return;
+            const totalTest = (item.stokAdedi * product.ambalajDegeri) + item.cihazUstuAdedi;
+            const costPerTest = product.cost / product.ambalajDegeri;
+            const totalNative = costPerTest * totalTest;
+            const productCurrency = (product.currency || 'TRY') as Currency;
+            let costEUR: number;
+            switch (productCurrency) {
+              case 'EUR': costEUR = totalNative; break;
+              case 'USD': costEUR = totalNative / (rates.USD || 1); break;
+              case 'TRY': costEUR = totalNative / (rates.TRY || 1); break;
+              default: costEUR = totalNative / (rates.TRY || 1);
+            }
+            cost += costEUR * (rates[currency] || 1);
+          });
+      });
+      return { month: format(monthStart, 'MMM yy', { locale: tr }), cost };
+    });
+  }, [sessions, selectedBrand, rates, productMap, currency]);
+
+  // ---- Brand detail: average unit cost ----
+  const brandAvgUnitCost = useMemo(() => {
+    if (!rates || !selectedBrand) return 0;
+    let totalCost = 0;
+    let totalUnits = 0;
+    latestPerLocation.forEach(session => {
+      session.items
+        .filter(item => (item.marka || 'Diğer') === selectedBrand)
+        .forEach(item => {
+          const product = productMap.get(item.stokKodu);
+          if (!product?.cost || !product?.ambalajDegeri) return;
+          const totalTest = (item.stokAdedi * product.ambalajDegeri) + item.cihazUstuAdedi;
+          const costPerTest = product.cost / product.ambalajDegeri;
+          const totalNative = costPerTest * totalTest;
+          const productCurrency = (product.currency || 'TRY') as Currency;
+          let costEUR: number;
+          switch (productCurrency) {
+            case 'EUR': costEUR = totalNative; break;
+            case 'USD': costEUR = totalNative / (rates.USD || 1); break;
+            case 'TRY': costEUR = totalNative / (rates.TRY || 1); break;
+            default: costEUR = totalNative / (rates.TRY || 1);
+          }
+          totalCost += costEUR * (rates[currency] || 1);
+          totalUnits += item.stokAdedi + (item.cihazUstuAdedi > 0 ? 1 : 0);
+        });
+    });
+    return totalUnits > 0 ? totalCost / totalUnits : 0;
+  }, [latestPerLocation, selectedBrand, productMap, rates, currency]);
+
+  // ---- RENDER ----
 
   if (isLoading) {
     return (
@@ -401,6 +531,7 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
     return (
       <div className="cihaz-shell min-h-screen">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-6 sm:pt-8 pb-24">
+          {/* Header */}
           <div className="flex items-center gap-3 mb-6">
             <button
               onClick={() => setSelectedBrand(null)}
@@ -410,32 +541,186 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
             </button>
             <div>
               <h1 className="text-xl font-bold text-[var(--dashboard-text)]">{selectedBrand}</h1>
-              <p className="text-xs text-[var(--dashboard-muted)]">{brandProducts.length} ürün · Toplam {fmtCurrency(brandTotal, sym)}</p>
+              <p className="text-xs text-[var(--dashboard-muted)]">{brandProducts.length} ürün · {brandLocationBreakdown.length} konum</p>
             </div>
           </div>
 
-          <div className="space-y-2">
-            {brandProducts.map((p, i) => (
-              <div key={`${p.stokKodu}-${p.locationName}-${i}`} className="cihaz-card p-4 flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-[var(--dashboard-text)]">{p.stokAdi}</p>
-                  <p className="text-[11px] text-[var(--dashboard-muted)] mt-0.5">
-                    {p.stokKodu} · Stok: {p.stokAdedi}
-                    {p.cihazUstuAdedi > 0 && ` · Cihaz Üstü: ${p.cihazUstuAdedi}`}
-                    {latestPerLocation.length > 1 && ` · ${p.locationName}`}
-                  </p>
-                </div>
-                <div className="text-right shrink-0">
-                  <span className="text-sm font-semibold text-[var(--dashboard-accent)]">{fmtCurrencyDetailed(p.cost, sym)}</span>
-                  {p.nativeCurrency !== currency && (
-                    <p className="text-[10px] text-[var(--dashboard-muted)]">{CURRENCY_SYMBOLS[p.nativeCurrency as Currency]}{p.nativeCurrency}</p>
-                  )}
-                </div>
+          {/* Summary cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-5">
+            <div className="cihaz-card-strong p-4">
+              <div className="flex items-center gap-1.5 mb-1">
+                <Wallet className="w-3.5 h-3.5 text-[var(--dashboard-accent)]" />
+                <span className="text-[10px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider">Toplam Maliyet</span>
               </div>
-            ))}
-            {brandProducts.length === 0 && (
-              <div className="cihaz-card p-8 text-center text-sm text-[var(--dashboard-muted)]">Bu markada veri yok.</div>
-            )}
+              <p className="text-xl font-bold text-[var(--dashboard-accent)]">{fmtCurrency(brandTotal, sym)}</p>
+              {consolidatedCost > 0 && (
+                <p className="text-[10px] text-[var(--dashboard-muted)] mt-0.5">
+                  Toplam maliyetin %{((brandTotal / consolidatedCost) * 100).toFixed(1)}&apos;i
+                </p>
+              )}
+            </div>
+            <div className="cihaz-card-strong p-4">
+              <div className="flex items-center gap-1.5 mb-1">
+                <BarChart3 className="w-3.5 h-3.5 text-[var(--dashboard-accent)]" />
+                <span className="text-[10px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider">Ort. Birim Maliyet</span>
+              </div>
+              <p className="text-xl font-bold text-[var(--dashboard-accent)]">{fmtCurrencyDetailed(brandAvgUnitCost, sym)}</p>
+              <p className="text-[10px] text-[var(--dashboard-muted)] mt-0.5">birim başına ortalama</p>
+            </div>
+            <div className="cihaz-card-strong p-4 col-span-2 sm:col-span-1">
+              <div className="flex items-center gap-1.5 mb-1">
+                <Layers className="w-3.5 h-3.5 text-[var(--dashboard-accent)]" />
+                <span className="text-[10px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider">Ürün Sayısı</span>
+              </div>
+              <p className="text-xl font-bold text-[var(--dashboard-accent)]">{brandProducts.length}</p>
+              <p className="text-[10px] text-[var(--dashboard-muted)] mt-0.5">{brandLocationBreakdown.length} konumda</p>
+            </div>
+          </div>
+
+          {/* Location & Group breakdown side by side */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
+            {/* Per-location cost */}
+            <div className="cihaz-card-strong p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <MapPin className="w-4 h-4 text-[var(--dashboard-accent)]" />
+                <span className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider">Konum Bazlı Maliyet</span>
+              </div>
+              <div className="space-y-2">
+                {brandLocationBreakdown.map(loc => (
+                  <div key={loc.name} className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-[var(--dashboard-surface-2)]/50">
+                    <div className="min-w-0">
+                      <span className="text-sm font-semibold text-[var(--dashboard-text)] truncate block">{loc.name}</span>
+                      <p className="text-[10px] text-[var(--dashboard-muted)]">
+                        {loc.type === 'lab' ? 'Lab' : 'Depo'} · {loc.productCount} ürün
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0 ml-3">
+                      <span className="text-sm font-bold text-[var(--dashboard-accent)]">{fmtCurrency(loc.cost, sym)}</span>
+                      {brandTotal > 0 && (
+                        <p className="text-[10px] text-[var(--dashboard-muted)]">%{((loc.cost / brandTotal) * 100).toFixed(1)}</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {brandLocationBreakdown.length === 0 && (
+                  <p className="text-center py-4 text-sm text-[var(--dashboard-muted)]">Veri yok</p>
+                )}
+              </div>
+            </div>
+
+            {/* Per-group cost */}
+            <div className="cihaz-card-strong p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <Layers className="w-4 h-4 text-[var(--dashboard-accent)]" />
+                <span className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider">Ürün Grubu Kırılımı</span>
+              </div>
+              <div className="space-y-3">
+                {brandGroupBreakdown.length > 0 ? brandGroupBreakdown.map(g => {
+                  const pct = brandTotal > 0 ? (g.cost / brandTotal) * 100 : 0;
+                  return (
+                    <div key={g.name}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-sm font-medium text-[var(--dashboard-text)]">{g.name}</span>
+                        <span className="text-sm font-semibold text-[var(--dashboard-accent)]">{fmtCurrency(g.cost, sym)}</span>
+                      </div>
+                      <div className="h-2 rounded-full bg-[var(--dashboard-surface-2)] overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-[var(--dashboard-accent)] transition-all duration-500"
+                          style={{ width: `${Math.min(pct, 100)}%` }}
+                        />
+                      </div>
+                      <p className="text-[10px] text-[var(--dashboard-muted)] mt-0.5">Marka maliyetinin %{pct.toFixed(1)}&apos;i</p>
+                    </div>
+                  );
+                }) : (
+                  <p className="text-center py-4 text-sm text-[var(--dashboard-muted)]">Ürün grubu bilgisi yok</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Monthly trend chart */}
+          <div className="cihaz-card-strong p-5 mb-5">
+            <div className="flex items-center gap-2 mb-4">
+              <TrendingUp className="w-4 h-4 text-[var(--dashboard-accent)]" />
+              <span className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider">Yıllık Maliyet Trendi</span>
+            </div>
+            <div className="h-[200px]">
+              {brandMonthlyTrend.some(m => m.cost > 0) ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={brandMonthlyTrend}>
+                    <XAxis
+                      dataKey="month"
+                      stroke="var(--dashboard-muted)"
+                      fontSize={11}
+                      tickLine={false}
+                      axisLine={false}
+                    />
+                    <YAxis
+                      stroke="var(--dashboard-muted)"
+                      fontSize={11}
+                      tickLine={false}
+                      axisLine={false}
+                      tickFormatter={(v) => `${sym}${(v / 1000).toFixed(0)}k`}
+                      width={55}
+                    />
+                    <RechartsTooltip
+                      contentStyle={{
+                        background: 'var(--dashboard-surface)',
+                        border: '1px solid var(--dashboard-stroke)',
+                        borderRadius: '12px',
+                        fontSize: '12px',
+                        boxShadow: 'var(--dashboard-raised-soft)',
+                      }}
+                      formatter={(value: number) => [fmtCurrencyDetailed(value, sym), 'Maliyet']}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="cost"
+                      stroke="var(--dashboard-accent)"
+                      strokeWidth={2.5}
+                      dot={{ r: 4, fill: 'var(--dashboard-accent)', stroke: 'var(--dashboard-surface)', strokeWidth: 2 }}
+                      activeDot={{ r: 6 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex items-center justify-center h-full text-sm text-[var(--dashboard-muted)]">
+                  Bu marka için trend verisi yok.
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Product list */}
+          <div className="cihaz-card-strong p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <PieChartIcon className="w-4 h-4 text-[var(--dashboard-accent)]" />
+              <span className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider">Ürün Listesi</span>
+            </div>
+            <div className="space-y-2">
+              {brandProducts.map((p, i) => (
+                <div key={`${p.stokKodu}-${p.locationName}-${i}`} className="flex items-start justify-between gap-3 px-3 py-2.5 rounded-xl bg-[var(--dashboard-surface-2)]/50">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-[var(--dashboard-text)]">{p.stokAdi}</p>
+                    <p className="text-[11px] text-[var(--dashboard-muted)] mt-0.5">
+                      {p.stokKodu} · Stok: {p.stokAdedi}
+                      {p.cihazUstuAdedi > 0 && ` · Cihaz Üstü: ${p.cihazUstuAdedi}`}
+                      {latestPerLocation.length > 1 && ` · ${p.locationName}`}
+                    </p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className="text-sm font-semibold text-[var(--dashboard-accent)]">{fmtCurrencyDetailed(p.cost, sym)}</span>
+                    {p.nativeCurrency !== currency && (
+                      <p className="text-[10px] text-[var(--dashboard-muted)]">{CURRENCY_SYMBOLS[p.nativeCurrency as Currency]}{p.nativeCurrency}</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {brandProducts.length === 0 && (
+                <div className="p-8 text-center text-sm text-[var(--dashboard-muted)]">Bu markada veri yok.</div>
+              )}
+            </div>
           </div>
         </div>
       </div>
