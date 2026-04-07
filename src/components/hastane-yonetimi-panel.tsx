@@ -80,20 +80,20 @@ function getCoverageInfoForRow(
   minMaxRules: Record<string, MinMaxRule>,
   lotTrackedStockCodes: Set<string>,
   sourceRows: GroupedStockItem[]
-): { label: string; severity: 'good' | 'warning' | 'critical' | 'unknown'; coverageDays: number; dailyNeed: number } {
+): { label: string; severity: 'good' | 'warning' | 'critical' | 'unknown'; coverageDays: number; dailyNeed: number; min: number | null; max: number | null } {
   const rule = minMaxRules[row.stokKodu];
-  if (!rule || !rule.max || !rule.maxGun) return { label: 'Min/Max tanımsız', severity: 'unknown', coverageDays: 0, dailyNeed: 0 };
+  if (!rule || !rule.max || !rule.maxGun) return { label: 'Min/Max tanımsız', severity: 'unknown', coverageDays: 0, dailyNeed: 0, min: null, max: null };
   const stockForCoverage = lotTrackedStockCodes.has(row.stokKodu)
     ? row.quantity
     : sourceRows.reduce((acc, r) => r.stokKodu === row.stokKodu ? acc + r.quantity : acc, 0);
   const periodDays = Math.floor(rule.maxGun);
-  if (periodDays <= 0) return { label: 'Hesaplanamadı', severity: 'unknown', coverageDays: 0, dailyNeed: 0 };
+  if (periodDays <= 0) return { label: 'Hesaplanamadı', severity: 'unknown', coverageDays: 0, dailyNeed: 0, min: rule.min ?? null, max: rule.max ?? null };
   const dailyNeed = rule.max / periodDays;
-  if (dailyNeed <= 0) return { label: 'Hesaplanamadı', severity: 'unknown', coverageDays: 0, dailyNeed: 0 };
+  if (dailyNeed <= 0) return { label: 'Hesaplanamadı', severity: 'unknown', coverageDays: 0, dailyNeed: 0, min: rule.min ?? null, max: rule.max ?? null };
   const coverageDays = Math.floor(stockForCoverage / dailyNeed);
-  if (coverageDays <= 3) return { label: `${coverageDays} gün`, severity: 'critical', coverageDays, dailyNeed };
-  if (coverageDays <= 10) return { label: `${coverageDays} gün`, severity: 'warning', coverageDays, dailyNeed };
-  return { label: `${coverageDays} gün yeter`, severity: 'good', coverageDays, dailyNeed };
+  if (coverageDays <= 3) return { label: `${coverageDays} gün`, severity: 'critical', coverageDays, dailyNeed, min: rule.min ?? null, max: rule.max ?? null };
+  if (coverageDays <= 10) return { label: `${coverageDays} gün`, severity: 'warning', coverageDays, dailyNeed, min: rule.min ?? null, max: rule.max ?? null };
+  return { label: `${coverageDays} gün yeter`, severity: 'good', coverageDays, dailyNeed, min: rule.min ?? null, max: rule.max ?? null };
 }
 
 function getRiskyBoxes(miadInfo: { days: number }, coverageInfo: { severity: string; coverageDays: number; dailyNeed: number }) {
@@ -1008,19 +1008,26 @@ export default function LaboratuvarYonetimiPanel() {
                                 )}
                               </td>
                               <td className="px-3 py-3">
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
-                                    coverageInfo.severity === 'good' ? 'bg-emerald-100 text-emerald-700' :
-                                      coverageInfo.severity === 'warning' ? 'bg-orange-100 text-orange-700' :
-                                        coverageInfo.severity === 'critical' ? 'bg-red-100 text-red-700' :
-                                          'bg-slate-100 text-slate-500'
-                                  }`}>
-                                    {coverageInfo.label}
-                                  </span>
-                                  {riskyBoxes > 0 && (
-                                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800">
-                                      <AlertTriangle className="h-3 w-3" />
-                                      {riskyBoxes} kutu riskli
+                                <div className="flex flex-col gap-1">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                                      coverageInfo.severity === 'good' ? 'bg-emerald-100 text-emerald-700' :
+                                        coverageInfo.severity === 'warning' ? 'bg-orange-100 text-orange-700' :
+                                          coverageInfo.severity === 'critical' ? 'bg-red-100 text-red-700' :
+                                            'bg-slate-100 text-slate-500'
+                                    }`}>
+                                      {coverageInfo.label}
+                                    </span>
+                                    {riskyBoxes > 0 && (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800">
+                                        <AlertTriangle className="h-3 w-3" />
+                                        {riskyBoxes} kutu riskli
+                                      </span>
+                                    )}
+                                  </div>
+                                  {coverageInfo.min != null && coverageInfo.max != null && (
+                                    <span className="text-[10px] text-[var(--dashboard-muted)]">
+                                      Min: {coverageInfo.min} / Max: {coverageInfo.max}
                                     </span>
                                   )}
                                 </div>
