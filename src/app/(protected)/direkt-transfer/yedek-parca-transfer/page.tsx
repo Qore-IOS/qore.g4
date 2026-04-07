@@ -2390,13 +2390,14 @@ export default function YedekParcaTransferPage() {
     setHistoryPage(0);
   }, [historyActionFilter, historySearchQuery, historyPageSize]);
 
+  const totalHistoryPages = Math.max(1, Math.ceil(filteredHistoryLogs.length / historyPageSize));
+
   useEffect(() => {
     if (historyPage > totalHistoryPages - 1) {
       setHistoryPage(Math.max(0, totalHistoryPages - 1));
     }
   }, [historyPage, totalHistoryPages]);
 
-  const totalHistoryPages = Math.max(1, Math.ceil(filteredHistoryLogs.length / historyPageSize));
   const paginatedHistoryLogs = useMemo(() => {
     const safePage = Math.min(historyPage, Math.max(0, totalHistoryPages - 1));
     const start = safePage * historyPageSize;
