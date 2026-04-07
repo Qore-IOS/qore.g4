@@ -326,46 +326,30 @@ export default function AplikasyonTutanakPDFButton({ device, hospital, actionRec
 
       currentY = (doc as any).lastAutoTable.finalY + 15;
 
-      // --- ISLEM TURU SECTION ---
-      if (actionRecord.islemTuru) {
-        doc.setFont(FONT, 'bold');
-        doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
-        doc.line(padX, currentY, pageW - padX, currentY);
-        doc.text(txt('İşlem Türü', useTurkish), padX, currentY + 12);
-        currentY += 18;
+      // --- ISLEM TIPI VE TURU SECTION ---
+      doc.setFont(FONT, 'bold');
+      doc.setFontSize(10);
+      doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
+      doc.line(padX, currentY, pageW - padX, currentY);
+      doc.text(txt('İşlem Tipi ve Türü', useTurkish), padX, currentY + 12);
+      currentY += 18;
+      doc.setFont(FONT, 'normal');
 
-        autoTable(doc, {
-          body: [[txt('İşlem Türü:', useTurkish), txt(ISLEM_TURU_LABELS[actionRecord.islemTuru] || '-', useTurkish)]],
-          startY: currentY,
-          theme: 'plain',
-          styles: { font: FONT, fontSize: 10, cellPadding: { top: 3, bottom: 3 } },
-          columnStyles: { 0: { fontStyle: 'bold', cellWidth: 100 } },
-          margin: { left: padX, right: padX },
-        });
+      autoTable(doc, {
+        body: [
+          [txt('İşlem Tipi:', useTurkish), txt('Aplikasyon', useTurkish)],
+          [txt('İşlem Türü:', useTurkish), txt(ISLEM_TURU_LABELS[actionRecord.islemTuru || ''] || '-', useTurkish)],
+        ],
+        startY: currentY,
+        theme: 'plain',
+        styles: { font: FONT, fontSize: 10, cellPadding: { top: 3, bottom: 3 } },
+        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 100 } },
+        margin: { left: padX, right: padX },
+      });
 
-        currentY = (doc as any).lastAutoTable.finalY + 15;
-      }
+      currentY = (doc as any).lastAutoTable.finalY + 15;
 
-      // --- ACIKLAMA SECTION ---
-      if (actionRecord.aciklama?.trim()) {
-        doc.setFont(FONT, 'bold');
-        doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
-        doc.line(padX, currentY, pageW - padX, currentY);
-        doc.text(txt('Açıklama', useTurkish), padX, currentY + 12);
-        currentY += 18;
-
-        autoTable(doc, {
-          body: [[txt(actionRecord.aciklama, useTurkish)]],
-          startY: currentY,
-          theme: 'grid',
-          styles: { font: FONT, fontSize: 10, cellPadding: { top: 6, bottom: 6 } },
-          margin: { left: padX, right: padX },
-        });
-
-        currentY = (doc as any).lastAutoTable.finalY + 15;
-      }
-
-      // --- ISLEM TURUNE OZEL DETAYLAR ---
+      // --- ISLEM TURUNE OZEL DETAYLAR (arıza/periyodik - açıklamadan önce) ---
       const hasPeriyodikDetay = actionRecord.islemTuru === 'periyodik_bakim' && (actionRecord.selectedMaintenanceTasks?.length ?? 0) > 0;
       const hasArizaDetay = actionRecord.islemTuru === 'ariza' && (Boolean(actionRecord.selectedFaultName) || (actionRecord.selectedTests?.length ?? 0) > 0);
 
@@ -405,6 +389,25 @@ export default function AplikasyonTutanakPDFButton({ device, hospital, actionRec
           theme: 'grid',
           styles: { font: FONT, fontSize: 10, cellPadding: { top: 5, bottom: 5 } },
           columnStyles: { 0: { fontStyle: 'bold', cellWidth: 160 } },
+          margin: { left: padX, right: padX },
+        });
+
+        currentY = (doc as any).lastAutoTable.finalY + 15;
+      }
+
+      // --- ACIKLAMA SECTION ---
+      if (actionRecord.aciklama?.trim()) {
+        doc.setFont(FONT, 'bold');
+        doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
+        doc.line(padX, currentY, pageW - padX, currentY);
+        doc.text(txt('Açıklama', useTurkish), padX, currentY + 12);
+        currentY += 18;
+
+        autoTable(doc, {
+          body: [[txt(actionRecord.aciklama, useTurkish)]],
+          startY: currentY,
+          theme: 'grid',
+          styles: { font: FONT, fontSize: 10, cellPadding: { top: 6, bottom: 6 } },
           margin: { left: padX, right: padX },
         });
 
@@ -521,35 +524,42 @@ export default function AplikasyonTutanakPDFButton({ device, hospital, actionRec
       const finalY = (doc as any).lastAutoTable.finalY;
 
       // --- ADD SIGNATURES ---
-      const signatureY = finalY + 40;
-      if (signatureY < pageH - 140) {
-          doc.setFont(FONT, 'bold');
-          doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
-          doc.line(padX, signatureY - 15, pageW - padX, signatureY - 15);
-          doc.text(txt('İmzalar', useTurkish), padX, signatureY - 3);
+      // Signatures require ~140pt: if not enough space on current page, start a new page
+      let sigY = finalY + 40;
+      if (sigY > pageH - 140) {
+        doc.addPage();
+        doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
+        doc.setLineWidth(2);
+        doc.rect(padX / 2, padX / 2, pageW - padX, pageH - padX);
+        sigY = 60;
+      }
 
-          doc.setFont(FONT, 'normal');
-          doc.setFontSize(10);
+      doc.setFont(FONT, 'bold');
+      doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
+      doc.line(padX, sigY - 15, pageW - padX, sigY - 15);
+      doc.text(txt('İmzalar', useTurkish), padX, sigY - 3);
 
-          // Personnel signature with name
-          doc.text(txt('İşlemi Yapan Personel', useTurkish), padX, signatureY + 15);
-          doc.setFont(FONT, 'bold');
-          doc.text(txt(actionRecord.createdByName, useTurkish), padX, signatureY + 28);
-          doc.setFont(FONT, 'normal');
-          doc.line(padX, signatureY + 32, padX + 150, signatureY + 32);
-          if (actionRecord.personnelSignature) {
-            doc.addImage(actionRecord.personnelSignature, 'PNG', padX, signatureY + 37, 150, 40, undefined, 'FAST');
-          }
+      doc.setFont(FONT, 'normal');
+      doc.setFontSize(10);
 
-          // Technician signature with name
-          doc.text('Teknisyen', pageW / 2 + 20, signatureY + 15);
-          doc.setFont(FONT, 'bold');
-          doc.text(txt(actionRecord.technicianName || '-', useTurkish), pageW / 2 + 20, signatureY + 28);
-          doc.setFont(FONT, 'normal');
-          doc.line(pageW / 2 + 20, signatureY + 32, pageW / 2 + 170, signatureY + 32);
-          if (actionRecord.technicianSignature) {
-            doc.addImage(actionRecord.technicianSignature, 'PNG', pageW / 2 + 20, signatureY + 37, 150, 40, undefined, 'FAST');
-          }
+      // Personnel signature with name
+      doc.text(txt('İşlemi Yapan Personel', useTurkish), padX, sigY + 15);
+      doc.setFont(FONT, 'bold');
+      doc.text(txt(actionRecord.createdByName, useTurkish), padX, sigY + 28);
+      doc.setFont(FONT, 'normal');
+      doc.line(padX, sigY + 32, padX + 150, sigY + 32);
+      if (actionRecord.personnelSignature) {
+        doc.addImage(actionRecord.personnelSignature, 'PNG', padX, sigY + 37, 150, 40, undefined, 'FAST');
+      }
+
+      // Technician signature with name
+      doc.text('Teknisyen', pageW / 2 + 20, sigY + 15);
+      doc.setFont(FONT, 'bold');
+      doc.text(txt(actionRecord.technicianName || '-', useTurkish), pageW / 2 + 20, sigY + 28);
+      doc.setFont(FONT, 'normal');
+      doc.line(pageW / 2 + 20, sigY + 32, pageW / 2 + 170, sigY + 32);
+      if (actionRecord.technicianSignature) {
+        doc.addImage(actionRecord.technicianSignature, 'PNG', pageW / 2 + 20, sigY + 37, 150, 40, undefined, 'FAST');
       }
 
       doc.save(`AplikasyonFormu_${device.seriNumarasi}_${actionRecord.id.substring(0,6)}.pdf`);

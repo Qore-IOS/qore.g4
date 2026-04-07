@@ -1448,7 +1448,7 @@ export default function YedekParcaTransferPage() {
           anaBirim: editingDepoGroup.anaBirim || 'Adet',
           serialNumber: '',
           quantity: nextNonSerialTotal,
-          address: '',
+          address: editingDepoGroup.entries.find(e => (e.address || '').trim())?.address || '',
           cihazGrubu: editingDepoGroup.cihazGrubu || '',
           createdAt: Timestamp.fromDate(now),
           createdByUid: currentUserProfile?.uid || '',
@@ -2833,7 +2833,7 @@ export default function YedekParcaTransferPage() {
                         {group.cihazGrubu && <span className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-medium flex-shrink-0" style={{ background: 'rgba(245,158,11,.10)', color: '#B45309' }}>{group.cihazGrubu}</span>}
                       </div>
                       <p className="text-[10px] font-mono" style={{ color: 'var(--dashboard-muted)' }}>{group.stokKodu} · {format(group.earliestDate, 'dd.MM.yyyy', { locale: tr })}</p>
-                      <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>Adres: {group.entries.find(e => (e.address || '').trim())?.address || '—'}</p>
+                      <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>Adres: {[...new Set(group.entries.map(e => (e.address || '').trim()).filter(Boolean))].join(', ') || '—'}</p>
                     </div>
                     <div className="flex items-center gap-1.5 flex-shrink-0">
                       <span className="cihaz-pressed px-2 py-0.5 text-xs font-bold" style={{ borderRadius: 8, color: 'var(--dashboard-text)' }}>{group.totalQuantity}</span>
