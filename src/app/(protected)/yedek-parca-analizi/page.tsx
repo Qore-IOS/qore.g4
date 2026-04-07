@@ -107,8 +107,9 @@ export default function YedekParcaAnaliziPage() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [transferSnap, hospitalsSnap, assignmentsSnap, devicesSnap] = await Promise.all([
+        const [useOnDeviceSnap, borrowedPartSnap, hospitalsSnap, assignmentsSnap, devicesSnap] = await Promise.all([
           getDocs(query(collection(db, 'sparePartTransferLogs'), where('action', '==', 'use_on_device'))),
+          getDocs(query(collection(db, 'sparePartTransferLogs'), where('action', '==', 'borrowed_part'))),
           getDocs(collection(db, 'hospitals')),
           getDocs(collection(db, 'hospitalDeviceAssignments')),
           getDocs(collection(db, 'devices')),
@@ -149,8 +150,7 @@ export default function YedekParcaAnaliziPage() {
         });
         setDeviceLabMap(dlMap);
 
-        // Transfer loglarını şirketin cihazlarına göre filtrele (eski kayıtlarda companyId olmayabilir)
-        const allLogs = transferSnap.docs.map((d) => {
+        const mapLog = (d: any) => {
           const data = d.data();
           return {
             id: d.id, action: data.action, stokKodu: data.stokKodu || '', stokAdi: data.stokAdi || '',
@@ -159,8 +159,23 @@ export default function YedekParcaAnaliziPage() {
             createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : new Date(data.createdAt),
             formType: data.formType,
             companyId: data.companyId,
+            borrowedPartId: data.borrowedPartId,
           };
-        });
+        };
+
+        // use_on_device: tüm onaylı parça değişimleri (form + arıza kaynaklı)
+        const useOnDeviceLogs = useOnDeviceSnap.docs.map(mapLog);
+
+        // borrowed_part: arızadan kaynaklanan ama henüz onaylanmamış veya hücre değişimleri
+        // use_on_device ile zaten referans edilen borrowedPartId'leri çıkar (mükerrer sayımı önlemek için)
+        const approvedBorrowedIds = new Set(useOnDeviceLogs.map(l => l.borrowedPartId).filter(Boolean));
+        const arizaBorrowedLogs = borrowedPartSnap.docs
+          .map(mapLog)
+          .filter(l => l.formType === 'ariza_yonetimi' && !approvedBorrowedIds.has(l.id));
+
+        const allLogs = [...useOnDeviceLogs, ...arizaBorrowedLogs];
+
+        // Transfer loglarını şirketin cihazlarına göre filtrele (eski kayıtlarda companyId olmayabilir)
         setTransferLogs(
           isSuperAdmin
             ? allLogs
