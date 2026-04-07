@@ -240,6 +240,9 @@ export default function YedekParcaTransferPage() {
   const [allStockLoading, setAllStockLoading] = useState(false);
   const [takingOverStockId, setTakingOverStockId] = useState<string | null>(null);
   const [historyActionFilter, setHistoryActionFilter] = useState<string>('all');
+  const [historySearchQuery, setHistorySearchQuery] = useState('');
+  const [historyPage, setHistoryPage] = useState(0);
+  const [historyPageSize, setHistoryPageSize] = useState(25);
   const [manualStockModalOpen, setManualStockModalOpen] = useState(false);
   const [manualStockRows, setManualStockRows] = useState<ManualPersonnelStockRow[]>([]);
   const [isSavingManualStock, setIsSavingManualStock] = useState(false);
@@ -281,16 +284,108 @@ export default function YedekParcaTransferPage() {
   const isFieldPersonnel = currentUserProfile?.role === 'teknik_servis' || currentUserProfile?.role === 'aplikasyon';
   const canAccessTransferPanel = !isFieldPersonnel;
 
+  const getLogQuantity = useCallback((log: any) => {
+    const q = Number(log?.quantity);
+    return Number.isFinite(q) && q > 0 ? q : 1;
+  }, []);
+
+  const getLogNetStockDelta = useCallback((log: any) => {
+    const qty = getLogQuantity(log);
+    const action = String(log?.action || '');
+
+    if (action === 'stok_giris' || action === 'use_on_device' || action === 'depo_serial_deleted' || action === 'depo_stock_deleted_admin' || action === 'stok_silme_admin' || action === 'personnel_stock_deleted_admin' || action === 'pool_stock_deleted_admin') {
+      return action === 'stok_giris' ? qty : -qty;
+    }
+
+    if (action === 'borrowed_rejected') {
+      return log?.sourceType === 'depot' ? qty : 0;
+    }
+
+    if (action === 'depo_stock_adjusted') {
+      const notes = String(log?.notes || '');
+      const parsed = notes.match(/(\d+)\s*->\s*(\d+)/);
+      if (parsed) {
+        const oldQty = Number(parsed[1] || 0);
+        const newQty = Number(parsed[2] || 0);
+        if (Number.isFinite(oldQty) && Number.isFinite(newQty)) {
+          return newQty - oldQty;
+        }
+      }
+      return 0;
+    }
+
+    return 0;
+  }, [getLogQuantity]);
+
   const loadRecentTransferLogs = useCallback(async () => {
-    const logsSnap = await getDocs(collection(db, 'sparePartTransferLogs'));
-    const logs = filterByCompanyScope(logsSnap.docs.map(d => {
+    const [transferLogsSnap, depotLogsSnap, depotStockSnap, personalStockSnap, poolStockSnap] = await Promise.all([
+      getDocs(collection(db, 'sparePartTransferLogs')),
+      getDocs(collection(db, 'yedekParcaDepoLog')),
+      getDocs(collection(db, 'yedekParcaDepoStok')),
+      getDocs(query(collection(db, 'personalStock'), where('status', '==', 'in_stock'))),
+      getDocs(query(collection(db, 'poolWarehouseStock'), where('status', '==', 'in_stock'))),
+    ]);
+
+    const transferLogsData = filterByCompanyScope(transferLogsSnap.docs.map(d => {
       const data = d.data();
       const timestamp = data.timestamp?.toDate?.() || data.createdAt?.toDate?.() || new Date();
-      return { id: d.id, ...data, timestamp };
+      return { id: d.id, ...data, timestamp, sourceCollection: 'sparePartTransferLogs' as const };
     }), currentCompanyId, isSuperAdmin);
+
+    const depotLogsData = filterByCompanyScope(depotLogsSnap.docs.map(d => {
+      const data = d.data();
+      const timestamp = data.createdAt?.toDate?.() || data.timestamp?.toDate?.() || new Date();
+      return { id: d.id, ...data, timestamp, sourceCollection: 'yedekParcaDepoLog' as const };
+    }), currentCompanyId, isSuperAdmin);
+
+    const logs = [...transferLogsData, ...depotLogsData];
     logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-    setTransferLogs(logs.slice(0, 50));
-  }, [currentCompanyId, isSuperAdmin]);
+
+    const runningStockByCode = new Map<string, number>();
+    const addToRunning = (stokKodu: string, quantity: number) => {
+      const code = String(stokKodu || '').trim();
+      if (!code) return;
+      runningStockByCode.set(code, (runningStockByCode.get(code) || 0) + quantity);
+    };
+
+    const depotStock = filterByCompanyScope(
+      depotStockSnap.docs.map(d => d.data()),
+      currentCompanyId,
+      isSuperAdmin,
+    );
+    depotStock.forEach((item: any) => addToRunning(item.stokKodu, Number(item.quantity) || 1));
+
+    const personalStock = filterByCompanyScope(
+      personalStockSnap.docs.map(d => d.data()),
+      currentCompanyId,
+      isSuperAdmin,
+    );
+    personalStock.forEach((item: any) => addToRunning(item.stokKodu, Number(item.quantity) || 1));
+
+    const poolStockData = filterByCompanyScope(
+      poolStockSnap.docs.map(d => d.data()),
+      currentCompanyId,
+      isSuperAdmin,
+    );
+    poolStockData.forEach((item: any) => addToRunning(item.stokKodu, Number(item.quantity) || 1));
+
+    for (const log of logs) {
+      const code = String(log.stokKodu || '').trim();
+      if (!code) {
+        log.postActionStockTotal = null;
+        continue;
+      }
+
+      const currentAfter = runningStockByCode.get(code) || 0;
+      log.postActionStockTotal = currentAfter;
+
+      const delta = getLogNetStockDelta(log);
+      const before = currentAfter - delta;
+      runningStockByCode.set(code, Math.max(0, before));
+    }
+
+    setTransferLogs(logs);
+  }, [currentCompanyId, getLogNetStockDelta, isSuperAdmin]);
 
   // Fetch data
   useEffect(() => {
@@ -2332,6 +2427,11 @@ export default function YedekParcaTransferPage() {
       borrowed_rejected: 'Borç Reddedildi',
       depo_stock_adjusted: 'Depo Stok Güncellendi',
       depo_serial_deleted: 'Depo Seri No Silindi',
+      stok_giris: 'Depo Stok Girişi',
+      transfer_cikis: 'Depodan Çıkış',
+      iade_giris: 'Depoya İade Girişi',
+      stok_duzeltme: 'Depo Stok Düzeltme',
+      stok_silme_admin: 'Depo Stok Silme',
       transfer_between_personnel: 'Personelden Personele Devir',
       depo_stock_deleted_admin: 'Admin Depo Stok Silme',
       personnel_stock_deleted_admin: 'Admin Personel Stok Silme',
@@ -2343,9 +2443,46 @@ export default function YedekParcaTransferPage() {
   };
 
   const filteredHistoryLogs = useMemo(() => {
-    if (historyActionFilter === 'all') return transferLogs;
-    return transferLogs.filter((log) => log.action === historyActionFilter);
-  }, [historyActionFilter, transferLogs]);
+    const query = historySearchQuery.trim().toLocaleLowerCase('tr-TR');
+    return transferLogs.filter((log) => {
+      const matchesAction = historyActionFilter === 'all' || log.action === historyActionFilter;
+      if (!matchesAction) return false;
+      if (!query) return true;
+
+      const haystack = [
+        log.stokKodu,
+        log.stokAdi,
+        log.serialNumber,
+        log.hucreNumarasi,
+        log.fromName,
+        log.toName,
+        log.createdByName,
+        log.notes,
+      ]
+        .map(v => String(v || '').toLocaleLowerCase('tr-TR'))
+        .join(' ');
+
+      return haystack.includes(query);
+    });
+  }, [historyActionFilter, historySearchQuery, transferLogs]);
+
+  useEffect(() => {
+    setHistoryPage(0);
+  }, [historyActionFilter, historySearchQuery, historyPageSize]);
+
+  const totalHistoryPages = Math.max(1, Math.ceil(filteredHistoryLogs.length / historyPageSize));
+
+  useEffect(() => {
+    if (historyPage > totalHistoryPages - 1) {
+      setHistoryPage(Math.max(0, totalHistoryPages - 1));
+    }
+  }, [historyPage, totalHistoryPages]);
+
+  const paginatedHistoryLogs = useMemo(() => {
+    const safePage = Math.min(historyPage, Math.max(0, totalHistoryPages - 1));
+    const start = safePage * historyPageSize;
+    return filteredHistoryLogs.slice(start, start + historyPageSize);
+  }, [filteredHistoryLogs, historyPage, historyPageSize, totalHistoryPages]);
 
   // Transfer panel tab state
   const [transferTab, setTransferTab] = useState<'transfer' | 'borrowed' | 'pending' | 'history'>('transfer');
@@ -2659,8 +2796,14 @@ export default function YedekParcaTransferPage() {
                   onChange={(e) => setHistoryActionFilter(e.target.value)}
                 >
                   <option value="all">Tümü</option>
+                  <option value="stok_giris">Depo Stok Girişi</option>
+                  <option value="stok_duzeltme">Depo Stok Düzeltme</option>
+                  <option value="transfer_cikis">Depodan Çıkış</option>
+                  <option value="iade_giris">Depoya İade Girişi</option>
                   <option value="transfer_to_personnel">Personele Transfer</option>
                   <option value="transfer_between_personnel">Personelden Personele Devir</option>
+                  <option value="return_to_depot">Depoya İade Talebi</option>
+                  <option value="submit_to_depot">Depoya Teslim Talebi</option>
                   <option value="return_confirmed">İade Teslim Alındı</option>
                   <option value="submit_confirmed">Teslim Alındı</option>
                   <option value="use_on_device">Cihazda Kullanıldı</option>
@@ -2671,17 +2814,47 @@ export default function YedekParcaTransferPage() {
                   <option value="transfer_rejected">Transfer Reddedildi</option>
                   <option value="depo_stock_adjusted">Depo Stok Güncellendi</option>
                   <option value="depo_serial_deleted">Depo Seri No Silindi</option>
+                  <option value="stok_silme_admin">Depo Stok Silme</option>
                   <option value="depo_stock_deleted_admin">Admin Depo Stok Silme</option>
                   <option value="personnel_stock_deleted_admin">Admin Personel Stok Silme</option>
                   <option value="pool_stock_deleted_admin">Admin Havuz Stok Silme</option>
                 </select>
+                <select
+                  className="cihaz-pressed px-3 py-1.5 text-xs font-medium !border-0 !ring-0"
+                  style={{ borderRadius: 10, color: 'var(--dashboard-text)', background: 'var(--dashboard-pressed, var(--dashboard-surface-2))' }}
+                  value={String(historyPageSize)}
+                  onChange={(e) => setHistoryPageSize(Math.max(10, Number(e.target.value) || 25))}
+                >
+                  <option value="25">25 / sayfa</option>
+                  <option value="50">50 / sayfa</option>
+                  <option value="100">100 / sayfa</option>
+                </select>
+              </div>
+
+              <div className="cihaz-pressed flex items-center gap-2 px-3 py-2" style={{ borderRadius: 12 }}>
+                <Search className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--dashboard-muted)' }} />
+                <input
+                  type="text"
+                  placeholder="Kod, ad, seri, personel veya not ile ara…"
+                  value={historySearchQuery}
+                  onChange={(e) => setHistorySearchQuery(e.target.value)}
+                  className="flex-1 bg-transparent text-xs outline-none placeholder:text-[var(--dashboard-muted)]"
+                  style={{ color: 'var(--dashboard-text)' }}
+                />
+                <span className="text-[10px] font-medium" style={{ color: 'var(--dashboard-muted)' }}>
+                  {filteredHistoryLogs.length} kayıt
+                </span>
               </div>
 
               {/* Log list */}
               <div className="cihaz-card overflow-hidden" style={{ maxHeight: 500, overflowY: 'auto' }}>
                 <div className="divide-y" style={{ borderColor: 'var(--dashboard-stroke)' }}>
-                  {filteredHistoryLogs.map(log => {
+                  {paginatedHistoryLogs.map(log => {
                     const isTransferAction = log.action === 'transfer_to_personnel' || log.action === 'transfer_between_personnel';
+                    const isUseOnDevice = log.action === 'use_on_device';
+                    const usageFormId = log.formId || log.usedOnFormId;
+                    const usageFormType = log.formType || log.usedOnFormType;
+                    const usageDeviceId = log.deviceId || log.usedOnDeviceId;
                     const resolvedActionLabel = log.action === 'borrowed_part' && log.approvalStatus === 'pending'
                       ? 'Onay Bekleyen Borç'
                       : getActionLabel(log.action);
@@ -2699,6 +2872,20 @@ export default function YedekParcaTransferPage() {
                         <div className="flex items-center gap-1.5 flex-shrink-0">
                           <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>{format(log.timestamp, 'dd.MM.yy HH:mm', { locale: tr })}</span>
                           {isTransferAction && <SparePartTransferTutanakPDFButton log={log} className="h-6 px-2 text-[10px]" />}
+                          {isUseOnDevice && usageFormId && usageFormType && usageDeviceId && (usageFormType === 'teknik_servis' || usageFormType === 'aplikasyon') && (
+                            <SparePartFormPDFButton
+                              formId={usageFormId}
+                              formType={usageFormType}
+                              deviceId={usageDeviceId}
+                            />
+                          )}
+                          <span
+                            className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-semibold"
+                            style={{ background: 'rgba(16,185,129,.10)', color: '#047857' }}
+                            title="İşlem sonrası toplam stok (depo + personel + havuz)"
+                          >
+                            Sonrası: {Number.isFinite(Number(log.postActionStockTotal)) ? Number(log.postActionStockTotal) : 0}
+                          </span>
                           {log.usageImageUrl && <button onClick={() => setPreviewImage(log.usageImageUrl)} className="cihaz-tool-item p-1"><ImageIcon className="w-3 h-3" style={{ color: 'var(--dashboard-muted)' }} /></button>}
                         </div>
                       </div>
@@ -2706,6 +2893,32 @@ export default function YedekParcaTransferPage() {
                   })}
                 </div>
               </div>
+
+              {filteredHistoryLogs.length > 0 && (
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px]" style={{ color: 'var(--dashboard-muted)' }}>
+                    Sayfa {Math.min(historyPage + 1, totalHistoryPages)} / {totalHistoryPages}
+                  </span>
+                  <div className="flex gap-1.5">
+                    <button
+                      disabled={historyPage === 0}
+                      onClick={() => setHistoryPage((p) => Math.max(0, p - 1))}
+                      className="cihaz-tool-item px-3 py-1 text-[11px] font-medium disabled:opacity-30"
+                      style={{ color: 'var(--dashboard-text)' }}
+                    >
+                      <ChevronLeft className="w-3 h-3 inline" /> Önceki
+                    </button>
+                    <button
+                      disabled={historyPage >= totalHistoryPages - 1}
+                      onClick={() => setHistoryPage((p) => Math.min(totalHistoryPages - 1, p + 1))}
+                      className="cihaz-tool-item px-3 py-1 text-[11px] font-medium disabled:opacity-30"
+                      style={{ color: 'var(--dashboard-text)' }}
+                    >
+                      Sonraki <ChevronRight className="w-3 h-3 inline" />
+                    </button>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </div>
