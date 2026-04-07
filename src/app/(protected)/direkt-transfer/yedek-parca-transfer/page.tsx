@@ -284,10 +284,46 @@ export default function YedekParcaTransferPage() {
   const isFieldPersonnel = currentUserProfile?.role === 'teknik_servis' || currentUserProfile?.role === 'aplikasyon';
   const canAccessTransferPanel = !isFieldPersonnel;
 
+  const getLogQuantity = useCallback((log: any) => {
+    const q = Number(log?.quantity);
+    return Number.isFinite(q) && q > 0 ? q : 1;
+  }, []);
+
+  const getLogNetStockDelta = useCallback((log: any) => {
+    const qty = getLogQuantity(log);
+    const action = String(log?.action || '');
+
+    if (action === 'stok_giris' || action === 'use_on_device' || action === 'depo_serial_deleted' || action === 'depo_stock_deleted_admin' || action === 'stok_silme_admin' || action === 'personnel_stock_deleted_admin' || action === 'pool_stock_deleted_admin') {
+      return action === 'stok_giris' ? qty : -qty;
+    }
+
+    if (action === 'borrowed_rejected') {
+      return log?.sourceType === 'depot' ? qty : 0;
+    }
+
+    if (action === 'depo_stock_adjusted') {
+      const notes = String(log?.notes || '');
+      const parsed = notes.match(/(\d+)\s*->\s*(\d+)/);
+      if (parsed) {
+        const oldQty = Number(parsed[1] || 0);
+        const newQty = Number(parsed[2] || 0);
+        if (Number.isFinite(oldQty) && Number.isFinite(newQty)) {
+          return newQty - oldQty;
+        }
+      }
+      return 0;
+    }
+
+    return 0;
+  }, [getLogQuantity]);
+
   const loadRecentTransferLogs = useCallback(async () => {
-    const [transferLogsSnap, depotLogsSnap] = await Promise.all([
+    const [transferLogsSnap, depotLogsSnap, depotStockSnap, personalStockSnap, poolStockSnap] = await Promise.all([
       getDocs(collection(db, 'sparePartTransferLogs')),
       getDocs(collection(db, 'yedekParcaDepoLog')),
+      getDocs(collection(db, 'yedekParcaDepoStok')),
+      getDocs(query(collection(db, 'personalStock'), where('status', '==', 'in_stock'))),
+      getDocs(query(collection(db, 'poolWarehouseStock'), where('status', '==', 'in_stock'))),
     ]);
 
     const transferLogsData = filterByCompanyScope(transferLogsSnap.docs.map(d => {
@@ -304,8 +340,52 @@ export default function YedekParcaTransferPage() {
 
     const logs = [...transferLogsData, ...depotLogsData];
     logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+    const runningStockByCode = new Map<string, number>();
+    const addToRunning = (stokKodu: string, quantity: number) => {
+      const code = String(stokKodu || '').trim();
+      if (!code) return;
+      runningStockByCode.set(code, (runningStockByCode.get(code) || 0) + quantity);
+    };
+
+    const depotStock = filterByCompanyScope(
+      depotStockSnap.docs.map(d => d.data()),
+      currentCompanyId,
+      isSuperAdmin,
+    );
+    depotStock.forEach((item: any) => addToRunning(item.stokKodu, Number(item.quantity) || 1));
+
+    const personalStock = filterByCompanyScope(
+      personalStockSnap.docs.map(d => d.data()),
+      currentCompanyId,
+      isSuperAdmin,
+    );
+    personalStock.forEach((item: any) => addToRunning(item.stokKodu, Number(item.quantity) || 1));
+
+    const poolStockData = filterByCompanyScope(
+      poolStockSnap.docs.map(d => d.data()),
+      currentCompanyId,
+      isSuperAdmin,
+    );
+    poolStockData.forEach((item: any) => addToRunning(item.stokKodu, Number(item.quantity) || 1));
+
+    for (const log of logs) {
+      const code = String(log.stokKodu || '').trim();
+      if (!code) {
+        log.postActionStockTotal = null;
+        continue;
+      }
+
+      const currentAfter = runningStockByCode.get(code) || 0;
+      log.postActionStockTotal = currentAfter;
+
+      const delta = getLogNetStockDelta(log);
+      const before = currentAfter - delta;
+      runningStockByCode.set(code, Math.max(0, before));
+    }
+
     setTransferLogs(logs);
-  }, [currentCompanyId, isSuperAdmin]);
+  }, [currentCompanyId, getLogNetStockDelta, isSuperAdmin]);
 
   // Fetch data
   useEffect(() => {
@@ -2771,6 +2851,10 @@ export default function YedekParcaTransferPage() {
                 <div className="divide-y" style={{ borderColor: 'var(--dashboard-stroke)' }}>
                   {paginatedHistoryLogs.map(log => {
                     const isTransferAction = log.action === 'transfer_to_personnel' || log.action === 'transfer_between_personnel';
+                    const isUseOnDevice = log.action === 'use_on_device';
+                    const usageFormId = log.formId || log.usedOnFormId;
+                    const usageFormType = log.formType || log.usedOnFormType;
+                    const usageDeviceId = log.deviceId || log.usedOnDeviceId;
                     const resolvedActionLabel = log.action === 'borrowed_part' && log.approvalStatus === 'pending'
                       ? 'Onay Bekleyen Borç'
                       : getActionLabel(log.action);
@@ -2788,6 +2872,20 @@ export default function YedekParcaTransferPage() {
                         <div className="flex items-center gap-1.5 flex-shrink-0">
                           <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>{format(log.timestamp, 'dd.MM.yy HH:mm', { locale: tr })}</span>
                           {isTransferAction && <SparePartTransferTutanakPDFButton log={log} className="h-6 px-2 text-[10px]" />}
+                          {isUseOnDevice && usageFormId && usageFormType && usageDeviceId && (usageFormType === 'teknik_servis' || usageFormType === 'aplikasyon') && (
+                            <SparePartFormPDFButton
+                              formId={usageFormId}
+                              formType={usageFormType}
+                              deviceId={usageDeviceId}
+                            />
+                          )}
+                          <span
+                            className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-semibold"
+                            style={{ background: 'rgba(16,185,129,.10)', color: '#047857' }}
+                            title="İşlem sonrası toplam stok (depo + personel + havuz)"
+                          >
+                            Sonrası: {Number.isFinite(Number(log.postActionStockTotal)) ? Number(log.postActionStockTotal) : 0}
+                          </span>
                           {log.usageImageUrl && <button onClick={() => setPreviewImage(log.usageImageUrl)} className="cihaz-tool-item p-1"><ImageIcon className="w-3 h-3" style={{ color: 'var(--dashboard-muted)' }} /></button>}
                         </div>
                       </div>
