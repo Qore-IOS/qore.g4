@@ -397,7 +397,7 @@ export default function YedekParcaTransferPage() {
     const grouped = new Map<string, GroupedDepoStokItem>();
 
     for (const item of depoStok) {
-      const key = item.stokKodu;
+      const key = `${item.stokKodu}|${(item.address || '').trim()}`;
       if (!grouped.has(key)) {
         const pc = productCodeMap.get(item.productCodeId);
         grouped.set(key, {
@@ -432,7 +432,11 @@ export default function YedekParcaTransferPage() {
       }
     }
 
-    const sorted = Array.from(grouped.values()).sort((a, b) => a.stokKodu.localeCompare(b.stokKodu));
+    const sorted = Array.from(grouped.values()).sort((a, b) => {
+      const codeComp = a.stokKodu.localeCompare(b.stokKodu);
+      if (codeComp !== 0) return codeComp;
+      return (a.entries[0]?.address || '').localeCompare(b.entries[0]?.address || '');
+    });
     setDepoStokProducts(sorted);
   }, [depoStok, productCodes]);
 
@@ -2833,7 +2837,7 @@ export default function YedekParcaTransferPage() {
                         {group.cihazGrubu && <span className="inline-flex px-1.5 py-0.5 rounded text-[9px] font-medium flex-shrink-0" style={{ background: 'rgba(245,158,11,.10)', color: '#B45309' }}>{group.cihazGrubu}</span>}
                       </div>
                       <p className="text-[10px] font-mono" style={{ color: 'var(--dashboard-muted)' }}>{group.stokKodu} · {format(group.earliestDate, 'dd.MM.yyyy', { locale: tr })}</p>
-                      <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>Adres: {[...new Set(group.entries.map(e => (e.address || '').trim()).filter(Boolean))].join(', ') || '—'}</p>
+                      <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>Adres: {(group.entries[0]?.address || '').trim() || '—'}</p>
                     </div>
                     <div className="flex items-center gap-1.5 flex-shrink-0">
                       <span className="cihaz-pressed px-2 py-0.5 text-xs font-bold" style={{ borderRadius: 8, color: 'var(--dashboard-text)' }}>{group.totalQuantity}</span>
