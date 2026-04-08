@@ -159,8 +159,8 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
           fetchExchangeRates(),
           getDocs(query(collection(db, 'maliyetSayimSessions'), orderBy('createdAt', 'desc'))),
         ]);
-        setRates(ratesData);
-        const allSessions = sessionsSnap.docs.map(d => ({ id: d.id, ...d.data() } as SayimSession));
+        setRates(rateData);
+        const allSessions = sessionSnap.docs.map(d => ({ id: d.id, ...d.data() } as SayimSession));
         setSessions(filterByCompanyScope(allSessions, companyId, superAdmin));
       } catch (err) {
         console.error('Error loading cost dashboard:', err);
