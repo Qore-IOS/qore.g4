@@ -45,6 +45,7 @@ export default function YedekParcaSiparisPage() {
   const [currentByCode, setCurrentByCode] = useState<Map<string, number>>(new Map());
   const [rules, setRules] = useState<MinMaxRule[]>([]);
   const [productOptions, setProductOptions] = useState<Array<{ stokKodu: string; stokAdi: string }>>([]);
+  const [manualSearchQuery, setManualSearchQuery] = useState('');
 
   const [manualCode, setManualCode] = useState('');
   const [manualQty, setManualQty] = useState<number>(1);
@@ -82,7 +83,7 @@ export default function YedekParcaSiparisPage() {
       const products = filterByCompanyScope(
         productsSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }) as ProductCode),
         currentCompanyId,
-      ).filter((product) => product.urunGrubu === 'yedek_parca');
+      );
 
       const productNames = new Map<string, string>();
       for (const product of products) {
@@ -159,6 +160,17 @@ export default function YedekParcaSiparisPage() {
     setItems(autoItems);
     toast({ title: 'Hazırlandı', description: `${autoItems.length} kalem min/max listesi oluşturuldu.` });
   };
+
+  const filteredProductOptions = useMemo(() => {
+    const q = manualSearchQuery.trim().toLowerCase();
+    if (!q) return productOptions.slice(0, 200);
+    return productOptions
+      .filter((option) =>
+        option.stokKodu.toLowerCase().includes(q) ||
+        option.stokAdi.toLowerCase().includes(q),
+      )
+      .slice(0, 200);
+  }, [manualSearchQuery, productOptions]);
 
   const addManualRow = () => {
     const code = normalizeCode(manualCode);
@@ -278,12 +290,21 @@ export default function YedekParcaSiparisPage() {
           <input value={orderNo} onChange={(e) => setOrderNo(e.target.value)} className="w-full mt-1 px-3 py-2 text-sm rounded-xl border outline-none" style={{ borderColor: 'var(--dashboard-stroke)', background: 'var(--dashboard-surface)', color: 'var(--dashboard-text)' }} />
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-[1fr_120px_auto] gap-2">
-          <select value={manualCode} onChange={(e) => setManualCode(e.target.value)} className="w-full px-3 py-2 text-sm rounded-xl border" style={{ borderColor: 'var(--dashboard-stroke)', background: 'var(--dashboard-surface)', color: 'var(--dashboard-text)' }}>
+          <div className="space-y-1">
+            <input
+              value={manualSearchQuery}
+              onChange={(e) => setManualSearchQuery(e.target.value)}
+              placeholder="Stok kodu veya adı ile ara..."
+              className="w-full px-3 py-2 text-xs rounded-xl border"
+              style={{ borderColor: 'var(--dashboard-stroke)', background: 'var(--dashboard-surface)', color: 'var(--dashboard-text)' }}
+            />
+            <select value={manualCode} onChange={(e) => setManualCode(e.target.value)} className="w-full px-3 py-2 text-sm rounded-xl border" style={{ borderColor: 'var(--dashboard-stroke)', background: 'var(--dashboard-surface)', color: 'var(--dashboard-text)' }}>
             <option value="">Ürün seçin (Ürün Kodu Yönetimi)</option>
-            {productOptions.map((p) => (
+            {filteredProductOptions.map((p) => (
               <option key={`${p.stokKodu}-${p.stokAdi}`} value={p.stokKodu}>{p.stokKodu} · {p.stokAdi}</option>
             ))}
           </select>
+          </div>
           <input type="number" min={1} value={manualQty} onChange={(e) => setManualQty(Number(e.target.value || 1))} className="w-full px-3 py-2 text-sm rounded-xl border" style={{ borderColor: 'var(--dashboard-stroke)', background: 'var(--dashboard-surface)', color: 'var(--dashboard-text)' }} />
           <button onClick={addManualRow} className="cihaz-tool-item inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium" style={{ color: 'var(--dashboard-text)' }}>
             <Plus className="w-3.5 h-3.5" /> Satır Ekle
