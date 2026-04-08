@@ -25,6 +25,11 @@ const makeDefaultOrderNo = () => {
 };
 
 const normalizeCode = (value?: string | null) => String(value || '').trim().toUpperCase();
+const canonicalCode = (value?: string | null) => {
+  const normalized = normalizeCode(value);
+  const stripped = normalized.replace(/^0+/, '');
+  return stripped || normalized;
+};
 
 export default function YedekParcaSiparisPage() {
   const router = useRouter();
@@ -65,32 +70,53 @@ export default function YedekParcaSiparisPage() {
         currentCompanyId,
       ).filter((product) => product.urunGrubu === 'yedek_parca');
 
-      const productNameByCode = new Map(
-        products
-          .filter((product) => Boolean(product.stokKodu))
-          .map((product) => [normalizeCode(product.stokKodu), (product.stokAdi || '').trim()]),
-      );
+      const productNameByCode = new Map<string, string>();
+      for (const product of products) {
+        const rawCode = product.stokKodu;
+        if (!rawCode) continue;
+        const nameCandidate = (
+          product.stokAdi ||
+          (product as any).urunAdi ||
+          (product as any).name ||
+          (product as any).ad ||
+          ''
+        ).trim();
+        if (!nameCandidate) continue;
+        const normalized = normalizeCode(rawCode);
+        const canonical = canonicalCode(rawCode);
+        if (!productNameByCode.has(normalized)) productNameByCode.set(normalized, nameCandidate);
+        if (!productNameByCode.has(canonical)) productNameByCode.set(canonical, nameCandidate);
+      }
 
       const stockNameByCode = new Map<string, string>();
       const currentByCode = new Map<string, number>();
       for (const stock of depoStock) {
         const code = normalizeCode(stock.stokKodu);
+        const canonical = canonicalCode(stock.stokKodu);
         if (!code) continue;
         const prevQty = currentByCode.get(code) || 0;
         currentByCode.set(code, prevQty + (Number(stock.quantity) || 0));
+        if (code !== canonical) {
+          const canonicalQty = currentByCode.get(canonical) || 0;
+          currentByCode.set(canonical, canonicalQty + (Number(stock.quantity) || 0));
+        }
         if (!stockNameByCode.has(code) && stock.stokAdi?.trim()) {
           stockNameByCode.set(code, stock.stokAdi.trim());
+        }
+        if (!stockNameByCode.has(canonical) && stock.stokAdi?.trim()) {
+          stockNameByCode.set(canonical, stock.stokAdi.trim());
         }
       }
 
       const autoItems = rules
         .map((rule) => {
           const code = normalizeCode(rule.stokKodu);
-          const mevcut = currentByCode.get(code) || 0;
+          const codeCanonical = canonicalCode(rule.stokKodu);
+          const mevcut = currentByCode.get(code) || currentByCode.get(codeCanonical) || 0;
           const max = Number(rule.max) || 0;
           const siparisAdedi = Math.max(0, max - mevcut);
-          const productName = productNameByCode.get(code);
-          const stockName = stockNameByCode.get(code);
+          const productName = productNameByCode.get(code) || productNameByCode.get(codeCanonical);
+          const stockName = stockNameByCode.get(code) || stockNameByCode.get(codeCanonical);
 
           return {
             stokKodu: code,
