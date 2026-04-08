@@ -413,12 +413,12 @@ export default function KullaniciPanel() {
       </div>
 
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
-        <DialogContent className="max-w-7xl w-[96vw] p-0 overflow-hidden">
-          <DialogHeader className="px-6 pt-6">
+        <DialogContent className="max-w-7xl w-[96vw] p-0 overflow-hidden max-h-[92vh] flex flex-col">
+          <DialogHeader className="px-6 pt-6 shrink-0">
             <DialogTitle className="text-xl">{currentUser.uid ? 'Kullanıcı Düzenle' : 'Yeni Kullanıcı Oluştur'}</DialogTitle>
           </DialogHeader>
 
-          <div className="px-6 pb-6 grid grid-cols-1 xl:grid-cols-3 gap-4 max-h-[80vh] overflow-y-auto">
+          <div className="px-6 pb-4 grid grid-cols-1 xl:grid-cols-3 gap-4 overflow-y-auto flex-1 min-h-0">
             <Card className="xl:col-span-1 border-border/60">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Temel Bilgiler</CardTitle>
@@ -633,7 +633,7 @@ export default function KullaniciPanel() {
             </Card>
           </div>
 
-          <DialogFooter className="px-6 pb-6">
+          <DialogFooter className="px-6 pb-6 pt-3 shrink-0 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
             <DialogClose asChild><Button variant="outline">İptal</Button></DialogClose>
             <Button onClick={handleSave} disabled={isLoading}>Kaydet</Button>
           </DialogFooter>
