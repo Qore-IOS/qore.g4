@@ -55,6 +55,7 @@ import {
   Upload,
   FileText,
   Database,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { format } from 'date-fns';
@@ -67,6 +68,7 @@ import SparePartTransferTutanakPDFButton from '@/components/exports/SparePartTra
 import TeknikServisTutanakPDFButton from '@/components/exports/TeknikServisTutanakPDFButton';
 import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
 import { emitSparePartTransfer } from '@/lib/notifications';
+import MinMaxSettingsPanel from '@/components/MinMaxSettingsPanel';
 
 // Menu selection types
 type MenuSection = 'transfer' | 'depo-stok' | 'toplam-stok' | 'personnel' | 'pool-stok';
@@ -219,6 +221,7 @@ export default function YedekParcaTransferPage() {
   const [depoStokLoading, setDepoStokLoading] = useState(false);
   const [expandedStokKodu, setExpandedStokKodu] = useState<string | null>(null);
   const [depoStokSearchQuery, setDepoStokSearchQuery] = useState('');
+  const [minMaxPanelOpen, setMinMaxPanelOpen] = useState(false);
   const [depoStokPage, setDepoStokPage] = useState(0);
   const [editingDepoGroup, setEditingDepoGroup] = useState<GroupedDepoStokItem | null>(null);
   const [editingQuantity, setEditingQuantity] = useState<number>(1);
@@ -3123,6 +3126,11 @@ export default function YedekParcaTransferPage() {
           <button onClick={handleOpenStockCardSync} className="cihaz-tool-item inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium" style={{ color: 'var(--dashboard-text)' }}>
             <CheckCircle className="w-3.5 h-3.5" /> Stok Kart Kontrol
           </button>
+          {(isAdmin || isTeknikLojistik) && (
+            <button onClick={() => setMinMaxPanelOpen(true)} className="cihaz-tool-item inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium" style={{ color: 'var(--dashboard-text)' }}>
+              <SlidersHorizontal className="w-3.5 h-3.5" /> Min-Max Ayarları
+            </button>
+          )}
           <button onClick={() => router.push('/direkt-transfer/yedek-parca-transfer/stok-giris')} className="cihaz-action-tile inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white" style={{ background: 'var(--dashboard-accent)' }}>
             <Plus className="w-3.5 h-3.5" /> Stok Girişi
           </button>
@@ -4293,6 +4301,18 @@ export default function YedekParcaTransferPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Min-Max Settings Panel for Spare Parts Depot */}
+      {currentCompanyId && (
+        <MinMaxSettingsPanel
+          isOpen={minMaxPanelOpen}
+          onClose={() => setMinMaxPanelOpen(false)}
+          target={{ id: currentCompanyId, name: 'Yedek Parça Deposu' } as any}
+          targetType="spare_parts_depot"
+          productCodes={productCodes}
+          toast={toast}
+        />
+      )}
 
       {/* Image Preview Modal */}
       <Dialog open={!!previewImage} onOpenChange={() => setPreviewImage(null)}>
