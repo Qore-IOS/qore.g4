@@ -277,18 +277,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
       const user = userCredential.user;
       const userDocRef = doc(db, "users", user.uid);
-      const defaultViews = VIEWS.map(v => v.key) as AppView[];
+      const selectedViews = additionalData.accessibleViews ?? [];
       const newUserProfile: Partial<User> = {
         uid: user.uid,
         email: user.email,
         role: additionalData.role || 'user',
         name: additionalData.name || email.split('@')[0],
-        accessibleViews: defaultViews,
+        companyId: additionalData.companyId || LEGACY_COMPANY_ID,
+        accessibleViews: selectedViews as AppView[],
         assignedLaboratories: additionalData.assignedLaboratories || [],
+        primaryLaboratories: additionalData.primaryLaboratories || [],
         assignedDepots: additionalData.assignedDepots || [],
         assignedBrands: additionalData.assignedBrands || [],
         phoneNumber: additionalData.phoneNumber || '',
         nfcId: additionalData.nfcId || '',
+        notificationsEnabled: additionalData.notificationsEnabled ?? false,
+        notificationPreferences: additionalData.notificationPreferences || [],
         createdAt: new Date(),
       };
       await setDoc(userDocRef, newUserProfile);
