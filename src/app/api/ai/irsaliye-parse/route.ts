@@ -14,6 +14,35 @@ function looksLikeUtsCode(value?: string): boolean {
   return /^\d{11,16}$/.test(value.replace(/\s+/g, ''));
 }
 
+function normalizeToken(value?: string): string | undefined {
+  if (!value) return undefined;
+  const token = value
+    .trim()
+    .replace(/[|;,]+/g, ' ')
+    .match(/\b([A-Za-z0-9-]{3,})\b/)?.[1];
+  return token ? token.toUpperCase() : undefined;
+}
+
+function extractLotFromRawLine(rawLine?: string, stokKodu?: string): string | undefined {
+  if (!rawLine) return undefined;
+  const dateMatch = rawLine.match(/\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b/);
+  if (!dateMatch || dateMatch.index == null) return undefined;
+
+  const beforeDate = rawLine.slice(0, dateMatch.index).trim();
+  const tokens = beforeDate.split(/\s+/).map((t) => normalizeToken(t)).filter((t): t is string => !!t);
+  if (tokens.length === 0) return undefined;
+
+  for (let i = tokens.length - 1; i >= 0; i--) {
+    const candidate = tokens[i];
+    if (!candidate) continue;
+    if (stokKodu && candidate === stokKodu.toUpperCase()) continue;
+    if (/^(ADET|KUTU|PAKET|KOLI|PCS|EA|BOX|BIRIM)$/i.test(candidate)) continue;
+    if (looksLikeUtsCode(candidate)) continue;
+    return candidate;
+  }
+  return undefined;
+}
+
 function normalizeDate(value?: string): string | undefined {
   if (!value) return undefined;
   const m = value.trim().match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$/);
@@ -33,14 +62,20 @@ function extractJsonArray(raw: string): ParsedItem[] {
     .map((row: any) => ({
       stokKodu: String(row?.stokKodu || '').trim(),
       quantity: Math.max(0, Number(row?.quantity || 0)),
-      lot: row?.lot ? String(row.lot).trim() : undefined,
+      lot: normalizeToken(row?.lot ? String(row.lot) : undefined),
       miad: normalizeDate(row?.miad ? String(row.miad) : undefined),
       rawLine: row?.rawLine ? String(row.rawLine) : undefined,
     }))
     .map((row: ParsedItem) => ({
       ...row,
-      // Safety net: UTS-like long numeric identifiers cannot be treated as LOT.
-      lot: looksLikeUtsCode(row.lot) ? undefined : row.lot,
+      lot: (() => {
+        const rawLineLot = extractLotFromRawLine(row.rawLine, row.stokKodu);
+        // Strong rule: prefer LOT inferred from the row segment before MIAD (table order),
+        // otherwise use AI lot if it is not UTS-like.
+        if (rawLineLot) return rawLineLot;
+        if (looksLikeUtsCode(row.lot)) return undefined;
+        return row.lot;
+      })(),
     }))
     .filter((row: ParsedItem) => row.stokKodu && row.quantity > 0);
 }
