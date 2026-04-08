@@ -20,7 +20,7 @@ interface MinMaxSettingsPanelProps {
   isOpen: boolean;
   onClose: () => void;
   target: Depot | Hospital;
-  targetType: 'depot' | 'hospital' | 'laboratory';
+  targetType: 'depot' | 'hospital' | 'laboratory' | 'spare_parts_depot';
   productCodes: ProductCode[];
   toast: (options: { title: string; description: string; variant?: "default" | "destructive" }) => void;
 }
@@ -44,7 +44,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
   const [unselectedSearch, setUnselectedSearch] = useState('');
   const [existingRuleCodes, setExistingRuleCodes] = useState<Set<string>>(new Set());
   
-  const collectionName = targetType === 'depot' ? 'depots' : 'hospitals';
+  const collectionName = targetType === 'depot' ? 'depots' : targetType === 'spare_parts_depot' ? 'yedekParcaDepoMinMax' : 'hospitals';
 
   useEffect(() => {
     if (!target || !target.id) return;
@@ -309,7 +309,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
         const rulesRef = collection(db, collectionName, target.id!, "minMaxRules");
         const snapshot = await getDocs(rulesRef);
         if(snapshot.empty) {
-            toast({ title: "Bilgi", description: `Bu ${targetType === 'depot' ? 'depo' : 'hastane'} için zaten tanımlı kural bulunmuyor.`, variant: "default" });
+            toast({ title: "Bilgi", description: `Bu ${targetType === 'depot' ? 'depo' : targetType === 'spare_parts_depot' ? 'yedek parça deposu' : 'hastane'} için zaten tanımlı kural bulunmuyor.`, variant: "default" });
             setIsLoading(false);
             return;
         }
@@ -337,7 +337,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
             <SlidersHorizontal className="mr-2 h-6 w-6" /> Min-Max Stok Seviyeleri: {target.name}
           </DialogTitle>
           <DialogDescription>
-            Bu {targetType === 'depot' ? 'depoda' : 'hastanede'} işlem görebilecek ürünleri ve bu ürünler için stok seviyelerini belirleyin.
+            Bu {targetType === 'depot' ? 'depoda' : targetType === 'spare_parts_depot' ? 'yedek parça deposunda' : 'hastanede'} işlem görebilecek ürünleri ve bu ürünler için stok seviyelerini belirleyin.
           </DialogDescription>
         </DialogHeader>
 
@@ -451,9 +451,9 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
                               type="number"
                               value={isEnabled ? (rule?.aylikTuketimLimiti ?? '') : ''}
                               onChange={e => handleRuleChange(product.stokKodu!, 'aylikTuketimLimiti', e.target.value)}
-                              disabled={!isEnabled || targetType === 'depot'}
+                              disabled={!isEnabled || targetType === 'depot' || targetType === 'spare_parts_depot'}
                               className="h-8"
-                              placeholder={targetType === 'depot' ? 'N/A' : 'Limit'}
+                              placeholder={targetType === 'depot' || targetType === 'spare_parts_depot' ? 'N/A' : 'Limit'}
                             />
                           </TableCell>
                           <TableCell>
