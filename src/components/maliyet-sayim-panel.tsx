@@ -950,7 +950,17 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
     setIsSaving(true);
     try {
       const entries = Object.values(countData) as ProductCountEntry[];
-      const countedEntries = entries.filter(entry => entry.counted);
+      const countedEntries = entries.filter((entry) => {
+        const stok = parseInt(entry.stokAdedi, 10) || 0;
+        const cihaz = parseInt(entry.cihazUstuAdedi, 10) || 0;
+        const hasManualData =
+          stok > 0 ||
+          cihaz > 0 ||
+          entry.lots.length > 0 ||
+          entry.serials.length > 0 ||
+          entry.expiryWarnings.length > 0;
+        return entry.counted || hasManualData;
+      });
 
       if (sessionMode === 'collaborative' && activeSessionId && activeSession) {
         // Collaborative mode: use completeSession to save with attribution
