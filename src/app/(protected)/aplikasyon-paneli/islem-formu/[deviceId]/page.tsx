@@ -42,7 +42,7 @@ type OperationType =
   | 'diger';
 
 // İşlem Türü
-type IslemTuru = 'rutin_kurum_ziyareti' | 'periyodik_bakim' | 'ariza' | 'alis' | 'roche_bilgisayar_arizasi' | '';
+type IslemTuru = 'rutin_kurum_ziyareti' | 'periyodik_bakim' | 'ariza' | 'alis' | 'roche_bilgisayar_arizasi' | 'diger' | '';
 
 // İşlem Türü Labels
 const ISLEM_TURU_LABELS: Record<IslemTuru, string> = {
@@ -52,6 +52,7 @@ const ISLEM_TURU_LABELS: Record<IslemTuru, string> = {
   ariza: 'Arıza',
   alis: 'ALIS',
   roche_bilgisayar_arizasi: 'Roche Bilgisayar Arızası',
+  diger: 'Diğer',
 };
 
 // Cihaz Durumu
@@ -2287,7 +2288,7 @@ export default function AplikasyonIslemFormuPage() {
         }
         return (
           <div className="wizard-option-list">
-            {(['rutin_kurum_ziyareti', 'periyodik_bakim', 'ariza', 'alis', 'roche_bilgisayar_arizasi'] as IslemTuru[]).map(tur => {
+            {(['rutin_kurum_ziyareti', 'periyodik_bakim', 'ariza', 'alis', 'roche_bilgisayar_arizasi', 'diger'] as IslemTuru[]).map(tur => {
               const hasSubFields = tur === 'ariza' || tur === 'periyodik_bakim';
               return (
                 <React.Fragment key={tur}>
@@ -2356,6 +2357,21 @@ export default function AplikasyonIslemFormuPage() {
                           </div>
                         )}
                       </div>
+                    </div>
+                  )}
+
+                  {/* Diğer sub-field shown inline below the diğer option */}
+                  {tur === 'diger' && islemTuru === 'diger' && (
+                    <div style={{ margin: '8px 24px 16px' }}>
+                      <label style={{ color: 'rgba(255,255,255,0.8)', fontSize: '14px', fontWeight: 500, display: 'block', marginBottom: '12px' }}>
+                        Diğer İşlem Açıklaması *
+                      </label>
+                      <Textarea
+                        placeholder="Diğer işlem türü için açıklama girin..."
+                        value={aciklama}
+                        onChange={(e) => setAciklama(e.target.value)}
+                        className="wizard-dark-select bg-white/10 border-white/20 text-white min-h-[96px]"
+                      />
                     </div>
                   )}
 
