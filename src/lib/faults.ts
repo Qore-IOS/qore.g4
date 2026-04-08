@@ -6,7 +6,7 @@ import { db } from '@/lib/firebase';
 import {
   addDoc, collection, doc, serverTimestamp, Timestamp, updateDoc, getDoc, writeBatch, query, where, getDocs
 } from 'firebase/firestore';
-import { emitFaultOpened, emitFaultTransferred } from '@/lib/notifications';
+import { createNotification, emitFaultOpened, emitFaultTransferred } from '@/lib/notifications';
 import type { DeviceFaultStatus, InterventionType } from '@/lib/types';
 import { withCompanyScope } from '@/lib/company-scope';
 
