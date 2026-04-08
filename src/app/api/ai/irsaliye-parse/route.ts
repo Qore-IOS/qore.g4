@@ -9,6 +9,45 @@ type ParsedItem = {
   rawLine?: string;
 };
 
+function looksLikeUtsCode(value?: string): boolean {
+  if (!value) return false;
+  return /^\d{11,16}$/.test(value.replace(/\s+/g, ''));
+}
+
+function normalizeToken(value?: string): string | undefined {
+  if (!value) return undefined;
+  const token = value
+    .trim()
+    .replace(/[|;,]+/g, ' ')
+    .match(/\b([A-Za-z0-9-]{3,})\b/)?.[1];
+  return token ? token.toUpperCase() : undefined;
+}
+
+function isLikelyLotToken(value?: string): boolean {
+  if (!value) return false;
+  return /\d/.test(value) && value.length >= 4 && !looksLikeUtsCode(value);
+}
+
+function extractLotFromRawLine(rawLine?: string, stokKodu?: string): string | undefined {
+  if (!rawLine) return undefined;
+  const dateMatch = rawLine.match(/\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b/);
+  if (!dateMatch || dateMatch.index == null) return undefined;
+
+  const beforeDate = rawLine.slice(0, dateMatch.index).trim();
+  const tokens = beforeDate.split(/\s+/).map((t) => normalizeToken(t)).filter((t): t is string => !!t);
+  if (tokens.length === 0) return undefined;
+
+  for (let i = tokens.length - 1; i >= 0; i--) {
+    const candidate = tokens[i];
+    if (!candidate) continue;
+    if (stokKodu && candidate === stokKodu.toUpperCase()) continue;
+    if (/^(ADET|KUTU|PAKET|KOLI|PCS|EA|BOX|BIRIM)$/i.test(candidate)) continue;
+    if (!isLikelyLotToken(candidate)) continue;
+    return candidate;
+  }
+  return undefined;
+}
+
 function normalizeDate(value?: string): string | undefined {
   if (!value) return undefined;
   const m = value.trim().match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$/);
@@ -28,9 +67,20 @@ function extractJsonArray(raw: string): ParsedItem[] {
     .map((row: any) => ({
       stokKodu: String(row?.stokKodu || '').trim(),
       quantity: Math.max(0, Number(row?.quantity || 0)),
-      lot: row?.lot ? String(row.lot).trim() : undefined,
+      lot: normalizeToken(row?.lot ? String(row.lot) : undefined),
       miad: normalizeDate(row?.miad ? String(row.miad) : undefined),
       rawLine: row?.rawLine ? String(row.rawLine) : undefined,
+    }))
+    .map((row: ParsedItem) => ({
+      ...row,
+      lot: (() => {
+        const rawLineLot = extractLotFromRawLine(row.rawLine, row.stokKodu);
+        // Strong rule: prefer LOT inferred from the row segment before MIAD (table order),
+        // otherwise use AI lot if it is not UTS-like.
+        if (rawLineLot) return rawLineLot;
+        if (!isLikelyLotToken(row.lot)) return undefined;
+        return row.lot;
+      })(),
     }))
     .filter((row: ParsedItem) => row.stokKodu && row.quantity > 0);
 }
@@ -61,7 +111,9 @@ export async function POST(req: NextRequest) {
         'You are a Turkish e-irsaliye parser.',
         'Return ONLY JSON array, no markdown.',
         'Use table headers to map correct columns.',
+        'IMPORTANT: LOT must be read only from the LOT/Parti/Batch column header.',
         'IMPORTANT: never confuse UTS Kodu with LOT.',
+        'If LOT column is missing or unreadable, return lot as empty/undefined.',
       ].join(' '),
       messages: [
         {
@@ -69,7 +121,8 @@ export async function POST(req: NextRequest) {
           content: [
             'Aşağıdaki irsaliye metninden ürün satırlarını çıkar.',
             'Sadece verilen ürün kodlarıyla eşleşen satırları döndür.',
-            'Kolon başlıklarını dikkate al. UTS Kodu sütunu varsa LOT olarak alma.',
+            'Kolon başlıklarını dikkate al. LOT değeri sadece LOT sütunundan alınmalı.',
+            'UTS Kodu sütunu varsa asla LOT olarak alma.',
             'Miad/SKT tarihini dd.MM.yyyy formatında döndür.',
             'quantity satırdaki miktar olsun.',
             'JSON şema: [{ "stokKodu": "...", "quantity": 0, "lot": "...", "miad": "...", "rawLine": "..." }]',
@@ -89,4 +142,3 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: error?.message || 'AI parse başarısız.' }, { status: 500 });
   }
 }
-
