@@ -33,7 +33,6 @@ function sanitizeLotValue(value?: string): string | undefined {
     .match(/\b([A-Za-z0-9-]{3,})\b/)?.[1]
     ?.trim();
   if (!token) return undefined;
-  if (!/\d/.test(token)) return undefined;
   if (looksLikeUtsCode(token)) return undefined;
   return token.toUpperCase();
 }
@@ -333,13 +332,8 @@ function parseLineByLine(lines: string[], productCodes: ProductCode[]): Irsaliye
       }
     }
 
-    // Lot: look for "lot" keyword or standalone lot-like numbers
+    // LOT başlığı zorunlu olduğundan line-by-line fallback'te lot üretme.
     let lot: string | undefined;
-    const lotKeywordMatch = contextLines.match(/(?:lot|parti|batch)\s*[:.]?\s*([A-Za-z0-9-]+)/i);
-    if (lotKeywordMatch) {
-      const normalized = lotKeywordMatch[1].toUpperCase();
-      lot = /\d/.test(normalized) ? normalized : undefined;
-    }
 
     if (stokKodu && quantity > 0) {
       results.push({ stokKodu, quantity, lot, miad, rawLine: line.trim() });

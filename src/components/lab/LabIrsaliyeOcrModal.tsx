@@ -62,10 +62,7 @@ export default function LabIrsaliyeOcrModal({
   const normalizeLotToken = (value?: string) => {
     if (!value) return undefined;
     const token = value.trim().replace(/[|;,]+/g, ' ').match(/\b([A-Za-z0-9-]{3,})\b/)?.[1]?.toUpperCase();
-    if (!token) return undefined;
-    // Stok adı parçalarının LOT'a düşmesini engellemek için en az bir rakam şartı.
-    if (!/\d/.test(token)) return undefined;
-    return token;
+    return token || undefined;
   };
 
   useEffect(() => {
@@ -122,7 +119,6 @@ export default function LabIrsaliyeOcrModal({
         // AI çıktısı geldiğinde de lokal parser ile LOT doğrulaması yap.
         const localItems = parseIrsaliyeText(text, productCodes);
         rawItems = rawItems.map((item) => {
-          const aiLot = normalizeLotToken(item.lot);
           const localMatch = localItems.find((local) =>
             local.stokKodu === item.stokKodu &&
             (
@@ -134,7 +130,8 @@ export default function LabIrsaliyeOcrModal({
           const localLot = normalizeLotToken(localMatch?.lot);
           return {
             ...item,
-            lot: localLot || aiLot,
+            // LOT değeri her zaman lokal parser'dan gelsin (LOT başlığına göre çıkarım).
+            lot: localLot || undefined,
           };
         });
       }

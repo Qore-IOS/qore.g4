@@ -25,7 +25,7 @@ function normalizeToken(value?: string): string | undefined {
 
 function isLikelyLotToken(value?: string): boolean {
   if (!value) return false;
-  return /\d/.test(value) && value.length >= 4 && !looksLikeUtsCode(value);
+  return value.length >= 3 && !looksLikeUtsCode(value);
 }
 
 function extractLotFromRawLine(rawLine?: string, stokKodu?: string): string | undefined {
@@ -58,7 +58,7 @@ function normalizeDate(value?: string): string | undefined {
   return `${dd}.${mm}.${yyyy}`;
 }
 
-function extractJsonArray(raw: string): ParsedItem[] {
+function extractJsonArray(raw: string, hasLotHeader: boolean): ParsedItem[] {
   const match = raw.match(/\[[\s\S]*\]/);
   const candidate = (match?.[0] ?? raw).replace(/```json|```/gi, '').trim();
   const parsed = JSON.parse(candidate);
@@ -74,6 +74,7 @@ function extractJsonArray(raw: string): ParsedItem[] {
     .map((row: ParsedItem) => ({
       ...row,
       lot: (() => {
+        if (!hasLotHeader) return undefined;
         const rawLineLot = extractLotFromRawLine(row.rawLine, row.stokKodu);
         // Strong rule: prefer LOT inferred from the row segment before MIAD (table order),
         // otherwise use AI lot if it is not UTS-like.
@@ -97,6 +98,8 @@ export async function POST(req: NextRequest) {
     if (productCodes.length === 0) {
       return NextResponse.json({ error: 'productCodes zorunludur.' }, { status: 400 });
     }
+
+    const hasLotHeader = /\b(lot|parti|batch)\b/i.test(text);
 
     const compactProducts = productCodes
       .slice(0, 2500)
@@ -135,7 +138,7 @@ export async function POST(req: NextRequest) {
       maxOutputTokens: 2400,
     });
 
-    const parsed = extractJsonArray(result.text);
+    const parsed = extractJsonArray(result.text, hasLotHeader);
     return NextResponse.json({ parsed, model: result.model });
   } catch (error: any) {
     console.error('AI irsaliye parse error:', error);
