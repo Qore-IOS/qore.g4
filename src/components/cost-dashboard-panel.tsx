@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { collection, getDocs, orderBy, query } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
@@ -9,7 +9,7 @@ import { PieChart, ResponsiveContainer, Pie, Cell, Tooltip as RechartsTooltip, L
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Loader2, TrendingUp, TrendingDown, PieChart as PieChartIcon,
-  Wallet, BarChart3, Calendar, ChevronRight, ArrowLeft,
+  Wallet, BarChart3, Calendar, ChevronRight, ArrowLeft, FileSpreadsheet, FileText,
   MapPin, Layers,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -27,6 +27,7 @@ import BudgetComparison from '@/components/cost-observation/BudgetComparison';
 import CapitalEfficiency from '@/components/cost-observation/CapitalEfficiency';
 import ExpiryRiskCard from '@/components/cost-observation/ExpiryRiskCard';
 import ProductGroupBreakdown from '@/components/cost-observation/ProductGroupBreakdown';
+import { useToast } from '@/hooks/use-toast';
 import {
   calculateTotalCostForRange,
   calculateTurnoverMetrics,
@@ -141,6 +142,7 @@ type TimePeriod = 'latest' | '3m' | '6m' | '12m' | 'all';
 export default function CostDashboardPanel({ productCodes }: CostDashboardPanelProps) {
   const router = useRouter();
   const { currentCompanyId, isSuperAdmin } = useAuth();
+  const { toast } = useToast();
   const [isLoading, setLoading] = useState(false);
   const [rates, setRates] = useState<Record<Currency, number> | null>(null);
   const [currency, setCurrency] = useState<Currency>('TRY');
@@ -159,8 +161,8 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
           fetchExchangeRates(),
           getDocs(query(collection(db, 'maliyetSayimSessions'), orderBy('createdAt', 'desc'))),
         ]);
-        setRates(ratesData);
-        const allSessions = sessionsSnap.docs.map(d => ({ id: d.id, ...d.data() } as SayimSession));
+        setRates(rateData);
+        const allSessions = sessionSnap.docs.map(d => ({ id: d.id, ...d.data() } as SayimSession));
         setSessions(filterByCompanyScope(allSessions, companyId, superAdmin));
       } catch (err) {
         console.error('Error loading cost dashboard:', err);
@@ -514,6 +516,231 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
     return totalUnits > 0 ? totalCost / totalUnits : 0;
   }, [latestPerLocation, selectedBrand, productMap, rates, currency]);
 
+  const loadLogoDataUrl = useCallback(async (): Promise<string | null> => {
+    try {
+      const response = await fetch('/QORE-INV_LOGO.PNG');
+      if (!response.ok) return null;
+      const blob = await response.blob();
+      return await new Promise<string | null>((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const sanitizePdfText = useCallback((text: string): string => {
+    return text
+      .replace(/İ/g, 'I').replace(/ı/g, 'i')
+      .replace(/Ş/g, 'S').replace(/ş/g, 's')
+      .replace(/Ğ/g, 'G').replace(/ğ/g, 'g')
+      .replace(/Ü/g, 'U').replace(/ü/g, 'u')
+      .replace(/Ö/g, 'O').replace(/ö/g, 'o')
+      .replace(/Ç/g, 'C').replace(/ç/g, 'c');
+  }, []);
+
+  const createPieChartDataUrl = useCallback((items: { label: string; value: number }[], title: string): string | null => {
+    if (typeof document === 'undefined' || items.length === 0) return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = 460;
+    canvas.height = 300;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#334155';
+    ctx.font = 'bold 16px Arial';
+    ctx.fillText(title, 18, 26);
+
+    const total = items.reduce((s, i) => s + i.value, 0) || 1;
+    let start = -Math.PI / 2;
+    const cx = 140;
+    const cy = 160;
+    const r = 90;
+    items.slice(0, 8).forEach((item, i) => {
+      const ratio = item.value / total;
+      const end = start + ratio * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, r, start, end);
+      ctx.closePath();
+      ctx.fillStyle = PIE_COLORS[i % PIE_COLORS.length];
+      ctx.fill();
+      start = end;
+    });
+
+    ctx.fillStyle = '#1e293b';
+    ctx.font = '12px Arial';
+    items.slice(0, 6).forEach((item, i) => {
+      const y = 72 + i * 28;
+      ctx.fillStyle = PIE_COLORS[i % PIE_COLORS.length];
+      ctx.fillRect(260, y - 10, 10, 10);
+      ctx.fillStyle = '#1e293b';
+      const pct = ((item.value / total) * 100).toFixed(1);
+      ctx.fillText(`${sanitizePdfText(item.label)} %${pct}`, 276, y);
+    });
+
+    return canvas.toDataURL('image/png');
+  }, [sanitizePdfText]);
+
+  const handleExportExcel = useCallback(async () => {
+    try {
+      const XLSX = await import('xlsx');
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet([
+        ['QORE Maliyet Gözlem Raporu'],
+        [`Tarih: ${new Date().toLocaleString('tr-TR')}`],
+        [`Para Birimi: ${currency}`],
+        [`Konsolide Toplam: ${fmtCurrency(consolidatedCost, sym)}`],
+        [],
+        ['Konum', 'Tip', 'Ürün Sayısı', 'Maliyet'],
+        ...locationBreakdown.map((l) => [l.name, l.type === 'lab' ? 'Lab' : 'Depo', l.productCount, Number(l.cost.toFixed(2))]),
+      ]);
+      ws['!cols'] = [{ wch: 32 }, { wch: 14 }, { wch: 14 }, { wch: 18 }];
+      ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 3 } }];
+      (ws as any)['!autofilter'] = { ref: `A6:D${locationBreakdown.length + 6}` };
+      (ws as any)['!pageSetup'] = { orientation: 'landscape', fitToWidth: 1, fitToHeight: 0, paperSize: 9 };
+      XLSX.utils.book_append_sheet(wb, ws, 'Ozet');
+
+      const monthlyWs = XLSX.utils.json_to_sheet(monthlyTrend.map((m) => ({
+        Ay: m.month,
+        Maliyet: Number(m.cost.toFixed(2)),
+      })));
+      monthlyWs['!cols'] = [{ wch: 18 }, { wch: 18 }];
+      (monthlyWs as any)['!pageSetup'] = { orientation: 'landscape', fitToWidth: 1, fitToHeight: 0, paperSize: 9 };
+      XLSX.utils.book_append_sheet(wb, monthlyWs, 'AylikTrend');
+
+      const brandWs = XLSX.utils.json_to_sheet(brandCosts.map((b) => ({
+        Marka: b.name,
+        UrunSayisi: b.productCount,
+        Maliyet: Number(b.cost.toFixed(2)),
+      })));
+      brandWs['!cols'] = [{ wch: 28 }, { wch: 14 }, { wch: 18 }];
+      (brandWs as any)['!pageSetup'] = { orientation: 'landscape', fitToWidth: 1, fitToHeight: 0, paperSize: 9 };
+      XLSX.utils.book_append_sheet(wb, brandWs, 'MarkaDagilim');
+
+      XLSX.writeFile(wb, `Maliyet_Gozlem_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      toast({ title: 'Başarılı', description: 'Excel raporu indirildi.' });
+    } catch (error) {
+      console.error(error);
+      toast({ title: 'Hata', description: 'Excel raporu oluşturulamadı.', variant: 'destructive' });
+    }
+  }, [currency, consolidatedCost, sym, locationBreakdown, monthlyTrend, brandCosts, toast]);
+
+  const handleExportPdf = useCallback(async () => {
+    try {
+      const [jsPDFModule, autoTableModule] = await Promise.all([import('jspdf'), import('jspdf-autotable')]);
+      const jsPDF = jsPDFModule.default;
+      const autoTable = autoTableModule.default;
+      const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'landscape' });
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const logo = await loadLogoDataUrl();
+      const brandPie = createPieChartDataUrl(brandCosts.map((b) => ({ label: b.name, value: b.cost })), 'Marka Dagilimi');
+      const groupPie = createPieChartDataUrl(groupBreakdown.map((g) => ({ label: g.name, value: g.cost })), 'Urun Grubu Kirilimi');
+
+      const drawFooter = () => {
+        const badgeW = 220;
+        const badgeH = 32;
+        const bx = pageW / 2 - badgeW / 2;
+        const by = pageH - 40;
+        doc.setFillColor(254, 243, 199);
+        doc.roundedRect(bx, by, badgeW, badgeH, 10, 10, 'F');
+        if (logo) {
+          // "Üstten/alttan bastırılmış" görünüm için alçak yükseklik
+          doc.addImage(logo, 'PNG', pageW / 2 - 58, by + 8, 116, 14, undefined, 'FAST');
+        }
+      };
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(22);
+      doc.text(sanitizePdfText('QORE Maliyet Gozlem Raporu'), pageW / 2, 38, { align: 'center' });
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.text(sanitizePdfText(`Tarih: ${new Date().toLocaleString('tr-TR')}   Para Birimi: ${currency}`), 40, 56);
+
+      const cardY = 72;
+      const cardW = (pageW - 60) / 4;
+      const cards = [
+        { t: 'Toplam Envanter Maliyeti', v: fmtCurrency(consolidatedCost, sym) },
+        { t: 'Konum Bazli Maliyet', v: `${locationBreakdown.length} konum` },
+        { t: 'Marka Dagilimi', v: `${brandCosts.length} marka` },
+        { t: 'Urun Grubu Kirilim', v: `${groupBreakdown.length} grup` },
+      ];
+      cards.forEach((c, i) => {
+        const x = 20 + i * cardW;
+        doc.setFillColor(248, 250, 252);
+        doc.roundedRect(x, cardY, cardW - 8, 58, 10, 10, 'F');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10);
+        doc.text(sanitizePdfText(c.t), x + 10, cardY + 22);
+        doc.setTextColor(199, 137, 65);
+        doc.setFontSize(13);
+        doc.text(sanitizePdfText(c.v), x + 10, cardY + 44);
+        doc.setTextColor(0, 0, 0);
+      });
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.text(sanitizePdfText('Aylik Maliyet Trendi'), 28, 150);
+      const chartX = 28, chartY = 160, chartW = pageW - 56, chartH = 110;
+      doc.setDrawColor(226, 232, 240);
+      doc.rect(chartX, chartY, chartW, chartH);
+      const maxCost = Math.max(...monthlyTrend.map((m) => m.cost), 1);
+      monthlyTrend.forEach((m, i) => {
+        const bw = Math.max(10, (chartW - 30) / Math.max(monthlyTrend.length, 1) - 6);
+        const x = chartX + 15 + i * (bw + 6);
+        const h = (m.cost / maxCost) * (chartH - 28);
+        doc.setFillColor(59, 130, 246);
+        doc.rect(x, chartY + chartH - 14 - h, bw, h, 'F');
+        doc.setFontSize(7);
+        doc.text(sanitizePdfText(m.month), x, chartY + chartH - 3);
+      });
+
+      if (brandPie) doc.addImage(brandPie, 'PNG', 28, 286, (pageW - 72) / 2, 190, undefined, 'FAST');
+      if (groupPie) doc.addImage(groupPie, 'PNG', pageW / 2 + 6, 286, (pageW - 72) / 2, 190, undefined, 'FAST');
+      drawFooter();
+
+      doc.addPage('a4', 'landscape');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      doc.text(sanitizePdfText('Detay Tablolari'), 28, 34);
+
+      autoTable(doc, {
+        startY: 48,
+        head: [[sanitizePdfText('Konum'), sanitizePdfText('Tip'), sanitizePdfText('Urun'), sanitizePdfText('Maliyet')]],
+        body: locationBreakdown.map((l) => [sanitizePdfText(l.name), l.type === 'lab' ? 'Lab' : 'Depo', String(l.productCount), fmtCurrencyDetailed(l.cost, sym)]),
+        styles: { fontSize: 9, cellPadding: 4 },
+        headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
+      });
+      autoTable(doc, {
+        startY: (doc as any).lastAutoTable.finalY + 10,
+        head: [[sanitizePdfText('Marka'), sanitizePdfText('Urun'), sanitizePdfText('Maliyet')]],
+        body: brandCosts.map((b) => [sanitizePdfText(b.name), String(b.productCount), fmtCurrencyDetailed(b.cost, sym)]),
+        styles: { fontSize: 9, cellPadding: 4 },
+        headStyles: { fillColor: [255, 237, 213], textColor: [154, 52, 18] },
+      });
+      autoTable(doc, {
+        startY: (doc as any).lastAutoTable.finalY + 10,
+        head: [[sanitizePdfText('Urun Grubu'), sanitizePdfText('Maliyet')]],
+        body: groupBreakdown.map((g) => [sanitizePdfText(g.name), fmtCurrencyDetailed(g.cost, sym)]),
+        styles: { fontSize: 9, cellPadding: 4 },
+        headStyles: { fillColor: [220, 252, 231], textColor: [22, 101, 52] },
+      });
+      drawFooter();
+
+      doc.save(`Maliyet_Gozlem_${new Date().toISOString().slice(0, 10)}.pdf`);
+      toast({ title: 'Başarılı', description: 'PDF raporu indirildi.' });
+    } catch (error) {
+      console.error(error);
+      toast({ title: 'Hata', description: 'PDF raporu oluşturulamadı.', variant: 'destructive' });
+    }
+  }, [brandCosts, consolidatedCost, createPieChartDataUrl, currency, groupBreakdown, loadLogoDataUrl, locationBreakdown, monthlyTrend, sanitizePdfText, sym, toast]);
+
   // ---- RENDER ----
 
   if (isLoading) {
@@ -736,10 +963,23 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
             </span>
             <div>
               <h1 className="text-xl sm:text-2xl font-bold text-[var(--dashboard-text)]">Maliyet Gözlem Merkezi</h1>
-              <p className="text-xs sm:text-sm text-[var(--dashboard-muted)]">CFO görünümü: delta, konsolide toplam, bütçe ve risk analizi</p>
             </div>
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap justify-end">
+            <button
+              onClick={handleExportExcel}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500 text-white inline-flex items-center gap-1.5"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              Excel
+            </button>
+            <button
+              onClick={handleExportPdf}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-blue-600 text-white inline-flex items-center gap-1.5"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              PDF
+            </button>
             {(['EUR', 'USD', 'TRY'] as Currency[]).map((cur) => (
               <button key={cur} onClick={() => setCurrency(cur)} className={`px-3 py-1.5 rounded-xl text-xs font-semibold ${currency === cur ? 'bg-[var(--dashboard-accent)] text-white' : 'bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)]'}`}>
                 {CURRENCY_SYMBOLS[cur]} {cur}
