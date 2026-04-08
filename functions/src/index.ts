@@ -400,6 +400,119 @@ export const onNotificationCreated = functions
   }
 );
 
+// --- ARIZA HATIRLATICI (4 saat+ müdahale bekleyen arızalar) ---
+// Her saat çalışır, mudahale_bekliyor veya mudahale_ediliyor durumunda 4+ saat kalan
+// arızalar için üzerine alan personele bildirim gönderir.
+export const faultInterventionReminder = onSchedule(
+    {
+        schedule: 'every 1 hours',
+        timeZone: 'Europe/Istanbul',
+        region: 'europe-west1',
+        timeoutSeconds: 120,
+        memory: '256MiB',
+    },
+    async () => {
+        const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
+        const now = Date.now();
+        const fourHoursAgo = admin.firestore.Timestamp.fromMillis(now - FOUR_HOURS_MS);
+
+        try {
+            // Query faults that are in mudahale_bekliyor or mudahale_ediliyor status
+            // and have been assigned more than 4 hours ago
+            const [bekleyenSnap, ediliyorSnap] = await Promise.all([
+                db.collection('deviceFaultReports')
+                    .where('status', '==', 'mudahale_bekliyor')
+                    .where('assignedAt', '<=', fourHoursAgo)
+                    .get(),
+                db.collection('deviceFaultReports')
+                    .where('status', '==', 'mudahale_ediliyor')
+                    .where('assignedAt', '<=', fourHoursAgo)
+                    .get(),
+            ]);
+
+            const allDocs = [...bekleyenSnap.docs, ...ediliyorSnap.docs];
+
+            if (allDocs.length === 0) {
+                logger.info('[faultReminder] No faults awaiting intervention for 4+ hours.');
+                return;
+            }
+
+            logger.info(`[faultReminder] Found ${allDocs.length} faults awaiting intervention for 4+ hours.`);
+
+            // Check which faults have already been reminded recently (within last 4 hours)
+            // to avoid spamming the same person every hour
+            const REMINDER_COOLDOWN_MS = 4 * 60 * 60 * 1000;
+            const cooldownThreshold = admin.firestore.Timestamp.fromMillis(now - REMINDER_COOLDOWN_MS);
+
+            for (const faultDoc of allDocs) {
+                const data = faultDoc.data();
+                const assignedToUid = data.assignedToUid;
+                const assignedToName = data.assignedToName || 'Personel';
+
+                if (!assignedToUid) {
+                    logger.warn(`[faultReminder] Fault ${faultDoc.id} has no assignedToUid, skipping.`);
+                    continue;
+                }
+
+                // Check cooldown - skip if reminder was sent recently
+                const lastReminderAt = data.lastFaultReminderAt;
+                if (lastReminderAt && lastReminderAt.toMillis() > cooldownThreshold.toMillis()) {
+                    logger.info(`[faultReminder] Fault ${faultDoc.id} already reminded recently, skipping.`);
+                    continue;
+                }
+
+                // Calculate how long the fault has been waiting
+                const assignedAtMs = data.assignedAt?.toMillis?.() || now;
+                const waitingHours = Math.floor((now - assignedAtMs) / (60 * 60 * 1000));
+
+                const statusLabel = data.status === 'mudahale_bekliyor'
+                    ? 'müdahale bekliyor'
+                    : 'müdahale ediliyor';
+
+                const deviceName = data.model || data.deviceName || 'Bilinmeyen Cihaz';
+                const labName = data.labName || '';
+                const faultId = faultDoc.id;
+
+                // Create notification for the assigned personnel
+                const notificationData = {
+                    type: 'fault_reminder' as const,
+                    title: `Arıza Hatırlatma: ${deviceName}`,
+                    message: `${labName ? labName + ' - ' : ''}${deviceName} cihazı için açılan arıza ${waitingHours} saattir "${statusLabel}" durumunda bekliyor. Lütfen arızayı kontrol ediniz.`,
+                    href: `/ariza-yonetimi/${faultId}`,
+                    resource: { type: 'device' as const, id: data.deviceId || '' },
+                    actor: { uid: 'system', name: 'Sistem' },
+                    targets: [`user:${assignedToUid}`],
+                    meta: {
+                        faultReportId: faultId,
+                        assignedToUid,
+                        assignedToName,
+                        deviceName,
+                        labName,
+                        waitingHours,
+                        status: data.status,
+                    },
+                    channel: 'push' as const,
+                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                    readBy: [] as string[],
+                };
+
+                await db.collection('notifications').add(notificationData);
+
+                // Update the fault document to track last reminder time
+                await faultDoc.ref.update({
+                    lastFaultReminderAt: admin.firestore.FieldValue.serverTimestamp(),
+                });
+
+                logger.info(`[faultReminder] Sent reminder for fault ${faultId} to ${assignedToName} (${assignedToUid}), waiting ${waitingHours}h in "${statusLabel}".`);
+            }
+
+            logger.info(`[faultReminder] Completed. Processed ${allDocs.length} faults.`);
+        } catch (error) {
+            logger.error('[faultReminder] Error processing fault reminders:', error);
+        }
+    }
+);
+
 // --- İRSALİYE DOSYA TEMİZLEME (1 hafta sonra otomatik silme) ---
 // Her gün gece yarısı çalışır (Europe/Istanbul timezone)
 export const cleanupExpiredIrsaliyeDosyalari = onSchedule(

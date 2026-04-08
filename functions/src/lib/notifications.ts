@@ -16,6 +16,7 @@ type NotificationType =
   | 'maliyet_sayim_davet'
   | 'user_request_created'
   | 'user_request_completed'
+  | 'fault_reminder'
   | 'custom';
 
 export type ResourceType =

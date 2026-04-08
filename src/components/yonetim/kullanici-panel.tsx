@@ -49,6 +49,7 @@ const NOTIFICATION_OPTIONS: { key: NotificationTypeUI; label: string }[] = [
     { key: 'lab_count_completed', label: 'Laboratuvar Sayımı Tamamlandı' },
     { key: 'fault_opened', label: 'Arıza Kaydı Açıldı' },
     { key: 'fault_closed', label: 'Arıza Kaydı Kapandı' },
+    { key: 'fault_reminder', label: 'Arıza Müdahale Hatırlatma (4 saat+)' },
     { key: 'stock_threshold', label: 'Stok Eşik Uyarısı' },
     { key: 'user_request_created', label: 'Kullanıcı Talebi (Yeni Talep)' },
     { key: 'user_request_completed', label: 'Kullanıcı Talebi (Tamamlandı)' },
