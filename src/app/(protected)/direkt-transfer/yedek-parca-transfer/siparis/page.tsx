@@ -8,7 +8,7 @@ import { useToast } from '@/hooks/use-toast';
 import { withCompanyScope, filterByCompanyScope } from '@/lib/company-scope';
 import type { MinMaxRule, ProductCode, YedekParcaDepoStokItem } from '@/lib/types';
 import { addDoc, collection, getDocs, Timestamp } from 'firebase/firestore';
-import { ArrowLeft, CheckCircle2, ClipboardList, Loader2, RefreshCw, ShoppingCart, Warehouse } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, ClipboardList, History, Loader2, RefreshCw, ShoppingCart, Trash2, Warehouse } from 'lucide-react';
 
 interface SparePartOrderItem {
   stokKodu: string;
@@ -18,6 +18,14 @@ interface SparePartOrderItem {
   siparisAdedi: number;
 }
 
+const makeDefaultOrderNo = () => {
+  const now = new Date();
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `YP-${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}`;
+};
+
+const normalizeCode = (value?: string | null) => String(value || '').trim().toUpperCase();
+
 export default function YedekParcaSiparisPage() {
   const router = useRouter();
   const { toast } = useToast();
@@ -25,6 +33,7 @@ export default function YedekParcaSiparisPage() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [orderNo, setOrderNo] = useState(makeDefaultOrderNo());
   const [items, setItems] = useState<SparePartOrderItem[]>([]);
 
   const loadData = useCallback(async () => {
@@ -59,26 +68,33 @@ export default function YedekParcaSiparisPage() {
       const productNameByCode = new Map(
         products
           .filter((product) => Boolean(product.stokKodu))
-          .map((product) => [String(product.stokKodu), product.stokAdi || String(product.stokKodu)]),
+          .map((product) => [normalizeCode(product.stokKodu), (product.stokAdi || '').trim()]),
       );
 
+      const stockNameByCode = new Map<string, string>();
       const currentByCode = new Map<string, number>();
       for (const stock of depoStock) {
-        if (!stock.stokKodu) continue;
-        const prev = currentByCode.get(stock.stokKodu) || 0;
-        currentByCode.set(stock.stokKodu, prev + (Number(stock.quantity) || 0));
+        const code = normalizeCode(stock.stokKodu);
+        if (!code) continue;
+        const prevQty = currentByCode.get(code) || 0;
+        currentByCode.set(code, prevQty + (Number(stock.quantity) || 0));
+        if (!stockNameByCode.has(code) && stock.stokAdi?.trim()) {
+          stockNameByCode.set(code, stock.stokAdi.trim());
+        }
       }
 
       const autoItems = rules
         .map((rule) => {
-          const stokKodu = String(rule.stokKodu || '');
-          const mevcut = currentByCode.get(stokKodu) || 0;
+          const code = normalizeCode(rule.stokKodu);
+          const mevcut = currentByCode.get(code) || 0;
           const max = Number(rule.max) || 0;
           const siparisAdedi = Math.max(0, max - mevcut);
+          const productName = productNameByCode.get(code);
+          const stockName = stockNameByCode.get(code);
 
           return {
-            stokKodu,
-            stokAdi: productNameByCode.get(stokKodu) || stokKodu,
+            stokKodu: code,
+            stokAdi: stockName || productName || rule.stokKodu || code,
             mevcut,
             max,
             siparisAdedi,
@@ -106,14 +122,28 @@ export default function YedekParcaSiparisPage() {
     return { kalem, toplamSiparis };
   }, [items]);
 
+  const updateQty = (stokKodu: string, qty: number) => {
+    const safeQty = Number.isFinite(qty) ? Math.max(1, Math.floor(qty)) : 1;
+    setItems((prev) => prev.map((item) => (item.stokKodu === stokKodu ? { ...item, siparisAdedi: safeQty } : item)));
+  };
+
+  const removeRow = (stokKodu: string) => {
+    setItems((prev) => prev.filter((item) => item.stokKodu !== stokKodu));
+  };
+
   const handleSaveOrder = async () => {
     if (!currentCompanyId || !currentUserProfile?.uid) {
       toast({ title: 'Yetki Hatası', description: 'Sipariş kaydı için kullanıcı bilgisi bulunamadı.', variant: 'destructive' });
       return;
     }
 
+    if (!orderNo.trim()) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen sipariş numarası girin.', variant: 'destructive' });
+      return;
+    }
+
     if (items.length === 0) {
-      toast({ title: 'Sipariş Yok', description: 'Oluşturulacak otomatik sipariş kalemi bulunamadı.' });
+      toast({ title: 'Sipariş Yok', description: 'Kaydedilecek sipariş kalemi bulunamadı.' });
       return;
     }
 
@@ -122,6 +152,8 @@ export default function YedekParcaSiparisPage() {
       await addDoc(collection(db, 'yedekParcaSiparisler'), withCompanyScope({
         type: 'auto_max_replenishment',
         status: 'draft',
+        orderNo: orderNo.trim(),
+        orderName: `Yedek Parça Sipariş - ${orderNo.trim()}`,
         createdAt: Timestamp.fromDate(new Date()),
         createdByUid: currentUserProfile.uid,
         createdByName: currentUserProfile.name || currentUserProfile.email || 'Bilinmeyen Kullanıcı',
@@ -131,7 +163,8 @@ export default function YedekParcaSiparisPage() {
         items,
       }, currentCompanyId));
 
-      toast({ title: 'Başarılı', description: `${totals.kalem} kalem otomatik sipariş listesi taslak olarak kaydedildi.` });
+      toast({ title: 'Başarılı', description: `${orderNo.trim()} numaralı sipariş taslak olarak kaydedildi.` });
+      setOrderNo(makeDefaultOrderNo());
     } catch (error) {
       console.error('Yedek parça sipariş kaydı başarısız:', error);
       toast({ title: 'Kayıt Hatası', description: 'Sipariş taslağı kaydedilemedi.', variant: 'destructive' });
@@ -156,13 +189,27 @@ export default function YedekParcaSiparisPage() {
           <button onClick={() => router.push('/direkt-transfer/yedek-parca-transfer?section=depo-stok')} className="cihaz-tool-item inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium" style={{ color: 'var(--dashboard-text)' }}>
             <ArrowLeft className="w-3.5 h-3.5" /> Depo Stok
           </button>
+          <button onClick={() => router.push('/direkt-transfer/yedek-parca-transfer/siparis/gecmis')} className="cihaz-tool-item inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium" style={{ color: 'var(--dashboard-text)' }}>
+            <History className="w-3.5 h-3.5" /> Sipariş Geçmişi
+          </button>
           <button onClick={() => void loadData()} disabled={loading} className="cihaz-tool-item inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium disabled:opacity-50" style={{ color: 'var(--dashboard-text)' }}>
             {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} Yenile
           </button>
           <button onClick={handleSaveOrder} disabled={saving || loading || items.length === 0} className="cihaz-action-tile inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white disabled:opacity-50" style={{ background: 'var(--dashboard-accent)' }}>
-            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ClipboardList className="w-3.5 h-3.5" />} Sipariş Taslağını Kaydet
+            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ClipboardList className="w-3.5 h-3.5" />} Siparişi Kaydet
           </button>
         </div>
+      </div>
+
+      <div className="cihaz-card p-3">
+        <label className="text-[11px] font-semibold" style={{ color: 'var(--dashboard-muted)' }}>Sipariş Numarası</label>
+        <input
+          value={orderNo}
+          onChange={(e) => setOrderNo(e.target.value)}
+          placeholder="Örn: YP-20260408-001"
+          className="w-full mt-1 px-3 py-2 text-sm rounded-xl border outline-none"
+          style={{ borderColor: 'var(--dashboard-stroke)', background: 'var(--dashboard-surface)', color: 'var(--dashboard-text)' }}
+        />
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -203,17 +250,36 @@ export default function YedekParcaSiparisPage() {
                   <th className="px-3 py-2 font-semibold">Stok Adı</th>
                   <th className="px-3 py-2 font-semibold text-right">Mevcut</th>
                   <th className="px-3 py-2 font-semibold text-right">Max</th>
-                  <th className="px-3 py-2 font-semibold text-right">Sipariş</th>
+                  <th className="px-3 py-2 font-semibold text-right">Sipariş Adedi</th>
+                  <th className="px-3 py-2 font-semibold text-right">İşlem</th>
                 </tr>
               </thead>
               <tbody>
                 {items.map((item) => (
                   <tr key={item.stokKodu} className="border-t" style={{ borderColor: 'var(--dashboard-stroke)' }}>
                     <td className="px-3 py-2 font-mono">{item.stokKodu}</td>
-                    <td className="px-3 py-2">{item.stokAdi}</td>
+                    <td className="px-3 py-2 text-[13px] font-medium">{item.stokAdi}</td>
                     <td className="px-3 py-2 text-right">{item.mevcut}</td>
                     <td className="px-3 py-2 text-right">{item.max}</td>
-                    <td className="px-3 py-2 text-right font-semibold" style={{ color: 'var(--dashboard-accent)' }}>{item.siparisAdedi}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex justify-end items-center gap-1.5">
+                        <button onClick={() => updateQty(item.stokKodu, item.siparisAdedi - 1)} className="cihaz-tool-item w-7 h-7 text-sm">-</button>
+                        <input
+                          type="number"
+                          min={1}
+                          value={item.siparisAdedi}
+                          onChange={(e) => updateQty(item.stokKodu, Number(e.target.value || 1))}
+                          className="w-20 text-center text-lg font-bold rounded-lg border"
+                          style={{ borderColor: 'var(--dashboard-stroke)', background: 'var(--dashboard-surface)', color: 'var(--dashboard-accent)' }}
+                        />
+                        <button onClick={() => updateQty(item.stokKodu, item.siparisAdedi + 1)} className="cihaz-tool-item w-7 h-7 text-sm">+</button>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <button onClick={() => removeRow(item.stokKodu)} className="inline-flex items-center justify-center w-8 h-8 rounded-lg hover:bg-red-50">
+                        <Trash2 className="w-4 h-4" style={{ color: '#B91C1C' }} />
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
