@@ -41,6 +41,14 @@ export async function openDeviceFaultReport(input: OpenFaultInput): Promise<stri
     affectedDeviceIds = [], stopLevel, notifyAllPersonnel = false
   } = input;
 
+  let resolvedAffectedDeviceIds = affectedDeviceIds.filter(Boolean);
+  if (affectsAllDevices && resolvedAffectedDeviceIds.length === 0 && hospitalId) {
+    const allLabDevicesSnap = await getDocs(
+      query(collection(db, 'devices'), where('hospitalId', '==', hospitalId))
+    );
+    resolvedAffectedDeviceIds = allLabDevicesSnap.docs.map((d) => d.id);
+  }
+
   // Corrected flat structure for Google Sheets extension
   const report = {
     // Fields for Google Sheets
@@ -75,16 +83,16 @@ export async function openDeviceFaultReport(input: OpenFaultInput): Promise<stri
     faultDefinitionId: faultDefinitionId ?? null,
     faultName: faultName ?? null,
     affectsAllDevices,
-    affectedDeviceIds,
+    affectedDeviceIds: resolvedAffectedDeviceIds,
     stopLevel: stopLevel ?? null,
   };
 
   const reportRef = await addDoc(collection(db, 'deviceFaultReports'), withCompanyScope(report, companyId));
 
   // Update impacted device(s) arizaDurumu
-  if (affectsAllDevices && affectedDeviceIds.length > 0) {
+  if (affectsAllDevices && resolvedAffectedDeviceIds.length > 0) {
     const batch = writeBatch(db);
-    affectedDeviceIds.forEach((id) => {
+    resolvedAffectedDeviceIds.forEach((id) => {
       if (!id) return;
       batch.update(doc(db, 'devices', id), {
         arizaDurumu: faultType,
@@ -108,6 +116,22 @@ export async function openDeviceFaultReport(input: OpenFaultInput): Promise<stri
     description: openDescription ?? '',
     timestamp: serverTimestamp(),
   });
+
+  if (affectsAllDevices && resolvedAffectedDeviceIds.length > 0) {
+    const historyBatch = writeBatch(db);
+    resolvedAffectedDeviceIds.forEach((id) => {
+      const historyRef = doc(collection(db, 'deviceFaultReports', reportRef.id, 'history'));
+      historyBatch.set(historyRef, {
+        type: 'opened',
+        actorUid: openedByUid,
+        actorName: openedByName,
+        deviceId: id,
+        description: `${stopLevel || 'STOP'} etkisi kapsamında cihaz arızalıya alındı.`,
+        timestamp: serverTimestamp(),
+      });
+    });
+    await historyBatch.commit();
+  }
 
   // Emit notification after fault is successfully opened
   if (notifyAllPersonnel) {
