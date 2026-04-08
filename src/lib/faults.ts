@@ -111,23 +111,33 @@ export async function openDeviceFaultReport(input: OpenFaultInput): Promise<stri
 
   // Emit notification after fault is successfully opened
   if (notifyAllPersonnel) {
-    await createNotification({
-      type: 'custom',
-      title: `KOMPLE STOP: ${stopLevel || 'STOP'}`,
-      message: `${labName} laboratuvarında ${stopLevel || 'STOP'} arızası açıldı. Tüm cihazlar etkileniyor. (Açan: ${openedByName})`,
-      href: `/ariza-yonetimi/${reportRef.id}`,
-      resource: { type: 'device', id: deviceId || undefined },
-      actor: { uid: openedByUid, name: openedByName },
-      targets: [`lab:${hospitalId}`, 'role:teknik_servis', 'role:aplikasyon', 'role:admin'],
-      meta: {
-        hospitalId,
+    const stopDeviceName = stopLevel ? `${model} • ${stopLevel}` : model;
+    const stopDescription = openDescription ?? `${stopLevel || 'STOP'} arızası açıldı.`;
+
+    await Promise.all([
+      emitFaultOpened({
+        actor: { uid: openedByUid, name: openedByName },
         faultReportId: reportRef.id,
-        faultType,
-        stopLevel: stopLevel ?? null,
-        affectsAllDevices,
-        affectedDeviceIds,
-      },
-    });
+        assignedDeviceId: deviceId,
+        deviceName: stopDeviceName,
+        faultType: 'teknik_servis',
+        hospitalId,
+        hospitalName: labName,
+        description: stopDescription,
+        deviceImageUrl: input.deviceImageUrl,
+      }),
+      emitFaultOpened({
+        actor: { uid: openedByUid, name: openedByName },
+        faultReportId: reportRef.id,
+        assignedDeviceId: deviceId,
+        deviceName: stopDeviceName,
+        faultType: 'aplikasyon',
+        hospitalId,
+        hospitalName: labName,
+        description: stopDescription,
+        deviceImageUrl: input.deviceImageUrl,
+      }),
+    ]);
   } else {
     await emitFaultOpened({
       actor: { uid: openedByUid, name: openedByName },
