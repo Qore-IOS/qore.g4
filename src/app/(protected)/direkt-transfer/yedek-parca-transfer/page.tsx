@@ -17,6 +17,7 @@ import {
   writeBatch,
   increment,
   setDoc,
+  runTransaction,
 } from 'firebase/firestore';
 import type { ProductCode, User, PendingReturn, SparePartTransferRow, PersonalStockItem, YedekParcaDepoStokItem, Device, Hospital, Depot, DeviceLabPool, PoolWarehouseStockItem } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
@@ -1732,14 +1733,56 @@ export default function YedekParcaTransferPage() {
       return;
     }
 
-    const shouldDelete = window.confirm(`${item.stokKodu} (${item.serialNumber || 'Seri No Yok'}) personel stok kaydı silinsin mi?`);
+    const isActiveStock = item.status === 'in_stock' || item.status === 'pending_approval';
+    const confirmMessage = isActiveStock
+      ? `${item.stokKodu} (${item.serialNumber || 'Seri No Yok'}) aktif stok kaydı silinecek ve ürün depoya iade edilecektir. Devam edilsin mi?`
+      : `${item.stokKodu} (${item.serialNumber || 'Seri No Yok'}) personel stok kaydı silinsin mi?`;
+    const shouldDelete = window.confirm(confirmMessage);
     if (!shouldDelete) return;
 
     try {
       const now = new Date();
-      await deleteDoc(doc(db, 'personalStock', item.id));
+      const batch = writeBatch(db);
+      const stockRef = doc(db, 'personalStock', item.id);
 
-      await addDoc(collection(db, 'sparePartTransferLogs'), withCompanyScope({
+      batch.delete(stockRef);
+
+      // Active stock (in_stock or pending_approval): return to depot so stock is not lost
+      if (isActiveStock) {
+        const depoRef = doc(collection(db, 'yedekParcaDepoStok'));
+        batch.set(depoRef, withCompanyScope({
+          productCodeId: item.productCodeId,
+          stokKodu: item.stokKodu,
+          stokAdi: item.stokAdi,
+          anaBirim: item.anaBirim || 'Adet',
+          serialNumber: item.serialNumber || '',
+          ...(item.hucreNumarasi ? { hucreNumarasi: item.hucreNumarasi } : {}),
+          quantity: 1,
+          createdAt: Timestamp.fromDate(now),
+          createdByUid: currentUserProfile?.uid || '',
+          createdByName: currentUserProfile?.name || '',
+        }, currentCompanyId));
+
+        const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
+        batch.set(depoLogRef, {
+          action: 'iade_giris',
+          productCodeId: item.productCodeId,
+          stokKodu: item.stokKodu,
+          stokAdi: item.stokAdi,
+          anaBirim: item.anaBirim || 'Adet',
+          serialNumber: item.serialNumber || '',
+          quantity: 1,
+          relatedPersonnelUid: item.ownerUid,
+          relatedPersonnelName: item.ownerName,
+          notes: `Personel stok silme ile depoya iade: ${item.ownerName} -> Depo`,
+          createdAt: Timestamp.fromDate(now),
+          createdByUid: currentUserProfile?.uid || '',
+          createdByName: currentUserProfile?.name || '',
+        });
+      }
+
+      const logRef = doc(collection(db, 'sparePartTransferLogs'));
+      batch.set(logRef, withCompanyScope({
         action: 'personnel_stock_deleted_admin',
         personalStockId: item.id,
         productCodeId: item.productCodeId,
@@ -1750,19 +1793,30 @@ export default function YedekParcaTransferPage() {
         fromUid: item.ownerUid,
         fromName: item.ownerName,
         quantity: item.quantity || 1,
-        notes: `${isAdmin ? 'Admin' : 'Teknik Lojistik'} personel stok satırı silme işlemi`,
+        returnedToDepot: isActiveStock,
+        notes: isActiveStock
+          ? `${isAdmin ? 'Admin' : 'Teknik Lojistik'} personel stok silme - ürün depoya iade edildi`
+          : `${isAdmin ? 'Admin' : 'Teknik Lojistik'} personel stok satırı silme işlemi`,
         createdAt: Timestamp.fromDate(now),
         createdByUid: currentUserProfile?.uid || '',
         createdByName: currentUserProfile?.name || '',
       }, currentCompanyId));
 
+      await batch.commit();
+
       if (menuSelection.personnelUid) {
         await fetchPersonnelStock(menuSelection.personnelUid);
       }
       await fetchAllPersonnelStock();
+      await fetchDepoStok();
       await loadRecentTransferLogs();
 
-      toast({ title: 'Personel Stok Kaydı Silindi', description: `${item.stokKodu} kaydı kaldırıldı.` });
+      toast({
+        title: 'Personel Stok Kaydı Silindi',
+        description: isActiveStock
+          ? `${item.stokKodu} kaydı kaldırıldı, ürün depoya iade edildi.`
+          : `${item.stokKodu} kaydı kaldırıldı.`,
+      });
     } catch (err) {
       console.error('Error deleting personnel stock item:', err);
       toast({ title: 'Hata', description: 'Personel stok satırı silinirken hata oluştu.', variant: 'destructive' });
@@ -2120,43 +2174,61 @@ export default function YedekParcaTransferPage() {
     setIsPersonnelTransferring(true);
     try {
       const now = new Date();
-      const batch = writeBatch(db);
       const itemsToTransfer = availableItems.slice(0, qty);
 
-      for (const si of itemsToTransfer) {
-        batch.update(doc(db, 'personalStock', si.id), {
-          ownerUid: pTransferTargetUid,
-          ownerName: pTransferTargetName,
+      // Use transaction to verify each item is still in_stock before transferring
+      await runTransaction(db, async (transaction) => {
+        // First, read all items to verify their current status
+        const snapshots = await Promise.all(
+          itemsToTransfer.map(si => transaction.get(doc(db, 'personalStock', si.id)))
+        );
+
+        // Verify all items are still in_stock
+        for (let i = 0; i < snapshots.length; i++) {
+          const snap = snapshots[i];
+          if (!snap.exists()) {
+            throw new Error(`STOCK_NOT_FOUND:${itemsToTransfer[i].stokKodu}`);
+          }
+          const currentStatus = snap.data()?.status;
+          if (currentStatus !== 'in_stock') {
+            throw new Error(`INVALID_STATUS:${itemsToTransfer[i].stokKodu}:${currentStatus}`);
+          }
+        }
+
+        // All items verified, proceed with transfer
+        for (const si of itemsToTransfer) {
+          transaction.update(doc(db, 'personalStock', si.id), {
+            ownerUid: pTransferTargetUid,
+            ownerName: pTransferTargetName,
+            status: 'pending_approval',
+            previousOwnerUid: si.ownerUid,
+            previousOwnerName: si.ownerName,
+            transferredByUid: currentUserProfile?.uid || '',
+            transferredByName: currentUserProfile?.name || '',
+            transferredAt: Timestamp.fromDate(now),
+          });
+        }
+
+        // Transfer log
+        const logRef = doc(collection(db, 'sparePartTransferLogs'));
+        transaction.set(logRef, withCompanyScope({
+          action: 'transfer_between_personnel',
+          productCodeId: pTransferItem.productCodeId,
+          stokKodu: pTransferItem.stokKodu,
+          stokAdi: pTransferItem.stokAdi,
+          anaBirim: pTransferItem.anaBirim || 'Adet',
+          serialNumber: pTransferItem.serialNumber || '',
+          quantity: qty,
+          fromUid: pTransferItem.ownerUid,
+          fromName: pTransferItem.ownerName,
+          toUid: pTransferTargetUid,
+          toName: pTransferTargetName,
           status: 'pending_approval',
-          previousOwnerUid: si.ownerUid,
-          previousOwnerName: si.ownerName,
-          transferredByUid: currentUserProfile?.uid || '',
-          transferredByName: currentUserProfile?.name || '',
-          transferredAt: Timestamp.fromDate(now),
-        });
-      }
-
-      // Transfer log
-      const logRef = doc(collection(db, 'sparePartTransferLogs'));
-      batch.set(logRef, withCompanyScope({
-        action: 'transfer_between_personnel',
-        productCodeId: pTransferItem.productCodeId,
-        stokKodu: pTransferItem.stokKodu,
-        stokAdi: pTransferItem.stokAdi,
-        anaBirim: pTransferItem.anaBirim || 'Adet',
-        serialNumber: pTransferItem.serialNumber || '',
-        quantity: qty,
-        fromUid: pTransferItem.ownerUid,
-        fromName: pTransferItem.ownerName,
-        toUid: pTransferTargetUid,
-        toName: pTransferTargetName,
-        status: 'pending_approval',
-        createdAt: Timestamp.fromDate(now),
-        createdByUid: currentUserProfile?.uid || '',
-        createdByName: currentUserProfile?.name || '',
-      }, currentCompanyId));
-
-      await batch.commit();
+          createdAt: Timestamp.fromDate(now),
+          createdByUid: currentUserProfile?.uid || '',
+          createdByName: currentUserProfile?.name || '',
+        }, currentCompanyId));
+      });
 
       // Notifications
       emitSparePartTransfer({
@@ -2182,9 +2254,15 @@ export default function YedekParcaTransferPage() {
         await fetchPersonnelStock(menuSelection.personnelUid);
       }
       await loadRecentTransferLogs();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error sending personnel transfer:', err);
-      toast({ title: 'Hata', description: 'Transfer sırasında hata oluştu.', variant: 'destructive' });
+      if (err?.message?.startsWith('STOCK_NOT_FOUND:')) {
+        toast({ title: 'Hata', description: 'Transfer edilecek ürünlerden biri artık mevcut değil. Lütfen sayfayı yenileyin.', variant: 'destructive' });
+      } else if (err?.message?.startsWith('INVALID_STATUS:')) {
+        toast({ title: 'Hata', description: 'Transfer edilecek ürünlerden biri başka bir işlemde kullanılmış. Lütfen sayfayı yenileyin.', variant: 'destructive' });
+      } else {
+        toast({ title: 'Hata', description: 'Transfer sırasında hata oluştu.', variant: 'destructive' });
+      }
     } finally {
       setIsPersonnelTransferring(false);
     }
@@ -2255,30 +2333,44 @@ export default function YedekParcaTransferPage() {
     }
   };
 
-  // Approve pending transfer
+  // Approve pending transfer (with status verification via transaction)
   const approveTransfer = async (item: PersonnelStockViewItem) => {
     try {
       const now = new Date();
-      await updateDoc(doc(db, 'personalStock', item.id), {
-        status: 'in_stock',
-        approvedAt: Timestamp.fromDate(now),
-      });
+      const stockRef = doc(db, 'personalStock', item.id);
 
-      await addDoc(collection(db, 'sparePartTransferLogs'), withCompanyScope({
-        action: 'transfer_approved',
-        personalStockId: item.id,
-        productCodeId: item.productCodeId,
-        stokKodu: item.stokKodu,
-        stokAdi: item.stokAdi,
-        anaBirim: item.anaBirim || 'Adet',
-        serialNumber: item.serialNumber || '',
-        toUid: item.ownerUid,
-        toName: item.ownerName,
-        quantity: 1,
-        createdAt: Timestamp.fromDate(now),
-        createdByUid: currentUserProfile?.uid || '',
-        createdByName: currentUserProfile?.name || '',
-      }, currentCompanyId));
+      await runTransaction(db, async (transaction) => {
+        const stockSnap = await transaction.get(stockRef);
+        if (!stockSnap.exists()) {
+          throw new Error('STOCK_NOT_FOUND');
+        }
+        const currentStatus = stockSnap.data()?.status;
+        if (currentStatus !== 'pending_approval') {
+          throw new Error(`INVALID_STATUS:${currentStatus}`);
+        }
+
+        transaction.update(stockRef, {
+          status: 'in_stock',
+          approvedAt: Timestamp.fromDate(now),
+        });
+
+        const logRef = doc(collection(db, 'sparePartTransferLogs'));
+        transaction.set(logRef, withCompanyScope({
+          action: 'transfer_approved',
+          personalStockId: item.id,
+          productCodeId: item.productCodeId,
+          stokKodu: item.stokKodu,
+          stokAdi: item.stokAdi,
+          anaBirim: item.anaBirim || 'Adet',
+          serialNumber: item.serialNumber || '',
+          toUid: item.ownerUid,
+          toName: item.ownerName,
+          quantity: 1,
+          createdAt: Timestamp.fromDate(now),
+          createdByUid: currentUserProfile?.uid || '',
+          createdByName: currentUserProfile?.name || '',
+        }, currentCompanyId));
+      });
 
       toast({
         title: 'Onaylandı',
@@ -2288,13 +2380,22 @@ export default function YedekParcaTransferPage() {
       if (menuSelection.personnelUid) {
         await fetchPersonnelStock(menuSelection.personnelUid);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error approving transfer:', err);
-      toast({ title: 'Hata', description: 'Onaylama sırasında hata oluştu.', variant: 'destructive' });
+      if (err?.message === 'STOCK_NOT_FOUND') {
+        toast({ title: 'Hata', description: 'Bu stok kaydı artık mevcut değil. Sayfa yenileniyor...', variant: 'destructive' });
+      } else if (err?.message?.startsWith('INVALID_STATUS:')) {
+        toast({ title: 'Hata', description: 'Bu transfer zaten işlenmiş. Sayfa yenileniyor...', variant: 'destructive' });
+      } else {
+        toast({ title: 'Hata', description: 'Onaylama sırasında hata oluştu.', variant: 'destructive' });
+      }
+      if (menuSelection.personnelUid) {
+        await fetchPersonnelStock(menuSelection.personnelUid);
+      }
     }
   };
 
-  // Reject pending transfer - return to depot
+  // Reject pending transfer - return to depot (with status verification via transaction)
   const rejectTransfer = async (item: PersonnelStockViewItem) => {
     const hasPreviousOwner = !!(item as any).previousOwnerUid;
     const returnLabel = hasPreviousOwner ? `${(item as any).previousOwnerName} adlı personele geri gönderilecektir` : 'depoya geri gönderilecektir';
@@ -2303,113 +2404,127 @@ export default function YedekParcaTransferPage() {
 
     try {
       const now = new Date();
-      const batch = writeBatch(db);
+      const stockRef = doc(db, 'personalStock', item.id);
 
-      if (hasPreviousOwner) {
-        // Return to previous owner (personnel-to-personnel transfer rejected)
-        batch.update(doc(db, 'personalStock', item.id), {
-          ownerUid: (item as any).previousOwnerUid,
-          ownerName: (item as any).previousOwnerName,
-          status: 'in_stock',
-          previousOwnerUid: null,
-          previousOwnerName: null,
-          transferredAt: null,
-        });
+      await runTransaction(db, async (transaction) => {
+        // Re-read the document to verify current status
+        const stockSnap = await transaction.get(stockRef);
+        if (!stockSnap.exists()) {
+          throw new Error('STOCK_NOT_FOUND');
+        }
+        const currentStatus = stockSnap.data()?.status;
+        if (currentStatus !== 'pending_approval') {
+          throw new Error(`INVALID_STATUS:${currentStatus}`);
+        }
 
-        const logRef = doc(collection(db, 'sparePartTransferLogs'));
-        batch.set(logRef, withCompanyScope({
-          action: 'transfer_rejected',
-          personalStockId: item.id,
-          productCodeId: item.productCodeId,
-          stokKodu: item.stokKodu,
-          stokAdi: item.stokAdi,
-          anaBirim: item.anaBirim || 'Adet',
-          serialNumber: item.serialNumber || '',
-          fromUid: item.ownerUid,
-          fromName: item.ownerName,
-          toUid: (item as any).previousOwnerUid,
-          toName: (item as any).previousOwnerName,
-          quantity: 1,
-          notes: `Transfer reddedildi: ${item.ownerName} -> ${(item as any).previousOwnerName}`,
-          createdAt: Timestamp.fromDate(now),
-          createdByUid: currentUserProfile?.uid || '',
-          createdByName: currentUserProfile?.name || '',
-        }, currentCompanyId));
+        if (hasPreviousOwner) {
+          // Return to previous owner (personnel-to-personnel transfer rejected)
+          transaction.update(stockRef, {
+            ownerUid: (item as any).previousOwnerUid,
+            ownerName: (item as any).previousOwnerName,
+            status: 'in_stock',
+            previousOwnerUid: null,
+            previousOwnerName: null,
+            transferredAt: null,
+          });
 
-        await batch.commit();
+          const logRef = doc(collection(db, 'sparePartTransferLogs'));
+          transaction.set(logRef, withCompanyScope({
+            action: 'transfer_rejected',
+            personalStockId: item.id,
+            productCodeId: item.productCodeId,
+            stokKodu: item.stokKodu,
+            stokAdi: item.stokAdi,
+            anaBirim: item.anaBirim || 'Adet',
+            serialNumber: item.serialNumber || '',
+            fromUid: item.ownerUid,
+            fromName: item.ownerName,
+            toUid: (item as any).previousOwnerUid,
+            toName: (item as any).previousOwnerName,
+            quantity: 1,
+            notes: `Transfer reddedildi: ${item.ownerName} -> ${(item as any).previousOwnerName}`,
+            createdAt: Timestamp.fromDate(now),
+            createdByUid: currentUserProfile?.uid || '',
+            createdByName: currentUserProfile?.name || '',
+          }, currentCompanyId));
+        } else {
+          // Return to depot (lojistik → personnel transfer rejected)
+          transaction.delete(stockRef);
 
-        toast({
-          title: 'Reddedildi',
-          description: `${item.stokAdi} transferi reddedildi, ürün ${(item as any).previousOwnerName} adlı personele geri gönderildi.`,
-        });
-      } else {
-        // Return to depot (lojistik → personnel transfer rejected)
-        batch.delete(doc(db, 'personalStock', item.id));
+          const depoRef = doc(collection(db, 'yedekParcaDepoStok'));
+          transaction.set(depoRef, withCompanyScope({
+            productCodeId: item.productCodeId,
+            stokKodu: item.stokKodu,
+            stokAdi: item.stokAdi,
+            anaBirim: item.anaBirim || 'Adet',
+            serialNumber: item.serialNumber || '',
+            ...(item.hucreNumarasi ? { hucreNumarasi: item.hucreNumarasi } : {}),
+            quantity: 1,
+            createdAt: Timestamp.fromDate(now),
+            createdByUid: currentUserProfile?.uid || '',
+            createdByName: currentUserProfile?.name || '',
+          }, currentCompanyId));
 
-        const depoRef = doc(collection(db, 'yedekParcaDepoStok'));
-        batch.set(depoRef, withCompanyScope({
-          productCodeId: item.productCodeId,
-          stokKodu: item.stokKodu,
-          stokAdi: item.stokAdi,
-          anaBirim: item.anaBirim || 'Adet',
-          serialNumber: item.serialNumber || '',
-          ...(item.hucreNumarasi ? { hucreNumarasi: item.hucreNumarasi } : {}),
-          quantity: 1,
-          createdAt: Timestamp.fromDate(now),
-          createdByUid: currentUserProfile?.uid || '',
-          createdByName: currentUserProfile?.name || '',
-        }, currentCompanyId));
+          const logRef = doc(collection(db, 'sparePartTransferLogs'));
+          transaction.set(logRef, withCompanyScope({
+            action: 'transfer_rejected',
+            personalStockId: item.id,
+            productCodeId: item.productCodeId,
+            stokKodu: item.stokKodu,
+            stokAdi: item.stokAdi,
+            anaBirim: item.anaBirim || 'Adet',
+            serialNumber: item.serialNumber || '',
+            fromUid: item.ownerUid,
+            fromName: item.ownerName,
+            quantity: 1,
+            notes: 'Transfer personel tarafından reddedildi, ürün depoya iade edildi.',
+            createdAt: Timestamp.fromDate(now),
+            createdByUid: currentUserProfile?.uid || '',
+            createdByName: currentUserProfile?.name || '',
+          }, currentCompanyId));
 
-        const logRef = doc(collection(db, 'sparePartTransferLogs'));
-        batch.set(logRef, withCompanyScope({
-          action: 'transfer_rejected',
-          personalStockId: item.id,
-          productCodeId: item.productCodeId,
-          stokKodu: item.stokKodu,
-          stokAdi: item.stokAdi,
-          anaBirim: item.anaBirim || 'Adet',
-          serialNumber: item.serialNumber || '',
-          fromUid: item.ownerUid,
-          fromName: item.ownerName,
-          quantity: 1,
-          notes: 'Transfer personel tarafından reddedildi, ürün depoya iade edildi.',
-          createdAt: Timestamp.fromDate(now),
-          createdByUid: currentUserProfile?.uid || '',
-          createdByName: currentUserProfile?.name || '',
-        }, currentCompanyId));
+          const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
+          transaction.set(depoLogRef, {
+            action: 'iade_giris',
+            productCodeId: item.productCodeId,
+            stokKodu: item.stokKodu,
+            stokAdi: item.stokAdi,
+            anaBirim: item.anaBirim || 'Adet',
+            serialNumber: item.serialNumber || '',
+            quantity: 1,
+            relatedPersonnelUid: item.ownerUid,
+            relatedPersonnelName: item.ownerName,
+            notes: `Transfer reddedildi: ${item.ownerName} -> Depo`,
+            createdAt: Timestamp.fromDate(now),
+            createdByUid: currentUserProfile?.uid || '',
+            createdByName: currentUserProfile?.name || '',
+          });
+        }
+      });
 
-        const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
-        batch.set(depoLogRef, {
-          action: 'iade_giris',
-          productCodeId: item.productCodeId,
-          stokKodu: item.stokKodu,
-          stokAdi: item.stokAdi,
-          anaBirim: item.anaBirim || 'Adet',
-          serialNumber: item.serialNumber || '',
-          quantity: 1,
-          relatedPersonnelUid: item.ownerUid,
-          relatedPersonnelName: item.ownerName,
-          notes: `Transfer reddedildi: ${item.ownerName} -> Depo`,
-          createdAt: Timestamp.fromDate(now),
-          createdByUid: currentUserProfile?.uid || '',
-          createdByName: currentUserProfile?.name || '',
-        });
-
-        await batch.commit();
-
-        toast({
-          title: 'Reddedildi',
-          description: `${item.stokAdi} (${item.serialNumber || item.stokKodu}) transferi reddedildi, ürün depoya iade edildi.`,
-        });
-      }
+      toast({
+        title: 'Reddedildi',
+        description: hasPreviousOwner
+          ? `${item.stokAdi} transferi reddedildi, ürün ${(item as any).previousOwnerName} adlı personele geri gönderildi.`
+          : `${item.stokAdi} (${item.serialNumber || item.stokKodu}) transferi reddedildi, ürün depoya iade edildi.`,
+      });
 
       if (menuSelection.personnelUid) {
         await fetchPersonnelStock(menuSelection.personnelUid);
       }
       await loadRecentTransferLogs();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error rejecting transfer:', err);
-      toast({ title: 'Hata', description: 'Reddetme sırasında hata oluştu.', variant: 'destructive' });
+      if (err?.message === 'STOCK_NOT_FOUND') {
+        toast({ title: 'Hata', description: 'Bu stok kaydı artık mevcut değil. Sayfa yenileniyor...', variant: 'destructive' });
+      } else if (err?.message?.startsWith('INVALID_STATUS:')) {
+        toast({ title: 'Hata', description: 'Bu transfer zaten işlenmiş (onaylanmış veya reddedilmiş). Sayfa yenileniyor...', variant: 'destructive' });
+      } else {
+        toast({ title: 'Hata', description: 'Reddetme sırasında hata oluştu.', variant: 'destructive' });
+      }
+      if (menuSelection.personnelUid) {
+        await fetchPersonnelStock(menuSelection.personnelUid);
+      }
     }
   };
 
