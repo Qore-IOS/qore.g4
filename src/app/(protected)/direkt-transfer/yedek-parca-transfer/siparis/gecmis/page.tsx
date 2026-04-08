@@ -17,6 +17,7 @@ interface SparePartOrderHistoryRow {
   totalItems?: number;
   totalQuantity?: number;
   createdAt?: Date;
+  status?: 'draft' | 'completed' | 'open';
 }
 
 const formatDate = (value?: Date) => {
@@ -55,6 +56,7 @@ export default function YedekParcaSiparisGecmisPage() {
           createdByName: row.createdByName,
           totalItems: Number(row.totalItems || 0),
           totalQuantity: Number(row.totalQuantity || 0),
+          status: row.status,
           createdAt: row.createdAt instanceof Timestamp ? row.createdAt.toDate() : row.createdAt?.toDate?.() || undefined,
         }))
         .sort((a, b) => (b.createdAt?.getTime() || 0) - (a.createdAt?.getTime() || 0));
@@ -124,16 +126,33 @@ export default function YedekParcaSiparisGecmisPage() {
                   <th className="px-3 py-2 font-semibold">Sipariş No</th>
                   <th className="px-3 py-2 font-semibold">Oluşturan</th>
                   <th className="px-3 py-2 font-semibold text-right">Kalem Sayısı</th>
+                  <th className="px-3 py-2 font-semibold text-right">Durum</th>
                   <th className="px-3 py-2 font-semibold text-right">Tarih</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((row) => (
-                  <tr key={row.id} className="border-t" style={{ borderColor: 'var(--dashboard-stroke)' }}>
+                  <tr
+                    key={row.id}
+                    className="border-t cursor-pointer hover:bg-black/[.02]"
+                    style={{ borderColor: 'var(--dashboard-stroke)' }}
+                    onClick={() => router.push(`/direkt-transfer/yedek-parca-transfer/siparis/gecmis/${row.id}`)}
+                  >
                     <td className="px-3 py-2 text-[13px] font-semibold">{row.orderName || 'Yedek Parça Sipariş'}</td>
                     <td className="px-3 py-2 font-mono">{row.orderNo || '—'}</td>
                     <td className="px-3 py-2">{row.createdByName || '—'}</td>
                     <td className="px-3 py-2 text-right">{row.totalItems || 0}</td>
+                    <td className="px-3 py-2 text-right">
+                      <span
+                        className="inline-flex px-2 py-1 rounded-lg text-[11px] font-semibold"
+                        style={{
+                          background: row.status === 'completed' ? 'rgba(22,163,74,.14)' : row.status === 'open' ? 'rgba(245,158,11,.14)' : 'rgba(59,130,246,.14)',
+                          color: row.status === 'completed' ? '#166534' : row.status === 'open' ? '#92400E' : '#1E3A8A',
+                        }}
+                      >
+                        {row.status === 'completed' ? 'Tamamlandı' : row.status === 'open' ? 'Açık (Eksik/Fazla)' : 'Taslak'}
+                      </span>
+                    </td>
                     <td className="px-3 py-2 text-right">{formatDate(row.createdAt)}</td>
                   </tr>
                 ))}
