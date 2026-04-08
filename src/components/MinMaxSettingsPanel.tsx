@@ -1,20 +1,14 @@
 
 'use client';
-import React, { useState, useEffect, ChangeEvent } from 'react';
+import React, { useState, useEffect, useMemo, ChangeEvent } from 'react';
 import type { Depot, Hospital, ProductCode, MinMaxRule } from '@/lib/types';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDocs, writeBatch, addDoc, serverTimestamp } from 'firebase/firestore';
-import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
-import { Upload, Download, Loader2, Save, Trash2, SlidersHorizontal, Clock } from 'lucide-react';
+import { Upload, Download, Loader2, Save, Trash2, SlidersHorizontal, Clock, Search, X, Plus } from 'lucide-react';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { exportDataToExcel, readExcelData } from '@/lib/utils';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 
 interface MinMaxSettingsPanelProps {
   isOpen: boolean;
@@ -37,25 +31,29 @@ interface RuleState {
   }
 }
 
+type PanelTab = 'selected' | 'unselected';
+
 export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetType, productCodes, toast }: MinMaxSettingsPanelProps) {
   const [rules, setRules] = useState<RuleState>({});
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedSearch, setSelectedSearch] = useState('');
-  const [unselectedSearch, setUnselectedSearch] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [existingRuleCodes, setExistingRuleCodes] = useState<Set<string>>(new Set());
-  
+  const [activeTab, setActiveTab] = useState<PanelTab>('selected');
+
   const collectionName = targetType === 'depot' ? 'depots' : targetType === 'spare_parts_depot' ? 'yedekParcaDepoMinMax' : 'hospitals';
+  const isDepotLike = targetType === 'depot' || targetType === 'spare_parts_depot';
+  const locationLabel = targetType === 'depot' ? 'depo' : targetType === 'spare_parts_depot' ? 'yedek parça deposu' : 'hastane';
 
   useEffect(() => {
-    if (!target || !target.id) return;
+    if (!isOpen || !target || !target.id) return;
     const fetchRules = async () => {
       setIsLoading(true);
       const fetchedRules: RuleState = {};
       try {
         const rulesRef = collection(db, collectionName, target.id!, "minMaxRules");
         const snapshot = await getDocs(rulesRef);
-        snapshot.forEach(doc => {
-          const data = doc.data() as MinMaxRule;
+        snapshot.forEach(d => {
+          const data = d.data() as MinMaxRule;
           if (data.stokKodu) {
             fetchedRules[data.stokKodu] = {
               min: data.min ?? 0,
@@ -78,36 +76,36 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
       }
     };
     fetchRules();
-  }, [target, toast, targetType, collectionName]);
-  
+  }, [isOpen, target, toast, targetType, collectionName]);
+
   const handleCheckboxChange = (stockCode: string, checked: boolean | string) => {
     setRules(prev => {
-        const newRules = { ...prev };
-        if (checked) {
-            newRules[stockCode] = { ...(newRules[stockCode] || { min: '', max: '', maxGun: '', aylikTuketimLimiti: '', ortalamaTuketimSuresi: '', tuketimSuresiBirimi: 'gun' }), enabled: true };
+      const newRules = { ...prev };
+      if (checked) {
+        newRules[stockCode] = { ...(newRules[stockCode] || { min: '', max: '', maxGun: '', aylikTuketimLimiti: '', ortalamaTuketimSuresi: '', tuketimSuresiBirimi: 'gun' }), enabled: true };
+      } else {
+        if (newRules[stockCode]) {
+          newRules[stockCode].enabled = false;
         } else {
-            if(newRules[stockCode]) {
-              newRules[stockCode].enabled = false;
-            } else {
-              newRules[stockCode] = { min: '', max: '', maxGun: '', aylikTuketimLimiti: '', ortalamaTuketimSuresi: '', tuketimSuresiBirimi: 'gun', enabled: false };
-            }
+          newRules[stockCode] = { min: '', max: '', maxGun: '', aylikTuketimLimiti: '', ortalamaTuketimSuresi: '', tuketimSuresiBirimi: 'gun', enabled: false };
         }
-        return newRules;
+      }
+      return newRules;
     });
   };
-  
+
   const handleRuleChange = (stockCode: string, field: 'min' | 'max' | 'maxGun' | 'aylikTuketimLimiti' | 'ortalamaTuketimSuresi', value: string) => {
     const numValue = value === '' ? '' : Number(value);
     setRules(prev => ({
-        ...prev,
-        [stockCode]: { ...(prev[stockCode] ?? { min: '', max: '', maxGun: '', aylikTuketimLimiti: '', ortalamaTuketimSuresi: '', tuketimSuresiBirimi: 'gun', enabled: true }), [field]: numValue }
+      ...prev,
+      [stockCode]: { ...(prev[stockCode] ?? { min: '', max: '', maxGun: '', aylikTuketimLimiti: '', ortalamaTuketimSuresi: '', tuketimSuresiBirimi: 'gun', enabled: true }), [field]: numValue }
     }));
   };
 
   const handleBirimChange = (stockCode: string, birim: 'gun' | 'saat') => {
     setRules(prev => ({
-        ...prev,
-        [stockCode]: { ...(prev[stockCode] ?? { min: '', max: '', maxGun: '', aylikTuketimLimiti: '', ortalamaTuketimSuresi: '', tuketimSuresiBirimi: 'gun', enabled: true }), tuketimSuresiBirimi: birim }
+      ...prev,
+      [stockCode]: { ...(prev[stockCode] ?? { min: '', max: '', maxGun: '', aylikTuketimLimiti: '', ortalamaTuketimSuresi: '', tuketimSuresiBirimi: 'gun', enabled: true }), tuketimSuresiBirimi: birim }
     }));
   };
 
@@ -125,27 +123,17 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
 
       jsonData.forEach((row: any) => {
         const stockCode = String(row['stock_code'] || row['Stok Kodu'] || '').trim();
-        if (!stockCode || !validProductCodes.has(stockCode)) {
-          skippedRows++;
-          return;
-        }
-
+        if (!stockCode || !validProductCodes.has(stockCode)) { skippedRows++; return; }
         const min = Number(row['min']);
         const max = Number(row['max']);
         const maxGun = Number(row['max_gun'] || row['Max Gün']);
         const aylikTuketimLimiti = Number(row['aylik_tuketim_limiti'] || row['Aylık Tüketim Limiti']);
         const ortalamaTuketimSuresi = Number(row['ortalama_tuketim_suresi'] || row['Ort. Tüketim Süresi']);
         const tuketimBirimi = String(row['tuketim_birimi'] || row['Tüketim Birimi'] || '').toLowerCase();
-
-        if (isNaN(min) || isNaN(max) || min < 0 || max < min) {
-          skippedRows++;
-          return;
-        }
-
+        if (isNaN(min) || isNaN(max) || min < 0 || max < min) { skippedRows++; return; }
         const willBeNewRule = !existingRuleCodes.has(stockCode);
         updatedRules[stockCode] = {
-          min,
-          max,
+          min, max,
           maxGun: isNaN(maxGun) ? '' : maxGun,
           aylikTuketimLimiti: isNaN(aylikTuketimLimiti) ? '' : aylikTuketimLimiti,
           ortalamaTuketimSuresi: isNaN(ortalamaTuketimSuresi) ? '' : ortalamaTuketimSuresi,
@@ -157,22 +145,19 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
       });
 
       if (upsertedRows === 0) {
-        toast({ title: "İşlenecek Veri Yok", description: "Excel dosyasında geçerli ürün kodu ve min-max değerine sahip satır bulunamadı.", variant: "destructive" });
+        toast({ title: "İşlenecek Veri Yok", description: "Excel dosyasında geçerli veri bulunamadı.", variant: "destructive" });
         return;
       }
-
       const mergedRules = { ...rules, ...updatedRules };
       setRules(mergedRules);
       setExistingRuleCodes(new Set(Object.keys(mergedRules).filter(code => mergedRules[code]?.enabled)));
-      toast({
-        title: "Başarılı",
-        description: `${upsertedRows} kural Excel ile işlendi${newlyEnabledRows > 0 ? `, ${newlyEnabledRows} yeni kural eklendi` : ''}${skippedRows > 0 ? `, ${skippedRows} satır atlandı` : ''}.`
-      });
+      setActiveTab('selected');
+      toast({ title: "Başarılı", description: `${upsertedRows} kural işlendi${newlyEnabledRows > 0 ? `, ${newlyEnabledRows} yeni` : ''}${skippedRows > 0 ? `, ${skippedRows} atlandı` : ''}.` });
     } catch (error) {
       toast({ title: "Excel Hatası", description: "Excel dosyası işlenirken bir sorun oluştu.", variant: "destructive" });
     } finally {
       setIsLoading(false);
-      if(event.target) event.target.value = '';
+      if (event.target) event.target.value = '';
     }
   };
 
@@ -182,7 +167,6 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
       toast({ title: "Veri Yok", description: "Dışa aktarılacak aktif kural bulunmuyor.", variant: "default" });
       return;
     }
-
     const dataToExport = enabledRules.map(([stockCode, rule]) => ({
       'Stok Kodu': stockCode,
       min: rule.min,
@@ -192,26 +176,21 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
       'Ort. Tüketim Süresi': rule.ortalamaTuketimSuresi,
       'Tüketim Birimi': rule.tuketimSuresiBirimi === 'saat' ? 'Saat' : 'Gün',
     }));
-
-    exportDataToExcel(dataToExport, `${target.name}_Mevcut_MinMax_Kurallari`, 'Kurallar', toast);
+    exportDataToExcel(dataToExport, `${target.name}_MinMax_Kurallari`, 'Kurallar', toast);
   };
-
 
   const handleSaveRules = async () => {
     setIsLoading(true);
     const batch = writeBatch(db);
     let hasError = false;
-
     const rulesCollectionRef = collection(db, collectionName, target.id!, "minMaxRules");
     const existingRulesSnapshot = await getDocs(rulesCollectionRef);
-    const existingRuleIds = new Set(existingRulesSnapshot.docs.map(doc => doc.id));
-
+    const existingRuleIds = new Set(existingRulesSnapshot.docs.map(d => d.id));
     const historyWrites: Promise<any>[] = [];
 
     for (const stockCode in rules) {
       const rule = rules[stockCode];
       const ruleRef = doc(db, collectionName, target.id!, "minMaxRules", stockCode);
-
       if (rule.enabled) {
         const min = Number(rule.min);
         const max = Number(rule.max);
@@ -219,57 +198,25 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
         const aylikTuketimLimiti = rule.aylikTuketimLimiti === '' ? undefined : Number(rule.aylikTuketimLimiti);
         const ortalamaTuketimSuresi = rule.ortalamaTuketimSuresi === '' ? undefined : Number(rule.ortalamaTuketimSuresi);
         const tuketimSuresiBirimi = rule.tuketimSuresiBirimi ?? 'gun';
-
         if (isNaN(min) || isNaN(max) || min < 0 || max < min || (maxGun !== undefined && (isNaN(maxGun) || maxGun < 0)) || (aylikTuketimLimiti !== undefined && isNaN(aylikTuketimLimiti))) {
-          toast({ title: `Hata: ${stockCode}`, description: `Geçersiz değerler. Kayıt atlandı.`, variant: "destructive" });
+          toast({ title: `Hata: ${stockCode}`, description: `Geçersiz değerler.`, variant: "destructive" });
           hasError = true;
           continue;
         }
-
         const dataToSet: MinMaxRule = { stokKodu: stockCode, min, max };
-        if (maxGun !== undefined) {
-          dataToSet.maxGun = maxGun;
-        }
-        if (aylikTuketimLimiti !== undefined) {
-          dataToSet.aylikTuketimLimiti = aylikTuketimLimiti;
-        }
-        if (ortalamaTuketimSuresi !== undefined) {
-          dataToSet.ortalamaTuketimSuresi = ortalamaTuketimSuresi;
-          dataToSet.tuketimSuresiBirimi = tuketimSuresiBirimi;
-        }
-
+        if (maxGun !== undefined) dataToSet.maxGun = maxGun;
+        if (aylikTuketimLimiti !== undefined) dataToSet.aylikTuketimLimiti = aylikTuketimLimiti;
+        if (ortalamaTuketimSuresi !== undefined) { dataToSet.ortalamaTuketimSuresi = ortalamaTuketimSuresi; dataToSet.tuketimSuresiBirimi = tuketimSuresiBirimi; }
         batch.set(ruleRef, dataToSet);
-        
-        historyWrites.push(addDoc(collection(db, 'minMaxHistory'), {
-          ...dataToSet,
-          locationId: target.id,
-          locationType: targetType,
-          timestamp: serverTimestamp(),
-        }));
+        historyWrites.push(addDoc(collection(db, 'minMaxHistory'), { ...dataToSet, locationId: target.id, locationType: targetType, timestamp: serverTimestamp() }));
       } else {
         if (existingRuleIds.has(stockCode)) {
-            batch.delete(ruleRef);
-            historyWrites.push(addDoc(collection(db, 'minMaxHistory'), {
-                stokKodu: stockCode,
-                min: null,
-                max: null,
-                maxGun: null,
-                aylikTuketimLimiti: null,
-                locationId: target.id,
-                locationType: targetType,
-                timestamp: serverTimestamp(),
-                action: 'deleted',
-            }));
+          batch.delete(ruleRef);
+          historyWrites.push(addDoc(collection(db, 'minMaxHistory'), { stokKodu: stockCode, min: null, max: null, maxGun: null, aylikTuketimLimiti: null, locationId: target.id, locationType: targetType, timestamp: serverTimestamp(), action: 'deleted' }));
         }
       }
     }
-
-    if (hasError) {
-        setIsLoading(false);
-        toast({ title: "İşlem Durduruldu", description: "Lütfen hatalı girişleri düzeltip tekrar deneyin.", variant: "destructive" });
-        return;
-    }
-
+    if (hasError) { setIsLoading(false); return; }
     try {
       await batch.commit();
       await Promise.all(historyWrites);
@@ -283,276 +230,300 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
     }
   };
 
-  const matchesSearch = (product: ProductCode, searchTerm: string) => {
-    const keyword = searchTerm.trim().toLowerCase();
-    if (!keyword) return true;
-
-    return (
-      (product.stokAdi ?? '').toLowerCase().includes(keyword)
-      || (product.stokKodu ?? '').toLowerCase().includes(keyword)
-    );
-  };
-
-  const selectedProducts = productCodes.filter(product => {
-    const stockCode = product.stokKodu ?? '';
-    return Boolean(rules[stockCode]?.enabled) && matchesSearch(product, selectedSearch);
-  });
-
-  const unselectedProducts = productCodes.filter(product => {
-    const stockCode = product.stokKodu ?? '';
-    return !rules[stockCode]?.enabled && matchesSearch(product, unselectedSearch);
-  });
-  
   const handleResetRules = async () => {
+    if (!window.confirm(`${target.name} için tanımlanmış tüm min-max kuralları kalıcı olarak silinecektir. Emin misiniz?`)) return;
     setIsLoading(true);
     try {
-        const rulesRef = collection(db, collectionName, target.id!, "minMaxRules");
-        const snapshot = await getDocs(rulesRef);
-        if(snapshot.empty) {
-            toast({ title: "Bilgi", description: `Bu ${targetType === 'depot' ? 'depo' : targetType === 'spare_parts_depot' ? 'yedek parça deposu' : 'hastane'} için zaten tanımlı kural bulunmuyor.`, variant: "default" });
-            setIsLoading(false);
-            return;
-        }
-
-        const batch = writeBatch(db);
-        snapshot.forEach(doc => batch.delete(doc.ref));
-        await batch.commit();
-        setRules({});
-        setExistingRuleCodes(new Set());
-        toast({ title: "Başarılı", description: `${target.name} için tüm min-max kuralları sıfırlandı.`});
-    } catch (error) {
-        console.error("Error resetting rules:", error);
-        toast({ title: "Hata", description: "Kurallar sıfırlanırken bir hata oluştu.", variant: "destructive" });
-    } finally {
+      const rulesRef = collection(db, collectionName, target.id!, "minMaxRules");
+      const snapshot = await getDocs(rulesRef);
+      if (snapshot.empty) {
+        toast({ title: "Bilgi", description: `Bu ${locationLabel} için zaten tanımlı kural bulunmuyor.`, variant: "default" });
         setIsLoading(false);
+        return;
+      }
+      const batch = writeBatch(db);
+      snapshot.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+      setRules({});
+      setExistingRuleCodes(new Set());
+      toast({ title: "Başarılı", description: `Tüm min-max kuralları sıfırlandı.` });
+    } catch (error) {
+      console.error("Error resetting rules:", error);
+      toast({ title: "Hata", description: "Kurallar sıfırlanırken bir hata oluştu.", variant: "destructive" });
+    } finally {
+      setIsLoading(false);
     }
   };
 
+  const matchesSearch = (product: ProductCode) => {
+    const keyword = searchQuery.trim().toLowerCase();
+    if (!keyword) return true;
+    return (product.stokAdi ?? '').toLowerCase().includes(keyword) || (product.stokKodu ?? '').toLowerCase().includes(keyword);
+  };
+
+  const selectedProducts = useMemo(() =>
+    productCodes.filter(p => Boolean(rules[p.stokKodu ?? '']?.enabled) && matchesSearch(p)),
+    [productCodes, rules, searchQuery]
+  );
+
+  const unselectedProducts = useMemo(() =>
+    productCodes.filter(p => !rules[p.stokKodu ?? '']?.enabled && matchesSearch(p)),
+    [productCodes, rules, searchQuery]
+  );
+
+  const selectedCount = useMemo(() =>
+    productCodes.filter(p => Boolean(rules[p.stokKodu ?? '']?.enabled)).length,
+    [productCodes, rules]
+  );
+
+  if (!isOpen) return null;
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="w-[96vw] max-w-[96vw] h-[92vh] flex flex-col">
-        <DialogHeader>
-          <DialogTitle className="text-xl flex items-center">
-            <SlidersHorizontal className="mr-2 h-6 w-6" /> Min-Max Stok Seviyeleri: {target.name}
-          </DialogTitle>
-          <DialogDescription>
-            Bu {targetType === 'depot' ? 'depoda' : targetType === 'spare_parts_depot' ? 'yedek parça deposunda' : 'hastanede'} işlem görebilecek ürünleri ve bu ürünler için stok seviyelerini belirleyin.
-          </DialogDescription>
-        </DialogHeader>
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: 'var(--dashboard-bg, #f8fafc)' }}>
+      {/* Top bar */}
+      <div className="flex-shrink-0 flex items-center justify-between gap-4 px-4 sm:px-6 py-3 border-b" style={{ background: 'var(--dashboard-card, #fff)', borderColor: 'var(--dashboard-stroke, #e5e7eb)' }}>
+        <div className="flex items-center gap-3 min-w-0">
+          <SlidersHorizontal className="w-5 h-5 flex-shrink-0" style={{ color: 'var(--dashboard-accent, #6366f1)' }} />
+          <div className="min-w-0">
+            <h1 className="text-sm font-bold truncate" style={{ color: 'var(--dashboard-text, #111)' }}>Min-Max Stok Seviyeleri</h1>
+            <p className="text-[11px] truncate" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>{target.name} &middot; {selectedCount} ürün tanımlı</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <button
+            onClick={handleSaveRules}
+            disabled={isLoading}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold text-white disabled:opacity-40 transition-all active:scale-95"
+            style={{ background: 'var(--dashboard-accent, #6366f1)' }}
+          >
+            {isLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+            Kaydet
+          </button>
+          <button onClick={onClose} className="p-2 rounded-xl transition-colors hover:bg-black/5" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+      </div>
 
-        <div className="flex-grow flex flex-col gap-4 overflow-hidden">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Toplu İşlemler</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-wrap gap-2">
-              <p className="w-full text-xs text-muted-foreground">
-                Mevcut Kuralları İndir çıktısını düzenleyip aynı şablonla tekrar yükleyerek kuralları toplu güncelleyebilir ve yeni min-max kuralı ekleyebilirsiniz.
-              </p>
-              <Button onClick={handleExportCurrentRules} variant="outline" size="sm" disabled={isLoading}><Download className="mr-2 h-4 w-4"/>Mevcut Kuralları İndir</Button>
-              <Button asChild variant="outline" size="sm" disabled={isLoading}><label htmlFor="minmax-excel-update" className="cursor-pointer flex items-center"><Upload className="mr-2 h-4 w-4"/>Excel ile Ekle/Güncelle<input id="minmax-excel-update" type="file" accept=".xlsx, .xls" className="hidden" onChange={handleExcelUpsertRules} /></label></Button>
-              <AlertDialog>
-                <AlertDialogTrigger asChild>
-                  <Button variant="destructive" size="sm" disabled={isLoading}><Trash2 className="mr-2 h-4 w-4"/>Tüm Kuralları Sıfırla</Button>
-                </AlertDialogTrigger>
-                <AlertDialogContent>
-                    <AlertDialogHeader>
-                        <AlertDialogTitle>Emin misiniz?</AlertDialogTitle>
-                        <AlertDialogDescription>
-                            Bu işlem geri alınamaz. {target.name} için tanımlanmış tüm min-max kuralları kalıcı olarak silinecektir.
-                        </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                        <AlertDialogCancel>İptal</AlertDialogCancel>
-                        <AlertDialogAction onClick={handleResetRules} className='bg-destructive hover:bg-destructive/90'>Onayla ve Sıfırla</AlertDialogAction>
-                    </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
-            </CardContent>
-          </Card>
+      {/* Toolbar */}
+      <div className="flex-shrink-0 flex flex-wrap items-center gap-2 px-4 sm:px-6 py-2.5 border-b" style={{ borderColor: 'var(--dashboard-stroke, #e5e7eb)', background: 'var(--dashboard-card, #fff)' }}>
+        {/* Search */}
+        <div className="flex items-center gap-2 flex-1 min-w-[200px] max-w-md px-3 py-1.5 rounded-xl" style={{ background: 'var(--dashboard-pressed, #f3f4f6)' }}>
+          <Search className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--dashboard-muted, #6b7280)' }} />
+          <input
+            type="text"
+            placeholder="Ürün adı veya stok kodu ile ara..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="flex-1 bg-transparent text-xs outline-none placeholder:text-[var(--dashboard-muted)]"
+            style={{ color: 'var(--dashboard-text, #111)' }}
+          />
+          {searchQuery && (
+            <button onClick={() => setSearchQuery('')} className="p-0.5 rounded hover:bg-black/5">
+              <X className="w-3 h-3" style={{ color: 'var(--dashboard-muted, #6b7280)' }} />
+            </button>
+          )}
+        </div>
+        {/* Actions */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <button onClick={handleExportCurrentRules} disabled={isLoading} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors hover:bg-black/5" style={{ color: 'var(--dashboard-text, #111)' }}>
+            <Download className="w-3.5 h-3.5" /> İndir
+          </button>
+          <label htmlFor="minmax-excel-update" className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium cursor-pointer transition-colors hover:bg-black/5" style={{ color: 'var(--dashboard-text, #111)' }}>
+            <Upload className="w-3.5 h-3.5" /> Excel Yükle
+            <input id="minmax-excel-update" type="file" accept=".xlsx,.xls" className="hidden" onChange={handleExcelUpsertRules} />
+          </label>
+          <button onClick={handleResetRules} disabled={isLoading} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors hover:bg-red-50" style={{ color: '#B91C1C' }}>
+            <Trash2 className="w-3.5 h-3.5" /> Sıfırla
+          </button>
+        </div>
+      </div>
 
-          <div className="flex-grow grid grid-cols-1 lg:grid-cols-2 gap-4 min-h-0">
-            <div className="border rounded-md overflow-hidden flex flex-col min-h-0">
-              <div className="p-3 border-b space-y-2">
-                <p className="font-medium text-sm">Seçilen Ürünler ({selectedProducts.length})</p>
-                <Input
-                  placeholder="Seçilenlerde ürün ara..."
-                  value={selectedSearch}
-                  onChange={(e) => setSelectedSearch(e.target.value)}
-                  className="h-8"
-                />
-              </div>
-              <ScrollArea className="flex-1">
-                {isLoading && !Object.keys(rules).length ? <div className="flex justify-center p-4"><Loader2 className="h-6 w-6 animate-spin"/></div> :
-                <Table className="min-w-[1060px]">
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-12">Aktif</TableHead>
-                      <TableHead>Ürün Adı (Stok Kodu)</TableHead>
-                      <TableHead className="w-24">Min</TableHead>
-                      <TableHead className="w-24">Max</TableHead>
-                      <TableHead className="w-24">Max Gün</TableHead>
-                      <TableHead className="w-32">Aylık Max Tüketim</TableHead>
-                      <TableHead className="w-44">
-                        <div className="flex items-center gap-1">
-                          <Clock className="h-3.5 w-3.5" />
-                          Ort. Tüketim Süresi
-                        </div>
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {selectedProducts.map(product => {
-                      const rule = rules[product.stokKodu!];
-                      const isEnabled = rule?.enabled ?? false;
-                      return (
-                        <TableRow key={product.id}>
-                          <TableCell>
-                            <Checkbox
-                              checked={isEnabled}
-                              onCheckedChange={(checked) => handleCheckboxChange(product.stokKodu!, checked)}
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <p className="font-medium">{product.stokAdi}</p>
-                            <p className="text-xs text-muted-foreground font-code">{product.stokKodu}</p>
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              type="number"
-                              value={isEnabled ? (rule?.min ?? '') : ''}
-                              onChange={e => handleRuleChange(product.stokKodu!, 'min', e.target.value)}
-                              disabled={!isEnabled}
-                              className="h-8"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              type="number"
-                              value={isEnabled ? (rule?.max ?? '') : ''}
-                              onChange={e => handleRuleChange(product.stokKodu!, 'max', e.target.value)}
-                              disabled={!isEnabled}
-                              className="h-8"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
-                              type="number"
-                              value={isEnabled ? (rule?.maxGun ?? '') : ''}
-                              onChange={e => handleRuleChange(product.stokKodu!, 'maxGun', e.target.value)}
-                              disabled={!isEnabled}
-                              className="h-8"
-                              placeholder="Boş bırak"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            <Input
+      {/* Tabs */}
+      <div className="flex-shrink-0 flex items-center gap-1 px-4 sm:px-6 pt-3 pb-0">
+        <button
+          onClick={() => setActiveTab('selected')}
+          className="px-4 py-2 rounded-t-xl text-xs font-semibold transition-colors border border-b-0"
+          style={{
+            background: activeTab === 'selected' ? 'var(--dashboard-card, #fff)' : 'transparent',
+            color: activeTab === 'selected' ? 'var(--dashboard-accent, #6366f1)' : 'var(--dashboard-muted, #6b7280)',
+            borderColor: activeTab === 'selected' ? 'var(--dashboard-stroke, #e5e7eb)' : 'transparent',
+          }}
+        >
+          Tanımlı Ürünler ({selectedProducts.length})
+        </button>
+        <button
+          onClick={() => setActiveTab('unselected')}
+          className="px-4 py-2 rounded-t-xl text-xs font-semibold transition-colors border border-b-0"
+          style={{
+            background: activeTab === 'unselected' ? 'var(--dashboard-card, #fff)' : 'transparent',
+            color: activeTab === 'unselected' ? 'var(--dashboard-accent, #6366f1)' : 'var(--dashboard-muted, #6b7280)',
+            borderColor: activeTab === 'unselected' ? 'var(--dashboard-stroke, #e5e7eb)' : 'transparent',
+          }}
+        >
+          <Plus className="w-3 h-3 inline mr-1" />
+          Ürün Ekle ({unselectedProducts.length})
+        </button>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-auto px-4 sm:px-6 pb-4 border-t" style={{ borderColor: 'var(--dashboard-stroke, #e5e7eb)' }}>
+        {isLoading && !Object.keys(rules).length ? (
+          <div className="flex items-center justify-center py-20">
+            <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--dashboard-accent, #6366f1)' }} />
+            <span className="ml-2 text-sm" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>Yükleniyor...</span>
+          </div>
+        ) : activeTab === 'selected' ? (
+          selectedProducts.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>
+              <SlidersHorizontal className="w-10 h-10 mb-3 opacity-20" />
+              <p className="text-sm font-medium">{searchQuery ? 'Eşleşen tanımlı ürün yok.' : 'Henüz min-max kuralı tanımlanmamış.'}</p>
+              <p className="text-xs mt-1">Ürün Ekle sekmesinden ürün seçerek başlayın.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto -mx-4 sm:-mx-6">
+              <table className="w-full min-w-[900px]">
+                <thead>
+                  <tr className="border-b" style={{ borderColor: 'var(--dashboard-stroke, #e5e7eb)' }}>
+                    <th className="text-left px-4 sm:px-6 py-2.5 text-[10px] font-semibold uppercase tracking-wider w-10" style={{ color: 'var(--dashboard-muted, #6b7280)' }}></th>
+                    <th className="text-left px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>Ürün</th>
+                    <th className="text-left px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wider w-[90px]" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>Min</th>
+                    <th className="text-left px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wider w-[90px]" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>Max</th>
+                    <th className="text-left px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wider w-[90px]" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>Max Gün</th>
+                    {!isDepotLike && (
+                      <th className="text-left px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wider w-[110px]" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>Aylık Limit</th>
+                    )}
+                    <th className="text-left px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wider w-[160px]" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>
+                      <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> Ort. Tüketim</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedProducts.map(product => {
+                    const rule = rules[product.stokKodu!];
+                    const isEnabled = rule?.enabled ?? false;
+                    return (
+                      <tr key={product.id} className="border-b transition-colors hover:bg-black/[.015]" style={{ borderColor: 'var(--dashboard-stroke, #e5e7eb)' }}>
+                        <td className="px-4 sm:px-6 py-2">
+                          <Checkbox
+                            checked={isEnabled}
+                            onCheckedChange={(checked) => handleCheckboxChange(product.stokKodu!, checked)}
+                          />
+                        </td>
+                        <td className="px-2 py-2 min-w-[180px]">
+                          <p className="text-xs font-semibold truncate" style={{ color: 'var(--dashboard-text, #111)' }}>{product.stokAdi}</p>
+                          <p className="text-[10px] font-mono" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>{product.stokKodu}</p>
+                        </td>
+                        <td className="px-2 py-2">
+                          <input
+                            type="number"
+                            value={isEnabled ? (rule?.min ?? '') : ''}
+                            onChange={e => handleRuleChange(product.stokKodu!, 'min', e.target.value)}
+                            disabled={!isEnabled}
+                            className="w-full h-8 px-2.5 rounded-lg text-xs border-0 outline-none disabled:opacity-30"
+                            style={{ background: 'var(--dashboard-pressed, #f3f4f6)', color: 'var(--dashboard-text, #111)' }}
+                            placeholder="0"
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          <input
+                            type="number"
+                            value={isEnabled ? (rule?.max ?? '') : ''}
+                            onChange={e => handleRuleChange(product.stokKodu!, 'max', e.target.value)}
+                            disabled={!isEnabled}
+                            className="w-full h-8 px-2.5 rounded-lg text-xs border-0 outline-none disabled:opacity-30"
+                            style={{ background: 'var(--dashboard-pressed, #f3f4f6)', color: 'var(--dashboard-text, #111)' }}
+                            placeholder="0"
+                          />
+                        </td>
+                        <td className="px-2 py-2">
+                          <input
+                            type="number"
+                            value={isEnabled ? (rule?.maxGun ?? '') : ''}
+                            onChange={e => handleRuleChange(product.stokKodu!, 'maxGun', e.target.value)}
+                            disabled={!isEnabled}
+                            className="w-full h-8 px-2.5 rounded-lg text-xs border-0 outline-none disabled:opacity-30"
+                            style={{ background: 'var(--dashboard-pressed, #f3f4f6)', color: 'var(--dashboard-text, #111)' }}
+                            placeholder="-"
+                          />
+                        </td>
+                        {!isDepotLike && (
+                          <td className="px-2 py-2">
+                            <input
                               type="number"
                               value={isEnabled ? (rule?.aylikTuketimLimiti ?? '') : ''}
                               onChange={e => handleRuleChange(product.stokKodu!, 'aylikTuketimLimiti', e.target.value)}
-                              disabled={!isEnabled || targetType === 'depot' || targetType === 'spare_parts_depot'}
-                              className="h-8"
-                              placeholder={targetType === 'depot' || targetType === 'spare_parts_depot' ? 'N/A' : 'Limit'}
+                              disabled={!isEnabled}
+                              className="w-full h-8 px-2.5 rounded-lg text-xs border-0 outline-none disabled:opacity-30"
+                              style={{ background: 'var(--dashboard-pressed, #f3f4f6)', color: 'var(--dashboard-text, #111)' }}
+                              placeholder="-"
                             />
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-1">
-                              <Input
-                                type="number"
-                                value={isEnabled ? (rule?.ortalamaTuketimSuresi ?? '') : ''}
-                                onChange={e => handleRuleChange(product.stokKodu!, 'ortalamaTuketimSuresi', e.target.value)}
-                                disabled={!isEnabled}
-                                className="h-8 w-16"
-                                placeholder="Süre"
-                                min={0}
-                                step={0.5}
-                              />
-                              <Select
-                                value={isEnabled ? (rule?.tuketimSuresiBirimi ?? 'gun') : 'gun'}
-                                onValueChange={(val) => handleBirimChange(product.stokKodu!, val as 'gun' | 'saat')}
-                                disabled={!isEnabled}
-                              >
-                                <SelectTrigger className="h-8 w-[72px] text-xs">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="gun">Gün</SelectItem>
-                                  <SelectItem value="saat">Saat</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                    {selectedProducts.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={7} className="text-center text-muted-foreground py-6">
-                          Seçilen ürün bulunamadı.
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>}
-              </ScrollArea>
+                          </td>
+                        )}
+                        <td className="px-2 py-2">
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              type="number"
+                              value={isEnabled ? (rule?.ortalamaTuketimSuresi ?? '') : ''}
+                              onChange={e => handleRuleChange(product.stokKodu!, 'ortalamaTuketimSuresi', e.target.value)}
+                              disabled={!isEnabled}
+                              className="w-16 h-8 px-2.5 rounded-lg text-xs border-0 outline-none disabled:opacity-30"
+                              style={{ background: 'var(--dashboard-pressed, #f3f4f6)', color: 'var(--dashboard-text, #111)' }}
+                              placeholder="-"
+                              min={0}
+                              step={0.5}
+                            />
+                            <Select
+                              value={isEnabled ? (rule?.tuketimSuresiBirimi ?? 'gun') : 'gun'}
+                              onValueChange={(val) => handleBirimChange(product.stokKodu!, val as 'gun' | 'saat')}
+                              disabled={!isEnabled}
+                            >
+                              <SelectTrigger className="h-8 w-[68px] text-[11px] border-0 rounded-lg" style={{ background: 'var(--dashboard-pressed, #f3f4f6)' }}>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="gun">Gün</SelectItem>
+                                <SelectItem value="saat">Saat</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-
-            <div className="border rounded-md overflow-hidden flex flex-col min-h-0">
-              <div className="p-3 border-b space-y-2">
-                <p className="font-medium text-sm">Seçilmeyen Ürünler ({unselectedProducts.length})</p>
-                <Input
-                  placeholder="Seçilmeyenlerde ürün ara..."
-                  value={unselectedSearch}
-                  onChange={(e) => setUnselectedSearch(e.target.value)}
-                  className="h-8"
-                />
-              </div>
-              <ScrollArea className="flex-1">
-                <Table className="min-w-[420px]">
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-12">Aktif</TableHead>
-                      <TableHead>Ürün Adı (Stok Kodu)</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {unselectedProducts.map(product => (
-                      <TableRow key={product.id}>
-                        <TableCell>
-                          <Checkbox
-                            checked={false}
-                            onCheckedChange={(checked) => handleCheckboxChange(product.stokKodu!, checked)}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <p className="font-medium">{product.stokAdi}</p>
-                          <p className="text-xs text-muted-foreground font-code">{product.stokKodu}</p>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {unselectedProducts.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={2} className="text-center text-muted-foreground py-6">
-                          Seçilmeyen ürün bulunamadı.
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </ScrollArea>
+          )
+        ) : (
+          /* Unselected / Add Products Tab */
+          unselectedProducts.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-20" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>
+              <Plus className="w-10 h-10 mb-3 opacity-20" />
+              <p className="text-sm font-medium">{searchQuery ? 'Eşleşen ürün yok.' : 'Tüm ürünler zaten tanımlı.'}</p>
             </div>
-          </div>
-        </div>
-
-        <DialogFooter className="pt-4 border-t">
-          <DialogClose asChild><Button variant="outline" disabled={isLoading}>İptal</Button></DialogClose>
-          <Button onClick={handleSaveRules} disabled={isLoading}>
-            {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin"/>}
-            <Save className="mr-2 h-4 w-4"/> Kuralları Kaydet
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2 pt-3">
+              {unselectedProducts.map(product => (
+                <button
+                  key={product.id}
+                  onClick={() => { handleCheckboxChange(product.stokKodu!, true); setActiveTab('selected'); }}
+                  className="flex items-center gap-3 p-3 rounded-xl border text-left transition-all hover:shadow-sm active:scale-[0.99]"
+                  style={{ borderColor: 'var(--dashboard-stroke, #e5e7eb)', background: 'var(--dashboard-card, #fff)' }}
+                >
+                  <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'var(--dashboard-pressed, #f3f4f6)' }}>
+                    <Plus className="w-4 h-4" style={{ color: 'var(--dashboard-accent, #6366f1)' }} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold truncate" style={{ color: 'var(--dashboard-text, #111)' }}>{product.stokAdi}</p>
+                    <p className="text-[10px] font-mono truncate" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>{product.stokKodu}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )
+        )}
+      </div>
+    </div>
   );
 }
