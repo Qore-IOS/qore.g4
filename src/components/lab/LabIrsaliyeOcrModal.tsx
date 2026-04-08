@@ -61,7 +61,11 @@ export default function LabIrsaliyeOcrModal({
 
   const normalizeLotToken = (value?: string) => {
     if (!value) return undefined;
-    return value.trim().replace(/[|;,]+/g, ' ').match(/\b([A-Za-z0-9-]{3,})\b/)?.[1]?.toUpperCase();
+    const token = value.trim().replace(/[|;,]+/g, ' ').match(/\b([A-Za-z0-9-]{3,})\b/)?.[1]?.toUpperCase();
+    if (!token) return undefined;
+    // Stok adı parçalarının LOT'a düşmesini engellemek için en az bir rakam şartı.
+    if (!/\d/.test(token)) return undefined;
+    return token;
   };
 
   useEffect(() => {

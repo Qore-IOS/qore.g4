@@ -33,6 +33,7 @@ function sanitizeLotValue(value?: string): string | undefined {
     .match(/\b([A-Za-z0-9-]{3,})\b/)?.[1]
     ?.trim();
   if (!token) return undefined;
+  if (!/\d/.test(token)) return undefined;
   if (looksLikeUtsCode(token)) return undefined;
   return token.toUpperCase();
 }
@@ -336,7 +337,8 @@ function parseLineByLine(lines: string[], productCodes: ProductCode[]): Irsaliye
     let lot: string | undefined;
     const lotKeywordMatch = contextLines.match(/(?:lot|parti|batch)\s*[:.]?\s*([A-Za-z0-9-]+)/i);
     if (lotKeywordMatch) {
-      lot = lotKeywordMatch[1].toUpperCase();
+      const normalized = lotKeywordMatch[1].toUpperCase();
+      lot = /\d/.test(normalized) ? normalized : undefined;
     }
 
     if (stokKodu && quantity > 0) {

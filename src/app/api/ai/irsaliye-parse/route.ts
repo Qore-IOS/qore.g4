@@ -23,6 +23,11 @@ function normalizeToken(value?: string): string | undefined {
   return token ? token.toUpperCase() : undefined;
 }
 
+function isLikelyLotToken(value?: string): boolean {
+  if (!value) return false;
+  return /\d/.test(value) && value.length >= 4 && !looksLikeUtsCode(value);
+}
+
 function extractLotFromRawLine(rawLine?: string, stokKodu?: string): string | undefined {
   if (!rawLine) return undefined;
   const dateMatch = rawLine.match(/\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b/);
@@ -37,7 +42,7 @@ function extractLotFromRawLine(rawLine?: string, stokKodu?: string): string | un
     if (!candidate) continue;
     if (stokKodu && candidate === stokKodu.toUpperCase()) continue;
     if (/^(ADET|KUTU|PAKET|KOLI|PCS|EA|BOX|BIRIM)$/i.test(candidate)) continue;
-    if (looksLikeUtsCode(candidate)) continue;
+    if (!isLikelyLotToken(candidate)) continue;
     return candidate;
   }
   return undefined;
@@ -73,7 +78,7 @@ function extractJsonArray(raw: string): ParsedItem[] {
         // Strong rule: prefer LOT inferred from the row segment before MIAD (table order),
         // otherwise use AI lot if it is not UTS-like.
         if (rawLineLot) return rawLineLot;
-        if (looksLikeUtsCode(row.lot)) return undefined;
+        if (!isLikelyLotToken(row.lot)) return undefined;
         return row.lot;
       })(),
     }))
