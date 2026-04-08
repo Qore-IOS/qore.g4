@@ -101,6 +101,10 @@ type ActionFormRecord = {
     personnelSignature?: string;
     technicianSignature?: string;
     technicianName?: string;
+    baslangicTarihi?: string;
+    baslangicSaati?: string;
+    bitisTarihi?: string;
+    bitisSaati?: string;
 };
 
 // Turkish labels - will use Turkish font if available
@@ -318,9 +322,12 @@ export default function TeknikServisTutanakPDFButton({ device, hospital, actionR
           ['Laboratuvar:', txt(labDisplayName, useTurkish)],
           ['Cihaz:', txt(`${device.cihazAdi} (SN: ${device.seriNumarasi})`, useTurkish)],
           [txt('İşlemi Yapan:', useTurkish), personnelStr],
-          ['Tarih / Saat:', actionRecord.baslangicTarihi && actionRecord.baslangicSaati
+          [txt('Başlangıç:', useTurkish), actionRecord.baslangicTarihi && actionRecord.baslangicSaati
             ? `${actionRecord.baslangicTarihi.split('-').reverse().join('.')} ${actionRecord.baslangicSaati}`
-            : format(actionRecord.createdAt.toDate(), 'dd.MM.yyyy HH:mm')]
+            : format(actionRecord.createdAt.toDate(), 'dd.MM.yyyy HH:mm')],
+          [txt('Bitiş:', useTurkish), actionRecord.bitisTarihi && actionRecord.bitisSaati
+            ? `${actionRecord.bitisTarihi.split('-').reverse().join('.')} ${actionRecord.bitisSaati}`
+            : '-']
       ];
 
       autoTable(doc, {
