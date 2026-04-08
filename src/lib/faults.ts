@@ -6,7 +6,7 @@ import { db } from '@/lib/firebase';
 import {
   addDoc, collection, doc, serverTimestamp, Timestamp, updateDoc, getDoc, writeBatch, query, where, getDocs
 } from 'firebase/firestore';
-import { emitFaultOpened, emitFaultTransferred } from '@/lib/notifications';
+import { createNotification, emitFaultOpened, emitFaultTransferred } from '@/lib/notifications';
 import type { DeviceFaultStatus, InterventionType } from '@/lib/types';
 import { withCompanyScope } from '@/lib/company-scope';
 
@@ -27,13 +27,18 @@ export type OpenFaultInput = {
   faultName?: string; // Name from faultDefinitions (for statistics)
   deviceImageUrl?: string; // Device model image URL for push notifications
   companyId?: string | null;
+  affectsAllDevices?: boolean;
+  affectedDeviceIds?: string[];
+  stopLevel?: 'E STOP' | 'S STOP' | 'NORMAL STOP';
+  notifyAllPersonnel?: boolean;
 };
 
 export async function openDeviceFaultReport(input: OpenFaultInput): Promise<string> {
   const {
     hospitalId, labName, deviceId, model, serial,
     faultType, openedByUid, openedByName, openDescription, title,
-    faultDefinitionId, faultName, companyId
+    faultDefinitionId, faultName, companyId, affectsAllDevices = false,
+    affectedDeviceIds = [], stopLevel, notifyAllPersonnel = false
   } = input;
 
   // Corrected flat structure for Google Sheets extension
@@ -69,12 +74,25 @@ export async function openDeviceFaultReport(input: OpenFaultInput): Promise<stri
     // Fault definition fields (for statistics)
     faultDefinitionId: faultDefinitionId ?? null,
     faultName: faultName ?? null,
+    affectsAllDevices,
+    affectedDeviceIds,
+    stopLevel: stopLevel ?? null,
   };
 
   const reportRef = await addDoc(collection(db, 'deviceFaultReports'), withCompanyScope(report, companyId));
 
-  // Update device arizaDurumu
-  if (deviceId) {
+  // Update impacted device(s) arizaDurumu
+  if (affectsAllDevices && affectedDeviceIds.length > 0) {
+    const batch = writeBatch(db);
+    affectedDeviceIds.forEach((id) => {
+      if (!id) return;
+      batch.update(doc(db, 'devices', id), {
+        arizaDurumu: faultType,
+        arizaAciklamasi: openDescription ?? '',
+      });
+    });
+    await batch.commit();
+  } else if (deviceId) {
     const deviceRef = doc(db, 'devices', deviceId);
     await updateDoc(deviceRef, {
       arizaDurumu: faultType,
@@ -92,17 +110,37 @@ export async function openDeviceFaultReport(input: OpenFaultInput): Promise<stri
   });
 
   // Emit notification after fault is successfully opened
-  await emitFaultOpened({
-    actor: { uid: openedByUid, name: openedByName },
-    faultReportId: reportRef.id,
-    assignedDeviceId: deviceId,
-    deviceName: model,
-    faultType: faultType,
-    hospitalId: hospitalId,
-    hospitalName: labName,
-    description: openDescription ?? undefined,
-    deviceImageUrl: input.deviceImageUrl,
-  });
+  if (notifyAllPersonnel) {
+    await createNotification({
+      type: 'custom',
+      title: `KOMPLE STOP: ${stopLevel || 'STOP'}`,
+      message: `${labName} laboratuvarında ${stopLevel || 'STOP'} arızası açıldı. Tüm cihazlar etkileniyor. (Açan: ${openedByName})`,
+      href: `/ariza-yonetimi/${reportRef.id}`,
+      resource: { type: 'device', id: deviceId || undefined },
+      actor: { uid: openedByUid, name: openedByName },
+      targets: [`lab:${hospitalId}`, 'role:teknik_servis', 'role:aplikasyon', 'role:admin'],
+      meta: {
+        hospitalId,
+        faultReportId: reportRef.id,
+        faultType,
+        stopLevel: stopLevel ?? null,
+        affectsAllDevices,
+        affectedDeviceIds,
+      },
+    });
+  } else {
+    await emitFaultOpened({
+      actor: { uid: openedByUid, name: openedByName },
+      faultReportId: reportRef.id,
+      assignedDeviceId: deviceId,
+      deviceName: model,
+      faultType: faultType,
+      hospitalId: hospitalId,
+      hospitalName: labName,
+      description: openDescription ?? undefined,
+      deviceImageUrl: input.deviceImageUrl,
+    });
+  }
 
   return reportRef.id;
 }
@@ -169,9 +207,36 @@ export async function closeDeviceFaultReport(
 
   batch.update(reportRef, updateData);
 
-  // 2. Update the main device document ONLY if a deviceId exists
+  // 2. Update related device documents
   //    Check if there are other open fault reports for the same device
-  if (deviceId) {
+  if (reportData?.affectsAllDevices && Array.isArray(reportData?.affectedDeviceIds)) {
+    const targetDeviceIds = (reportData.affectedDeviceIds as string[]).filter(Boolean);
+
+    for (const targetDeviceId of targetDeviceIds) {
+      const otherOpenFaults = await getDocs(
+        query(
+          collection(db, 'deviceFaultReports'),
+          where('deviceId', '==', targetDeviceId),
+          where('status', 'in', ['atama_bekliyor', 'mudahale_bekliyor', 'mudahale_ediliyor', 'open'])
+        )
+      );
+      const remainingOpenFaults = otherOpenFaults.docs.filter(d => d.id !== reportId);
+
+      const deviceRef = doc(db, 'devices', targetDeviceId);
+      if (remainingOpenFaults.length > 0) {
+        const remainingFault = remainingOpenFaults[0].data();
+        batch.update(deviceRef, {
+          arizaDurumu: remainingFault.faultType || 'teknik_servis',
+          arizaAciklamasi: remainingFault.description || '',
+        });
+      } else {
+        batch.update(deviceRef, {
+          arizaDurumu: 'yok',
+          arizaAciklamasi: '',
+        });
+      }
+    }
+  } else if (deviceId) {
     const otherOpenFaults = await getDocs(
       query(
         collection(db, 'deviceFaultReports'),
