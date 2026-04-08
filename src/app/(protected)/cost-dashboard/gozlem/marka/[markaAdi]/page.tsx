@@ -124,6 +124,54 @@ export default function BrandObservationPage() {
     }
   }, []);
 
+  const sanitizePdfText = useCallback((text: string): string => {
+    return text
+      .replace(/İ/g, 'I').replace(/ı/g, 'i')
+      .replace(/Ş/g, 'S').replace(/ş/g, 's')
+      .replace(/Ğ/g, 'G').replace(/ğ/g, 'g')
+      .replace(/Ü/g, 'U').replace(/ü/g, 'u')
+      .replace(/Ö/g, 'O').replace(/ö/g, 'o')
+      .replace(/Ç/g, 'C').replace(/ç/g, 'c');
+  }, []);
+
+  const createPieChartDataUrl = useCallback((items: { label: string; value: number }[], title: string): string | null => {
+    if (typeof document === 'undefined' || items.length === 0) return null;
+    const colors = ['#2563eb', '#7c3aed', '#db2777', '#ea580c', '#0891b2', '#16a34a', '#ca8a04', '#dc2626'];
+    const canvas = document.createElement('canvas');
+    canvas.width = 460;
+    canvas.height = 300;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, 460, 300);
+    ctx.fillStyle = '#334155';
+    ctx.font = 'bold 16px Arial';
+    ctx.fillText(title, 18, 26);
+    const totalVal = items.reduce((s, i) => s + i.value, 0) || 1;
+    let start = -Math.PI / 2;
+    const cx = 140, cy = 160, r = 88;
+    items.slice(0, 8).forEach((item, i) => {
+      const end = start + (item.value / totalVal) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, r, start, end);
+      ctx.closePath();
+      ctx.fillStyle = colors[i % colors.length];
+      ctx.fill();
+      start = end;
+    });
+    ctx.font = '12px Arial';
+    items.slice(0, 6).forEach((item, i) => {
+      const y = 72 + i * 28;
+      ctx.fillStyle = colors[i % colors.length];
+      ctx.fillRect(260, y - 10, 10, 10);
+      ctx.fillStyle = '#1e293b';
+      const pct = ((item.value / totalVal) * 100).toFixed(1);
+      ctx.fillText(`${sanitizePdfText(item.label)} %${pct}`, 276, y);
+    });
+    return canvas.toDataURL('image/png');
+  }, [sanitizePdfText]);
+
   const handleExcelExport = useCallback(async () => {
     try {
       const XLSX = await import('xlsx');
@@ -163,41 +211,81 @@ export default function BrandObservationPage() {
       const autoTable = autoTableModule.default;
       const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'landscape' });
       const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
       const logo = await loadLogoDataUrl();
+      const locationPie = createPieChartDataUrl(locationSummary.map((l) => ({ label: l.locationName, value: l.cost })), 'Konum Bazli Dagilim');
+
+      const drawFooter = () => {
+        const badgeW = 220;
+        const badgeH = 32;
+        const bx = pageW / 2 - badgeW / 2;
+        const by = pageH - 40;
+        doc.setFillColor(254, 243, 199);
+        doc.roundedRect(bx, by, badgeW, badgeH, 10, 10, 'F');
+        if (logo) {
+          doc.addImage(logo, 'PNG', pageW / 2 - 58, by + 8, 116, 14, undefined, 'FAST');
+        }
+      };
 
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(18);
-      doc.text(`QORE Marka Gozlem - ${brand}`, 40, 34);
+      doc.setFontSize(20);
+      doc.text(sanitizePdfText(`QORE Marka Gozlem - ${brand}`), pageW / 2, 38, { align: 'center' });
       doc.setFont('helvetica', 'normal');
       doc.setFontSize(10);
-      doc.text(`Tarih: ${new Date().toLocaleString('tr-TR')}`, 40, 52);
-      doc.text(`Toplam Maliyet: ${sym}${total.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}`, 40, 66);
-      if (logo) doc.addImage(logo, 'PNG', pageW - 180, 16, 140, 40, undefined, 'FAST');
+      doc.text(sanitizePdfText(`Tarih: ${new Date().toLocaleString('tr-TR')}  Para Birimi: ${currency}`), 32, 56);
+
+      const cardW = (pageW - 60) / 4;
+      const cards = [
+        { t: 'Toplam Marka Maliyeti', v: `${sym}${total.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}` },
+        { t: 'Pareto %20', v: `%${pareto.share.toFixed(1)}` },
+        { t: 'Ort. Birim Maliyet', v: `${sym}${unitCostAvg.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}` },
+        { t: 'Konum Sayisi', v: `${locationSummary.length}` },
+      ];
+      cards.forEach((c, i) => {
+        const x = 20 + i * cardW;
+        doc.setFillColor(248, 250, 252);
+        doc.roundedRect(x, 70, cardW - 8, 56, 10, 10, 'F');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10);
+        doc.text(sanitizePdfText(c.t), x + 10, 91);
+        doc.setTextColor(199, 137, 65);
+        doc.setFontSize(13);
+        doc.text(sanitizePdfText(c.v), x + 10, 112);
+        doc.setTextColor(0, 0, 0);
+      });
 
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(11);
-      doc.text('Aylik Trend (Grafik)', 40, 95);
-      const chartX = 40; const chartY = 106; const chartW = pageW - 80; const chartH = 95;
+      doc.text(sanitizePdfText('Aylik Trend (Grafik)'), 28, 148);
+      const chartX = 28; const chartY = 160; const chartW = pageW - 56; const chartH = 96;
       doc.setDrawColor(203, 213, 225);
       doc.rect(chartX, chartY, chartW, chartH);
       const maxCost = Math.max(...monthly.map((m) => m.cost), 1);
       monthly.forEach((m, i) => {
-        const bw = Math.max(10, (chartW - 20) / Math.max(monthly.length, 1) - 6);
-        const x = chartX + 10 + i * (bw + 6);
+        const bw = Math.max(10, (chartW - 24) / Math.max(monthly.length, 1) - 6);
+        const x = chartX + 12 + i * (bw + 6);
         const h = (m.cost / maxCost) * (chartH - 24);
         doc.setFillColor(14, 165, 233);
         doc.rect(x, chartY + chartH - 12 - h, bw, h, 'F');
         doc.setFontSize(7);
-        doc.text(m.monthLabel, x, chartY + chartH - 2);
+        doc.text(sanitizePdfText(m.monthLabel), x, chartY + chartH - 2);
       });
 
+      if (locationPie) doc.addImage(locationPie, 'PNG', 28, 266, pageW - 56, 180, undefined, 'FAST');
+      drawFooter();
+
+      doc.addPage('a4', 'landscape');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      doc.text(sanitizePdfText('Marka Detay Tablosu'), 28, 34);
       autoTable(doc, {
-        startY: 220,
-        head: [['Ürün', 'Stok Kodu', 'Konum', 'Stok', 'Cihaz Üstü', 'Maliyet']],
-        body: latestRows.slice(0, 300).map((r) => [r.stokAdi, r.stokKodu, r.locationName, String(r.stokAdedi), String(r.cihazUstuAdedi), `${sym}${r.totalCost.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}`]),
-        styles: { fontSize: 9, cellPadding: 5 },
+        startY: 48,
+        head: [[sanitizePdfText('Urun'), sanitizePdfText('Stok Kodu'), sanitizePdfText('Konum'), sanitizePdfText('Stok'), sanitizePdfText('Cihaz Ustu'), sanitizePdfText('Maliyet')]],
+        body: latestRows.slice(0, 500).map((r) => [sanitizePdfText(r.stokAdi), r.stokKodu, sanitizePdfText(r.locationName), String(r.stokAdedi), String(r.cihazUstuAdedi), `${sym}${r.totalCost.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}`]),
+        styles: { fontSize: 9, cellPadding: 4 },
         headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
       });
+      drawFooter();
 
       doc.save(`Marka_Gozlem_${brand}_${new Date().toISOString().slice(0, 10)}.pdf`);
       toast({ title: 'Başarılı', description: 'PDF raporu indirildi.' });
@@ -205,7 +293,7 @@ export default function BrandObservationPage() {
       console.error(error);
       toast({ title: 'Hata', description: 'PDF raporu oluşturulamadı.', variant: 'destructive' });
     }
-  }, [brand, latestRows, loadLogoDataUrl, monthly, sym, toast, total]);
+  }, [brand, createPieChartDataUrl, currency, latestRows, loadLogoDataUrl, locationSummary, monthly, pareto.share, sanitizePdfText, sym, toast, total, unitCostAvg]);
 
   if (loading || productsQuery.isLoading) {
     return <div className="min-h-screen flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)]" /></div>;

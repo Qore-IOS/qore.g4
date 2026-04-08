@@ -532,6 +532,61 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
     }
   }, []);
 
+  const sanitizePdfText = useCallback((text: string): string => {
+    return text
+      .replace(/İ/g, 'I').replace(/ı/g, 'i')
+      .replace(/Ş/g, 'S').replace(/ş/g, 's')
+      .replace(/Ğ/g, 'G').replace(/ğ/g, 'g')
+      .replace(/Ü/g, 'U').replace(/ü/g, 'u')
+      .replace(/Ö/g, 'O').replace(/ö/g, 'o')
+      .replace(/Ç/g, 'C').replace(/ç/g, 'c');
+  }, []);
+
+  const createPieChartDataUrl = useCallback((items: { label: string; value: number }[], title: string): string | null => {
+    if (typeof document === 'undefined' || items.length === 0) return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = 460;
+    canvas.height = 300;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#334155';
+    ctx.font = 'bold 16px Arial';
+    ctx.fillText(title, 18, 26);
+
+    const total = items.reduce((s, i) => s + i.value, 0) || 1;
+    let start = -Math.PI / 2;
+    const cx = 140;
+    const cy = 160;
+    const r = 90;
+    items.slice(0, 8).forEach((item, i) => {
+      const ratio = item.value / total;
+      const end = start + ratio * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.arc(cx, cy, r, start, end);
+      ctx.closePath();
+      ctx.fillStyle = PIE_COLORS[i % PIE_COLORS.length];
+      ctx.fill();
+      start = end;
+    });
+
+    ctx.fillStyle = '#1e293b';
+    ctx.font = '12px Arial';
+    items.slice(0, 6).forEach((item, i) => {
+      const y = 72 + i * 28;
+      ctx.fillStyle = PIE_COLORS[i % PIE_COLORS.length];
+      ctx.fillRect(260, y - 10, 10, 10);
+      ctx.fillStyle = '#1e293b';
+      const pct = ((item.value / total) * 100).toFixed(1);
+      ctx.fillText(`${sanitizePdfText(item.label)} %${pct}`, 276, y);
+    });
+
+    return canvas.toDataURL('image/png');
+  }, [sanitizePdfText]);
+
   const handleExportExcel = useCallback(async () => {
     try {
       const XLSX = await import('xlsx');
@@ -583,62 +638,100 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
       const autoTable = autoTableModule.default;
       const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'landscape' });
       const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
       const logo = await loadLogoDataUrl();
+      const brandPie = createPieChartDataUrl(brandCosts.map((b) => ({ label: b.name, value: b.cost })), 'Marka Dagilimi');
+      const groupPie = createPieChartDataUrl(groupBreakdown.map((g) => ({ label: g.name, value: g.cost })), 'Urun Grubu Kirilimi');
+
+      const drawFooter = () => {
+        const badgeW = 220;
+        const badgeH = 32;
+        const bx = pageW / 2 - badgeW / 2;
+        const by = pageH - 40;
+        doc.setFillColor(254, 243, 199);
+        doc.roundedRect(bx, by, badgeW, badgeH, 10, 10, 'F');
+        if (logo) {
+          // "Üstten/alttan bastırılmış" görünüm için alçak yükseklik
+          doc.addImage(logo, 'PNG', pageW / 2 - 58, by + 8, 116, 14, undefined, 'FAST');
+        }
+      };
 
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(18);
-      doc.text('QORE Maliyet Gozlem Raporu', 40, 34);
+      doc.setFontSize(22);
+      doc.text(sanitizePdfText('QORE Maliyet Gozlem Raporu'), pageW / 2, 38, { align: 'center' });
       doc.setFontSize(10);
       doc.setFont('helvetica', 'normal');
-      doc.text(`Tarih: ${new Date().toLocaleString('tr-TR')}`, 40, 52);
-      doc.text(`Para Birimi: ${currency}`, 40, 66);
-      if (logo) doc.addImage(logo, 'PNG', pageW - 180, 16, 140, 40, undefined, 'FAST');
+      doc.text(sanitizePdfText(`Tarih: ${new Date().toLocaleString('tr-TR')}   Para Birimi: ${currency}`), 40, 56);
 
-      doc.setFillColor(236, 253, 245);
-      doc.roundedRect(40, 80, 220, 56, 8, 8, 'F');
+      const cardY = 72;
+      const cardW = (pageW - 60) / 4;
+      const cards = [
+        { t: 'Toplam Envanter Maliyeti', v: fmtCurrency(consolidatedCost, sym) },
+        { t: 'Konum Bazli Maliyet', v: `${locationBreakdown.length} konum` },
+        { t: 'Marka Dagilimi', v: `${brandCosts.length} marka` },
+        { t: 'Urun Grubu Kirilim', v: `${groupBreakdown.length} grup` },
+      ];
+      cards.forEach((c, i) => {
+        const x = 20 + i * cardW;
+        doc.setFillColor(248, 250, 252);
+        doc.roundedRect(x, cardY, cardW - 8, 58, 10, 10, 'F');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10);
+        doc.text(sanitizePdfText(c.t), x + 10, cardY + 22);
+        doc.setTextColor(199, 137, 65);
+        doc.setFontSize(13);
+        doc.text(sanitizePdfText(c.v), x + 10, cardY + 44);
+        doc.setTextColor(0, 0, 0);
+      });
+
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(11);
-      doc.text('Konsolide Toplam', 52, 102);
-      doc.setTextColor(22, 163, 74);
-      doc.setFontSize(16);
-      doc.text(fmtCurrency(consolidatedCost, sym), 52, 122);
-      doc.setTextColor(0, 0, 0);
-
-      doc.setFontSize(11);
-      doc.setFont('helvetica', 'bold');
-      doc.text('Aylik Maliyet Trendi (Grafik)', 40, 164);
-      const chartX = 40;
-      const chartY = 176;
-      const chartW = pageW - 80;
-      const chartH = 110;
-      doc.setDrawColor(203, 213, 225);
+      doc.text(sanitizePdfText('Aylik Maliyet Trendi'), 28, 150);
+      const chartX = 28, chartY = 160, chartW = pageW - 56, chartH = 110;
+      doc.setDrawColor(226, 232, 240);
       doc.rect(chartX, chartY, chartW, chartH);
       const maxCost = Math.max(...monthlyTrend.map((m) => m.cost), 1);
       monthlyTrend.forEach((m, i) => {
-        const bw = Math.max(8, (chartW - 24) / Math.max(monthlyTrend.length, 1) - 6);
-        const x = chartX + 12 + i * (bw + 6);
+        const bw = Math.max(10, (chartW - 30) / Math.max(monthlyTrend.length, 1) - 6);
+        const x = chartX + 15 + i * (bw + 6);
         const h = (m.cost / maxCost) * (chartH - 28);
         doc.setFillColor(59, 130, 246);
         doc.rect(x, chartY + chartH - 14 - h, bw, h, 'F');
         doc.setFontSize(7);
-        doc.text(m.month, x, chartY + chartH - 3);
+        doc.text(sanitizePdfText(m.month), x, chartY + chartH - 3);
       });
 
+      if (brandPie) doc.addImage(brandPie, 'PNG', 28, 286, (pageW - 72) / 2, 190, undefined, 'FAST');
+      if (groupPie) doc.addImage(groupPie, 'PNG', pageW / 2 + 6, 286, (pageW - 72) / 2, 190, undefined, 'FAST');
+      drawFooter();
+
+      doc.addPage('a4', 'landscape');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      doc.text(sanitizePdfText('Detay Tablolari'), 28, 34);
+
       autoTable(doc, {
-        startY: 304,
-        head: [['Konum', 'Tip', 'Urun', 'Maliyet']],
-        body: locationBreakdown.map((l) => [l.name, l.type === 'lab' ? 'Lab' : 'Depo', String(l.productCount), fmtCurrencyDetailed(l.cost, sym)]),
-        styles: { fontSize: 9, cellPadding: 5 },
+        startY: 48,
+        head: [[sanitizePdfText('Konum'), sanitizePdfText('Tip'), sanitizePdfText('Urun'), sanitizePdfText('Maliyet')]],
+        body: locationBreakdown.map((l) => [sanitizePdfText(l.name), l.type === 'lab' ? 'Lab' : 'Depo', String(l.productCount), fmtCurrencyDetailed(l.cost, sym)]),
+        styles: { fontSize: 9, cellPadding: 4 },
         headStyles: { fillColor: [241, 245, 249], textColor: [51, 65, 85] },
       });
-
       autoTable(doc, {
-        startY: (doc as any).lastAutoTable.finalY + 12,
-        head: [['Marka', 'Urun', 'Maliyet']],
-        body: brandCosts.slice(0, 15).map((b) => [b.name, String(b.productCount), fmtCurrencyDetailed(b.cost, sym)]),
-        styles: { fontSize: 9, cellPadding: 5 },
+        startY: (doc as any).lastAutoTable.finalY + 10,
+        head: [[sanitizePdfText('Marka'), sanitizePdfText('Urun'), sanitizePdfText('Maliyet')]],
+        body: brandCosts.map((b) => [sanitizePdfText(b.name), String(b.productCount), fmtCurrencyDetailed(b.cost, sym)]),
+        styles: { fontSize: 9, cellPadding: 4 },
         headStyles: { fillColor: [255, 237, 213], textColor: [154, 52, 18] },
       });
+      autoTable(doc, {
+        startY: (doc as any).lastAutoTable.finalY + 10,
+        head: [[sanitizePdfText('Urun Grubu'), sanitizePdfText('Maliyet')]],
+        body: groupBreakdown.map((g) => [sanitizePdfText(g.name), fmtCurrencyDetailed(g.cost, sym)]),
+        styles: { fontSize: 9, cellPadding: 4 },
+        headStyles: { fillColor: [220, 252, 231], textColor: [22, 101, 52] },
+      });
+      drawFooter();
 
       doc.save(`Maliyet_Gozlem_${new Date().toISOString().slice(0, 10)}.pdf`);
       toast({ title: 'Başarılı', description: 'PDF raporu indirildi.' });
@@ -646,7 +739,7 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
       console.error(error);
       toast({ title: 'Hata', description: 'PDF raporu oluşturulamadı.', variant: 'destructive' });
     }
-  }, [brandCosts, consolidatedCost, currency, loadLogoDataUrl, locationBreakdown, monthlyTrend, sym, toast]);
+  }, [brandCosts, consolidatedCost, createPieChartDataUrl, currency, groupBreakdown, loadLogoDataUrl, locationBreakdown, monthlyTrend, sanitizePdfText, sym, toast]);
 
   // ---- RENDER ----
 
