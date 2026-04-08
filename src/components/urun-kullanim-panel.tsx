@@ -294,6 +294,7 @@ export default function UrunKullanimPanel() {
   
   const [faultModalOpen, setFaultModalOpen] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
+  const [faultTargetMode, setFaultTargetMode] = useState<'single' | 'global'>('single');
   const [faultDescription, setFaultDescription] = useState('');
   const [isSavingFault, setIsSavingFault] = useState(false);
   const [faultDefinitions, setFaultDefinitions] = useState<FaultDefinition[]>([]);
@@ -330,6 +331,7 @@ export default function UrunKullanimPanel() {
 
   useEffect(() => {
     const handleOpenFaultModal = (event: CustomEvent<Device>) => {
+      setFaultTargetMode('single');
       setSelectedDevice(event.detail);
       setFaultDescription((event.detail as any).arizaAciklamasi || '');
       setFaultModalOpen(true);
@@ -985,6 +987,13 @@ export default function UrunKullanimPanel() {
     [faultDefinitions]
   );
 
+  const handleOpenGlobalStopModal = useCallback(() => {
+    setFaultTargetMode('global');
+    setSelectedDevice(null);
+    setFaultDescription('');
+    setFaultModalOpen(true);
+  }, []);
+
   const handleFaultReport = useCallback(async (faultDefinition: FaultDefinition) => {
     if (!selectedDevice) return;
     setIsSavingFault(true);
@@ -1080,6 +1089,58 @@ export default function UrunKullanimPanel() {
       setIsSavingFault(false);
     }
   }, [selectedDevice, customFaultType, customFaultTitle, customFaultDescription, currentUser, currentUserProfile, selectedLabId, selectedLabName, toast]);
+
+  const handleStopFaultReport = useCallback(async (stopLevel: 'E STOP' | 'S STOP' | 'NORMAL STOP') => {
+    if (!selectedLabId || !selectedLabName) return;
+
+    const isGlobalStop = faultTargetMode === 'global';
+    const targetDeviceIds = isGlobalStop
+      ? devicesToDisplay.map((d) => d.id).filter(Boolean)
+      : (selectedDevice?.id ? [selectedDevice.id] : []);
+
+    if (targetDeviceIds.length === 0) {
+      toast({ title: 'Cihaz Bulunamadı', description: 'Arıza kaydı açmak için en az bir cihaz gerekli.', variant: 'destructive' });
+      return;
+    }
+
+    setIsSavingFault(true);
+    try {
+      await openDeviceFaultReport({
+        hospitalId: selectedLabId,
+        labName: selectedLabName,
+        deviceId: isGlobalStop ? targetDeviceIds[0] : (selectedDevice?.id || ''),
+        model: isGlobalStop ? 'KOMPLE STOP' : (selectedDevice?.cihazAdi || selectedDevice?.name || 'Cihaz'),
+        serial: isGlobalStop ? '-' : (selectedDevice?.seriNumarasi || ''),
+        faultType: 'teknik_servis',
+        openedByUid: currentUser?.uid || '',
+        openedByName: currentUserProfile?.name || '',
+        openDescription: `${stopLevel} - ${isGlobalStop ? 'KOMPLE STOP' : 'Cihaz STOP'} (Tüm personel bilgilendirildi)`,
+        title: `${stopLevel} • ${isGlobalStop ? 'KOMPLE STOP' : (selectedDevice?.cihazAdi || 'Cihaz')}`,
+        faultName: stopLevel,
+        deviceImageUrl: selectedDevice?.imageUrl || undefined,
+        companyId: currentUserProfile?.companyId ?? null,
+        affectsAllDevices: isGlobalStop,
+        affectedDeviceIds: targetDeviceIds,
+        stopLevel,
+        notifyAllPersonnel: true,
+      });
+
+      toast({
+        title: 'Arıza Kaydı Oluşturuldu',
+        description: isGlobalStop
+          ? `${stopLevel} arızası KOMPLE STOP olarak açıldı. Tüm cihazlar etkilendi.`
+          : `${selectedDevice?.cihazAdi || 'Cihaz'} için ${stopLevel} arızası açıldı.`,
+      });
+      setFaultModalOpen(false);
+      setSelectedDevice(null);
+      setFaultTargetMode('single');
+    } catch (err) {
+      urunKullanimLogger.error('STOP arıza kaydı oluşturulamadı', err, { stopLevel, mode: faultTargetMode });
+      toast({ title: 'Hata', description: 'STOP arıza kaydı oluşturulamadı.', variant: 'destructive' });
+    } finally {
+      setIsSavingFault(false);
+    }
+  }, [selectedLabId, selectedLabName, faultTargetMode, devicesToDisplay, selectedDevice, currentUser, currentUserProfile, toast]);
 
   const manualDeductionAvailableProducts = useMemo(() => {
     return Array.from(new Set(labStock.map(item => item.stokKodu)))
@@ -1599,11 +1660,21 @@ export default function UrunKullanimPanel() {
           {/* Card 4: Cihazlar */}
           {selectedLabId && (
             <div className="frosted-glass-card flex-1" role="region" aria-label="Laboratuvar cihazları">
-              <div className="frosted-header flex items-center gap-2">
-                <Wrench className="w-4 h-4 text-foreground/70 dark:text-foreground/60"/>
-                <span className="font-semibold text-sm">Cihazlar</span>
+              <div className="frosted-header grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Wrench className="w-4 h-4 text-foreground/70 dark:text-foreground/60"/>
+                  <span className="font-semibold text-sm">Cihazlar</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleOpenGlobalStopModal}
+                  disabled={devicesToDisplay.length === 0}
+                  className="text-[11px] px-3 py-1 rounded-md border border-destructive/40 text-destructive hover:bg-destructive/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  KOMPLE STOP
+                </button>
                 {devicesToDisplay.length > 0 && (
-                  <span className="text-xs text-foreground/70 dark:text-foreground/60 ml-auto">{devicesToDisplay.length} cihaz</span>
+                  <span className="text-xs text-foreground/70 dark:text-foreground/60 justify-self-end">{devicesToDisplay.length} cihaz</span>
                 )}
               </div>
               <div className="frosted-content">
@@ -1697,8 +1768,14 @@ export default function UrunKullanimPanel() {
       <Dialog open={faultModalOpen} onOpenChange={setFaultModalOpen}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col" aria-describedby="fault-dialog-description">
           <DialogHeader className="flex-shrink-0">
-            <DialogTitle>Arıza Kaydı: {selectedDevice?.cihazAdi}</DialogTitle>
-            <DialogDescription id="fault-dialog-description">SN: {selectedDevice?.seriNumarasi} • Arıza tipini seçin</DialogDescription>
+            <DialogTitle>
+              {faultTargetMode === 'global' ? 'Arıza Kaydı: KOMPLE STOP' : `Arıza Kaydı: ${selectedDevice?.cihazAdi}`}
+            </DialogTitle>
+            <DialogDescription id="fault-dialog-description">
+              {faultTargetMode === 'global'
+                ? `${devicesToDisplay.length} cihaz • Arıza tipini seçin`
+                : `SN: ${selectedDevice?.seriNumarasi} • Arıza tipini seçin`}
+            </DialogDescription>
           </DialogHeader>
           <div className="flex-1 overflow-auto py-4">
             {faultDefinitions.length === 0 ? (
@@ -1836,6 +1913,35 @@ export default function UrunKullanimPanel() {
                 </div>
               </div>
             )}
+          </div>
+          <div className="grid grid-cols-3 gap-2 border-t pt-4">
+            <Button
+              type="button"
+              variant="destructive"
+              className="w-full"
+              disabled={isSavingFault}
+              onClick={() => handleStopFaultReport('E STOP')}
+            >
+              E STOP
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              className="w-full"
+              disabled={isSavingFault}
+              onClick={() => handleStopFaultReport('S STOP')}
+            >
+              S STOP
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              className="w-full"
+              disabled={isSavingFault}
+              onClick={() => handleStopFaultReport('NORMAL STOP')}
+            >
+              NORMAL STOP
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
