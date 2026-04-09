@@ -633,7 +633,7 @@ export default function YedekParcaTransferPage() {
         });
 
         const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
-        batch.set(depoLogRef, {
+        batch.set(depoLogRef, withCompanyScope({
           action: 'stok_duzeltme',
           productCodeId: existing.productCodeId,
           stokKodu: existing.stokKodu,
@@ -642,12 +642,14 @@ export default function YedekParcaTransferPage() {
           address: nextAddress,
           cihazGrubu: existing.cihazGrubu || '',
           serialNumber: existing.serialNumber || '',
+          depoStokDocId: existing.id,
           quantity: Math.abs(nextQuantity - existing.quantity),
-          notes: `Excel stok güncelleme: adet ${existing.quantity} -> ${nextQuantity}, adres "${existing.address || '-'}" -> "${nextAddress || '-'}"`,
+          entrySource: 'excel',
+          notes: `[Excel] Stok güncelleme: adet ${existing.quantity} -> ${nextQuantity}, adres "${existing.address || '-'}" -> "${nextAddress || '-'}" (DocID: ${existing.id})`,
           createdAt: Timestamp.fromDate(now),
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || '',
-        });
+        }, currentCompanyId));
 
         const transferLogRef = doc(collection(db, 'sparePartTransferLogs'));
         batch.set(transferLogRef, withCompanyScope({
@@ -1067,8 +1069,38 @@ export default function YedekParcaTransferPage() {
     setIsTransferring(true);
 
     try {
-      const batch = writeBatch(db);
       const now = new Date();
+
+      // Read fresh depot stock from Firestore to avoid stale state issues
+      const freshStokSnap = await getDocs(collection(db, 'yedekParcaDepoStok'));
+      const freshDepoStok = filterByCompanyScope(freshStokSnap.docs.map(d => {
+        const data = d.data();
+        return { id: d.id, ...data, createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date() } as YedekParcaDepoStokItem;
+      }), currentCompanyId, isSuperAdmin);
+
+      // Verify all transfer items still exist in depot before proceeding
+      for (const row of transferRows) {
+        if (row.serialNumber || row.hucreNumarasi) {
+          const exists = freshDepoStok.some(d => d.stokKodu === row.stokKodu && (
+            (row.serialNumber && d.serialNumber === row.serialNumber) ||
+            (row.hucreNumarasi && d.hucreNumarasi === row.hucreNumarasi)
+          ));
+          if (!exists && row.serialNumber) {
+            throw new Error(`Depoda bulunamadı: ${row.stokKodu} (SN: ${row.serialNumber}). Stok başka biri tarafından transfer edilmiş olabilir.`);
+          }
+        } else {
+          const available = freshDepoStok
+            .filter(d => d.stokKodu === row.stokKodu && !d.serialNumber && !d.hucreNumarasi)
+            .reduce((sum, d) => sum + d.quantity, 0);
+          if (available < row.quantity) {
+            throw new Error(`Yetersiz stok: ${row.stokKodu} için depoda ${available} adet var, ${row.quantity} adet isteniyor.`);
+          }
+        }
+      }
+
+      // Collect all batch operations, then split into chunks of max 400 to stay under Firestore 500-op limit
+      type BatchOp = { type: 'set'; ref: ReturnType<typeof doc>; data: any } | { type: 'delete'; ref: ReturnType<typeof doc> } | { type: 'update'; ref: ReturnType<typeof doc>; data: any };
+      const ops: BatchOp[] = [];
 
       for (const row of transferRows) {
         const isPoolTarget = row.targetUid.startsWith('pool_');
@@ -1076,39 +1108,35 @@ export default function YedekParcaTransferPage() {
 
         if (row.serialNumber || row.hucreNumarasi) {
           // Tekil takipli: depodan ilgili seri/hücre kaydını bul ve sil
-          const depoItem = depoStok.find(
+          const depoItem = freshDepoStok.find(
             d => d.stokKodu === row.stokKodu && (
               (row.serialNumber && d.serialNumber === row.serialNumber) ||
               (row.hucreNumarasi && d.hucreNumarasi === row.hucreNumarasi)
             )
           );
           if (depoItem) {
-            batch.delete(doc(db, 'yedekParcaDepoStok', depoItem.id));
+            ops.push({ type: 'delete', ref: doc(db, 'yedekParcaDepoStok', depoItem.id) });
           } else if (row.hucreNumarasi && !row.serialNumber) {
-            // Depoya hücre ile giriş yapılmamış olsa bile manuel hücre transferinde depodan 1 adet düş
-            const fallbackEntry = depoStok
+            const fallbackEntry = freshDepoStok
               .filter(d => d.stokKodu === row.stokKodu && !d.serialNumber && !d.hucreNumarasi)
               .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())[0];
 
             if (!fallbackEntry) {
-              throw new Error(`Manual hucre transfer fallback stock not found for ${row.stokKodu}`);
+              throw new Error(`Depoda stok bulunamadı: ${row.stokKodu} (Hücre: ${row.hucreNumarasi})`);
             }
 
             if (fallbackEntry.quantity <= 1) {
-              batch.delete(doc(db, 'yedekParcaDepoStok', fallbackEntry.id));
+              ops.push({ type: 'delete', ref: doc(db, 'yedekParcaDepoStok', fallbackEntry.id) });
             } else {
-              batch.update(doc(db, 'yedekParcaDepoStok', fallbackEntry.id), {
-                quantity: fallbackEntry.quantity - 1,
-              });
+              ops.push({ type: 'update', ref: doc(db, 'yedekParcaDepoStok', fallbackEntry.id), data: { quantity: fallbackEntry.quantity - 1 } });
             }
           }
 
           const hucreData = row.hucreNumarasi ? { hucreNumarasi: row.hucreNumarasi } : {};
 
           if (isPoolTarget) {
-            // Havuz deposuna ekle
             const poolStockRef = doc(collection(db, 'poolWarehouseStock'));
-            batch.set(poolStockRef, withCompanyScope({
+            ops.push({ type: 'set', ref: poolStockRef, data: withCompanyScope({
               poolWarehouseId,
               poolWarehouseName: row.targetName,
               productCodeId: row.productCodeId,
@@ -1123,11 +1151,9 @@ export default function YedekParcaTransferPage() {
               createdAt: Timestamp.fromDate(now),
               transferredByUid: currentUserProfile?.uid || '',
               transferredByName: currentUserProfile?.name || '',
-            }, currentCompanyId));
+            }, currentCompanyId) });
 
-            // Transfer log
-            const logRef = doc(collection(db, 'sparePartTransferLogs'));
-            batch.set(logRef, withCompanyScope({
+            ops.push({ type: 'set', ref: doc(collection(db, 'sparePartTransferLogs')), data: withCompanyScope({
               action: 'transfer_to_pool',
               poolStockId: poolStockRef.id,
               poolWarehouseId,
@@ -1140,14 +1166,14 @@ export default function YedekParcaTransferPage() {
               ...hucreData,
               toName: row.targetName,
               quantity: 1,
+              notes: `Tekil transfer: ${row.serialNumber || row.hucreNumarasi} -> Havuz: ${row.targetName}`,
               createdAt: Timestamp.fromDate(now),
               createdByUid: currentUserProfile?.uid || '',
               createdByName: currentUserProfile?.name || '',
-            }, currentCompanyId));
+            }, currentCompanyId) });
           } else {
-            // Personel stokuna ekle (onay bekliyor olarak)
             const stockRef = doc(collection(db, 'personalStock'));
-            batch.set(stockRef, withCompanyScope({
+            ops.push({ type: 'set', ref: stockRef, data: withCompanyScope({
               ownerUid: row.targetUid,
               ownerName: row.targetName,
               productCodeId: row.productCodeId,
@@ -1161,11 +1187,9 @@ export default function YedekParcaTransferPage() {
               createdAt: Timestamp.fromDate(now),
               transferredByUid: currentUserProfile?.uid || '',
               transferredByName: currentUserProfile?.name || '',
-            }, currentCompanyId));
+            }, currentCompanyId) });
 
-            // Transfer log
-            const logRef = doc(collection(db, 'sparePartTransferLogs'));
-            batch.set(logRef, withCompanyScope({
+            ops.push({ type: 'set', ref: doc(collection(db, 'sparePartTransferLogs')), data: withCompanyScope({
               action: 'transfer_to_personnel',
               personalStockId: stockRef.id,
               productCodeId: row.productCodeId,
@@ -1177,20 +1201,20 @@ export default function YedekParcaTransferPage() {
               toUid: row.targetUid,
               toName: row.targetName,
               quantity: 1,
+              notes: `Tekil transfer: ${row.serialNumber || row.hucreNumarasi} -> ${row.targetName}`,
               createdAt: Timestamp.fromDate(now),
               createdByUid: currentUserProfile?.uid || '',
               createdByName: currentUserProfile?.name || '',
-            }, currentCompanyId));
+            }, currentCompanyId) });
           }
 
-          // Depo log
-          const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
-          batch.set(depoLogRef, {
+          // Depo log with companyScope
+          ops.push({ type: 'set', ref: doc(collection(db, 'yedekParcaDepoLog')), data: withCompanyScope({
             action: 'transfer_cikis',
             productCodeId: row.productCodeId,
             stokKodu: row.stokKodu,
             stokAdi: row.stokAdi,
-              anaBirim: row.anaBirim || 'Adet',
+            anaBirim: row.anaBirim || 'Adet',
             cihazGrubu: row.cihazGrubu || '',
             serialNumber: row.serialNumber,
             ...hucreData,
@@ -1203,11 +1227,11 @@ export default function YedekParcaTransferPage() {
             createdAt: Timestamp.fromDate(now),
             createdByUid: currentUserProfile?.uid || '',
             createdByName: currentUserProfile?.name || '',
-          });
+          }, currentCompanyId) });
         } else {
-          // Seri numarasız: adetli transfer
+          // Seri numarasız: adetli transfer - use fresh data
           let remainingQty = row.quantity;
-          const nonSerialEntries = depoStok
+          const nonSerialEntries = freshDepoStok
             .filter(d => d.stokKodu === row.stokKodu && !d.serialNumber && !d.hucreNumarasi)
             .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()); // FIFO
 
@@ -1215,27 +1239,27 @@ export default function YedekParcaTransferPage() {
             if (remainingQty <= 0) break;
 
             if (entry.quantity <= remainingQty) {
-              batch.delete(doc(db, 'yedekParcaDepoStok', entry.id));
+              ops.push({ type: 'delete', ref: doc(db, 'yedekParcaDepoStok', entry.id) });
               remainingQty -= entry.quantity;
             } else {
-              batch.update(doc(db, 'yedekParcaDepoStok', entry.id), {
-                quantity: entry.quantity - remainingQty,
-              });
+              ops.push({ type: 'update', ref: doc(db, 'yedekParcaDepoStok', entry.id), data: { quantity: entry.quantity - remainingQty } });
               remainingQty = 0;
             }
           }
 
+          if (remainingQty > 0) {
+            throw new Error(`Yetersiz stok: ${row.stokKodu} için ${remainingQty} adet eksik. Stok başka biri tarafından değiştirilmiş olabilir.`);
+          }
+
           if (isPoolTarget) {
-            // Havuz deposuna ekle (her adet için ayrı kayıt)
             for (let i = 0; i < row.quantity; i++) {
-              const poolStockRef = doc(collection(db, 'poolWarehouseStock'));
-              batch.set(poolStockRef, withCompanyScope({
+              ops.push({ type: 'set', ref: doc(collection(db, 'poolWarehouseStock')), data: withCompanyScope({
                 poolWarehouseId,
                 poolWarehouseName: row.targetName,
                 productCodeId: row.productCodeId,
                 stokKodu: row.stokKodu,
                 stokAdi: row.stokAdi,
-              anaBirim: row.anaBirim || 'Adet',
+                anaBirim: row.anaBirim || 'Adet',
                 serialNumber: '',
                 source: 'depot',
                 status: 'in_stock',
@@ -1243,12 +1267,10 @@ export default function YedekParcaTransferPage() {
                 createdAt: Timestamp.fromDate(now),
                 transferredByUid: currentUserProfile?.uid || '',
                 transferredByName: currentUserProfile?.name || '',
-              }, currentCompanyId));
+              }, currentCompanyId) });
             }
 
-            // Transfer log
-            const logRef = doc(collection(db, 'sparePartTransferLogs'));
-            batch.set(logRef, withCompanyScope({
+            ops.push({ type: 'set', ref: doc(collection(db, 'sparePartTransferLogs')), data: withCompanyScope({
               action: 'transfer_to_pool',
               poolWarehouseId,
               poolWarehouseName: row.targetName,
@@ -1259,33 +1281,30 @@ export default function YedekParcaTransferPage() {
               serialNumber: '',
               toName: row.targetName,
               quantity: row.quantity,
+              notes: `${row.quantity} adet transfer -> Havuz: ${row.targetName}`,
               createdAt: Timestamp.fromDate(now),
               createdByUid: currentUserProfile?.uid || '',
               createdByName: currentUserProfile?.name || '',
-            }, currentCompanyId));
+            }, currentCompanyId) });
           } else {
-            // Personel stokuna ekle (onay bekliyor olarak)
             for (let i = 0; i < row.quantity; i++) {
-              const stockRef = doc(collection(db, 'personalStock'));
-              batch.set(stockRef, withCompanyScope({
+              ops.push({ type: 'set', ref: doc(collection(db, 'personalStock')), data: withCompanyScope({
                 ownerUid: row.targetUid,
                 ownerName: row.targetName,
                 productCodeId: row.productCodeId,
                 stokKodu: row.stokKodu,
                 stokAdi: row.stokAdi,
-              anaBirim: row.anaBirim || 'Adet',
+                anaBirim: row.anaBirim || 'Adet',
                 serialNumber: '',
                 source: 'depot',
                 status: 'pending_approval',
                 createdAt: Timestamp.fromDate(now),
                 transferredByUid: currentUserProfile?.uid || '',
                 transferredByName: currentUserProfile?.name || '',
-              }, currentCompanyId));
+              }, currentCompanyId) });
             }
 
-            // Transfer log
-            const logRef = doc(collection(db, 'sparePartTransferLogs'));
-            batch.set(logRef, withCompanyScope({
+            ops.push({ type: 'set', ref: doc(collection(db, 'sparePartTransferLogs')), data: withCompanyScope({
               action: 'transfer_to_personnel',
               productCodeId: row.productCodeId,
               stokKodu: row.stokKodu,
@@ -1295,20 +1314,20 @@ export default function YedekParcaTransferPage() {
               toUid: row.targetUid,
               toName: row.targetName,
               quantity: row.quantity,
+              notes: `${row.quantity} adet transfer -> ${row.targetName}`,
               createdAt: Timestamp.fromDate(now),
               createdByUid: currentUserProfile?.uid || '',
               createdByName: currentUserProfile?.name || '',
-            }, currentCompanyId));
+            }, currentCompanyId) });
           }
 
-          // Depo log
-          const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
-          batch.set(depoLogRef, {
+          // Depo log with companyScope
+          ops.push({ type: 'set', ref: doc(collection(db, 'yedekParcaDepoLog')), data: withCompanyScope({
             action: 'transfer_cikis',
             productCodeId: row.productCodeId,
             stokKodu: row.stokKodu,
             stokAdi: row.stokAdi,
-              anaBirim: row.anaBirim || 'Adet',
+            anaBirim: row.anaBirim || 'Adet',
             cihazGrubu: row.cihazGrubu || '',
             serialNumber: '',
             quantity: row.quantity,
@@ -1320,11 +1339,22 @@ export default function YedekParcaTransferPage() {
             createdAt: Timestamp.fromDate(now),
             createdByUid: currentUserProfile?.uid || '',
             createdByName: currentUserProfile?.name || '',
-          });
+          }, currentCompanyId) });
         }
       }
 
-      await batch.commit();
+      // Execute in chunked batches (max 400 ops per batch to stay under Firestore 500 limit)
+      const BATCH_LIMIT = 400;
+      for (let i = 0; i < ops.length; i += BATCH_LIMIT) {
+        const chunk = ops.slice(i, i + BATCH_LIMIT);
+        const batch = writeBatch(db);
+        for (const op of chunk) {
+          if (op.type === 'set') batch.set(op.ref, op.data);
+          else if (op.type === 'delete') batch.delete(op.ref);
+          else if (op.type === 'update') batch.update(op.ref, op.data);
+        }
+        await batch.commit();
+      }
 
       // Send notifications to each recipient user (not pool warehouses)
       const personnelRows = transferRows.filter(r => !r.targetUid.startsWith('pool_'));
@@ -1355,7 +1385,7 @@ export default function YedekParcaTransferPage() {
 
       setTransferRows([]);
 
-      // Refresh data
+      // Refresh depot stock
       const stokSnap = await getDocs(collection(db, 'yedekParcaDepoStok'));
       const stokItems = filterByCompanyScope(stokSnap.docs.map(d => {
         const data = d.data();
@@ -1363,11 +1393,23 @@ export default function YedekParcaTransferPage() {
       }), currentCompanyId, isSuperAdmin);
       setDepoStok(stokItems);
 
+      // Refresh personnel stock if viewing a specific person
+      if (menuSelection.personnelUid) {
+        fetchPersonnelStock(menuSelection.personnelUid);
+      }
+      // Refresh all personnel stock view
+      fetchAllPersonnelStock();
+
       // Refresh logs
       await loadRecentTransferLogs();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error executing transfer:', err);
-      toast({ title: 'Hata', description: 'Transfer sırasında hata oluştu.', variant: 'destructive' });
+      const errorMessage = err?.message?.includes('Yetersiz stok') || err?.message?.includes('Depoda bulunamadı')
+        ? err.message
+        : 'Transfer sırasında hata oluştu. Lütfen sayfayı yenileyip tekrar deneyin.';
+      toast({ title: 'Transfer Hatası', description: errorMessage, variant: 'destructive' });
+      // Refresh depot stock to get latest state after error
+      fetchDepoStok();
     } finally {
       setIsTransferring(false);
     }
@@ -1446,17 +1488,19 @@ export default function YedekParcaTransferPage() {
 
       cleanedRows.forEach((row) => {
         const quantityToCreate = row.serialNumber ? 1 : row.quantity;
+        const stockRefIds: string[] = [];
         for (let i = 0; i < quantityToCreate; i++) {
           const stockRef = doc(collection(db, 'personalStock'));
+          stockRefIds.push(stockRef.id);
           batch.set(stockRef, withCompanyScope({
             ownerUid: menuSelection.personnelUid,
             ownerName: menuSelection.personnelName,
             productCodeId: '',
             stokKodu: row.stokKodu,
             stokAdi: row.stokAdi,
-              anaBirim: row.anaBirim || 'Adet',
+            anaBirim: row.anaBirim || 'Adet',
             serialNumber: row.serialNumber,
-            source: 'depot',
+            source: 'manual',
             status: 'in_stock',
             createdAt: now,
             transferredByUid: currentUserProfile?.uid || '',
@@ -1465,22 +1509,28 @@ export default function YedekParcaTransferPage() {
           }, currentCompanyId));
         }
 
+        const logNotes = row.serialNumber
+          ? `[Manuel] Personele doğrudan eklendi: ${row.stokKodu} (SN: ${row.serialNumber}) -> ${menuSelection.personnelName}`
+          : `[Manuel] Personele doğrudan eklendi: ${row.stokKodu} x${quantityToCreate} -> ${menuSelection.personnelName}`;
+
         const logRef = doc(collection(db, 'sparePartTransferLogs'));
         batch.set(logRef, withCompanyScope({
           action: 'transfer_to_personnel',
           productCodeId: '',
           stokKodu: row.stokKodu,
           stokAdi: row.stokAdi,
-              anaBirim: row.anaBirim || 'Adet',
+          anaBirim: row.anaBirim || 'Adet',
           serialNumber: row.serialNumber,
           toUid: menuSelection.personnelUid,
           toName: menuSelection.personnelName,
           quantity: quantityToCreate,
+          personalStockDocIds: stockRefIds,
           createdAt: now,
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || '',
-          notes: 'Manuel stok girişi',
+          notes: logNotes,
           manualEntry: true,
+          entrySource: 'manual',
         }, currentCompanyId));
       });
 
@@ -1562,12 +1612,12 @@ export default function YedekParcaTransferPage() {
       const delta = nextTotal - oldTotal;
 
       const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
-      batch.set(depoLogRef, {
+      batch.set(depoLogRef, withCompanyScope({
         action: 'stok_duzeltme',
         productCodeId: editingDepoGroup.productCodeId,
         stokKodu: editingDepoGroup.stokKodu,
         stokAdi: editingDepoGroup.stokAdi,
-          anaBirim: editingDepoGroup.anaBirim || 'Adet',
+        anaBirim: editingDepoGroup.anaBirim || 'Adet',
         cihazGrubu: editingDepoGroup.cihazGrubu || '',
         serialNumber: '',
         address: editingDepoGroup.entries.find(e => (e.address || '').trim())?.address || '',
@@ -1576,7 +1626,7 @@ export default function YedekParcaTransferPage() {
         createdAt: Timestamp.fromDate(now),
         createdByUid: currentUserProfile?.uid || '',
         createdByName: currentUserProfile?.name || '',
-      });
+      }, currentCompanyId));
 
       const transferLogRef = doc(collection(db, 'sparePartTransferLogs'));
       batch.set(transferLogRef, withCompanyScope({
@@ -1624,7 +1674,7 @@ export default function YedekParcaTransferPage() {
       batch.delete(doc(db, 'yedekParcaDepoStok', serialEntry.id));
 
       const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
-      batch.set(depoLogRef, {
+      batch.set(depoLogRef, withCompanyScope({
         action: 'stok_duzeltme',
         productCodeId: group.productCodeId,
         stokKodu: group.stokKodu,
@@ -1632,12 +1682,13 @@ export default function YedekParcaTransferPage() {
         anaBirim: group.anaBirim || 'Adet',
         cihazGrubu: group.cihazGrubu || '',
         serialNumber: serialEntry.serialNumber,
+        depoStokDocId: serialEntry.id,
         quantity: 1,
-        notes: `Seri numaralı stok kaydı silindi: ${serialEntry.serialNumber}`,
+        notes: `Seri numaralı stok kaydı silindi: ${serialEntry.serialNumber} (DocID: ${serialEntry.id})`,
         createdAt: Timestamp.fromDate(now),
         createdByUid: currentUserProfile?.uid || '',
         createdByName: currentUserProfile?.name || '',
-      });
+      }, currentCompanyId));
 
       const transferLogRef = doc(collection(db, 'sparePartTransferLogs'));
       batch.set(transferLogRef, withCompanyScope({
@@ -1647,7 +1698,9 @@ export default function YedekParcaTransferPage() {
         stokAdi: group.stokAdi,
         anaBirim: group.anaBirim || 'Adet',
         serialNumber: serialEntry.serialNumber,
+        depoStokDocId: serialEntry.id,
         quantity: 1,
+        notes: `Seri numaralı stok kaydı silindi: ${serialEntry.serialNumber} (DocID: ${serialEntry.id})`,
         createdAt: Timestamp.fromDate(now),
         createdByUid: currentUserProfile?.uid || '',
         createdByName: currentUserProfile?.name || '',
@@ -1684,8 +1737,9 @@ export default function YedekParcaTransferPage() {
         batch.delete(doc(db, 'yedekParcaDepoStok', entry.id));
       });
 
+      const deletedDocIds = group.entries.map(e => e.id);
       const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
-      batch.set(depoLogRef, {
+      batch.set(depoLogRef, withCompanyScope({
         action: 'stok_silme_admin',
         productCodeId: group.productCodeId,
         stokKodu: group.stokKodu,
@@ -1695,11 +1749,12 @@ export default function YedekParcaTransferPage() {
         serialNumber: '',
         address: group.entries.find(e => (e.address || '').trim())?.address || '',
         quantity: group.totalQuantity,
-        notes: `Admin stok satırı silme: ${group.totalQuantity} adet kayıt kaldırıldı.`,
+        deletedDocIds,
+        notes: `Admin stok satırı silme: ${group.totalQuantity} adet kayıt kaldırıldı. Silinen DocIDs: ${deletedDocIds.join(', ')}`,
         createdAt: Timestamp.fromDate(now),
         createdByUid: currentUserProfile?.uid || '',
         createdByName: currentUserProfile?.name || '',
-      });
+      }, currentCompanyId));
 
       const transferLogRef = doc(collection(db, 'sparePartTransferLogs'));
       batch.set(transferLogRef, withCompanyScope({
@@ -1710,7 +1765,8 @@ export default function YedekParcaTransferPage() {
         anaBirim: group.anaBirim || 'Adet',
         serialNumber: '',
         quantity: group.totalQuantity,
-        notes: 'Admin depo stok satırı silme işlemi',
+        deletedDocIds,
+        notes: `Admin stok satırı silme: ${group.totalQuantity} adet kayıt kaldırıldı`,
         createdAt: Timestamp.fromDate(now),
         createdByUid: currentUserProfile?.uid || '',
         createdByName: currentUserProfile?.name || '',
@@ -1767,7 +1823,7 @@ export default function YedekParcaTransferPage() {
         }, currentCompanyId));
 
         const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
-        batch.set(depoLogRef, {
+        batch.set(depoLogRef, withCompanyScope({
           action: 'iade_giris',
           productCodeId: item.productCodeId,
           stokKodu: item.stokKodu,
@@ -1775,13 +1831,14 @@ export default function YedekParcaTransferPage() {
           anaBirim: item.anaBirim || 'Adet',
           serialNumber: item.serialNumber || '',
           quantity: 1,
+          personalStockDocId: item.id,
           relatedPersonnelUid: item.ownerUid,
           relatedPersonnelName: item.ownerName,
-          notes: `Personel stok silme ile depoya iade: ${item.ownerName} -> Depo`,
+          notes: `Personel stok silme ile depoya iade: ${item.ownerName} -> Depo (PersonalStockID: ${item.id})`,
           createdAt: Timestamp.fromDate(now),
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || '',
-        });
+        }, currentCompanyId));
       }
 
       const logRef = doc(collection(db, 'sparePartTransferLogs'));
@@ -1798,8 +1855,8 @@ export default function YedekParcaTransferPage() {
         quantity: item.quantity || 1,
         returnedToDepot: isActiveStock,
         notes: isActiveStock
-          ? `${isAdmin ? 'Admin' : 'Teknik Lojistik'} personel stok silme - ürün depoya iade edildi`
-          : `${isAdmin ? 'Admin' : 'Teknik Lojistik'} personel stok satırı silme işlemi`,
+          ? `${isAdmin ? 'Admin' : 'Teknik Lojistik'} personel stok silme - ürün depoya iade edildi (PersonalStockID: ${item.id})`
+          : `${isAdmin ? 'Admin' : 'Teknik Lojistik'} personel stok satırı silme işlemi (PersonalStockID: ${item.id})`,
         createdAt: Timestamp.fromDate(now),
         createdByUid: currentUserProfile?.uid || '',
         createdByName: currentUserProfile?.name || '',
