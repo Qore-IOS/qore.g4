@@ -56,6 +56,7 @@ import {
   FileText,
   Database,
   SlidersHorizontal,
+  ShoppingCart,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { format } from 'date-fns';
@@ -3186,6 +3187,11 @@ export default function YedekParcaTransferPage() {
           {(isAdmin || isTeknikLojistik) && (
             <button onClick={() => setMinMaxPanelOpen(true)} className="cihaz-tool-item inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium" style={{ color: 'var(--dashboard-text)' }}>
               <SlidersHorizontal className="w-3.5 h-3.5" /> Min-Max Ayarları
+            </button>
+          )}
+          {(isAdmin || isTeknikLojistik) && (
+            <button onClick={() => router.push('/direkt-transfer/yedek-parca-transfer/siparis')} className="cihaz-tool-item inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium" style={{ color: 'var(--dashboard-text)' }}>
+              <ShoppingCart className="w-3.5 h-3.5" /> Sipariş Paneli
             </button>
           )}
           <button onClick={() => router.push('/direkt-transfer/yedek-parca-transfer/stok-giris')} className="cihaz-action-tile inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white" style={{ background: 'var(--dashboard-accent)' }}>

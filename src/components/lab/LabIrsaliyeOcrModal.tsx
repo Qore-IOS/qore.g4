@@ -59,6 +59,12 @@ export default function LabIrsaliyeOcrModal({
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [selectedFile, setSelectedFile] = useState<SavedIrsaliyeFile | null>(null);
 
+  const normalizeLotToken = (value?: string) => {
+    if (!value) return undefined;
+    const token = value.trim().replace(/[|;,]+/g, ' ').match(/\b([A-Za-z0-9-]{3,})\b/)?.[1]?.toUpperCase();
+    return token || undefined;
+  };
+
   useEffect(() => {
     if (!isOpen) return;
     setLoadingFiles(true);
@@ -109,6 +115,25 @@ export default function LabIrsaliyeOcrModal({
 
       if (rawItems.length === 0) {
         rawItems = parseIrsaliyeText(text, productCodes);
+      } else {
+        // AI çıktısı geldiğinde de lokal parser ile LOT doğrulaması yap.
+        const localItems = parseIrsaliyeText(text, productCodes);
+        rawItems = rawItems.map((item) => {
+          const localMatch = localItems.find((local) =>
+            local.stokKodu === item.stokKodu &&
+            (
+              (!!item.miad && !!local.miad && item.miad === local.miad) ||
+              (!!item.quantity && !!local.quantity && item.quantity === local.quantity)
+            )
+          ) || localItems.find((local) => local.stokKodu === item.stokKodu);
+
+          const localLot = normalizeLotToken(localMatch?.lot);
+          return {
+            ...item,
+            // LOT değeri her zaman lokal parser'dan gelsin (LOT başlığına göre çıkarım).
+            lot: localLot || undefined,
+          };
+        });
       }
 
       const processedItems = rawItems.map(item => {

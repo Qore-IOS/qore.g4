@@ -43,14 +43,16 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
   const collectionName = targetType === 'depot' ? 'depots' : targetType === 'spare_parts_depot' ? 'yedekParcaDepoMinMax' : 'hospitals';
   const isDepotLike = targetType === 'depot' || targetType === 'spare_parts_depot';
   const locationLabel = targetType === 'depot' ? 'depo' : targetType === 'spare_parts_depot' ? 'yedek parça deposu' : 'hastane';
+  const targetId = target?.id;
+  const targetName = target?.name || 'Hedef';
 
   useEffect(() => {
-    if (!isOpen || !target || !target.id) return;
+    if (!isOpen || !targetId) return;
     const fetchRules = async () => {
       setIsLoading(true);
       const fetchedRules: RuleState = {};
       try {
-        const rulesRef = collection(db, collectionName, target.id!, "minMaxRules");
+        const rulesRef = collection(db, collectionName, targetId, "minMaxRules");
         const snapshot = await getDocs(rulesRef);
         snapshot.forEach(d => {
           const data = d.data() as MinMaxRule;
@@ -76,7 +78,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
       }
     };
     fetchRules();
-  }, [isOpen, target, toast, targetType, collectionName]);
+  }, [isOpen, targetId, toast, targetType, collectionName]);
 
   const handleCheckboxChange = (stockCode: string, checked: boolean | string) => {
     setRules(prev => {
@@ -176,21 +178,26 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
       'Ort. Tüketim Süresi': rule.ortalamaTuketimSuresi,
       'Tüketim Birimi': rule.tuketimSuresiBirimi === 'saat' ? 'Saat' : 'Gün',
     }));
-    exportDataToExcel(dataToExport, `${target.name}_MinMax_Kurallari`, 'Kurallar', toast);
+    exportDataToExcel(dataToExport, `${targetName}_MinMax_Kurallari`, 'Kurallar', toast);
   };
 
   const handleSaveRules = async () => {
     setIsLoading(true);
     const batch = writeBatch(db);
     let hasError = false;
-    const rulesCollectionRef = collection(db, collectionName, target.id!, "minMaxRules");
+    if (!targetId) {
+      toast({ title: "Hata", description: "Hedef bilgisi eksik.", variant: "destructive" });
+      setIsLoading(false);
+      return;
+    }
+    const rulesCollectionRef = collection(db, collectionName, targetId, "minMaxRules");
     const existingRulesSnapshot = await getDocs(rulesCollectionRef);
     const existingRuleIds = new Set(existingRulesSnapshot.docs.map(d => d.id));
     const historyWrites: Promise<any>[] = [];
 
     for (const stockCode in rules) {
       const rule = rules[stockCode];
-      const ruleRef = doc(db, collectionName, target.id!, "minMaxRules", stockCode);
+      const ruleRef = doc(db, collectionName, targetId, "minMaxRules", stockCode);
       if (rule.enabled) {
         const min = Number(rule.min);
         const max = Number(rule.max);
@@ -208,11 +215,11 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
         if (aylikTuketimLimiti !== undefined) dataToSet.aylikTuketimLimiti = aylikTuketimLimiti;
         if (ortalamaTuketimSuresi !== undefined) { dataToSet.ortalamaTuketimSuresi = ortalamaTuketimSuresi; dataToSet.tuketimSuresiBirimi = tuketimSuresiBirimi; }
         batch.set(ruleRef, dataToSet);
-        historyWrites.push(addDoc(collection(db, 'minMaxHistory'), { ...dataToSet, locationId: target.id, locationType: targetType, timestamp: serverTimestamp() }));
+        historyWrites.push(addDoc(collection(db, 'minMaxHistory'), { ...dataToSet, locationId: targetId, locationType: targetType, timestamp: serverTimestamp() }));
       } else {
         if (existingRuleIds.has(stockCode)) {
           batch.delete(ruleRef);
-          historyWrites.push(addDoc(collection(db, 'minMaxHistory'), { stokKodu: stockCode, min: null, max: null, maxGun: null, aylikTuketimLimiti: null, locationId: target.id, locationType: targetType, timestamp: serverTimestamp(), action: 'deleted' }));
+          historyWrites.push(addDoc(collection(db, 'minMaxHistory'), { stokKodu: stockCode, min: null, max: null, maxGun: null, aylikTuketimLimiti: null, locationId: targetId, locationType: targetType, timestamp: serverTimestamp(), action: 'deleted' }));
         }
       }
     }
@@ -220,7 +227,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
     try {
       await batch.commit();
       await Promise.all(historyWrites);
-      toast({ title: "Başarılı", description: `${target.name} için min-max kuralları kaydedildi.` });
+      toast({ title: "Başarılı", description: `${targetName} için min-max kuralları kaydedildi.` });
       onClose();
     } catch (error) {
       console.error("Error saving rules:", error);
@@ -231,10 +238,15 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
   };
 
   const handleResetRules = async () => {
-    if (!window.confirm(`${target.name} için tanımlanmış tüm min-max kuralları kalıcı olarak silinecektir. Emin misiniz?`)) return;
+    if (!window.confirm(`${targetName} için tanımlanmış tüm min-max kuralları kalıcı olarak silinecektir. Emin misiniz?`)) return;
     setIsLoading(true);
     try {
-      const rulesRef = collection(db, collectionName, target.id!, "minMaxRules");
+      if (!targetId) {
+        toast({ title: "Hata", description: "Hedef bilgisi eksik.", variant: "destructive" });
+        setIsLoading(false);
+        return;
+      }
+      const rulesRef = collection(db, collectionName, targetId, "minMaxRules");
       const snapshot = await getDocs(rulesRef);
       if (snapshot.empty) {
         toast({ title: "Bilgi", description: `Bu ${locationLabel} için zaten tanımlı kural bulunmuyor.`, variant: "default" });

@@ -6,17 +6,16 @@ import { db } from '@/lib/firebase';
 import {
   collection,
   getDocs,
-  query,
-  where,
   writeBatch,
   doc,
   Timestamp,
   addDoc,
   setDoc,
+  updateDoc,
 } from 'firebase/firestore';
 import type { ProductCode } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
-import { withCompanyScope } from '@/lib/company-scope';
+import { withCompanyScope, filterByCompanyScope } from '@/lib/company-scope';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import {
@@ -31,6 +30,7 @@ import {
   Download,
   CheckCircle,
   ChevronLeft,
+  AlertTriangle,
 } from 'lucide-react';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -56,6 +56,20 @@ type MissingProductCardItem = {
   stokAdi: string;
 };
 
+interface SavedOrderItem {
+  stokKodu: string;
+  stokAdi?: string;
+  siparisAdedi: number;
+}
+
+interface SavedSparePartOrder {
+  id: string;
+  orderNo?: string;
+  orderName?: string;
+  status?: 'draft' | 'completed' | 'open';
+  items?: SavedOrderItem[];
+}
+
 export default function YedekParcaStokGirisPage() {
   const router = useRouter();
   const { currentUserProfile, currentCompanyId } = useAuth();
@@ -68,6 +82,8 @@ export default function YedekParcaStokGirisPage() {
   const [brandOptions, setBrandOptions] = useState<string[]>([]);
   const [rows, setRows] = useState<StokGirisRow[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [savedOrders, setSavedOrders] = useState<SavedSparePartOrder[]>([]);
+  const [selectedOrderId, setSelectedOrderId] = useState<string>('none');
 
   // New row state
   const [selectedProductId, setSelectedProductId] = useState<string>('');
@@ -102,9 +118,10 @@ export default function YedekParcaStokGirisPage() {
 
     const fetchData = async () => {
       try {
-        const [productsSnap, brandsSnap] = await Promise.all([
+        const [productsSnap, brandsSnap, ordersSnap] = await Promise.all([
           getDocs(collection(db, 'productCodes')),
           getDocs(collection(db, 'def_brands')),
+          getDocs(collection(db, 'yedekParcaSiparisler')),
         ]);
         const allProducts = productsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
         const sparePartProducts = allProducts.filter(p => p.urunGrubu === 'yedek_parca');
@@ -116,6 +133,11 @@ export default function YedekParcaStokGirisPage() {
         setAllProductCodes(allProducts);
         setBrandOptions(brands);
         setSpareParts(sparePartProducts);
+        const scopedOrders = filterByCompanyScope(
+          ordersSnap.docs.map(d => ({ id: d.id, ...d.data() } as SavedSparePartOrder)),
+          currentCompanyId,
+        ).filter(order => order.status !== 'completed');
+        setSavedOrders(scopedOrders);
       } catch (err) {
         console.error('Error fetching data:', err);
         toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
@@ -140,6 +162,68 @@ export default function YedekParcaStokGirisPage() {
   const selectedProduct = useMemo(() => {
     return spareParts.find(p => p.id === selectedProductId);
   }, [spareParts, selectedProductId]);
+
+  const selectedOrder = useMemo(() => {
+    if (!selectedOrderId || selectedOrderId === 'none') return null;
+    return savedOrders.find(order => order.id === selectedOrderId) || null;
+  }, [savedOrders, selectedOrderId]);
+
+  const selectedOrderComparison = useMemo(() => {
+    if (!selectedOrder?.items || selectedOrder.items.length === 0) return null;
+
+    const expectedMap = new Map<string, { name: string; qty: number }>();
+    for (const item of selectedOrder.items) {
+      const key = String(item.stokKodu || '').trim().toUpperCase();
+      if (!key) continue;
+      expectedMap.set(key, {
+        name: item.stokAdi || key,
+        qty: Number(item.siparisAdedi || 0),
+      });
+    }
+
+    const actualMap = new Map<string, { name: string; qty: number }>();
+    for (const row of rows) {
+      const key = String(row.stokKodu || '').trim().toUpperCase();
+      if (!key) continue;
+      const prev = actualMap.get(key);
+      actualMap.set(key, {
+        name: row.stokAdi || prev?.name || key,
+        qty: (prev?.qty || 0) + (Number(row.quantity) || 0),
+      });
+    }
+
+    const detail: Array<{
+      stokKodu: string;
+      stokAdi: string;
+      expected: number;
+      actual: number;
+      diff: number;
+      status: 'ok' | 'missing' | 'over';
+    }> = [];
+
+    expectedMap.forEach((expected, key) => {
+      const actual = actualMap.get(key)?.qty || 0;
+      const diff = actual - expected.qty;
+      detail.push({
+        stokKodu: key,
+        stokAdi: expected.name,
+        expected: expected.qty,
+        actual,
+        diff,
+        status: diff === 0 ? 'ok' : diff < 0 ? 'missing' : 'over',
+      });
+    });
+
+    const extraItems: Array<{ stokKodu: string; stokAdi: string; actual: number }> = [];
+    actualMap.forEach((actual, key) => {
+      if (!expectedMap.has(key)) {
+        extraItems.push({ stokKodu: key, stokAdi: actual.name, actual: actual.qty });
+      }
+    });
+
+    const isExact = detail.every(item => item.diff === 0) && extraItems.length === 0;
+    return { detail, extraItems, isExact };
+  }, [rows, selectedOrder]);
 
   // Hücre numarası format doğrulama (1 harf + 4 rakam, örn: A1234)
   const validateHucreNumarasi = (value: string): boolean => {
@@ -570,12 +654,37 @@ export default function YedekParcaStokGirisPage() {
         }, currentCompanyId));
       }
 
+      if (selectedOrder && selectedOrderComparison) {
+        const hasMismatch = !selectedOrderComparison.isExact;
+        await updateDoc(doc(db, 'yedekParcaSiparisler', selectedOrder.id), {
+          status: hasMismatch ? 'open' : 'completed',
+          completedAt: hasMismatch ? null : Timestamp.fromDate(now),
+          lastStockEntryAt: Timestamp.fromDate(now),
+          relatedStockEntryIds: createdStockEntryIds,
+          stockEntrySummary: {
+            isExact: selectedOrderComparison.isExact,
+            detail: selectedOrderComparison.detail.map(item => ({
+              stokKodu: item.stokKodu,
+              stokAdi: item.stokAdi,
+              expected: item.expected,
+              actual: item.actual,
+              diff: item.diff,
+              status: item.status,
+            })),
+            extraItems: selectedOrderComparison.extraItems,
+          },
+        });
+      }
+
       toast({
         title: 'Stok Girişi Tamamlandı',
-        description: `${totalQuantity} adet yedek parça (${rows.length} satır) depoya eklendi.`,
+        description: selectedOrder
+          ? `${totalQuantity} adet yedek parça depoya eklendi. Sipariş durumu: ${selectedOrderComparison?.isExact ? 'Tamamlandı' : 'Açık Kaldı (eksik/fazla mevcut)'}.`
+          : `${totalQuantity} adet yedek parça (${rows.length} satır) depoya eklendi.`,
       });
 
       setRows([]);
+      setSelectedOrderId('none');
     } catch (err) {
       console.error('Error saving stock:', err);
       toast({ title: 'Hata', description: 'Stok girişi sırasında hata oluştu.', variant: 'destructive' });
@@ -708,6 +817,33 @@ export default function YedekParcaStokGirisPage() {
           </div>
         </div>
       </header>
+
+      <section className="cihaz-card p-4 space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <p className="text-sm font-semibold" style={{ color: 'var(--dashboard-text)' }}>Sipariş Eşleştirme (Opsiyonel)</p>
+            <p className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>Stok girişi için kayıtlı sipariş taslağı seçebilirsiniz.</p>
+          </div>
+        </div>
+        <Select value={selectedOrderId} onValueChange={setSelectedOrderId}>
+          <SelectTrigger>
+            <SelectValue placeholder="Sipariş seçin" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none">Sipariş seçmeden devam et</SelectItem>
+            {savedOrders.map(order => (
+              <SelectItem key={order.id} value={order.id}>
+                {(order.orderNo || order.id)} · {order.orderName || 'Yedek Parça Sipariş'}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {selectedOrder && (
+          <p className="text-[11px] font-mono break-all" style={{ color: 'var(--dashboard-muted)' }}>
+            Seçilen Sipariş ID: {selectedOrder.id}
+          </p>
+        )}
+      </section>
 
       {/* Tab switcher */}
       <div className="cihaz-pressed inline-flex p-1 gap-1" style={{ borderRadius: 14 }}>
@@ -1030,6 +1166,49 @@ export default function YedekParcaStokGirisPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {selectedOrder && selectedOrderComparison && (
+        <section className="cihaz-card overflow-hidden">
+          <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid var(--dashboard-stroke)' }}>
+            <p className="text-sm font-semibold" style={{ color: 'var(--dashboard-text)' }}>Sipariş Karşılaştırma</p>
+            <span className="text-[11px] px-2 py-1 rounded-lg" style={{ background: selectedOrderComparison.isExact ? 'rgba(22,163,74,.14)' : 'rgba(245,158,11,.14)', color: selectedOrderComparison.isExact ? '#166534' : '#92400E' }}>
+              {selectedOrderComparison.isExact ? 'Tam Uyum' : 'Eksik/Fazla Var'}
+            </span>
+          </div>
+          <div className="p-3 space-y-2">
+            {selectedOrderComparison.detail.map(item => (
+              <div
+                key={item.stokKodu}
+                className="rounded-xl px-3 py-2 text-xs flex items-center justify-between"
+                style={{
+                  background: item.status === 'ok' ? 'rgba(22,163,74,.08)' : 'rgba(245,158,11,.12)',
+                  color: 'var(--dashboard-text)',
+                }}
+              >
+                <div>
+                  <p className="font-semibold">{item.stokAdi}</p>
+                  <p className="font-mono text-[11px]" style={{ color: 'var(--dashboard-muted)' }}>{item.stokKodu}</p>
+                </div>
+                <div className="text-right">
+                  <p>Beklenen: <strong>{item.expected}</strong></p>
+                  <p>Girilen: <strong>{item.actual}</strong></p>
+                  {item.diff !== 0 && <p style={{ color: '#92400E' }}>{item.diff < 0 ? `Eksik ${Math.abs(item.diff)}` : `Fazla +${item.diff}`}</p>}
+                </div>
+              </div>
+            ))}
+            {selectedOrderComparison.extraItems.length > 0 && (
+              <div className="rounded-xl px-3 py-2 text-xs" style={{ background: 'rgba(245,158,11,.12)' }}>
+                <p className="font-semibold inline-flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" /> Siparişte Olmayan Ama Stoğa Girilen Ürünler</p>
+                <div className="mt-1.5 space-y-1">
+                  {selectedOrderComparison.extraItems.map(extra => (
+                    <p key={extra.stokKodu}><span className="font-mono">{extra.stokKodu}</span> · {extra.stokAdi} · <strong>{extra.actual}</strong> adet</p>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* ─── Combined stock entry list ─── */}
       {rows.length > 0 && (

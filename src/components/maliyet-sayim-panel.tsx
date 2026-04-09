@@ -915,12 +915,52 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
     }
   }, [brandProgressList, activeBrand]);
 
-  const saveSessionToFirestore = useCallback(async () => {
-    if (!locationType || !selectedLocationId || isSaving) return;
+  const resetToLocationSelection = useCallback(() => {
+    // Stop voice recognition if active
+    if (recognitionRef.current) {
+      const ref = recognitionRef.current;
+      recognitionRef.current = null;
+      ref.stop();
+    }
+    setVoiceActive(false);
+    setVoiceTranscript('');
+    setScannerActive(false);
+
+    // Reset session + counting state
+    setShowFinishModal(false);
+    setSessionMode('solo');
+    setActiveSessionId(null);
+    setActiveSession(null);
+    setShowParticipantSelection(false);
+    setSelectedParticipants(new Set());
+    setLocationUsers([]);
+    setActiveBrand(null);
+    setCountData({});
+    setSearchQuery('');
+    setLocationSearch('');
+
+    // Return to location selection
+    setSelectedLocationId(null);
+    setLocationType(null);
+    router.replace('/maliyet-sayim', { scroll: false });
+  }, [router]);
+
+  const saveSessionToFirestore = useCallback(async (): Promise<boolean> => {
+    if (!locationType || !selectedLocationId || isSaving) return false;
     setIsSaving(true);
     try {
       const entries = Object.values(countData) as ProductCountEntry[];
-      const countedEntries = entries.filter(entry => entry.counted);
+      const countedEntries = entries.filter((entry) => {
+        const stok = parseInt(entry.stokAdedi, 10) || 0;
+        const cihaz = parseInt(entry.cihazUstuAdedi, 10) || 0;
+        const hasManualData =
+          stok > 0 ||
+          cihaz > 0 ||
+          entry.lots.length > 0 ||
+          entry.serials.length > 0 ||
+          entry.expiryWarnings.length > 0;
+        return entry.counted || hasManualData;
+      });
 
       if (sessionMode === 'collaborative' && activeSessionId && activeSession) {
         // Collaborative mode: use completeSession to save with attribution
@@ -973,13 +1013,16 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
       }
 
       toast({ title: 'Sayım kaydedildi', description: `${countedEntries.length} ürün ${locationName} için kaydedildi.` });
+      resetToLocationSelection();
+      return true;
     } catch (err) {
       console.error('Error saving session:', err);
       toast({ title: 'Hata', description: 'Sayım kaydedilemedi.', variant: 'destructive' });
+      return false;
     } finally {
       setIsSaving(false);
     }
-  }, [locationType, selectedLocationId, locationName, countData, currentUserProfile, totalBrands, isSaving, toast, sessionMode, activeSessionId, activeSession]);
+  }, [locationType, selectedLocationId, locationName, countData, currentUserProfile, totalBrands, isSaving, toast, sessionMode, activeSessionId, activeSession, resetToLocationSelection, currentCompanyId]);
 
   const flashFeedback = useCallback((type: 'success' | 'error', message: string) => {
     if (scanFeedbackTimer.current) clearTimeout(scanFeedbackTimer.current);
@@ -2223,8 +2266,8 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
             </Button>
             <Button
               onClick={async () => {
-                await saveSessionToFirestore();
-                setShowFinishModal(false);
+                const saved = await saveSessionToFirestore();
+                if (saved) setShowFinishModal(false);
               }}
               disabled={isSaving}
             >

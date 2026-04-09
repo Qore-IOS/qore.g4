@@ -1477,7 +1477,22 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                 <SelectTrigger><SelectValue placeholder="Model görseli (opsiyonel)" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Görsel seçme</SelectItem>
-                  {images.map(img => <SelectItem key={img} value={img}>{img}</SelectItem>)}
+                  {images.map(img => (
+                    <SelectItem key={img} value={img}>
+                      <div className="flex items-center gap-2">
+                        <div className="relative h-8 w-8 shrink-0 overflow-hidden rounded border bg-muted">
+                          <Image
+                            src={resolveImageSrc(img)}
+                            alt={img}
+                            fill
+                            className="object-contain"
+                            sizes="32px"
+                          />
+                        </div>
+                        <span className="truncate">{img}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               <Input

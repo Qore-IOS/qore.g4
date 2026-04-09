@@ -1518,7 +1518,8 @@ export default function FaultDetailPage() {
       [txt('Arıza Tipi:'), txt(faultTypeLabel)],
       ['Durum:', txt(statusLabel)],
       [txt('Açan:'), txt(`${fault.openedByName}${((fault as any).supportPersonnelNames?.length ? ` (Eşlik Eden: ${(fault as any).supportPersonnelNames.join(', ')})` : fault.supportPersonnelName ? ` (Eşlik Eden: ${fault.supportPersonnelName})` : '')}`)],
-      ['Tarih / Saat:', fault.openedAt ? format(fault.openedAt, 'dd.MM.yyyy HH:mm', { locale: tr }) : '-'],
+      [txt('Başlangıç:'), fault.openedAt ? format(fault.openedAt, 'dd.MM.yyyy HH:mm', { locale: tr }) : '-'],
+      [txt('Bitiş:'), fault.closedAt ? format(fault.closedAt, 'dd.MM.yyyy HH:mm', { locale: tr }) : '-'],
     ];
 
     autoTable(pdfDoc, {
