@@ -48,6 +48,7 @@ interface StokGirisRow {
   hucreNumarasi: string; // Hücre numarası (1 harf + 4 rakam) - opsiyonel tekil takip
   quantity: number; // seri numarası veya hücre numarası varsa 1, yoksa kullanıcının girdiği adet
   address: string;
+  entrySource: 'manual' | 'excel';
 }
 
 type MissingProductCardItem = {
@@ -291,6 +292,7 @@ export default function YedekParcaStokGirisPage() {
       hucreNumarasi: hn,
       quantity: qty,
       address: address.trim(),
+      entrySource: 'manual',
     };
 
     setRows(prev => [...prev, newRow]);
@@ -307,7 +309,7 @@ export default function YedekParcaStokGirisPage() {
       title: 'Eklendi',
       description: `${rowStokAdi} (${label}) listeye eklendi.`,
     });
-  }, [selectedProduct, serialNumber, hucreNumarasi, quantity, rows, toast, manualStokKodu, manualStokAdi]);
+  }, [selectedProduct, serialNumber, hucreNumarasi, quantity, rows, toast, manualStokKodu, manualStokAdi, address]);
 
   const findMissingCardsFromRows = useCallback((targetRows: StokGirisRow[]) => {
     const existingCodes = new Set(allProductCodes.map(p => (p.stokKodu || '').trim().toUpperCase()).filter(Boolean));
@@ -445,6 +447,7 @@ export default function YedekParcaStokGirisPage() {
             hucreNumarasi: rawHucreNo || '',
             quantity: isTracked ? 1 : (rawAdet && rawAdet >= 1 ? Math.floor(rawAdet) : 1),
             address: rawAddress,
+            entrySource: 'excel',
           });
           continue;
         }
@@ -473,6 +476,7 @@ export default function YedekParcaStokGirisPage() {
             hucreNumarasi: rawHucreNo || '',
             quantity: 1,
             address: rawAddress,
+            entrySource: 'excel',
           });
         } else {
           // Seri numarası yoksa, hücre numarası kontrolü
@@ -489,6 +493,7 @@ export default function YedekParcaStokGirisPage() {
             hucreNumarasi: rawHucreNo || '',
             quantity: adet,
             address: rawAddress,
+            entrySource: 'excel',
           });
         }
       }
@@ -585,12 +590,12 @@ export default function YedekParcaStokGirisPage() {
     try {
       const batch = writeBatch(db);
       const now = new Date();
-      const createdStockEntryIds: string[] = [];
+      const stockRefIds: string[] = [];
 
       for (const row of rows) {
         const isTracked = !!row.serialNumber || !!row.hucreNumarasi;
         const stockRef = doc(collection(db, 'yedekParcaDepoStok'));
-        createdStockEntryIds.push(stockRef.id);
+        stockRefIds.push(stockRef.id);
         batch.set(stockRef, withCompanyScope({
           productCodeId: row.productCodeId,
           stokKodu: row.stokKodu,
@@ -601,6 +606,7 @@ export default function YedekParcaStokGirisPage() {
           ...(row.hucreNumarasi ? { hucreNumarasi: row.hucreNumarasi } : {}),
           quantity: isTracked ? 1 : row.quantity,
           address: row.address || '',
+          entrySource: row.entrySource || 'manual',
           createdAt: Timestamp.fromDate(now),
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || '',
@@ -609,17 +615,23 @@ export default function YedekParcaStokGirisPage() {
 
       await batch.commit();
 
-      for (const row of rows) {
+      // Log each entry with full audit trail
+      for (let idx = 0; idx < rows.length; idx++) {
+        const row = rows[idx];
         const isTracked = !!row.serialNumber || !!row.hucreNumarasi;
+        const sourceLabel = row.entrySource === 'excel' ? 'Excel' : 'Manuel';
         let notes = '';
         if (row.serialNumber && row.hucreNumarasi) {
-          notes = `Seri numaralı ve hücre numaralı stok girişi: SN:${row.serialNumber}, Hücre:${row.hucreNumarasi}`;
+          notes = `[${sourceLabel}] Seri numaralı ve hücre numaralı stok girişi: SN:${row.serialNumber}, Hücre:${row.hucreNumarasi}`;
         } else if (row.serialNumber) {
-          notes = `Seri numaralı stok girişi: ${row.serialNumber}`;
+          notes = `[${sourceLabel}] Seri numaralı stok girişi: ${row.serialNumber}`;
         } else if (row.hucreNumarasi) {
-          notes = `Hücre numaralı stok girişi: ${row.hucreNumarasi}`;
+          notes = `[${sourceLabel}] Hücre numaralı stok girişi: ${row.hucreNumarasi}`;
         } else {
-          notes = `${row.quantity} ${row.anaBirim ? row.anaBirim.toLocaleLowerCase('tr-TR') : 'adet'} stok girişi`;
+          notes = `[${sourceLabel}] ${row.quantity} ${row.anaBirim ? row.anaBirim.toLocaleLowerCase('tr-TR') : 'adet'} stok girişi`;
+        }
+        if (row.address) {
+          notes += ` · Adres: ${row.address}`;
         }
 
         await addDoc(collection(db, 'yedekParcaDepoLog'), withCompanyScope({
@@ -633,6 +645,8 @@ export default function YedekParcaStokGirisPage() {
           ...(row.hucreNumarasi ? { hucreNumarasi: row.hucreNumarasi } : {}),
           quantity: isTracked ? 1 : row.quantity,
           address: row.address || '',
+          entrySource: row.entrySource || 'manual',
+          depoStokDocId: stockRefIds[idx] || '',
           notes,
           createdAt: Timestamp.fromDate(now),
           createdByUid: currentUserProfile?.uid || '',
