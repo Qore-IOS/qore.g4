@@ -5,8 +5,7 @@ import { collection, getDocs, orderBy, query } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import type { ProductCode, Currency } from '@/lib/types';
-// @ts-ignore
-import ExcelJS from 'exceljs/dist/exceljs.min.js';
+import ExcelJS from 'exceljs';
 import { PieChart, ResponsiveContainer, Pie, Cell, Tooltip as RechartsTooltip, LineChart, Line, XAxis, YAxis } from 'recharts';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
