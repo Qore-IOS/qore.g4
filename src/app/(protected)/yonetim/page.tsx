@@ -4,15 +4,14 @@ import React from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Warehouse, Building, Pill, MapPin, Users, Barcode, Moon, Sun, LogOut, Beaker, QrCode, History, BookText, AlertTriangle, UserCog, Shield, Send, Star } from 'lucide-react';
-import { useTheme } from 'next-themes';
+import { Warehouse, Building, Pill, MapPin, Users, Barcode, LogOut, Beaker, QrCode, History, BookText, AlertTriangle, UserCog, Shield, Send } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
 import { createNotification } from '@/lib/notifications';
 
 export default function YonetimPanel() {
   const router = useRouter();
-  const { setTheme } = useTheme();
+
   const { logout, isAdmin, currentUserProfile } = useAuth();
   const { toast } = useToast();
 
@@ -79,18 +78,7 @@ export default function YonetimPanel() {
               <LogOut className="mr-2 h-4 w-4"/>
               Çıkış Yap
             </Button>
-            <Button onClick={() => setTheme('light')} variant="outline">
-              <Sun className="mr-2 h-4 w-4"/>
-              Aydınlık Tema
-            </Button>
-            <Button onClick={() => setTheme('dark')} variant="outline">
-              <Moon className="mr-2 h-4 w-4"/>
-              Karanlık Tema
-            </Button>
-            <Button onClick={() => setTheme('qore-dark')} variant="outline">
-              <Star className="mr-2 h-4 w-4"/>
-              Qore Dark
-            </Button>
+
             <Button onClick={() => router.push('/yonetim/istisna-urunler')} variant="destructive" className="bg-amber-600 hover:bg-amber-700">
                 <AlertTriangle className="mr-2 h-4 w-4" />
                 İstisna Ürünler
