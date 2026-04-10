@@ -1546,20 +1546,63 @@ export default function AplikasyonIslemFormuPage() {
 
   const consumeDepotSelection = async (partChange: ActionItem, batch: any) => {
     const requestedQuantity = Math.max(1, partChange.quantity || 1);
+    const consumedEntries: YedekParcaDepoStokItem[] = [];
+    let remainingToConsume = requestedQuantity;
+
+    // Case 1: Direct ID provided (Serial or Cell tracked item)
     if (partChange.depotStockId) {
       const depotRef = doc(db, 'yedekParcaDepoStok', partChange.depotStockId);
       const depotSnap = await getDoc(depotRef);
-      if (!depotSnap.exists()) throw new Error(`${partChange.stokAdi} için depo stok satırı bulunamadı.`);
-      const depotData = depotSnap.data();
-      const currentQty = depotData.quantity || 1;
-      if (currentQty <= requestedQuantity) {
-        batch.delete(depotRef);
-      } else {
-        batch.update(depotRef, { quantity: currentQty - requestedQuantity });
+      if (depotSnap.exists()) {
+        const depotData = depotSnap.data();
+        const currentQty = depotData.quantity || 1;
+        if (currentQty <= remainingToConsume) {
+          batch.delete(depotRef);
+          remainingToConsume -= currentQty;
+        } else {
+          batch.update(depotRef, { quantity: currentQty - remainingToConsume });
+          remainingToConsume = 0;
+        }
+        consumedEntries.push({ id: depotSnap.id, ...depotData } as YedekParcaDepoStokItem);
       }
-      return { id: depotSnap.id, ...depotData } as YedekParcaDepoStokItem;
     }
-    throw new Error('Depo stok ID bulunamadı.');
+
+    // Case 2: No ID or remaining quantity for grouped items (Quantity tracked)
+    if (remainingToConsume > 0) {
+      const q = query(
+        collection(db, 'yedekParcaDepoStok'),
+        where('stokKodu', '==', partChange.stokKodu),
+        where('partCondition', '==', 'iyi'),
+        orderBy('createdAt', 'asc')
+      );
+      const snapshot = await getDocs(q);
+      
+      for (const docSnap of snapshot.docs) {
+        if (remainingToConsume <= 0) break;
+        // Don't double-process the same doc if it was already handled by Case 1
+        if (partChange.depotStockId === docSnap.id) continue;
+
+        const data = docSnap.data();
+        const available = data.quantity || 0;
+        const toTake = Math.min(available, remainingToConsume);
+
+        if (toTake > 0) {
+          if (available === toTake) {
+            batch.delete(docSnap.ref);
+          } else {
+            batch.update(docSnap.ref, { quantity: available - toTake });
+          }
+          consumedEntries.push({ ...data, id: docSnap.id, consumedQuantity: toTake } as any);
+          remainingToConsume -= toTake;
+        }
+      }
+    }
+
+    if (consumedEntries.length === 0) {
+      throw new Error(`${partChange.stokAdi} (${partChange.stokKodu}) için yeterli depo stoğu bulunamadı.`);
+    }
+
+    return consumedEntries[0]; // Return the first one for the main record, or refactor to handle multiple
   };
 
   const createDepotBorrowRecord = (partChange: ActionItem, depotEntry: YedekParcaDepoStokItem, batch: any, currentDevice: Device, formId: string, now: Date) => {
@@ -1569,7 +1612,7 @@ export default function AplikasyonIslemFormuPage() {
       stokKodu: partChange.stokKodu,
       stokAdi: partChange.stokAdi,
       anaBirim: partChange.anaBirim || depotEntry.anaBirim || 'Adet',
-      serialNumber: partChange.serialNumber || '',
+      serialNumber: partChange.serialNumber || depotEntry.serialNumber || '',
       hucreNumarasi: partChange.hucreNumarasi || depotEntry.hucreNumarasi || '',
       quantity: Math.max(1, partChange.quantity || 1),
       sourceType: 'depot',
