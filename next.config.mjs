@@ -42,11 +42,6 @@ const config = {
   // Experimental features
   experimental: {
     serverComponentsExternalPackages: ["@napi-rs/canvas", "canvas"],
-    turbo: {
-      resolveAlias: {
-        exceljs: 'exceljs/dist/exceljs.min.js',
-      },
-    },
   },
 
   // Webpack configuration
@@ -57,13 +52,6 @@ const config = {
       externals.add("@napi-rs/canvas");
       externals.add("canvas");
       cfg.externals = Array.from(externals);
-    }
-
-    // Resolve exceljs to its browser bundle for client-side
-    if (!isServer) {
-      cfg.resolve = cfg.resolve || {};
-      cfg.resolve.alias = cfg.resolve.alias || {};
-      cfg.resolve.alias.exceljs = 'exceljs/dist/exceljs.min.js';
     }
 
     // Exclude service worker files from webpack processing
