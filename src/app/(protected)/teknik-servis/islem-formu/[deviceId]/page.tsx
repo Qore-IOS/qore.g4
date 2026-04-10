@@ -1567,6 +1567,86 @@ export default function IslemFormuPage() {
   };
 
 
+  const consumeDepotSelection = async (partChange: ActionItem, batch: any) => {
+    const requestedQuantity = Math.max(1, partChange.quantity || 1);
+    const consumedEntries: YedekParcaDepoStokItem[] = [];
+    let remainingToConsume = requestedQuantity;
+
+    if (partChange.depotStockId) {
+      const depotRef = doc(db, 'yedekParcaDepoStok', partChange.depotStockId);
+      const depotSnap = await getDoc(depotRef);
+      if (depotSnap.exists()) {
+        const depotData = depotSnap.data();
+        const currentQty = depotData.quantity || 1;
+        if (currentQty <= remainingToConsume) {
+          batch.delete(depotRef);
+          remainingToConsume -= currentQty;
+        } else {
+          batch.update(depotRef, { quantity: currentQty - remainingToConsume });
+          remainingToConsume = 0;
+        }
+        consumedEntries.push({ id: depotSnap.id, ...depotData } as YedekParcaDepoStokItem);
+      }
+    }
+
+    if (remainingToConsume > 0) {
+      const q = query(
+        collection(db, 'yedekParcaDepoStok'),
+        where('stokKodu', '==', partChange.stokKodu),
+        where('partCondition', '==', 'iyi'),
+        orderBy('createdAt', 'asc')
+      );
+      const snapshot = await getDocs(q);
+      for (const docSnap of snapshot.docs) {
+        if (remainingToConsume <= 0) break;
+        if (partChange.depotStockId === docSnap.id) continue;
+        const data = docSnap.data();
+        const available = data.quantity || 0;
+        const toTake = Math.min(available, remainingToConsume);
+        if (toTake > 0) {
+          if (available === toTake) {
+            batch.delete(docSnap.ref);
+          } else {
+            batch.update(docSnap.ref, { quantity: available - toTake });
+          }
+          consumedEntries.push({ ...data, id: docSnap.id, consumedQuantity: toTake } as any);
+          remainingToConsume -= toTake;
+        }
+      }
+    }
+
+    if (consumedEntries.length === 0) {
+      throw new Error(`${partChange.stokAdi} (${partChange.stokKodu}) için yeterli depo stoğu bulunamadı.`);
+    }
+    return consumedEntries[0];
+  };
+
+  const createDepotBorrowRecord = (partChange: ActionItem, depotEntry: YedekParcaDepoStokItem, batch: any, currentDevice: Device, formId: string, now: Date) => {
+    const borrowedRef = doc(collection(db, 'borrowedSpareParts'));
+    batch.set(borrowedRef, {
+      productCodeId: partChange.action || depotEntry.productCodeId || '',
+      stokKodu: partChange.stokKodu,
+      stokAdi: partChange.stokAdi,
+      anaBirim: partChange.anaBirim || depotEntry.anaBirim || 'Adet',
+      serialNumber: partChange.serialNumber || depotEntry.serialNumber || '',
+      hucreNumarasi: partChange.hucreNumarasi || depotEntry.hucreNumarasi || '',
+      quantity: Math.max(1, partChange.quantity || 1),
+      sourceType: 'depot',
+      sourceActionType: partChange.type || 'part_change',
+      depotStockId: depotEntry.id,
+      deviceId: currentDevice.id,
+      deviceName: currentDevice.cihazAdi || currentDevice.model || '',
+      hospitalId: currentDevice.hospitalId || '',
+      labName: hospital?.name || '',
+      formId: formId,
+      formType: 'teknik_servis',
+      borrowedByUid: currentUserProfile?.uid || '',
+      borrowedByName: currentUserProfile?.name || '',
+      borrowedAt: Timestamp.fromDate(now),
+      status: 'pending',
+    });
+  };
+
   const handleSaveSignaturesAndFinish = async (finalSignatures: { personnel?: string; technician?: string }, finalTechnicianName?: string) => {
     setIsSaving(true);
     setIsSignatureModalOpen(false);
