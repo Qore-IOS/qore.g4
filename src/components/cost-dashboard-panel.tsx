@@ -654,7 +654,8 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
     try {
       const FileSaverModule = await import('file-saver');
       const saveAs = FileSaverModule.saveAs || FileSaverModule.default?.saveAs || (FileSaverModule as any).default;
-      const ExcelJSModule = await import('exceljs');
+      // @ts-ignore - browser UMD bundle
+      const ExcelJSModule = await import('@/lib/exceljs-browser.min.js');
       const ExcelJS = ExcelJSModule.default || ExcelJSModule;
       const wb = new ExcelJS.Workbook();
       wb.creator = 'QORE';
