@@ -1114,6 +1114,10 @@ export default function IslemFormuPage() {
   };
 
   const selectPersonalStockItem = (item: PersonalStockItem) => {
+    if (isLabMode && !partAssignedDeviceId) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen önce işlem yapılacak cihazı seçin.', variant: 'destructive' });
+      return;
+    }
     setSelectedStockItem(item);
     setSelectedPoolStockItem(null);
     setSelectedDepotStockItem(null);
@@ -1122,6 +1126,10 @@ export default function IslemFormuPage() {
   };
 
   const selectPoolStockItem = (item: PoolWarehouseStockItem) => {
+    if (isLabMode && !partAssignedDeviceId) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen önce işlem yapılacak cihazı seçin.', variant: 'destructive' });
+      return;
+    }
     setSelectedPoolStockItem(item);
     setSelectedStockItem(null);
     setSelectedDepotStockItem(null);
@@ -1130,6 +1138,10 @@ export default function IslemFormuPage() {
   };
 
   const activateManualEntry = () => {
+    if (isLabMode && !partAssignedDeviceId) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen önce işlem yapılacak cihazı seçin.', variant: 'destructive' });
+      return;
+    }
     setShowManualEntry(true);
     setSelectedStockItem(null);
     setSelectedPoolStockItem(null);
@@ -1228,6 +1240,11 @@ export default function IslemFormuPage() {
   };
 
   const addSelectedPart = async () => {
+    if (isLabMode && !partAssignedDeviceId) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen parça eklemeden önce cihaz seçin.', variant: 'destructive' });
+      return;
+    }
+
     // Determine if this is for a periodic part with reduced requirements
     const pendingPeriodic = pendingPeriodicPartChangeId
       ? periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)
@@ -1413,6 +1430,9 @@ export default function IslemFormuPage() {
     setRemovedPartImageFile(null); setRemovedPartImagePreview(null);
     setUsedPartImageFile(null); setUsedPartImagePreview(null);
     setPartSearchQuery('');
+    if (isLabMode) {
+      setPartAssignedDeviceId('');
+    }
     setIsPartModalOpen(false);
   };
 
@@ -2628,6 +2648,10 @@ export default function IslemFormuPage() {
           const seenDepotIds = new Set<string>();
           for (let i = 0; i < activeRows.length; i++) {
             const row = activeRows[i];
+            if (isLabMode && !row.assignedDeviceId) {
+              toast({ title: 'Eksik Bilgi', description: `${i + 1}. satır için önce cihaz seçin.`, variant: 'destructive' });
+              return;
+            }
             const selectedItem = getSelectedItem(row);
             if (!selectedItem) {
               toast({ title: 'Eksik Bilgi', description: `${i + 1}. satır için takılacak hücre seçin.`, variant: 'destructive' });
