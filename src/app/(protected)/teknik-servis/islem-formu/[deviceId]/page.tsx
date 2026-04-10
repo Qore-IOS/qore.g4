@@ -2768,7 +2768,6 @@ export default function IslemFormuPage() {
                         <Search style={{ position: 'absolute', left: '12px', top: '12px', width: '16px', height: '16px', color: 'var(--wz-text-secondary)' }} />
                         <input type="text" placeholder="Hücre no veya ürün ara..." value={row.searchQuery} onChange={(e) => updateRow(row.id, r => ({ ...r, searchQuery: e.target.value }))} style={{ paddingLeft: '36px', background: 'var(--wz-input-bg)', border: '1px solid var(--wz-input-border)', color: 'var(--wz-text)', borderRadius: '12px', padding: '10px 14px 10px 36px', fontSize: '15px', width: '100%', outline: 'none' }} />
                       </div>
-                      </div>
                       {isLabMode && (
                         <div style={{ marginBottom: '12px' }}>
                           <label style={{ fontSize: '13px', color: 'var(--wz-text-secondary)', display: 'block', marginBottom: '6px' }}>Bu Hücre Hangi Cihaza Takıldı? *</label>
