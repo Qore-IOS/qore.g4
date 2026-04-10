@@ -1615,19 +1615,27 @@ export default function SatinAlmaPanel() {
   const [justAddedTaskId, setJustAddedTaskId] = useState<string | null>(null);
 
   return (
-    <div className="cihaz-shell min-h-screen pb-24">
+    <div className="cihaz-shell min-h-screen pb-24 satin-alma-fluid-shell">
       {/* ===== STICKY HEADER — 3 rows: title+nav / search / date-strip ===== */}
-      <div className="sticky top-0 z-30" style={{ backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)', background: 'rgba(233,231,227,.82)' }}>
+      <div className="sticky top-0 z-30 satin-glass-header" style={{ backdropFilter: 'blur(18px)', WebkitBackdropFilter: 'blur(18px)', background: 'rgba(233,231,227,.82)' }}>
         {/* Row 1: Title + nav links */}
         <div className="px-4 pt-4 pb-1 md:px-8 md:pt-5">
-          <div className="flex items-start justify-between">
-            <div>
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div className="space-y-2">
               <p className="text-[10px] font-medium uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Planlama Birimi</p>
               <h1 className="text-lg md:text-xl font-bold mt-0.5" style={{ color: 'var(--dashboard-text)' }}>
                 Merhaba, <span style={{ color: 'var(--dashboard-accent)' }}>{userName}</span>
               </h1>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-semibold px-2 py-1 rounded-full satin-pill" style={{ color: 'var(--dashboard-accent)' }}>
+                  Tek Dokunuş Modu
+                </span>
+                <span className="text-[10px] px-2 py-1 rounded-full satin-pill" style={{ color: 'var(--dashboard-muted)' }}>
+                  {todayIncompleteTasks.length} açık görev
+                </span>
+              </div>
             </div>
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
               {(isOffline || pendingMutations > 0 || syncInProgress) && (
                 <div className="text-[10px] px-2 py-1 rounded-lg cihaz-pressed" style={{ color: 'var(--dashboard-muted)' }}>
                   {isOffline
@@ -1812,8 +1820,8 @@ export default function SatinAlmaPanel() {
 
       {/* ===== 1.1 TODAY HERO CARD (Bugün Kartı) ===== */}
       <div className="px-4 md:px-8 mt-3">
-        <div className="cihaz-card-strong rounded-2xl p-4 md:p-5">
-          <div className="flex items-start justify-between gap-3">
+        <div className="cihaz-card-strong rounded-3xl p-4 md:p-6 satin-hero-card">
+          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2">
                 <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-accent)' }}>
@@ -1840,12 +1848,26 @@ export default function SatinAlmaPanel() {
                 )}
               </div>
             </div>
+            <div className="grid grid-cols-3 gap-2 md:min-w-[220px]">
+              <div className="rounded-2xl p-2.5 satin-metric">
+                <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>Açık</p>
+                <p className="text-sm font-bold" style={{ color: 'var(--dashboard-text)' }}>{todayIncompleteTasks.length}</p>
+              </div>
+              <div className="rounded-2xl p-2.5 satin-metric">
+                <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>Tamam</p>
+                <p className="text-sm font-bold" style={{ color: 'var(--dashboard-text)' }}>{todayCompletedTasks.length}</p>
+              </div>
+              <div className="rounded-2xl p-2.5 satin-metric">
+                <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>Doluluk</p>
+                <p className="text-sm font-bold" style={{ color: 'var(--dashboard-text)' }}>%{todayOccupancy}</p>
+              </div>
+            </div>
           </div>
           {/* Two hero action buttons — larger, more prominent CTA */}
-          <div className="flex items-center gap-3 mt-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
             <button
               onClick={() => setShowAddModal(true)}
-              className="flex-1 flex items-center justify-center gap-2 py-3.5 rounded-xl text-sm font-bold transition-all hover:brightness-[0.93] active:scale-[0.97]"
+              className="flex items-center justify-center gap-2 py-3.5 rounded-2xl text-sm font-bold transition-all hover:brightness-[0.93] active:scale-[0.97] satin-float-action"
               style={{ background: 'var(--dashboard-accent)', color: '#fff', boxShadow: '0 4px 16px rgba(242,153,74,.25)' }}
             >
               <Plus className="w-5 h-5" strokeWidth={2.5} />
@@ -1853,7 +1875,7 @@ export default function SatinAlmaPanel() {
             </button>
             <button
               onClick={() => setShowAddModal(true)}
-              className="flex-1 flex items-center justify-center gap-2 py-3.5 rounded-xl text-sm font-bold cihaz-card transition-all hover:brightness-[0.96] active:scale-[0.97]"
+              className="flex items-center justify-center gap-2 py-3.5 rounded-2xl text-sm font-bold cihaz-card transition-all hover:brightness-[0.96] active:scale-[0.97] satin-float-action"
               style={{ color: 'var(--dashboard-text)' }}
             >
               <CalendarIcon className="w-4 h-4" />
@@ -1865,7 +1887,7 @@ export default function SatinAlmaPanel() {
 
       {/* ===== 1.2 TODAY AGENDA — Task list before calendar ===== */}
       <div className="px-4 md:px-8 mt-3">
-        <div className="cihaz-card rounded-2xl p-4">
+        <div className="cihaz-card rounded-3xl p-4 md:p-5 satin-soft-list">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-semibold" style={{ color: 'var(--dashboard-text)' }}>
               Bugün Yapılacaklar
@@ -1896,8 +1918,8 @@ export default function SatinAlmaPanel() {
                   <div
                     key={task.id}
                     className={cn(
-                      'flex items-center gap-3 p-3 rounded-xl transition-all cursor-pointer hover:brightness-[0.98]',
-                      isHighlighted ? 'ring-2 ring-[#F2994A]/40' : ''
+                      'flex items-center gap-3 p-3 md:p-3.5 rounded-2xl transition-all cursor-pointer hover:brightness-[0.98] satin-task-item',
+                      isHighlighted ? 'ring-2 ring-[#F2994A]/40 scale-[1.01]' : ''
                     )}
                     style={{ background: 'var(--dashboard-surface)', border: '1px solid var(--dashboard-stroke)' }}
                     onClick={() => setEditingTask(task)}
