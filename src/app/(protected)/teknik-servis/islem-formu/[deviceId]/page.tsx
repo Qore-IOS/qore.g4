@@ -296,7 +296,11 @@ export default function IslemFormuPage() {
           const qDevices = query(collection(db, 'devices'), where('hospitalId', '==', labHospitalId));
           const devicesSnap = await getDocs(qDevices);
           const list = devicesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Device));
-          setDevicesByLab(list.sort((a, b) => (String(a.order ?? 99)).localeCompare(String(b.order ?? 99))));
+          const sortedList = list.sort((a, b) => (String(a.order ?? 99)).localeCompare(String(b.order ?? 99)));
+          setDevicesByLab(sortedList);
+          if (sortedList.length > 0) {
+            setDevice(sortedList[0]);
+          }
 
         } else if (actualDeviceId) {
           const deviceSnap = await getDoc(doc(db, 'devices', actualDeviceId));
