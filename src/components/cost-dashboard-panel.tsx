@@ -5,6 +5,7 @@ import { collection, getDocs, orderBy, query } from 'firebase/firestore';
 import { useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import type { ProductCode, Currency } from '@/lib/types';
+import ExcelJS from 'exceljs';
 import { PieChart, ResponsiveContainer, Pie, Cell, Tooltip as RechartsTooltip, LineChart, Line, XAxis, YAxis } from 'recharts';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -651,8 +652,6 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
 
   const handleExportExcel = useCallback(async () => {
     try {
-      const ExcelJSModule = await import('exceljs');
-      const ExcelJS = ExcelJSModule.default || ExcelJSModule;
       const FileSaverModule = await import('file-saver');
       const saveAs = FileSaverModule.saveAs || FileSaverModule.default?.saveAs || (FileSaverModule as any).default;
       const wb = new ExcelJS.Workbook();
