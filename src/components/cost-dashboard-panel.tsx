@@ -651,8 +651,10 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
 
   const handleExportExcel = useCallback(async () => {
     try {
-      const ExcelJS = await import('exceljs');
-      const { saveAs } = await import('file-saver');
+      const ExcelJSModule = await import('exceljs');
+      const ExcelJS = ExcelJSModule.default || ExcelJSModule;
+      const FileSaverModule = await import('file-saver');
+      const saveAs = FileSaverModule.saveAs || FileSaverModule.default?.saveAs || (FileSaverModule as any).default;
       const wb = new ExcelJS.Workbook();
       wb.creator = 'QORE';
       wb.created = new Date();
