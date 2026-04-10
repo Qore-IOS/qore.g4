@@ -12,7 +12,7 @@
     "test:coverage": "rimraf .test-dist .coverage && tsc -p tsconfig.tests.json && NODE_V8_COVERAGE=.coverage node --test .test-dist/tests/**/*.js",
     "push": "git add . && git commit -m \"update\" && git push origin HEAD",
     "sync": "git checkout main && git pull origin main"
-  }
+  },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
     "@google/generative-ai": "^0.24.1",
