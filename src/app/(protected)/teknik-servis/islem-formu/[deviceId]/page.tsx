@@ -155,8 +155,7 @@ export default function IslemFormuPage() {
   const actualDeviceId = isLabModeRoute ? '' : routeDeviceId;
   const labHospitalId = isLabModeRoute ? routeDeviceId.replace('lab-', '') : '';
   const deviceId = routeDeviceId;
-  const isLabMode = isLabModeRoute;
-  
+
   const router = useRouter();
   const searchParams = useSearchParams();
   const draftIdFromUrl = searchParams?.get('draftId') || null;
@@ -1567,57 +1566,6 @@ export default function IslemFormuPage() {
     setSignatureStep('personnel');
   };
 
-  const consumeDepotSelection = async (item: ActionItem, batch: any) => {
-    const q = query(
-      collection(db, 'yedekParcaDepoStok'),
-      where('stokKodu', '==', item.stokKodu),
-      where('partCondition', '==', 'iyi'),
-      orderBy('createdAt', 'asc')
-    );
-    const snapshot = await getDocs(q);
-    let remainingToConsume = item.quantity;
-    const consumedEntries: any[] = [];
-
-    for (const docSnap of snapshot.docs) {
-      if (remainingToConsume <= 0) break;
-      const data = docSnap.data();
-      const available = data.quantity || 0;
-      const toTake = Math.min(available, remainingToConsume);
-
-      if (toTake > 0) {
-        if (available === toTake) {
-          batch.delete(docSnap.ref);
-        } else {
-          batch.update(docSnap.ref, { quantity: available - toTake });
-        }
-        consumedEntries.push({ ...data, id: docSnap.id, consumedQuantity: toTake });
-        remainingToConsume -= toTake;
-      }
-    }
-    return consumedEntries;
-  };
-
-  const createDepotBorrowRecord = (item: ActionItem, consumedEntries: any[], batch: any, currentDevice: Device, formId: string, now: Date) => {
-    const borrowedRef = doc(collection(db, 'borrowedSpareParts'));
-    batch.set(borrowedRef, {
-      stokKodu: item.stokKodu,
-      stokAdi: item.stokAdi,
-      serialNumber: item.serialNumber || null,
-      hucreNumarasi: item.hucreNumarasi || null,
-      deviceId: currentDevice.id,
-      deviceName: currentDevice.cihazAdi || currentDevice.model || '',
-      hospitalId: hospital?.id || '',
-      labName: hospital?.name || '',
-      formId: formId,
-      formType: 'teknik_servis',
-      borrowedByUid: currentUserProfile?.uid || '',
-      borrowedByName: currentUserProfile?.name || '',
-      borrowedAt: Timestamp.fromDate(now),
-      status: 'pending',
-      consumedFromDepot: true,
-      depotEntries: consumedEntries,
-    });
-  };
 
   const handleSaveSignaturesAndFinish = async (finalSignatures: { personnel?: string; technician?: string }, finalTechnicianName?: string) => {
     setIsSaving(true);
