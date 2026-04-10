@@ -60,6 +60,7 @@ type ActionItem = {
   personalStockId?: string;
   poolStockId?: string; // Pool warehouse stock item ID (if from pool)
   depotStockId?: string;
+  assignedDeviceId?: string; // For lab mode: Which device is this assigned to
   isDepotSelection?: boolean;
   poolWarehouseId?: string;
   poolWarehouseName?: string;
@@ -87,6 +88,7 @@ type HucreDegisimiDraftRow = {
   removedHucreNumarasi: string;
   description: string;
   selectedChannel?: 'CH1' | 'CH2';
+  assignedDeviceId?: string; // For lab mode
 };
 
 type ActionFormRecord = {
@@ -147,13 +149,19 @@ const CIHAZ_DURUMU_LABELS: Record<CihazDurumu, string> = {
 
 export default function IslemFormuPage() {
   const params = useParams();
-  const deviceId = params ? (Array.isArray(params.deviceId) ? params.deviceId[0] : params.deviceId as string) : '';
+  const routeDeviceId = params ? (Array.isArray(params.deviceId) ? params.deviceId[0] : params.deviceId as string) : '';
+  const isLabModeRoute = routeDeviceId.startsWith('lab-');
+  const actualDeviceId = isLabModeRoute ? '' : routeDeviceId;
+  const labHospitalId = isLabModeRoute ? routeDeviceId.replace('lab-', '') : '';
+  
   const router = useRouter();
   const searchParams = useSearchParams();
   const draftIdFromUrl = searchParams?.get('draftId') || null;
   const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
 
+  const [isLabMode, setIsLabMode] = useState(isLabModeRoute);
+  const [devicesByLab, setDevicesByLab] = useState<Device[]>([]); // Added for lab mode
   const [device, setDevice] = useState<Device | null>(null);
   const [hospital, setHospital] = useState<Hospital | null>(null);
   const [loading, setLoading] = useState(true);
@@ -267,37 +275,56 @@ export default function IslemFormuPage() {
 
   // Fetch device and hospital
   useEffect(() => {
-    if (!deviceId) return;
+    if (!actualDeviceId && !labHospitalId) return;
     setLoading(true);
     (async () => {
       try {
-        const deviceSnap = await getDoc(doc(db, 'devices', deviceId));
-        if (!deviceSnap.exists()) {
-          toast({ title: 'Hata', description: 'Cihaz bulunamadı.', variant: 'destructive' });
-          router.back();
-          return;
-        }
-        const deviceData = { id: deviceSnap.id, ...deviceSnap.data() } as Device;
-        setDevice(deviceData);
-
-        if (deviceData.hospitalId) {
-          const hospitalSnap = await getDoc(doc(db, 'hospitals', deviceData.hospitalId));
+        if (isLabMode && labHospitalId) {
+          const hospitalSnap = await getDoc(doc(db, 'hospitals', labHospitalId));
           if (hospitalSnap.exists()) {
-            setHospital({ id: hospitalSnap.id, ...hospitalSnap.data() } as Hospital);
+             setHospital({ id: hospitalSnap.id, ...hospitalSnap.data() } as Hospital);
+          } else {
+             toast({ title: 'Hata', description: 'Hastane bulunamadı.', variant: 'destructive' });
+             router.back();
+             return;
+          }
+
+          // Fetch all devices for this hospital
+          const qDevices = query(collection(db, 'devices'), where('hospitalId', '==', labHospitalId));
+          const devicesSnap = await getDocs(qDevices);
+          const list = devicesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Device));
+          setDevicesByLab(list.sort((a, b) => (String(a.order ?? 99)).localeCompare(String(b.order ?? 99))));
+
+        } else if (actualDeviceId) {
+          const deviceSnap = await getDoc(doc(db, 'devices', actualDeviceId));
+          if (!deviceSnap.exists()) {
+            toast({ title: 'Hata', description: 'Cihaz bulunamadı.', variant: 'destructive' });
+            router.back();
+            return;
+          }
+          const deviceData = { id: deviceSnap.id, ...deviceSnap.data() } as Device;
+          setDevice(deviceData);
+  
+          if (deviceData.hospitalId) {
+            const hospitalSnap = await getDoc(doc(db, 'hospitals', deviceData.hospitalId));
+            if (hospitalSnap.exists()) {
+              setHospital({ id: hospitalSnap.id, ...hospitalSnap.data() } as Hospital);
+            }
           }
         }
       } catch (err) {
-        console.error("Error fetching device/hospital data:", err);
+        console.error("Error fetching data:", err);
         toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
       } finally {
         setLoading(false);
       }
     })();
-  }, [deviceId, router, toast]);
+  }, [actualDeviceId, labHospitalId, isLabMode, router, toast]);
 
   // Load draft if draftId is in URL
   useEffect(() => {
-    if (!draftIdFromUrl || !deviceId) return;
+    if (!draftIdFromUrl) return;
+    if (!actualDeviceId && !labHospitalId) return;
     (async () => {
       try {
         const draftSnap = await getDoc(doc(db, 'draftActionForms', draftIdFromUrl));

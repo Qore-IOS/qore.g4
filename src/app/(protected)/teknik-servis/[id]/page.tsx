@@ -6,7 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import BackButton from '@/components/BackButton';
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
-import { AlertTriangle, CheckCircle, Loader2, Wrench, FilePenLine, FlaskConical, Building2, ChevronDown, ChevronUp, History, CalendarClock, RotateCcw, FileEdit, FilePlus } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Loader2, Wrench, FilePenLine, FlaskConical, Building2, ChevronDown, ChevronUp, History, CalendarClock, RotateCcw, FileEdit, FilePlus, ClipboardList } from 'lucide-react';
 import {
   collection,
   onSnapshot,
@@ -642,7 +642,14 @@ export default function TeknikServisDetayPage() {
                 <p className="text-sm text-[var(--dashboard-muted)]">Cihaz Durumları</p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => router.push(`/teknik-servis/islem-formu/lab-${hospitalId}`)}
+                className="cihaz-tool-item flex items-center gap-2 px-3 py-2 text-sm font-medium bg-[var(--dashboard-accent)] text-white hover:bg-[var(--dashboard-accent)]/90 shadow-sm"
+              >
+                <ClipboardList className="h-4 w-4" />
+                <span className="hidden sm:inline">Laboratuvar Formu</span>
+              </button>
               <button
                 onClick={() => setShowMaintenance(prev => !prev)}
                 className={cn(
