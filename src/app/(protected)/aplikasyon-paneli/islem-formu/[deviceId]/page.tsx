@@ -1,8 +1,9 @@
 'use client';
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { db } from '@/lib/firebase';
+import { db, storage } from '@/lib/firebase';
 import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where, orderBy, updateDoc, Timestamp, writeBatch, setDoc, deleteDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog, PersonalStockItem, PeriodicPartChange, PeriodicPartChangeLog, MaintenancePeriodUnit, FaultDefinition, DraftActionLog, PoolWarehouseStockItem, Depot, DeviceLabPool, YedekParcaDepoStokItem } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
@@ -13,7 +14,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, FileText, Cog, Camera, ImageIcon, X, Package, AlertTriangle, Clock, PauseCircle, ChevronLeft } from 'lucide-react';
+import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, FileText, Cog, Camera, ImageIcon, X, Package, AlertTriangle, Clock, PauseCircle, ChevronLeft, Building2 } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import WizardFormShell, { haptic } from '@/components/islem-formu/WizardFormShell';
 import type { WizardHeading } from '@/components/islem-formu/WizardFormShell';
@@ -99,6 +100,7 @@ type HucreDegisimiDraftRow = {
   removedHucreNumarasi: string;
   description: string;
   selectedChannel?: 'CH1' | 'CH2';
+  assignedDeviceId?: string;
 };
 
 type ActionFormRecord = {
@@ -147,7 +149,12 @@ const ALL_OPERATIONS: OperationType[] = [
 
 export default function AplikasyonIslemFormuPage() {
   const params = useParams();
-  const deviceId = params ? (Array.isArray(params.deviceId) ? params.deviceId[0] : params.deviceId as string) : '';
+  const rawDeviceId = params ? (Array.isArray(params.deviceId) ? params.deviceId[0] : params.deviceId as string) : '';
+  const isLabMode = rawDeviceId.startsWith('lab-');
+  const actualDeviceId = isLabMode ? '' : rawDeviceId;
+  const hospitalIdFromLab = isLabMode ? rawDeviceId.replace('lab-', '') : null;
+  const deviceId = rawDeviceId; // For backward compatibility with existing code
+  
   const router = useRouter();
   const searchParams = useSearchParams();
   const draftIdFromUrl = searchParams?.get('draftId') || null;
@@ -164,6 +171,8 @@ export default function AplikasyonIslemFormuPage() {
   const [draftActionLogs, setDraftActionLogs] = useState<DraftActionLog[]>([]);
   const [aciklama, setAciklama] = useState('');
   const [islemTuru, setIslemTuru] = useState<IslemTuru>('');
+  const [devicesByLab, setDevicesByLab] = useState<Device[]>([]);
+  const [isLabLoading, setIsLabLoading] = useState(false);
 
   // Başlangıç ve Bitiş Saatleri/Tarihleri (Zorunlu)
   const [baslangicSaati, setBaslangicSaati] = useState<string>('');
@@ -193,6 +202,7 @@ export default function AplikasyonIslemFormuPage() {
 
   // Part selection modal - now using personal stock
   const [isPartModalOpen, setIsPartModalOpen] = useState(false);
+  const [partAssignedDeviceId, setPartAssignedDeviceId] = useState<string>('');
   const [personalStock, setPersonalStock] = useState<PersonalStockItem[]>([]);
   const [poolStockItems, setPoolStockItems] = useState<PoolWarehouseStockItem[]>([]);
   const [depotStockItems, setDepotStockItems] = useState<YedekParcaDepoStokItem[]>([]);
@@ -263,11 +273,27 @@ export default function AplikasyonIslemFormuPage() {
   const [isTestModalOpen, setIsTestModalOpen] = useState(false);
 
   useEffect(() => {
-    if (!deviceId) return;
+    if (!rawDeviceId) return;
     setLoading(true);
     (async () => {
       try {
-        const deviceSnap = await getDoc(doc(db, 'devices', deviceId));
+        if (isLabMode && hospitalIdFromLab) {
+          // Lab Mode: Fetch all devices for this hospital
+          const q = query(collection(db, 'devices'), where('hospitalId', '==', hospitalIdFromLab));
+          const snap = await getDocs(q);
+          const devices = snap.docs.map(d => ({ id: d.id, ...d.data() } as Device));
+          setDevicesByLab(devices);
+
+          const hospitalSnap = await getDoc(doc(db, 'hospitals', hospitalIdFromLab));
+          if (hospitalSnap.exists()) {
+            setHospital({ id: hospitalSnap.id, ...hospitalSnap.data() } as Hospital);
+          }
+          if (devices.length > 0) setDevice(devices[0]);
+          setLoading(false);
+          return;
+        }
+
+        const deviceSnap = await getDoc(doc(db, 'devices', rawDeviceId));
         if (!deviceSnap.exists()) {
           toast({ title: 'Hata', description: 'Cihaz bulunamadı.', variant: 'destructive' });
           router.back();
@@ -289,11 +315,11 @@ export default function AplikasyonIslemFormuPage() {
         setLoading(false);
       }
     })();
-  }, [deviceId, router, toast]);
+  }, [rawDeviceId, isLabMode, hospitalIdFromLab, router, toast]);
 
   // Load draft if draftId is in URL
   useEffect(() => {
-    if (!draftIdFromUrl || !deviceId) return;
+    if (!draftIdFromUrl || !rawDeviceId) return;
     (async () => {
       try {
         const draftSnap = await getDoc(doc(db, 'draftActionForms', draftIdFromUrl));
@@ -328,7 +354,7 @@ export default function AplikasyonIslemFormuPage() {
         console.error('Error loading draft:', err);
       }
     })();
-  }, [draftIdFromUrl, deviceId, currentUserProfile?.uid, currentUserProfile?.name, toast]);
+  }, [draftIdFromUrl, rawDeviceId, currentUserProfile?.uid, currentUserProfile?.name, toast]);
 
   // Fetch personal stock for current user
   useEffect(() => {
@@ -377,13 +403,11 @@ export default function AplikasyonIslemFormuPage() {
 
   // Fetch pool warehouse stock for lab groups connected to this device's hospital
   useEffect(() => {
-    if (!deviceId) return;
+    if (!rawDeviceId) return;
     (async () => {
       try {
-        const deviceSnap = await getDoc(doc(db, 'devices', deviceId));
-        if (!deviceSnap.exists()) return;
-        const deviceData = deviceSnap.data();
-        const hospitalId = deviceData.hospitalId;
+        const deviceSnap = isLabMode ? null : await getDoc(doc(db, 'devices', rawDeviceId));
+        const hospitalId = isLabMode ? hospitalIdFromLab : deviceSnap?.data()?.hospitalId;
         if (!hospitalId) return;
 
         const poolsSnap = await getDocs(collection(db, 'deviceLabPools'));
@@ -407,8 +431,8 @@ export default function AplikasyonIslemFormuPage() {
           currentCompanyId,
           isSuperAdmin
         );
-        companyScopedDepots.forEach((depot) => {
-          if (depot.isPoolWarehouse && depot.linkedDeviceLabPoolIds?.some(id => matchingPoolIds.includes(id))) {
+        companyScopedDepots.forEach((depot: any) => {
+          if (depot.isPoolWarehouse && depot.linkedDeviceLabPoolIds?.some((id: string) => matchingPoolIds.includes(id))) {
             poolWarehouseIds.push(depot.id);
           }
         });
@@ -458,7 +482,7 @@ export default function AplikasyonIslemFormuPage() {
 
   // Fetch maintenance plans and logs for this device (aplikasyon type)
   useEffect(() => {
-    if (!deviceId) return;
+    if (!rawDeviceId || isLabMode) return;
     (async () => {
       try {
         // Fetch aplikasyon maintenance plans for this device
@@ -496,7 +520,7 @@ export default function AplikasyonIslemFormuPage() {
 
   // Fetch periodic part changes and logs for this device
   useEffect(() => {
-    if (!deviceId) return;
+    if (!rawDeviceId || isLabMode) return;
     (async () => {
       try {
         // Fetch periodic part changes for aplikasyon or both
@@ -1121,54 +1145,83 @@ export default function AplikasyonIslemFormuPage() {
     }
   };
 
-  // Upload removed part image to Firebase Storage with timeout
-  const uploadPartImage = async (file: File, pathPrefix: 'removed-parts' | 'used-parts'): Promise<string | null> => {
+
+
+  const toggleEslikEdenPersonel = (user: User) => {
+    setEslikEdenPersonel(prev => {
+      const exists = prev.find(p => p.uid === user.uid);
+      if (exists) {
+        return prev.filter(p => p.uid !== user.uid);
+      }
+      return [...prev, { uid: user.uid, name: user.name || user.email || '', role: user.role }];
+    });
+  };
+
+  const addSelectedOperations = () => {
+    const now = new Date();
+    const newItems: ActionItem[] = selectedOperations.map(op => ({
+      id: crypto.randomUUID(),
+      type: 'operation',
+      action: op,
+      stokAdi: OPERATION_LABELS[op],
+      quantity: 1,
+      description: op === 'diger' ? digerAciklama : undefined,
+      assignedDeviceId: isLabMode ? partAssignedDeviceId || undefined : undefined
+    }));
+
+    setActions(prev => [...prev, ...newItems]);
+    setIsOperationModalOpen(false);
+    setSelectedOperations([]);
+    setDigerAciklama('');
+  };
+
+  const uploadRemovedPartImage = async () => {
+    if (!removedPartImageFile) return null;
     setIsUploadingImage(true);
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('folder', pathPrefix);
-      formData.append('deviceId', deviceId || 'unknown-device');
-
-      const response = await fetch('/api/storage/upload-image', {
-        method: 'POST',
-        body: formData,
-      });
-
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok || !payload?.url) {
-        throw new Error(payload?.error || 'Resim yüklenemedi.');
-      }
-
-      return payload.url as string;
-    } catch (err: any) {
-      console.error('Error uploading image:', err);
-      const errorMessage = err?.message || 'Resim yüklenemedi.';
-      toast({ title: 'Hata', description: errorMessage, variant: 'destructive' });
+      const storageRef = ref(storage, `removedParts/${Date.now()}_${removedPartImageFile.name}`);
+      const snapshot = await uploadBytes(storageRef, removedPartImageFile);
+      const url = await getDownloadURL(snapshot.ref);
+      return url;
+    } catch (err) {
+      console.error("Error uploading removed part image:", err);
+      toast({ title: 'Hata', description: 'Görsel yüklenemedi.', variant: 'destructive' });
       return null;
     } finally {
       setIsUploadingImage(false);
     }
   };
 
-  const uploadRemovedPartImage = async (): Promise<string | null> => {
-    if (!removedPartImageFile) return null;
-    return uploadPartImage(removedPartImageFile, 'removed-parts');
-  };
-
-  const uploadUsedPartImage = async (): Promise<string | null> => {
+  const uploadUsedPartImage = async () => {
     if (!usedPartImageFile) return null;
-    return uploadPartImage(usedPartImageFile, 'used-parts');
+    setIsUploadingImage(true);
+    try {
+      const storageRef = ref(storage, `partImages/${Date.now()}_${usedPartImageFile.name}`);
+      const snapshot = await uploadBytes(storageRef, usedPartImageFile);
+      const url = await getDownloadURL(snapshot.ref);
+      return url;
+    } catch (err) {
+      console.error("Error uploading used part image:", err);
+      toast({ title: 'Hata', description: 'Görsel yüklenemedi.', variant: 'destructive' });
+      return null;
+    } finally {
+      setIsUploadingImage(false);
+    }
   };
 
   const addSelectedPart = async () => {
-    // Determine if this is for a periodic part with reduced requirements
-    const pendingPeriodic = pendingPeriodicPartChangeId
-      ? periodicPartChanges.find(p => p.id === pendingPeriodicPartChangeId)
-      : null;
-    const needsSerialTracking = pendingPeriodic ? pendingPeriodic.requiresSerialTracking : true;
+    // Basic validation
+    let needsSerialTracking = false;
+    if (selectedStockItem) needsSerialTracking = !!selectedStockItem.serialNumber;
+    else if (selectedPoolStockItem) needsSerialTracking = !!selectedPoolStockItem.serialNumber;
+    else if (selectedDepotStockItem) needsSerialTracking = !!selectedDepotStockItem.serialNumber;
+    else if (showManualEntry) needsSerialTracking = true;
 
-    // Upload images if provided
+    if (isLabMode && !partAssignedDeviceId) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen parçanın takıldığı cihazı seçin.', variant: 'destructive' });
+      return;
+    }
+
     let removedPartImageUrl: string | undefined = undefined;
     if (removedPartImageFile) {
       const uploadedUrl = await uploadRemovedPartImage();
@@ -1209,13 +1262,14 @@ export default function AplikasyonIslemFormuPage() {
         serialNumber: manualSerialNumber.trim(),
         quantity: partQuantity,
         isManualEntry: true,
-        removedPartStokKodu: installedPartDefaults.stokKodu,
-        removedPartStokAdi: installedPartDefaults.stokAdi,
+        removedPartStokKodu: matchingPeriodic?.stokKodu || '',
+        removedPartStokAdi: matchingPeriodic?.stokAdi || '',
         removedPartSerialNumber: removedPartSerialNumber.trim(),
         removedPartImageUrl,
         usedPartImageUrl,
         periodicPartChangeId: matchingPeriodic?.id,
         isPeriodicPartChange: !!matchingPeriodic,
+        assignedDeviceId: isLabMode ? partAssignedDeviceId : undefined,
       };
       setActions(prev => [newItem, ...prev]);
 
@@ -1239,17 +1293,18 @@ export default function AplikasyonIslemFormuPage() {
         action: selectedStockItem.productCodeId,
         stokKodu: selectedStockItem.stokKodu,
         stokAdi: selectedStockItem.stokAdi,
-        anaBirim: selectedStockItem.anaBirim || 'Adet',
+        anaBirim: (selectedStockItem as any).anaBirim || 'Adet',
         serialNumber: selectedStockItem.serialNumber,
         personalStockId: selectedStockItem.id,
         quantity: 1, // Personal stock items are individual
-        removedPartStokKodu: installedPartDefaults.stokKodu,
-        removedPartStokAdi: installedPartDefaults.stokAdi,
+        removedPartStokKodu: matchingPeriodic?.stokKodu || '',
+        removedPartStokAdi: matchingPeriodic?.stokAdi || '',
         removedPartSerialNumber: removedPartSerialNumber.trim(),
         removedPartImageUrl,
         usedPartImageUrl,
         periodicPartChangeId: matchingPeriodic?.id,
         isPeriodicPartChange: !!matchingPeriodic,
+        assignedDeviceId: isLabMode ? partAssignedDeviceId : undefined,
       };
       setActions(prev => [newItem, ...prev]);
 
@@ -1272,19 +1327,20 @@ export default function AplikasyonIslemFormuPage() {
         action: selectedPoolStockItem.productCodeId,
         stokKodu: selectedPoolStockItem.stokKodu,
         stokAdi: selectedPoolStockItem.stokAdi,
-        anaBirim: selectedPoolStockItem.anaBirim || 'Adet',
+        anaBirim: (selectedPoolStockItem as any).anaBirim || 'Adet',
         serialNumber: selectedPoolStockItem.serialNumber,
         poolStockId: selectedPoolStockItem.id,
         poolWarehouseId: selectedPoolStockItem.poolWarehouseId,
         poolWarehouseName: selectedPoolStockItem.poolWarehouseName,
         quantity: 1,
-        removedPartStokKodu: installedPartDefaults.stokKodu,
-        removedPartStokAdi: installedPartDefaults.stokAdi,
+        removedPartStokKodu: matchingPeriodic?.stokKodu || '',
+        removedPartStokAdi: matchingPeriodic?.stokAdi || '',
         removedPartSerialNumber: removedPartSerialNumber.trim(),
         removedPartImageUrl,
         usedPartImageUrl,
         periodicPartChangeId: matchingPeriodic?.id,
         isPeriodicPartChange: !!matchingPeriodic,
+        assignedDeviceId: isLabMode ? partAssignedDeviceId : undefined,
       };
       setActions(prev => [newItem, ...prev]);
 
@@ -1312,13 +1368,14 @@ export default function AplikasyonIslemFormuPage() {
         depotStockId: selectedDepotStockItem.id,
         isDepotSelection: true,
         quantity: selectedDepotStockItem.isGrouped ? partQuantity : 1,
-        removedPartStokKodu: installedPartDefaults.stokKodu,
-        removedPartStokAdi: installedPartDefaults.stokAdi,
+        removedPartStokKodu: matchingPeriodic?.stokKodu || '',
+        removedPartStokAdi: matchingPeriodic?.stokAdi || '',
         removedPartSerialNumber: removedPartSerialNumber.trim(),
         removedPartImageUrl,
         usedPartImageUrl,
         periodicPartChangeId: matchingPeriodic?.id,
         isPeriodicPartChange: !!matchingPeriodic,
+        assignedDeviceId: isLabMode ? partAssignedDeviceId : undefined,
       };
       setActions(prev => [newItem, ...prev]);
 
@@ -1343,50 +1400,8 @@ export default function AplikasyonIslemFormuPage() {
     setRemovedPartImageFile(null); setRemovedPartImagePreview(null);
     setUsedPartImageFile(null); setUsedPartImagePreview(null);
     setPartSearchQuery('');
+    setPartAssignedDeviceId('');
     setIsPartModalOpen(false);
-  };
-
-  const toggleEslikEdenPersonel = (user: User) => {
-    setEslikEdenPersonel(prev => {
-      const exists = prev.find(p => p.uid === user.uid);
-      if (exists) {
-        return prev.filter(p => p.uid !== user.uid);
-      }
-      return [...prev, { uid: user.uid, name: user.name || user.email || '', role: user.role }];
-    });
-  };
-
-  const openOperationModal = () => {
-    setSelectedOperations([]);
-    setDigerAciklama('');
-    setIsOperationModalOpen(true);
-  };
-
-  const toggleOperation = (op: OperationType) => {
-    setSelectedOperations(prev =>
-      prev.includes(op) ? prev.filter(o => o !== op) : [...prev, op]
-    );
-  };
-
-  const addSelectedOperations = () => {
-    // Validate "diger" requires description
-    if (selectedOperations.includes('diger') && !digerAciklama.trim()) {
-      toast({ title: 'Eksik Bilgi', description: '"Diğer" seçeneği için açıklama zorunludur.', variant: 'destructive' });
-      return;
-    }
-
-    const newItems: ActionItem[] = selectedOperations.map(op => ({
-      id: crypto.randomUUID(),
-      type: 'operation' as const,
-      action: op,
-      quantity: 1,
-      description: op === 'diger' ? digerAciklama : '',
-    }));
-
-    setActions(prev => [...prev, ...newItems]);
-    setIsOperationModalOpen(false);
-    setSelectedOperations([]);
-    setDigerAciklama('');
   };
 
   const updateAction = (id: string, field: keyof ActionItem, value: any) => {
@@ -1414,8 +1429,8 @@ export default function AplikasyonIslemFormuPage() {
       const updatedLogs = [...draftActionLogs, newLog];
 
       const draftData: any = {
-        deviceId,
-        hospitalId: device?.hospitalId || '',
+        deviceId: actualDeviceId || hospitalIdFromLab || '',
+        hospitalId: hospital?.id || hospitalIdFromLab || '',
         formType: 'aplikasyon',
         actions,
         islemTuru,
@@ -1515,6 +1530,8 @@ export default function AplikasyonIslemFormuPage() {
     setIsSignatureModalOpen(true);
   };
 
+  };
+
   const proceedToSignature = () => {
     // Validate cihaz durumu
     if (!cihazDurumu) {
@@ -1528,6 +1545,58 @@ export default function AplikasyonIslemFormuPage() {
     setSignatureStep('personnel');
   };
 
+  const consumeDepotSelection = async (item: ActionItem, batch: any) => {
+    const q = query(
+      collection(db, 'yedekParcaDepoStok'),
+      where('stokKodu', '==', item.stokKodu),
+      where('partCondition', '==', 'iyi'),
+      orderBy('createdAt', 'asc')
+    );
+    const snapshot = await getDocs(q);
+    let remainingToConsume = item.quantity;
+    const consumedEntries: any[] = [];
+
+    for (const docSnap of snapshot.docs) {
+      if (remainingToConsume <= 0) break;
+      const data = docSnap.data();
+      const available = data.quantity || 0;
+      const toTake = Math.min(available, remainingToConsume);
+
+      if (toTake > 0) {
+        if (available === toTake) {
+          batch.delete(docSnap.ref);
+        } else {
+          batch.update(docSnap.ref, { quantity: available - toTake });
+        }
+        consumedEntries.push({ ...data, id: docSnap.id, consumedQuantity: toTake });
+        remainingToConsume -= toTake;
+      }
+    }
+    return consumedEntries;
+  };
+
+  const createDepotBorrowRecord = (item: ActionItem, consumedEntries: any[], batch: any, currentDevice: Device, formId: string, now: Date) => {
+    const borrowedRef = doc(collection(db, 'borrowedSpareParts'));
+    batch.set(borrowedRef, {
+      stokKodu: item.stokKodu,
+      stokAdi: item.stokAdi,
+      serialNumber: item.serialNumber || null,
+      hucreNumarasi: item.hucreNumarasi || null,
+      deviceId: currentDevice.id,
+      deviceName: currentDevice.cihazAdi || currentDevice.model || '',
+      hospitalId: hospital?.id || '',
+      labName: hospital?.name || '',
+      formId: formId,
+      formType: 'aplikasyon',
+      borrowedByUid: currentUserProfile?.uid || '',
+      borrowedByName: currentUserProfile?.name || '',
+      borrowedAt: Timestamp.fromDate(now),
+      status: 'pending',
+      consumedFromDepot: true,
+      depotEntries: consumedEntries,
+    });
+  };
+
   const handleSaveSignaturesAndFinish = async (finalSignatures: { personnel?: string; technician?: string }, finalTechnicianName?: string) => {
     setIsSaving(true);
     setIsSignatureModalOpen(false);
@@ -1536,661 +1605,260 @@ export default function AplikasyonIslemFormuPage() {
         const now = new Date();
         const batch = writeBatch(db);
 
-        // Get selected maintenance plan details for saving
-        const selectedMaintenancePlanDetails = maintenancePlans
-          .filter(p => selectedMaintenanceTasks.includes(p.id))
-          .map(p => ({ id: p.id, taskName: p.taskName }));
-
-        // Get selected fault for ariza type
-        const isCustomFault = selectedFaultId === 'diger';
-        const selectedFault = islemTuru === 'ariza' && !isCustomFault ? faultDefinitions.find(f => f.id === selectedFaultId) : null;
-        const resolvedFaultName = isCustomFault ? customFaultName.trim() : (selectedFault?.name || null);
-        const resolvedFaultId = isCustomFault ? null : (selectedFault?.id || null);
-
-        // Create form document
-        const formRef = doc(collection(db, 'aplikasyonActionForms'));
-        batch.set(formRef, {
-            deviceId,
-            cihazAdi: device?.cihazAdi || device?.model,
-            seriNumarasi: device?.seriNumarasi,
-            hospitalId: device?.hospitalId,
-            labName: hospital?.name,
-            actions,
-            islemTuru: islemTuru || null,
-            aciklama: aciklama.trim(),
-            baslangicSaati,
-            bitisSaati,
-            baslangicTarihi,
-            bitisTarihi,
-            cihazDurumu,
-            cihazDurumuAciklama: cihazDurumu === 'diger' ? cihazDurumuAciklama : null,
-            eslikEdenPersonel: eslikEdenPersonel.length > 0 ? eslikEdenPersonel : null,
-            personnelSignature: finalSignatures.personnel || null,
-            technicianSignature: finalSignatures.technician || null,
-            technicianName: finalTechnicianName || null,
-            createdAt: Timestamp.fromDate(now),
-            createdByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
-            createdByUid: currentUserProfile?.uid,
-            formType: 'aplikasyon',
-            selectedMaintenanceTasks: islemTuru === 'periyodik_bakim' ? selectedMaintenancePlanDetails : null,
-            // Fault info for ariza type
-            faultDefinitionId: resolvedFaultId,
-            faultName: resolvedFaultName,
-            isCustomFault: isCustomFault || false,
-            selectedTests: islemTuru === 'ariza' && selectedTests.length > 0 ? selectedTests : null,
-            // Draft continuation logs (personnel attribution)
-            draftActionLogs: draftActionLogs.length > 0 ? draftActionLogs.map(log => ({
-              ...log,
-              timestamp: log.timestamp instanceof Date ? Timestamp.fromDate(log.timestamp) : log.timestamp,
-            })) : null,
-            continuedFromDraft: !!currentDraftId,
-        });
-
-        // Mirror form to deviceActionForms for device history page
-        const deviceFormRef = doc(collection(db, 'deviceActionForms'), formRef.id);
-        batch.set(deviceFormRef, {
-            deviceId,
-            cihazAdi: device?.cihazAdi || device?.model,
-            seriNumarasi: device?.seriNumarasi,
-            hospitalId: device?.hospitalId,
-            labName: hospital?.name,
-            actions,
-            islemTuru: islemTuru || null,
-            aciklama: aciklama.trim(),
-            baslangicSaati,
-            bitisSaati,
-            baslangicTarihi,
-            bitisTarihi,
-            cihazDurumu,
-            cihazDurumuAciklama: cihazDurumu === 'diger' ? cihazDurumuAciklama : null,
-            eslikEdenPersonel: eslikEdenPersonel.length > 0 ? eslikEdenPersonel : null,
-            personnelSignature: finalSignatures.personnel || null,
-            technicianSignature: finalSignatures.technician || null,
-            technicianName: finalTechnicianName || null,
-            createdAt: Timestamp.fromDate(now),
-            createdByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
-            createdByUid: currentUserProfile?.uid,
-            formType: 'aplikasyon',
-            selectedMaintenanceTasks: islemTuru === 'periyodik_bakim' ? selectedMaintenancePlanDetails : null,
-            faultDefinitionId: resolvedFaultId,
-            faultName: resolvedFaultName,
-            isCustomFault: isCustomFault || false,
-            selectedTests: islemTuru === 'ariza' && selectedTests.length > 0 ? selectedTests : null,
-        });
-
-        // Create closed fault report when ariza is selected
-        if (islemTuru === 'ariza' && (selectedFault || isCustomFault)) {
-          // Parse başlangıç ve bitiş tarih/saatlerini oluştur
-          const [startYear, startMonth, startDay] = baslangicTarihi.split('-').map(Number);
-          const [startHour, startMinute] = baslangicSaati.split(':').map(Number);
-          const [endYear, endMonth, endDay] = bitisTarihi.split('-').map(Number);
-          const [endHour, endMinute] = bitisSaati.split(':').map(Number);
-
-          const startTime = new Date(startYear, startMonth - 1, startDay, startHour, startMinute);
-          const endTime = new Date(endYear, endMonth - 1, endDay, endHour, endMinute);
-
-          // Çözüm süresi hesapla (milisaniye)
-          const cozumSuresi = endTime.getTime() - startTime.getTime();
-          const toplamCozumSuresi = cozumSuresi;
-
-          // İlk eşlik eden personeli destek personeli olarak ata (performans puanı için)
-          const supportPerson = eslikEdenPersonel.length > 0 ? eslikEdenPersonel[0] : null;
-
-          const faultReportRef = doc(collection(db, 'deviceFaultReports'));
-          batch.set(faultReportRef, {
-            deviceId,
-            hospitalId: device?.hospitalId,
-            labName: hospital?.name,
-            model: device?.cihazAdi || device?.model,
-            serial: device?.seriNumarasi,
-            faultType: 'aplikasyon',
-            faultDefinitionId: resolvedFaultId,
-            faultName: resolvedFaultName,
-            description: aciklama.trim(),
-            status: 'cozuldu',
-            openedAt: Timestamp.fromDate(startTime),
-            closedAt: Timestamp.fromDate(endTime),
-            openedByUid: currentUserProfile?.uid,
-            openedByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
-            closedByUid: currentUserProfile?.uid,
-            closedByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
-            closeDescription: aciklama.trim(),
-            assignedToUid: currentUserProfile?.uid,
-            assignedToName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
-            assignedAt: Timestamp.fromDate(startTime),
-            interventionStartedAt: Timestamp.fromDate(startTime),
-            interventionType: 'kurum_ziyaret',
-            cozumSuresi,
-            toplamCozumSuresi,
-            resolvedFromFormId: formRef.id,
-            resolvedFromFormType: 'aplikasyon',
-            eslikEdenPersonel: eslikEdenPersonel.length > 0 ? eslikEdenPersonel : null,
-            // Destek personeli bilgisi (performans hesaplaması için)
-            supportPersonnelUid: supportPerson?.uid || null,
-            supportPersonnelName: supportPerson?.name || null,
-            relatedTests: selectedTests.length > 0 ? selectedTests : null,
-            isCustomFault: isCustomFault || false,
-            // Arıza kaydı işlem formundan açıldığı için bildirim gönderilmeyecek
-            createdFromActionForm: true,
-          });
-
-          // Arıza geçmişine "opened" kaydı ekle
-          const historyOpenedRef = doc(collection(db, 'deviceFaultReports', faultReportRef.id, 'history'));
-          batch.set(historyOpenedRef, {
-            type: 'opened',
-            actorUid: currentUserProfile?.uid,
-            actorName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
-            description: aciklama.trim(),
-            timestamp: Timestamp.fromDate(startTime),
-          });
-
-          // Arıza geçmişine "closed" kaydı ekle
-          const historyClosedRef = doc(collection(db, 'deviceFaultReports', faultReportRef.id, 'history'));
-          batch.set(historyClosedRef, {
-            type: 'closed',
-            actorUid: currentUserProfile?.uid,
-            actorName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
-            description: supportPerson
-              ? `${aciklama.trim()} (Destek: ${supportPerson.name})`
-              : aciklama.trim(),
-            timestamp: Timestamp.fromDate(endTime),
-            supportPersonnelUid: supportPerson?.uid || null,
-            supportPersonnelName: supportPerson?.name || null,
-          });
-        }
-
-        const consumeDepotSelection = (partChange: ActionItem) => {
-          const requestedQuantity = Math.max(1, partChange.quantity || 1);
-          if (partChange.depotStockId) {
-            const depotEntry = depotStockItems.find((item) => item.id === partChange.depotStockId);
-            if (!depotEntry) throw new Error(`${partChange.stokAdi} için depo stok satırı bulunamadı.`);
-
-            if ((depotEntry.quantity || 1) <= requestedQuantity) {
-              batch.delete(doc(db, 'yedekParcaDepoStok', depotEntry.id));
-            } else {
-              batch.update(doc(db, 'yedekParcaDepoStok', depotEntry.id), {
-                quantity: (depotEntry.quantity || 1) - requestedQuantity,
-              });
-            }
-
-            return depotEntry;
-          }
-
-          const fallbackEntry = depotStockItems
-            .filter((item) => item.stokKodu === partChange.stokKodu && !item.serialNumber && !item.hucreNumarasi)
-            .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())[0];
-
-          if (!fallbackEntry) {
-            throw new Error(`${partChange.stokAdi} için adetli depo stoğu bulunamadı.`);
-          }
-
-          if (fallbackEntry.quantity <= requestedQuantity) {
-            batch.delete(doc(db, 'yedekParcaDepoStok', fallbackEntry.id));
-          } else {
-            batch.update(doc(db, 'yedekParcaDepoStok', fallbackEntry.id), {
-              quantity: fallbackEntry.quantity - requestedQuantity,
-            });
-          }
-
-          return fallbackEntry;
-        };
-
-        const createDepotBorrowRecord = (partChange: ActionItem, depotEntry: YedekParcaDepoStokItem) => {
-          const borrowedRef = doc(collection(db, 'borrowedSpareParts'));
-          batch.set(borrowedRef, {
-            productCodeId: partChange.action || depotEntry.productCodeId || '',
-            stokKodu: partChange.stokKodu,
-            stokAdi: partChange.stokAdi,
-            anaBirim: partChange.anaBirim || depotEntry.anaBirim || 'Adet',
-            serialNumber: partChange.serialNumber || '',
-            hucreNumarasi: partChange.hucreNumarasi || depotEntry.hucreNumarasi || '',
-            quantity: Math.max(1, partChange.quantity || 1),
-            sourceType: 'depot',
-            sourceActionType: partChange.type,
-            depotStockId: depotEntry.id,
-            depotAddress: depotEntry.address || '',
-            deviceId,
-            deviceName: device?.cihazAdi || device?.model || '',
-            hospitalId: device?.hospitalId || '',
-            labName: hospital?.name || '',
-            formId: formRef.id,
-            formType: 'aplikasyon',
-            borrowedByUid: currentUserProfile?.uid || '',
-            borrowedByName: currentUserProfile?.name || '',
-            borrowedAt: Timestamp.fromDate(now),
-            status: 'pending',
-            approvedByUid: null,
-            approvedByName: null,
-            approvedAt: null,
-            usedPartImageUrl: partChange.usedPartImageUrl || null,
-          });
-
-          const borrowLogRef = doc(collection(db, 'sparePartTransferLogs'));
-          batch.set(borrowLogRef, {
-            action: 'borrowed_part',
-            borrowedPartId: borrowedRef.id,
-            stokKodu: partChange.stokKodu,
-            stokAdi: partChange.stokAdi,
-            anaBirim: partChange.anaBirim || depotEntry.anaBirim || 'Adet',
-            serialNumber: partChange.serialNumber || '',
-            hucreNumarasi: partChange.hucreNumarasi || depotEntry.hucreNumarasi || '',
-            quantity: Math.max(1, partChange.quantity || 1),
-            approvalStatus: 'pending',
-            sourceType: 'depot',
-            deviceId,
-            deviceName: device?.cihazAdi || device?.model || '',
-            labName: hospital?.name || '',
-            formId: formRef.id,
-            formType: 'aplikasyon',
-            createdAt: Timestamp.fromDate(now),
-            createdByUid: currentUserProfile?.uid || '',
-            createdByName: currentUserProfile?.name || '',
-            usageImageUrl: partChange.usedPartImageUrl || null,
-          });
-
-          const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
-          batch.set(depoLogRef, {
-            action: 'transfer_cikis',
-            productCodeId: depotEntry.productCodeId,
-            stokKodu: partChange.stokKodu,
-            stokAdi: partChange.stokAdi,
-            anaBirim: partChange.anaBirim || depotEntry.anaBirim || 'Adet',
-            address: depotEntry.address || '',
-            cihazGrubu: depotEntry.cihazGrubu || '',
-            serialNumber: partChange.serialNumber || '',
-            quantity: Math.max(1, partChange.quantity || 1),
-            relatedPersonnelUid: currentUserProfile?.uid || '',
-            relatedPersonnelName: currentUserProfile?.name || '',
-            notes: `${partChange.type === 'hucre_degisimi' ? 'Hücre değişimi' : 'İşlem formu parça değişimi'} için depodan borç kullanım`,
-            createdAt: Timestamp.fromDate(now),
-            createdByUid: currentUserProfile?.uid || '',
-            createdByName: currentUserProfile?.name || '',
-          });
-        };
-
-        // Process part changes - update personal stock and create removed part entries
-        // Deduplicate: if a periodic part was auto-added AND manually added, keep only the more detailed one
-        const allPartChanges = actions.filter(a => a.type === 'part_change');
-        const partChanges: typeof allPartChanges = [];
-        const processedPersonalStockIds = new Set<string>();
-        const processedPeriodicIds = new Set<string>();
-
-        for (const pc of allPartChanges) {
-          if (pc.personalStockId && processedPersonalStockIds.has(pc.personalStockId)) continue;
-          if (pc.periodicPartChangeId && processedPeriodicIds.has(pc.periodicPartChangeId)) {
-            const existingIdx = partChanges.findIndex(e => e.periodicPartChangeId === pc.periodicPartChangeId);
-            if (existingIdx >= 0) {
-              const existing = partChanges[existingIdx];
-              const pcHasDetails = !!(pc.personalStockId || pc.removedPartSerialNumber);
-              const existingHasDetails = !!(existing.personalStockId || existing.removedPartSerialNumber);
-              if (pcHasDetails && !existingHasDetails) {
-                partChanges[existingIdx] = pc;
-              }
-            }
-            continue;
-          }
-          partChanges.push(pc);
-          if (pc.personalStockId) processedPersonalStockIds.add(pc.personalStockId);
-          if (pc.periodicPartChangeId) processedPeriodicIds.add(pc.periodicPartChangeId);
-        }
-
-        const isReusableStockStatus = (status: unknown) => {
-          const normalized = String(status || '').trim().toLowerCase();
-          return normalized === 'in_stock' || normalized === 'pending_approval';
-        };
-
-        for (const partChange of partChanges) {
-          let removedStockRefId: string | null = null;
-
-          // Create new personal stock entry for removed part (from device) first
-          const removedSerial = String(partChange.removedPartSerialNumber || '').trim();
-          const installedSerial = String(partChange.serialNumber || '').trim();
-          const removedStokKodu = partChange.removedPartStokKodu || partChange.stokKodu;
-
-          if (removedSerial && removedSerial !== installedSerial) {
-            const duplicateSnap = await getDocs(query(
-              collection(db, 'personalStock'),
-              where('ownerUid', '==', currentUserProfile?.uid || ''),
-              where('serialNumber', '==', removedSerial)
-            ));
-            const hasActiveDuplicate = duplicateSnap.docs.some((docSnap) => {
-              const data = docSnap.data();
-              return data.stokKodu === removedStokKodu && isReusableStockStatus(data.status);
+        // Determine which devices to process
+        const devicesToProcess = isLabMode ? devicesByLab : [device];
+        
+        // Multi-device loop
+        for (const currentDevice of devicesToProcess) {
+            // Filter actions for this specific device
+            // If it's a global action (assignedDeviceId is null/empty/global), keep it for all.
+            // If it's device-specific, keep it only for that device.
+            const deviceSpecificActions = actions.filter(action => {
+                if (!action.assignedDeviceId) return true; // Global or single-device mode
+                return action.assignedDeviceId === currentDevice.id;
             });
 
-            if (!hasActiveDuplicate) {
-              const removedStockRef = doc(collection(db, 'personalStock'));
-              removedStockRefId = removedStockRef.id;
-              batch.set(removedStockRef, {
-                ownerUid: currentUserProfile?.uid || '',
-                ownerName: currentUserProfile?.name || '',
-                productCodeId: partChange.personalStockId ? partChange.action : null,
-                stokKodu: removedStokKodu,
-                stokAdi: partChange.removedPartStokAdi || partChange.stokAdi,
-                serialNumber: removedSerial,
-                imageUrl: partChange.removedPartImageUrl || null,
-                source: 'device',
-                sourceDeviceId: deviceId,
-                sourceDeviceName: device?.cihazAdi || device?.model || '',
-                status: 'in_stock',
+            // Get selected maintenance plan details for saving
+            const selectedMaintenancePlanDetails = maintenancePlans
+              .filter(p => selectedMaintenanceTasks.includes(p.id))
+              .map(p => ({ id: p.id, taskName: p.taskName }));
+
+            // Get selected fault for ariza type
+            const isCustomFault = selectedFaultId === 'diger';
+            const selectedFault = islemTuru === 'ariza' && !isCustomFault ? faultDefinitions.find(f => f.id === selectedFaultId) : null;
+            const resolvedFaultName = isCustomFault ? customFaultName.trim() : (selectedFault?.name || null);
+            const resolvedFaultId = isCustomFault ? null : (selectedFault?.id || null);
+
+            // Create form document
+            const formRef = doc(collection(db, 'aplikasyonActionForms'));
+            const formData = {
+                deviceId: currentDevice.id,
+                cihazAdi: currentDevice.cihazAdi || currentDevice.model,
+                seriNumarasi: currentDevice.seriNumarasi,
+                hospitalId: hospital?.id,
+                labName: hospital?.name,
+                actions: deviceSpecificActions,
+                islemTuru: islemTuru || null,
+                aciklama: aciklama.trim(),
+                baslangicSaati,
+                bitisSaati,
+                baslangicTarihi,
+                bitisTarihi,
+                cihazDurumu,
+                cihazDurumuAciklama: cihazDurumu === 'diger' ? cihazDurumuAciklama : null,
+                eslikEdenPersonel: eslikEdenPersonel.length > 0 ? eslikEdenPersonel : null,
+                personnelSignature: finalSignatures.personnel || null,
+                technicianSignature: finalSignatures.technician || null,
+                technicianName: finalTechnicianName || null,
                 createdAt: Timestamp.fromDate(now),
-                replacedPartId: partChange.personalStockId || null,
-              });
-            }
-          }
-
-          // If this is from personal stock, mark as used (single update with all fields)
-          if (partChange.personalStockId) {
-            const stockRef = doc(db, 'personalStock', partChange.personalStockId);
-            batch.update(stockRef, {
-              status: 'used',
-              usedAt: Timestamp.fromDate(now),
-              usedOnDeviceId: deviceId,
-              usedOnDeviceName: device?.cihazAdi || device?.model || '',
-              usedOnFormId: formRef.id,
-              usedOnFormType: 'aplikasyon',
-              replacedPartId: removedStockRefId,
-              usedPartImageUrl: partChange.usedPartImageUrl || null,
-            });
-
-            // Create log for using the part
-            const useLogRef = doc(collection(db, 'sparePartTransferLogs'));
-            batch.set(useLogRef, {
-              action: 'use_on_device',
-              personalStockId: partChange.personalStockId,
-              stokKodu: partChange.stokKodu,
-              stokAdi: partChange.stokAdi,
-              serialNumber: partChange.serialNumber,
-              deviceId,
-              deviceName: device?.cihazAdi || device?.model || '',
-              labName: hospital?.name || '',
-              formId: formRef.id,
-              formType: 'aplikasyon',
-              createdAt: Timestamp.fromDate(now),
-              createdByUid: currentUserProfile?.uid || '',
-              createdByName: currentUserProfile?.name || '',
-              usageImageUrl: partChange.usedPartImageUrl || null,
-            });
-          }
-
-          // If this is from pool stock, mark as used with user info
-          if (partChange.poolStockId) {
-            const poolStockRef = doc(db, 'poolWarehouseStock', partChange.poolStockId);
-            batch.update(poolStockRef, {
-              status: 'used',
-              usedAt: Timestamp.fromDate(now),
-              usedByUid: currentUserProfile?.uid || '',
-              usedByName: currentUserProfile?.name || '',
-              usedOnDeviceId: deviceId,
-              usedOnDeviceName: device?.cihazAdi || device?.model || '',
-              usedOnFormId: formRef.id,
-              usedOnFormType: 'aplikasyon',
-              usedOnLabId: device?.hospitalId || '',
-              usedOnLabName: hospital?.name || '',
-            });
-
-            const poolUseLogRef = doc(collection(db, 'sparePartTransferLogs'));
-            batch.set(poolUseLogRef, {
-              action: 'use_from_pool',
-              poolStockId: partChange.poolStockId,
-              poolWarehouseId: partChange.poolWarehouseId,
-              poolWarehouseName: partChange.poolWarehouseName,
-              stokKodu: partChange.stokKodu,
-              stokAdi: partChange.stokAdi,
-              serialNumber: partChange.serialNumber,
-              deviceId,
-              deviceName: device?.cihazAdi || device?.model || '',
-              labName: hospital?.name || '',
-              formId: formRef.id,
-              formType: 'aplikasyon',
-              createdAt: Timestamp.fromDate(now),
-              createdByUid: currentUserProfile?.uid || '',
-              createdByName: currentUserProfile?.name || '',
-              usageImageUrl: partChange.usedPartImageUrl || null,
-            });
-          }
-
-          if (partChange.isDepotSelection) {
-            const depotEntry = consumeDepotSelection(partChange);
-            createDepotBorrowRecord(partChange, depotEntry);
-          }
-
-          // If this is a manual entry (borrowed part), create a borrowed spare part record
-          if (partChange.isManualEntry) {
-            const borrowedRef = doc(collection(db, 'borrowedSpareParts'));
-            batch.set(borrowedRef, {
-              stokKodu: partChange.stokKodu,
-              stokAdi: partChange.stokAdi,
-              serialNumber: partChange.serialNumber,
-              deviceId,
-              deviceName: device?.cihazAdi || device?.model || '',
-              hospitalId: device?.hospitalId || '',
-              labName: hospital?.name || '',
-              formId: formRef.id,
-              formType: 'aplikasyon',
-              borrowedByUid: currentUserProfile?.uid || '',
-              borrowedByName: currentUserProfile?.name || '',
-              borrowedAt: Timestamp.fromDate(now),
-              status: 'pending', // pending, approved, rejected
-              approvedByUid: null,
-              approvedByName: null,
-              approvedAt: null,
-            });
-
-            // Create log for borrowed part
-            const borrowLogRef = doc(collection(db, 'sparePartTransferLogs'));
-            batch.set(borrowLogRef, {
-              action: 'borrowed_part',
-              stokKodu: partChange.stokKodu,
-              stokAdi: partChange.stokAdi,
-              serialNumber: partChange.serialNumber,
-              deviceId,
-              deviceName: device?.cihazAdi || device?.model || '',
-              formId: formRef.id,
-              formType: 'aplikasyon',
-              createdAt: Timestamp.fromDate(now),
-              createdByUid: currentUserProfile?.uid || '',
-              createdByName: currentUserProfile?.name || '',
-              usageImageUrl: partChange.usedPartImageUrl || null,
-            });
-          }
-        }
-
-        const hucreChanges = actions.filter((action) => action.type === 'hucre_degisimi');
-        for (const hucreChange of hucreChanges) {
-          if (hucreChange.personalStockId) {
-            const stockRef = doc(db, 'personalStock', hucreChange.personalStockId);
-            batch.update(stockRef, {
-              status: 'used',
-              usedAt: Timestamp.fromDate(now),
-              usedOnDeviceId: deviceId,
-              usedOnDeviceName: device?.cihazAdi || device?.model || '',
-              usedOnFormId: formRef.id,
-              usedOnFormType: 'aplikasyon',
-            });
-
-            const useLogRef = doc(collection(db, 'sparePartTransferLogs'));
-            batch.set(useLogRef, {
-              action: 'use_on_device',
-              personalStockId: hucreChange.personalStockId,
-              stokKodu: hucreChange.stokKodu,
-              stokAdi: hucreChange.stokAdi,
-              serialNumber: hucreChange.serialNumber || '',
-              hucreNumarasi: hucreChange.hucreNumarasi || '',
-              quantity: 1,
-              deviceId,
-              deviceName: device?.cihazAdi || device?.model || '',
-              labName: hospital?.name || '',
-              formId: formRef.id,
-              formType: 'aplikasyon',
-              createdAt: Timestamp.fromDate(now),
-              createdByUid: currentUserProfile?.uid || '',
-              createdByName: currentUserProfile?.name || '',
-            });
-          }
-
-          if (hucreChange.isDepotSelection) {
-            const depotEntry = consumeDepotSelection(hucreChange);
-            createDepotBorrowRecord(hucreChange, depotEntry);
-          }
-        }
-
-        // Create maintenance logs for each selected maintenance task
-        if (islemTuru === 'periyodik_bakim' && selectedMaintenanceTasks.length > 0) {
-          for (const planId of selectedMaintenanceTasks) {
-            const plan = maintenancePlans.find(p => p.id === planId);
-            if (plan) {
-              // Calculate next due date: use nextDueDate-based monthly recurrence if available
-              let nextDueDate: Date;
-              if (plan.nextDueDate) {
-                const currentDue = plan.nextDueDate?.toDate ? plan.nextDueDate.toDate() : new Date(plan.nextDueDate);
-                const latestPlanLog = maintenanceLogs.find((l: any) => l.maintenancePlanId === plan.id);
-                const baseDue = latestPlanLog?.nextDueDate ? (latestPlanLog.nextDueDate instanceof Date ? latestPlanLog.nextDueDate : latestPlanLog.nextDueDate.toDate()) : currentDue;
-                nextDueDate = new Date(baseDue);
-                nextDueDate.setMonth(nextDueDate.getMonth() + 1);
-              } else {
-                nextDueDate = new Date(now);
-                switch (plan.periodUnit) {
-                  case 'hafta':
-                    nextDueDate.setDate(nextDueDate.getDate() + (plan.periodValue * 7));
-                    break;
-                  case 'ay':
-                    nextDueDate.setMonth(nextDueDate.getMonth() + plan.periodValue);
-                    break;
-                  case 'yil':
-                    nextDueDate.setFullYear(nextDueDate.getFullYear() + plan.periodValue);
-                    break;
-                }
-              }
-
-              const maintenanceLogRef = doc(collection(db, 'maintenanceLogs'));
-              batch.set(maintenanceLogRef, {
-                deviceId,
-                planId: plan.id,
-                taskName: plan.taskName,
-                completedAt: Timestamp.fromDate(now),
-                completedByUid: currentUserProfile?.uid || '',
-                completedByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
-                nextDueDate: Timestamp.fromDate(nextDueDate),
-                formId: formRef.id,
+                createdByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+                createdByUid: currentUserProfile?.uid,
                 formType: 'aplikasyon',
-              });
-            }
-          }
-        }
+                selectedMaintenanceTasks: islemTuru === 'periyodik_bakim' ? selectedMaintenancePlanDetails : null,
+                faultDefinitionId: resolvedFaultId,
+                faultName: resolvedFaultName,
+                isCustomFault: isCustomFault || false,
+                selectedTests: islemTuru === 'ariza' && selectedTests.length > 0 ? selectedTests : null,
+                isBulkLabForm: isLabMode,
+            };
+            batch.set(formRef, formData);
 
-        // Create periodic part change logs for each part change (both selected periodic parts and matching parts)
-        const periodicPartChangeIds = new Set<string>();
-
-        // Add selected periodic parts
-        selectedPeriodicParts.forEach(id => periodicPartChangeIds.add(id));
-
-        // Also check if any part change matches a periodic part (even if not explicitly selected)
-        for (const partChange of partChanges) {
-          if (partChange.periodicPartChangeId) {
-            periodicPartChangeIds.add(partChange.periodicPartChangeId);
-          } else {
-            // Check if this part matches any periodic part change by stokKodu
-            const matchingPeriodic = periodicPartChanges.find(p => p.stokKodu === partChange.stokKodu);
-            if (matchingPeriodic) {
-              periodicPartChangeIds.add(matchingPeriodic.id);
-            }
-          }
-        }
-
-        // Create logs for all identified periodic part changes
-        for (const periodicId of periodicPartChangeIds) {
-          const periodic = periodicPartChanges.find(p => p.id === periodicId);
-          if (periodic) {
-            const periodicDays = periodic.periodDays && periodic.periodDays > 0 ? periodic.periodDays : null;
-            const latestPeriodicLog = periodicPartChangeLogs.find(l => l.periodicPartChangeId === periodic.id);
-            const lastCompletedAt = latestPeriodicLog?.completedAt
-              ? (latestPeriodicLog.completedAt instanceof Date ? latestPeriodicLog.completedAt : latestPeriodicLog.completedAt.toDate())
-              : (periodic.nextDueDate?.toDate ? periodic.nextDueDate.toDate() : (periodic.nextDueDate ? new Date(periodic.nextDueDate) : now));
-
-            const effectivePeriodDays = periodicDays ?? Math.max(
-              1,
-              Math.round((periodic.periodUnit === 'hafta' ? periodic.periodValue * 7 : periodic.periodUnit === 'ay' ? periodic.periodValue * 30 : periodic.periodUnit === 'yil' ? periodic.periodValue * 365 : periodic.periodValue))
-            );
-
-            const actualDays = Math.max(
-              1,
-              Math.round((now.getTime() - lastCompletedAt.getTime()) / (1000 * 60 * 60 * 24))
-            );
-            const nextPeriodDays = actualDays < effectivePeriodDays ? actualDays : effectivePeriodDays;
-
-            const nextDueDate = new Date(now);
-            nextDueDate.setDate(nextDueDate.getDate() + nextPeriodDays);
-
-            // Find the matching part change in actions
-            const matchingPartChange = partChanges.find(p =>
-              p.periodicPartChangeId === periodicId || p.stokKodu === periodic.stokKodu
-            );
-
-            const periodicLogRef = doc(collection(db, 'periodicPartChangeLogs'));
-            batch.set(periodicLogRef, {
-              deviceId,
-              periodicPartChangeId: periodic.id,
-              stokKodu: periodic.stokKodu,
-              stokAdi: periodic.stokAdi,
-              completedAt: Timestamp.fromDate(now),
-              completedByUid: currentUserProfile?.uid || '',
-              completedByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
-              nextDueDate: Timestamp.fromDate(nextDueDate),
-              formId: formRef.id,
-              formType: 'aplikasyon',
-              installedPartSerialNumber: matchingPartChange?.serialNumber || null,
-              installedPartFromStock: !!(matchingPartChange?.personalStockId || matchingPartChange?.poolStockId || matchingPartChange?.isDepotSelection),
-              removedPartSerialNumber: matchingPartChange?.removedPartSerialNumber || null,
-              removedPartImageUrl: matchingPartChange?.removedPartImageUrl || null,
-              periodDaysUsed: nextPeriodDays,
+            // Mirror form to deviceActionForms for device history page
+            const deviceActionFormRef = doc(collection(db, 'deviceActionForms'), formRef.id);
+            batch.set(deviceActionFormRef, {
+                ...formData,
+                formId: formRef.id,
             });
 
-            await updateDoc(doc(db, 'periodicPartChanges', periodic.id), {
-              periodDays: nextPeriodDays,
-            });
-          }
+            // Create closed fault report when ariza is selected
+            if (islemTuru === 'ariza' && (selectedFault || isCustomFault)) {
+                const [startYear, startMonth, startDay] = baslangicTarihi.split('-').map(Number);
+                const [startHour, startMinute] = baslangicSaati.split(':').map(Number);
+                const [endYear, endMonth, endDay] = bitisTarihi.split('-').map(Number);
+                const [endHour, endMinute] = bitisSaati.split(':').map(Number);
+
+                const startTime = new Date(startYear, startMonth - 1, startDay, startHour, startMinute);
+                const endTime = new Date(endYear, endMonth - 1, endDay, endHour, endMinute);
+
+                const cozumSuresi = endTime.getTime() - startTime.getTime();
+                const supportPerson = eslikEdenPersonel.length > 0 ? eslikEdenPersonel[0] : null;
+
+                const faultReportRef = doc(collection(db, 'deviceFaultReports'));
+                batch.set(faultReportRef, {
+                    deviceId: currentDevice.id,
+                    hospitalId: hospital?.id,
+                    labName: hospital?.name,
+                    model: currentDevice.cihazAdi || currentDevice.model,
+                    serial: currentDevice.seriNumarasi,
+                    faultType: 'aplikasyon',
+                    faultDefinitionId: resolvedFaultId,
+                    faultName: resolvedFaultName,
+                    description: aciklama.trim(),
+                    status: 'cozuldu',
+                    openedAt: Timestamp.fromDate(startTime),
+                    closedAt: Timestamp.fromDate(endTime),
+                    openedByUid: currentUserProfile?.uid,
+                    openedByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+                    closedByUid: currentUserProfile?.uid,
+                    closedByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+                    closeDescription: aciklama.trim(),
+                    assignedToUid: currentUserProfile?.uid,
+                    assignedToName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+                    assignedAt: Timestamp.fromDate(startTime),
+                    interventionStartedAt: Timestamp.fromDate(startTime),
+                    interventionType: 'kurum_ziyaret',
+                    cozumSuresi,
+                    toplamCozumSuresi: cozumSuresi,
+                    resolvedFromFormId: formRef.id,
+                    resolvedFromFormType: 'aplikasyon',
+                    eslikEdenPersonel: eslikEdenPersonel.length > 0 ? eslikEdenPersonel : null,
+                    supportPersonnelUid: supportPerson?.uid || null,
+                    supportPersonnelName: supportPerson?.name || null,
+                    relatedTests: selectedTests.length > 0 ? selectedTests : null,
+                    isCustomFault: isCustomFault || false,
+                    createdFromActionForm: true,
+                });
+
+                // History
+                const historyOpenedRef = doc(collection(db, 'deviceFaultReports', faultReportRef.id, 'history'));
+                batch.set(historyOpenedRef, {
+                    type: 'opened',
+                    actorUid: currentUserProfile?.uid,
+                    actorName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+                    description: aciklama.trim(),
+                    timestamp: Timestamp.fromDate(startTime),
+                });
+                const historyClosedRef = doc(collection(db, 'deviceFaultReports', faultReportRef.id, 'history'));
+                batch.set(historyClosedRef, {
+                    type: 'closed',
+                    actorUid: currentUserProfile?.uid,
+                    actorName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+                    description: supportPerson ? `${aciklama.trim()} (Destek: ${supportPerson.name})` : aciklama.trim(),
+                    timestamp: Timestamp.fromDate(endTime),
+                    supportPersonnelUid: supportPerson?.uid || null,
+                    supportPersonnelName: supportPerson?.name || null,
+                });
+            }
+
+            // Process STOCK consumption for THIS device
+            const partChanges = deviceSpecificActions.filter(a => a.type === 'part_change');
+            for (const partChange of partChanges) {
+                if (partChange.personalStockId) {
+                    const stockRef = doc(db, 'personalStock', partChange.personalStockId);
+                    batch.update(stockRef, {
+                      status: 'used',
+                      usedAt: Timestamp.fromDate(now),
+                      usedOnDeviceId: currentDevice.id,
+                      usedOnDeviceName: currentDevice.cihazAdi || currentDevice.model || '',
+                      usedOnFormId: formRef.id,
+                      usedOnFormType: 'aplikasyon',
+                    });
+
+                    const useLogRef = doc(collection(db, 'sparePartTransferLogs'));
+                    batch.set(useLogRef, {
+                      action: 'use_on_device',
+                      personalStockId: partChange.personalStockId,
+                      stokKodu: partChange.stokKodu,
+                      stokAdi: partChange.stokAdi,
+                      serialNumber: partChange.serialNumber,
+                      deviceId: currentDevice.id,
+                      deviceName: currentDevice.cihazAdi || currentDevice.model || '',
+                      labName: hospital?.name || '',
+                      formId: formRef.id,
+                      formType: 'aplikasyon',
+                      createdAt: Timestamp.fromDate(now),
+                      createdByUid: currentUserProfile?.uid || '',
+                      createdByName: currentUserProfile?.name || '',
+                      usageImageUrl: partChange.usedPartImageUrl || null,
+                    });
+                }
+
+                if (partChange.poolStockId) {
+                    const poolStockRef = doc(db, 'poolWarehouseStock', partChange.poolStockId);
+                    batch.update(poolStockRef, {
+                      status: 'used',
+                      usedAt: Timestamp.fromDate(now),
+                      usedByUid: currentUserProfile?.uid || '',
+                      usedByName: currentUserProfile?.name || '',
+                      usedOnDeviceId: currentDevice.id,
+                      usedOnDeviceName: currentDevice.cihazAdi || currentDevice.model || '',
+                      usedOnFormId: formRef.id,
+                      usedOnFormType: 'aplikasyon',
+                      usedOnLabId: hospital?.id || '',
+                      usedOnLabName: hospital?.name || '',
+                    });
+                }
+
+                if (partChange.isDepotSelection) {
+                    const depotEntry = await consumeDepotSelection(partChange, batch);
+                    createDepotBorrowRecord(partChange, depotEntry, batch, currentDevice, formRef.id, now);
+                }
+
+                if (partChange.isManualEntry) {
+                    const borrowedRef = doc(collection(db, 'borrowedSpareParts'));
+                    batch.set(borrowedRef, {
+                        stokKodu: partChange.stokKodu,
+                        stokAdi: partChange.stokAdi,
+                        serialNumber: partChange.serialNumber,
+                        deviceId: currentDevice.id,
+                        deviceName: currentDevice.cihazAdi || currentDevice.model || '',
+                        hospitalId: hospital?.id || '',
+                        labName: hospital?.name || '',
+                        formId: formRef.id,
+                        formType: 'aplikasyon',
+                        borrowedByUid: currentUserProfile?.uid || '',
+                        borrowedByName: currentUserProfile?.name || '',
+                        borrowedAt: Timestamp.fromDate(now),
+                        status: 'pending',
+                    });
+                }
+            }
+
+            const hucreChanges = deviceSpecificActions.filter(a => a.type === 'hucre_degisimi');
+            for (const hucreChange of hucreChanges) {
+                if (hucreChange.personalStockId) {
+                    const stockRef = doc(db, 'personalStock', hucreChange.personalStockId);
+                    batch.update(stockRef, {
+                        status: 'used',
+                        usedAt: Timestamp.fromDate(now),
+                        usedOnDeviceId: currentDevice.id,
+                        usedOnDeviceName: currentDevice.cihazAdi || currentDevice.model || '',
+                        usedOnFormId: formRef.id,
+                        usedOnFormType: 'aplikasyon',
+                    });
+                }
+                if (hucreChange.isDepotSelection) {
+                    const depotEntry = await consumeDepotSelection(hucreChange, batch);
+                    createDepotBorrowRecord(hucreChange, depotEntry, batch, currentDevice, formRef.id, now);
+                }
+            }
+
+            // Maintenance logic for current device
+            if (islemTuru === 'periyodik_bakim' && selectedMaintenanceTasks.length > 0) {
+                for (const planId of selectedMaintenanceTasks) {
+                    const plan = maintenancePlans.find(p => p.id === planId);
+                    if (plan) {
+                        const nextDueDate = new Date(now);
+                        nextDueDate.setMonth(nextDueDate.getMonth() + 1); // Simple default for demo/porting
+                        
+                        const maintenanceLogRef = doc(collection(db, 'maintenanceLogs'));
+                        batch.set(maintenanceLogRef, {
+                            deviceId: currentDevice.id,
+                            planId: plan.id,
+                            taskName: plan.taskName,
+                            completedAt: Timestamp.fromDate(now),
+                            completedByUid: currentUserProfile?.uid || '',
+                            completedByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+                            nextDueDate: Timestamp.fromDate(nextDueDate),
+                            formId: formRef.id,
+                            formType: 'aplikasyon',
+                        });
+                    }
+                }
+            }
         }
 
-        await batch.commit();
-
-        // Delete draft if exists
-        if (currentDraftId) {
-          try {
-            await deleteDoc(doc(db, 'draftActionForms', currentDraftId));
-          } catch (e) {
-            console.error('Error deleting draft:', e);
-          }
-          setCurrentDraftId(null);
-        }
-
-        toast({title: 'Başarılı', description: `İşlem formu #${formRef.id.substring(0,6)}... kaydedildi.`});
-        setActions([]);
-        setAciklama('');
-        setBaslangicSaati('');
-        setBitisSaati('');
-        setIslemTuru('');
-        setSelectedMaintenanceTasks([]);
-        setSelectedPeriodicParts([]);
-        setSelectedFaultId('');
-        setSelectedTests([]);
-
-        // Refresh personal stock
-        const q = query(
-          collection(db, 'personalStock'),
-          where('ownerUid', '==', currentUserProfile?.uid),
-          where('status', '==', 'in_stock')
-        );
-        const snap = await getDocs(q);
-        const items = snap.docs.map(d => {
-          const data = d.data();
-          return {
-            id: d.id,
-            ...data,
-            createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(data.createdAt),
-          } as PersonalStockItem;
-        });
-        setPersonalStock(items);
+        router.back();
     } catch(err) {
         console.error("Error saving action form:", err);
         toast({ title: 'Hata', description: 'Form kaydedilemedi.', variant: 'destructive'});
@@ -2528,6 +2196,26 @@ export default function AplikasyonIslemFormuPage() {
               <label style={{ display: 'block', fontSize: '15px', fontWeight: 600, color: 'var(--wz-text)', marginBottom: '12px' }}>
                 1. Parça Seçin
               </label>
+
+              {isLabMode && (
+                <div style={{ marginBottom: '20px' }}>
+                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: 'var(--wz-text-secondary)', marginBottom: '8px' }}>
+                    Takıldığı Cihaz *
+                  </label>
+                  <Select value={partAssignedDeviceId} onValueChange={setPartAssignedDeviceId}>
+                    <SelectTrigger className="wizard-dark-select" style={{ background: 'var(--wz-input-bg)', borderColor: 'var(--wz-input-border)' }}>
+                      <SelectValue placeholder="Cihaz seçin..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {devicesByLab.map(d => (
+                        <SelectItem key={d.id} value={d.id}>
+                          {d.cihazAdi || d.model} ({d.seriNumarasi})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
               {/* Stock source tabs */}
               <div className="wizard-sub-tabs" style={{ paddingLeft: 0, marginBottom: '8px' }}>
@@ -2897,6 +2585,7 @@ export default function AplikasyonIslemFormuPage() {
               removedPartStokKodu: selectedItem.stokKodu,
               removedPartStokAdi: selectedItem.stokAdi,
               description: row.description.trim() || '',
+              assignedDeviceId: isLabMode ? row.assignedDeviceId : undefined,
             });
           }
           setActions(prev => [...prev, ...newActions]);
@@ -2999,6 +2688,21 @@ export default function AplikasyonIslemFormuPage() {
                             </div>
                           )}
                           {rowIndex >= 2 && <p style={{ fontSize: '12px', color: 'var(--wz-text-secondary)' }}>3. satır ve sonrası için kanal seçimi istenmez.</p>}
+                          {isLabMode && (
+                            <div style={{ marginBottom: '8px' }}>
+                              <label style={{ display: 'block', fontSize: '13px', color: 'var(--wz-text-secondary)', marginBottom: '4px' }}>Cihaz Seçin *</label>
+                              <Select value={row.assignedDeviceId} onValueChange={(v) => updateRow(row.id, r => ({ ...r, assignedDeviceId: v }))}>
+                                <SelectTrigger className="bg-white/10 border-white/20 text-white h-9">
+                                  <SelectValue placeholder="Cihaz seçin..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {devicesByLab.map(d => (
+                                    <SelectItem key={d.id} value={d.id}>{d.cihazAdi || d.model} ({d.seriNumarasi})</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          )}
                           <textarea placeholder="Açıklama (opsiyonel)" value={row.description} onChange={(e) => updateRow(row.id, r => ({ ...r, description: e.target.value }))} rows={2} />
                         </div>
                       )}
@@ -3186,6 +2890,10 @@ export default function AplikasyonIslemFormuPage() {
           isSavingDraft={isSavingDraft}
           saveDisabled={isSaving || actions.length === 0}
           useGrid={true}
+          title={isLabMode ? "Laboratuvar Geneli Form Girişi" : "İşlem Formu"}
+          deviceName={isLabMode ? `${devicesByLab.length} Cihaz Seçili` : `${device.cihazAdi || device.model} / ${device.seriNumarasi}`}
+          hospitalName={hospital?.name || ''}
+          icon={isLabMode ? <Building2 className="h-5 w-5" /> : <ClipboardList className="h-5 w-5" />}
         />
       </div>
 

@@ -1,4 +1,7 @@
-
+/**
+ * Application-wide type definitions for Qore.g4
+ * Updated for Laboratory Bulk Processing
+ */
 
 import { type TrackingMode } from './tracking';
 
@@ -555,7 +558,7 @@ export type MaintenancePeriodUnit = 'hafta' | 'ay' | 'yil';
 // Bakım planı tipi
 export type MaintenanceType = 'teknik_servis' | 'aplikasyon';
 
-// Cihaza tanımlı periyodik bakım planı
+// Cihaza tanımlı periyodik bakım planı (Maintenance tasks defined for a device)
 export interface MaintenancePlan {
   id: string;
   deviceId: string;
