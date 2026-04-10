@@ -9,7 +9,9 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "rimraf .test-dist && tsc -p tsconfig.tests.json && node --test .test-dist/tests/**/*.js",
-    "test:coverage": "rimraf .test-dist .coverage && tsc -p tsconfig.tests.json && NODE_V8_COVERAGE=.coverage node --test .test-dist/tests/**/*.js"
+    "test:coverage": "rimraf .test-dist .coverage && tsc -p tsconfig.tests.json && NODE_V8_COVERAGE=.coverage node --test .test-dist/tests/**/*.js",
+    "push": "git add . && git commit -m \"update\" && git push origin HEAD",
+    "sync": "git checkout main && git pull origin main"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
@@ -48,6 +50,7 @@
     "cmdk": "^1.0.0",
     "date-fns": "^3.6.0",
     "docx": "^8.5.0",
+    "exceljs": "^4.4.0",
     "file-saver": "^2.0.5",
     "firebase": "^11.8.1",
     "firebase-admin": "^12.3.0",
