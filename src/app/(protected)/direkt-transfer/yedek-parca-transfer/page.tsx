@@ -896,8 +896,8 @@ export default function YedekParcaTransferPage() {
     if (personnelStockFilter === 'pending_approval') {
       return personnelStock.filter(s => s.status === 'pending_approval');
     }
-    // 'all' filter: exclude pending_approval items (shown in separate tab)
-    return personnelStock.filter(s => s.status !== 'pending_approval');
+    // 'all' filter: show everything including pending_approval
+    return personnelStock;
   }, [personnelStock, personnelStockFilter]);
 
   // Paginated personnel stock
@@ -2329,70 +2329,7 @@ export default function YedekParcaTransferPage() {
     }
   };
 
-  const takeOverPersonnelStock = async (item: PersonalStockItem) => {
-    if (!currentUserProfile?.uid || !currentUserProfile?.name) {
-      toast({ title: 'Hata', description: 'Kullanıcı bilgisi bulunamadı.', variant: 'destructive' });
-      return;
-    }
 
-    if (item.ownerUid === currentUserProfile.uid) {
-      toast({ title: 'Bilgi', description: 'Bu ürün zaten sizin üzerinizde.', variant: 'default' });
-      return;
-    }
-
-    if (item.status !== 'in_stock') {
-      toast({ title: 'Uyarı', description: 'Sadece aktif stok devralınabilir.', variant: 'default' });
-      return;
-    }
-
-    setTakingOverStockId(item.id);
-    try {
-      const now = new Date();
-      await updateDoc(doc(db, 'personalStock', item.id), {
-        ownerUid: currentUserProfile.uid,
-        ownerName: currentUserProfile.name,
-        createdAt: Timestamp.fromDate(now),
-        transferredByUid: currentUserProfile.uid,
-        transferredByName: currentUserProfile.name,
-        previousOwnerUid: item.ownerUid,
-        previousOwnerName: item.ownerName,
-      });
-
-      await addDoc(collection(db, 'sparePartTransferLogs'), withCompanyScope({
-        action: 'transfer_between_personnel',
-        personalStockId: item.id,
-        productCodeId: item.productCodeId,
-        stokKodu: item.stokKodu,
-        stokAdi: item.stokAdi,
-        anaBirim: item.anaBirim || 'Adet',
-        serialNumber: item.serialNumber || '',
-        quantity: 1,
-        fromUid: item.ownerUid,
-        fromName: item.ownerName,
-        toUid: currentUserProfile.uid,
-        toName: currentUserProfile.name,
-        createdAt: Timestamp.fromDate(now),
-        createdByUid: currentUserProfile.uid,
-        createdByName: currentUserProfile.name,
-      }, currentCompanyId));
-
-      toast({
-        title: 'Üzerinize Alındı',
-        description: `${item.stokAdi} (${item.serialNumber || 'Seri No Yok'}) stoğunuza eklendi.`,
-      });
-
-      if (menuSelection.personnelUid) {
-        await fetchPersonnelStock(menuSelection.personnelUid);
-      }
-      await fetchAllPersonnelStock();
-      await loadRecentTransferLogs();
-    } catch (err) {
-      console.error('Error taking over personal stock:', err);
-      toast({ title: 'Hata', description: 'Ürünü üzerinize alma işlemi başarısız oldu.', variant: 'destructive' });
-    } finally {
-      setTakingOverStockId(null);
-    }
-  };
 
   // Approve pending transfer (with status verification via transaction)
   const approveTransfer = async (item: PersonnelStockViewItem) => {
