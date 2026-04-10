@@ -7,9 +7,10 @@ import { db } from '@/lib/firebase';
 import type { ProductCode, Currency } from '@/lib/types';
 import { PieChart, ResponsiveContainer, Pie, Cell, Tooltip as RechartsTooltip, LineChart, Line, XAxis, YAxis } from 'recharts';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
   Loader2, TrendingUp, TrendingDown, PieChart as PieChartIcon,
-  Wallet, BarChart3, Calendar, ChevronRight, ArrowLeft, FileSpreadsheet, FileText,
+  Wallet, BarChart3, Calendar, ChevronRight, ChevronDown, ArrowLeft, FileSpreadsheet, FileText,
   MapPin, Layers,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -246,6 +247,28 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
     return latestPerLocation.map(s => {
       const cost = getSessionCost(s, productMap, rates, currency);
       const date = getSessionDate(s);
+      
+      const enrichedItems = s.items.map(item => {
+        const product = productMap.get(item.stokKodu);
+        if (!product?.cost || !product?.ambalajDegeri) return { ...item, calculatedCost: 0, nativeCurrency: 'TRY' as Currency };
+        const totalTest = (item.stokAdedi * product.ambalajDegeri) + item.cihazUstuAdedi;
+        const costPerTest = product.cost / product.ambalajDegeri;
+        const totalNative = costPerTest * totalTest;
+        const productCurrency = (product.currency || 'TRY') as Currency;
+        let costEUR: number;
+        switch (productCurrency) {
+          case 'EUR': costEUR = totalNative; break;
+          case 'USD': costEUR = totalNative / (rates.USD || 1); break;
+          case 'TRY': costEUR = totalNative / (rates.TRY || 1); break;
+          default: costEUR = totalNative / (rates.TRY || 1);
+        }
+        return {
+          ...item,
+          calculatedCost: costEUR * (rates[currency] || 1),
+          nativeCurrency: productCurrency
+        };
+      }).filter(i => i.calculatedCost > 0).sort((a,b) => b.calculatedCost - a.calculatedCost);
+
       return {
         id: s.locationId,
         name: s.locationName,
@@ -253,6 +276,7 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
         cost,
         productCount: s.items.length,
         date,
+        items: enrichedItems
       };
     }).sort((a, b) => b.cost - a.cost);
   }, [latestPerLocation, productMap, rates, currency]);
@@ -292,7 +316,7 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
   // ---- Product group breakdown (Kit / Sarf / Yedek Parça) ----
   const groupBreakdown = useMemo(() => {
     if (!rates) return [];
-    const map = new Map<string, number>();
+    const map = new Map<string, {cost: number, items: any[]}>();
     latestPerLocation.forEach(session => {
       session.items.forEach(item => {
         const product = productMap.get(item.stokKodu);
@@ -314,11 +338,26 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
           default: costEUR = totalNative / (rates.TRY || 1);
         }
         const cost = costEUR * (rates[currency] || 1);
-        map.set(group, (map.get(group) || 0) + cost);
+        
+        const existing = map.get(group) || { cost: 0, items: [] };
+        existing.items.push({
+           stokKodu: item.stokKodu,
+           stokAdi: item.stokAdi,
+           stokAdedi: item.stokAdedi,
+           cihazUstuAdedi: item.cihazUstuAdedi,
+           locationName: session.locationName,
+           calculatedCost: cost,
+           nativeCurrency: productCurrency
+        });
+        existing.cost += cost;
+        map.set(group, existing);
       });
     });
     return Array.from(map.entries())
-      .map(([name, cost]) => ({ name, cost }))
+      .map(([name, data]) => {
+         const sortedItems = [...data.items].sort((a,b) => b.calculatedCost - a.calculatedCost);
+         return { name, cost: data.cost, items: sortedItems };
+      })
       .sort((a, b) => b.cost - a.cost);
   }, [latestPerLocation, productMap, rates, currency]);
 
@@ -390,6 +429,7 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
     return latestPerLocation.map(session => {
       let cost = 0;
       let productCount = 0;
+      const items: any[] = [];
       session.items
         .filter(item => (item.marka || 'Diğer') === selectedBrand)
         .forEach(item => {
@@ -406,17 +446,24 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
             case 'TRY': costEUR = totalNative / (rates.TRY || 1); break;
             default: costEUR = totalNative / (rates.TRY || 1);
           }
-          cost += costEUR * (rates[currency] || 1);
+          const itemCost = costEUR * (rates[currency] || 1);
+          cost += itemCost;
           productCount++;
+          items.push({
+            ...item,
+            calculatedCost: itemCost,
+            nativeCurrency: productCurrency
+          });
         });
-      return { name: session.locationName, type: session.locationType, cost, productCount };
+      const sortedItems = items.sort((a,b) => b.calculatedCost - a.calculatedCost);
+      return { name: session.locationName, type: session.locationType, cost, productCount, items: sortedItems };
     }).filter(l => l.cost > 0).sort((a, b) => b.cost - a.cost);
   }, [latestPerLocation, selectedBrand, productMap, rates, currency]);
 
   // ---- Brand detail: product group breakdown ----
   const brandGroupBreakdown = useMemo(() => {
     if (!rates || !selectedBrand) return [];
-    const map = new Map<string, number>();
+    const map = new Map<string, {cost: number, items: any[]}>();
     latestPerLocation.forEach(session => {
       session.items
         .filter(item => (item.marka || 'Diğer') === selectedBrand)
@@ -439,11 +486,26 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
             default: costEUR = totalNative / (rates.TRY || 1);
           }
           const cost = costEUR * (rates[currency] || 1);
-          map.set(group, (map.get(group) || 0) + cost);
+          
+          const existing = map.get(group) || { cost: 0, items: [] };
+          existing.items.push({
+             stokKodu: item.stokKodu,
+             stokAdi: item.stokAdi,
+             stokAdedi: item.stokAdedi,
+             cihazUstuAdedi: item.cihazUstuAdedi,
+             locationName: session.locationName,
+             calculatedCost: cost,
+             nativeCurrency: productCurrency
+          });
+          existing.cost += cost;
+          map.set(group, existing);
         });
     });
     return Array.from(map.entries())
-      .map(([name, cost]) => ({ name, cost }))
+      .map(([name, data]) => {
+         const sortedItems = [...data.items].sort((a,b) => b.calculatedCost - a.calculatedCost);
+         return { name, cost: data.cost, items: sortedItems };
+      })
       .sort((a, b) => b.cost - a.cost);
   }, [latestPerLocation, selectedBrand, productMap, rates, currency]);
 
@@ -589,47 +651,146 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
 
   const handleExportExcel = useCallback(async () => {
     try {
-      const XLSX = await import('xlsx');
-      const wb = XLSX.utils.book_new();
-      const ws = XLSX.utils.aoa_to_sheet([
-        ['QORE Maliyet Gözlem Raporu'],
-        [`Tarih: ${new Date().toLocaleString('tr-TR')}`],
-        [`Para Birimi: ${currency}`],
-        [`Konsolide Toplam: ${fmtCurrency(consolidatedCost, sym)}`],
-        [],
-        ['Konum', 'Tip', 'Ürün Sayısı', 'Maliyet'],
-        ...locationBreakdown.map((l) => [l.name, l.type === 'lab' ? 'Lab' : 'Depo', l.productCount, Number(l.cost.toFixed(2))]),
-      ]);
-      ws['!cols'] = [{ wch: 32 }, { wch: 14 }, { wch: 14 }, { wch: 18 }];
-      ws['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 3 } }];
-      (ws as any)['!autofilter'] = { ref: `A6:D${locationBreakdown.length + 6}` };
-      (ws as any)['!pageSetup'] = { orientation: 'landscape', fitToWidth: 1, fitToHeight: 0, paperSize: 9 };
-      XLSX.utils.book_append_sheet(wb, ws, 'Ozet');
+      const ExcelJS = await import('exceljs');
+      const { saveAs } = await import('file-saver');
+      const wb = new ExcelJS.Workbook();
+      wb.creator = 'QORE';
+      wb.created = new Date();
 
-      const monthlyWs = XLSX.utils.json_to_sheet(monthlyTrend.map((m) => ({
-        Ay: m.month,
-        Maliyet: Number(m.cost.toFixed(2)),
-      })));
-      monthlyWs['!cols'] = [{ wch: 18 }, { wch: 18 }];
-      (monthlyWs as any)['!pageSetup'] = { orientation: 'landscape', fitToWidth: 1, fitToHeight: 0, paperSize: 9 };
-      XLSX.utils.book_append_sheet(wb, monthlyWs, 'AylikTrend');
+      // ==== ÖZET SAYFASI ====
+      const wsOzet = wb.addWorksheet('Özet Maliyet');
+      wsOzet.columns = [
+        { header: 'Konum', key: 'name', width: 32 },
+        { header: 'Tip', key: 'type', width: 14 },
+        { header: 'Ürün Sayısı', key: 'count', width: 14 },
+        { header: 'Maliyet', key: 'cost', width: 18 }
+      ];
 
-      const brandWs = XLSX.utils.json_to_sheet(brandCosts.map((b) => ({
-        Marka: b.name,
-        UrunSayisi: b.productCount,
-        Maliyet: Number(b.cost.toFixed(2)),
-      })));
-      brandWs['!cols'] = [{ wch: 28 }, { wch: 14 }, { wch: 18 }];
-      (brandWs as any)['!pageSetup'] = { orientation: 'landscape', fitToWidth: 1, fitToHeight: 0, paperSize: 9 };
-      XLSX.utils.book_append_sheet(wb, brandWs, 'MarkaDagilim');
+      wsOzet.insertRow(1, ['QORE Maliyet Gözlem Raporu']);
+      wsOzet.insertRow(2, [`Tarih: ${new Date().toLocaleString('tr-TR')}`]);
+      wsOzet.insertRow(3, [`Para Birimi: ${currency}`]);
+      wsOzet.insertRow(4, [`Konsolide Toplam: ${fmtCurrency(consolidatedCost, sym)}`]);
+      wsOzet.insertRow(5, []);
+      // Shift header to row 6
+      wsOzet.getRow(6).values = ['Konum', 'Tip', 'Ürün Sayısı', 'Maliyet'];
+      wsOzet.getRow(6).font = { bold: true };
+      
+      let rowIndex = 7;
+      locationBreakdown.forEach(l => {
+        wsOzet.insertRow(rowIndex, [l.name, l.type === 'lab' ? 'Lab' : 'Depo', l.productCount, Number(l.cost.toFixed(2))]);
+        rowIndex++;
+      });
 
-      XLSX.writeFile(wb, `Maliyet_Gozlem_${new Date().toISOString().slice(0, 10)}.xlsx`);
-      toast({ title: 'Başarılı', description: 'Excel raporu indirildi.' });
+      // Style Ozet cells (Alignment and Borders)
+      wsOzet.eachRow((row, rowNumber) => {
+        row.eachCell((cell) => {
+          if (rowNumber > 5) {
+             cell.border = {
+               top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'}
+             };
+          }
+          cell.alignment = { vertical: 'middle', horizontal: 'center' };
+        });
+      });
+
+      // ==== MARKA DETAY SAYFALARI ====
+      brandCosts.forEach(b => {
+         const safeSheetName = b.name.replace(/[\[\]\*\\\/\?]/g, '').substring(0, 31);
+         const wsBrand = wb.addWorksheet(safeSheetName);
+         
+         wsBrand.columns = [
+           { key: 'col1', width: 35 },
+           { key: 'col2', width: 15 },
+           { key: 'col3', width: 20 },
+         ];
+
+         wsBrand.addRow([`${b.name} Marka Maliyet Raporu`]);
+         wsBrand.addRow([`Toplam Marka Maliyeti: ${fmtCurrency(b.cost, sym)}`]);
+         wsBrand.addRow([]);
+         
+         wsBrand.addRow(['Konum Bazlı Maliyet']);
+         wsBrand.lastRow.font = { bold: true, size: 12 };
+         
+         const locHeaderRow = wsBrand.addRow(['Konum', 'Ürün Sayısı', 'Maliyet']);
+         locHeaderRow.font = { bold: true };
+         
+         let locStart = locHeaderRow.number;
+         
+         const locMap = new Map<string, {count: number, cost: number}>();
+         const grpMap = new Map<string, number>();
+
+         latestPerLocation.forEach(session => {
+            let locCost = 0;
+            let locCount = 0;
+            session.items.filter(item => (item.marka || 'Diğer') === b.name).forEach(item => {
+               const product = productMap.get(item.stokKodu);
+               if (!product?.cost || !product?.ambalajDegeri) return;
+               const totalTest = (item.stokAdedi * product.ambalajDegeri) + item.cihazUstuAdedi;
+               const costPerTest = product.cost / product.ambalajDegeri;
+               const totalNative = costPerTest * totalTest;
+               const productCurrency = (product.currency || 'TRY') as Currency;
+               let costEUR: number;
+               switch (productCurrency) {
+                 case 'EUR': costEUR = totalNative; break;
+                 case 'USD': costEUR = totalNative / (rates!.USD || 1); break;
+                 case 'TRY': costEUR = totalNative / (rates!.TRY || 1); break;
+                 default: costEUR = totalNative / (rates!.TRY || 1);
+               }
+               const itemCost = costEUR * (rates![currency] || 1);
+               
+               locCost += itemCost;
+               locCount++;
+               
+               const group = product.urunGrubu === 'kit' ? 'Kit'
+                  : product.urunGrubu === 'sarf' ? 'Sarf Malzeme'
+                  : product.urunGrubu === 'yedek_parca' ? 'Yedek Parça'
+                  : 'Diğer';
+                  
+               grpMap.set(group, (grpMap.get(group) || 0) + itemCost);
+            });
+            if (locCost > 0) {
+               locMap.set(session.locationName, { count: locCount, cost: locCost });
+            }
+         });
+         
+         Array.from(locMap.entries()).sort((x,y) => y[1].cost - x[1].cost).forEach(([locName, data]) => {
+            wsBrand.addRow([locName, data.count, Number(data.cost.toFixed(2))]);
+         });
+         let locEnd = wsBrand.lastRow.number;
+
+         wsBrand.addRow([]);
+         wsBrand.addRow([]);
+
+         wsBrand.addRow(['Ürün Grubu Maliyeti']);
+         wsBrand.lastRow.font = { bold: true, size: 12 };
+         
+         const grpHeaderRow = wsBrand.addRow(['Ürün Grubu', '', 'Maliyet']);
+         grpHeaderRow.font = { bold: true };
+         let grpStart = grpHeaderRow.number;
+         
+         Array.from(grpMap.entries()).sort((x,y) => y[1] - x[1]).forEach(([grpName, cost]) => {
+            wsBrand.addRow([grpName, '', Number(cost.toFixed(2))]);
+         });
+         let grpEnd = wsBrand.lastRow.number;
+         
+         wsBrand.eachRow((row, rowNumber) => {
+            row.eachCell((cell) => {
+               if ((rowNumber >= locStart && rowNumber <= locEnd) || (rowNumber >= grpStart && rowNumber <= grpEnd)) {
+                  cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
+               }
+               cell.alignment = { vertical: 'middle', horizontal: 'center' };
+            });
+         });
+      });
+
+      const buffer = await wb.xlsx.writeBuffer();
+      saveAs(new Blob([buffer]), `Maliyet_Gozlem_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      toast({ title: 'Başarılı', description: 'Excel raporu detaylı bir şekilde indirildi.' });
     } catch (error) {
       console.error(error);
       toast({ title: 'Hata', description: 'Excel raporu oluşturulamadı.', variant: 'destructive' });
     }
-  }, [currency, consolidatedCost, sym, locationBreakdown, monthlyTrend, brandCosts, toast]);
+  }, [currency, consolidatedCost, sym, locationBreakdown, brandCosts, latestPerLocation, productMap, rates, toast]);
 
   const handleExportPdf = useCallback(async () => {
     try {
@@ -813,20 +974,38 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
               </div>
               <div className="space-y-2">
                 {brandLocationBreakdown.map(loc => (
-                  <div key={loc.name} className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-[var(--dashboard-surface-2)]/50">
-                    <div className="min-w-0">
-                      <span className="text-sm font-semibold text-[var(--dashboard-text)] truncate block">{loc.name}</span>
-                      <p className="text-[10px] text-[var(--dashboard-muted)]">
-                        {loc.type === 'lab' ? 'Lab' : 'Depo'} · {loc.productCount} ürün
-                      </p>
-                    </div>
-                    <div className="text-right shrink-0 ml-3">
-                      <span className="text-sm font-bold text-[var(--dashboard-accent)]">{fmtCurrency(loc.cost, sym)}</span>
-                      {brandTotal > 0 && (
-                        <p className="text-[10px] text-[var(--dashboard-muted)]">%{((loc.cost / brandTotal) * 100).toFixed(1)}</p>
-                      )}
-                    </div>
-                  </div>
+                  <Collapsible key={loc.name} className="bg-[var(--dashboard-surface-2)]/50 rounded-xl overflow-hidden group/col">
+                    <CollapsibleTrigger className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-[var(--dashboard-surface-2)] transition-colors">
+                      <div className="flex-1 min-w-0 text-left">
+                        <span className="text-sm font-semibold text-[var(--dashboard-text)] truncate block">{loc.name}</span>
+                        <p className="text-[10px] text-[var(--dashboard-muted)]">
+                          {loc.type === 'lab' ? 'Lab' : 'Depo'} · {loc.productCount} ürün
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0 ml-3">
+                        <div className="text-right">
+                          <span className="text-sm font-bold text-[var(--dashboard-accent)]">{fmtCurrency(loc.cost, sym)}</span>
+                          {brandTotal > 0 && (
+                            <p className="text-[10px] text-[var(--dashboard-muted)]">%{((loc.cost / brandTotal) * 100).toFixed(1)}</p>
+                          )}
+                        </div>
+                        <ChevronDown className="w-4 h-4 text-[var(--dashboard-muted)] transition-transform duration-200 group-data-[state=open]/col:rotate-180" />
+                      </div>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <div className="px-3 pb-3 space-y-1.5 pt-1 border-t border-[var(--dashboard-stroke)] mt-1">
+                        {loc.items && loc.items.map((pi: any, idx: number) => (
+                          <div key={idx} className="flex items-center justify-between gap-2 bg-[var(--dashboard-surface)]/50 px-2 py-1.5 rounded-lg">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-medium text-[var(--dashboard-text)] truncate">{pi.stokAdi}</p>
+                              <p className="text-[9px] text-[var(--dashboard-muted)]">{pi.stokKodu} · Stok: {pi.stokAdedi} {pi.cihazUstuAdedi > 0 ? ` (+${pi.cihazUstuAdedi} C.Ü)` : ''}</p>
+                            </div>
+                            <span className="text-xs font-semibold text-[var(--dashboard-accent)] shrink-0">{fmtCurrencyDetailed(pi.calculatedCost, sym)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
                 ))}
                 {brandLocationBreakdown.length === 0 && (
                   <p className="text-center py-4 text-sm text-[var(--dashboard-muted)]">Veri yok</p>
@@ -844,19 +1023,39 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
                 {brandGroupBreakdown.length > 0 ? brandGroupBreakdown.map(g => {
                   const pct = brandTotal > 0 ? (g.cost / brandTotal) * 100 : 0;
                   return (
-                    <div key={g.name}>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm font-medium text-[var(--dashboard-text)]">{g.name}</span>
-                        <span className="text-sm font-semibold text-[var(--dashboard-accent)]">{fmtCurrency(g.cost, sym)}</span>
-                      </div>
-                      <div className="h-2 rounded-full bg-[var(--dashboard-surface-2)] overflow-hidden">
-                        <div
-                          className="h-full rounded-full bg-[var(--dashboard-accent)] transition-all duration-500"
-                          style={{ width: `${Math.min(pct, 100)}%` }}
-                        />
-                      </div>
-                      <p className="text-[10px] text-[var(--dashboard-muted)] mt-0.5">Marka maliyetinin %{pct.toFixed(1)}&apos;i</p>
-                    </div>
+                    <Collapsible key={g.name} className="group/col">
+                      <CollapsibleTrigger className="w-full text-left">
+                        <div className="flex items-center justify-between mb-1">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-sm font-medium text-[var(--dashboard-text)] truncate">{g.name}</span>
+                            <ChevronDown className="w-3 h-3 text-[var(--dashboard-muted)] transition-transform duration-200 group-data-[state=open]/col:rotate-180" />
+                          </div>
+                          <span className="text-sm font-semibold text-[var(--dashboard-accent)]">{fmtCurrency(g.cost, sym)}</span>
+                        </div>
+                        <div className="h-2 rounded-full bg-[var(--dashboard-surface-2)] overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-[var(--dashboard-accent)] transition-all duration-500"
+                            style={{ width: `${Math.min(pct, 100)}%` }}
+                          />
+                        </div>
+                        <p className="text-[10px] text-[var(--dashboard-muted)] mt-0.5">Marka maliyetinin %{pct.toFixed(1)}'i</p>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        <div className="mt-2 space-y-1.5 pl-2 border-l-2 border-[var(--dashboard-stroke)] py-1">
+                          {g.items && g.items.map((pi: any, idx: number) => (
+                            <div key={idx} className="flex flex-col gap-0.5 bg-[var(--dashboard-surface-2)]/30 px-2 py-1.5 rounded-md">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-xs font-medium text-[var(--dashboard-text)] truncate">{pi.stokAdi}</span>
+                                <span className="text-xs font-semibold text-[var(--dashboard-accent)] shrink-0">{fmtCurrencyDetailed(pi.calculatedCost, sym)}</span>
+                              </div>
+                              <span className="text-[10px] text-[var(--dashboard-muted)]">
+                                {pi.locationName} · {pi.stokAdedi} adet
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
                   );
                 }) : (
                   <p className="text-center py-4 text-sm text-[var(--dashboard-muted)]">Ürün grubu bilgisi yok</p>
@@ -1046,18 +1245,36 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
                 <ScrollArea className="h-[180px]">
                   <div className="space-y-2 pr-2">
                     {locationBreakdown.map(loc => (
-                      <div key={loc.id} className="flex items-center justify-between px-3 py-2.5 rounded-xl bg-[var(--dashboard-surface-2)]/50">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{loc.name}</span>
+                      <Collapsible key={loc.id} className="bg-[var(--dashboard-surface-2)]/50 rounded-xl overflow-hidden group/col">
+                        <CollapsibleTrigger className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-[var(--dashboard-surface-2)] transition-colors">
+                          <div className="flex-1 min-w-0 text-left">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{loc.name}</span>
+                            </div>
+                            <p className="text-[10px] text-[var(--dashboard-muted)]">
+                              {loc.type === 'lab' ? 'Lab' : 'Depo'} · {loc.productCount} ürün
+                              {loc.date && ` · ${format(loc.date, 'dd MMM yyyy', { locale: tr })}`}
+                            </p>
                           </div>
-                          <p className="text-[10px] text-[var(--dashboard-muted)]">
-                            {loc.type === 'lab' ? 'Lab' : 'Depo'} · {loc.productCount} ürün
-                            {loc.date && ` · ${format(loc.date, 'dd MMM yyyy', { locale: tr })}`}
-                          </p>
-                        </div>
-                        <span className="text-sm font-bold text-[var(--dashboard-accent)] shrink-0 ml-3">{fmtCurrency(loc.cost, sym)}</span>
-                      </div>
+                          <div className="flex items-center gap-3 shrink-0 ml-3">
+                            <span className="text-sm font-bold text-[var(--dashboard-accent)]">{fmtCurrency(loc.cost, sym)}</span>
+                            <ChevronDown className="w-4 h-4 text-[var(--dashboard-muted)] transition-transform duration-200 group-data-[state=open]/col:rotate-180" />
+                          </div>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent>
+                          <div className="px-3 pb-3 space-y-1.5 pt-1 border-t border-[var(--dashboard-stroke)] mt-1">
+                            {loc.items && loc.items.map((pi: any, idx: number) => (
+                              <div key={idx} className="flex items-center justify-between gap-2 bg-[var(--dashboard-surface)]/50 px-2 py-1.5 rounded-lg">
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-xs font-medium text-[var(--dashboard-text)] truncate">{pi.stokAdi}</p>
+                                  <p className="text-[9px] text-[var(--dashboard-muted)]">{pi.marka || 'Diğer'} · {pi.stokKodu} · Stok: {pi.stokAdedi} {pi.cihazUstuAdedi > 0 ? ` (+${pi.cihazUstuAdedi} C.Ü)` : ''}</p>
+                                </div>
+                                <span className="text-xs font-semibold text-[var(--dashboard-accent)] shrink-0">{fmtCurrencyDetailed(pi.calculatedCost, sym)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </CollapsibleContent>
+                      </Collapsible>
                     ))}
                     {locationBreakdown.length === 0 && (
                       <p className="text-center py-6 text-sm text-[var(--dashboard-muted)]">Veri yok</p>
@@ -1220,19 +1437,41 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
                   {groupBreakdown.length > 0 ? groupBreakdown.map(g => {
                     const pct = consolidatedCost > 0 ? (g.cost / consolidatedCost) * 100 : 0;
                     return (
-                      <div key={g.name}>
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-sm font-medium text-[var(--dashboard-text)]">{g.name}</span>
-                          <span className="text-sm font-semibold text-[var(--dashboard-accent)]">{fmtCurrency(g.cost, sym)}</span>
-                        </div>
-                        <div className="h-2 rounded-full bg-[var(--dashboard-surface-2)] overflow-hidden">
-                          <div
-                            className="h-full rounded-full bg-[var(--dashboard-accent)] transition-all duration-500"
-                            style={{ width: `${Math.min(pct, 100)}%` }}
-                          />
-                        </div>
-                        <p className="text-[10px] text-[var(--dashboard-muted)] mt-0.5">Toplam maliyetin %{pct.toFixed(1)}'i</p>
-                      </div>
+                      <Collapsible key={g.name} className="group/col">
+                        <CollapsibleTrigger className="w-full text-left">
+                          <div className="flex items-center justify-between mb-1">
+                            <div className="flex items-center gap-1.5 min-w-0">
+                              <span className="text-sm font-medium text-[var(--dashboard-text)] truncate">{g.name}</span>
+                              <ChevronDown className="w-3 h-3 text-[var(--dashboard-muted)] transition-transform duration-200 group-data-[state=open]/col:rotate-180" />
+                            </div>
+                            <span className="text-sm font-semibold text-[var(--dashboard-accent)]">{fmtCurrency(g.cost, sym)}</span>
+                          </div>
+                          <div className="h-2 rounded-full bg-[var(--dashboard-surface-2)] overflow-hidden">
+                            <div
+                              className="h-full rounded-full bg-[var(--dashboard-accent)] transition-all duration-500"
+                              style={{ width: `${Math.min(pct, 100)}%` }}
+                            />
+                          </div>
+                          <p className="text-[10px] text-[var(--dashboard-muted)] mt-0.5">Toplam maliyetin %{pct.toFixed(1)}'i</p>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent>
+                          <ScrollArea className="h-[200px] mt-2">
+                            <div className="space-y-1.5 pl-2 border-l-2 border-[var(--dashboard-stroke)] py-1 pr-2">
+                              {g.items && g.items.map((pi: any, idx: number) => (
+                                <div key={idx} className="flex flex-col gap-0.5 bg-[var(--dashboard-surface-2)]/30 px-2 py-1.5 rounded-md">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <span className="text-xs font-medium text-[var(--dashboard-text)] truncate">{pi.stokAdi}</span>
+                                    <span className="text-xs font-semibold text-[var(--dashboard-accent)] shrink-0">{fmtCurrencyDetailed(pi.calculatedCost, sym)}</span>
+                                  </div>
+                                  <span className="text-[10px] text-[var(--dashboard-muted)]">
+                                    {pi.marka || 'Diğer'} · {pi.locationName} · {pi.stokAdedi} adet
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </ScrollArea>
+                        </CollapsibleContent>
+                      </Collapsible>
                     );
                   }) : (
                     <div className="text-center py-8 text-sm text-[var(--dashboard-muted)]">
