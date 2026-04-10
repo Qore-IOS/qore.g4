@@ -365,8 +365,8 @@ export default function IslemFormuPage() {
         console.error('Error loading draft:', err);
       }
     })();
-    })();
   }, [draftIdFromUrl, routeDeviceId, currentUserProfile?.uid, currentUserProfile?.name, toast]);
+
 
   // Fetch personal stock for current user
   useEffect(() => {
