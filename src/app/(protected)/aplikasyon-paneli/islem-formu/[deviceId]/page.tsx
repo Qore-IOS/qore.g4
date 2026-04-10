@@ -1544,6 +1544,50 @@ export default function AplikasyonIslemFormuPage() {
   };
 
 
+  const consumeDepotSelection = async (partChange: ActionItem, batch: any) => {
+    const requestedQuantity = Math.max(1, partChange.quantity || 1);
+    if (partChange.depotStockId) {
+      const depotRef = doc(db, 'yedekParcaDepoStok', partChange.depotStockId);
+      const depotSnap = await getDoc(depotRef);
+      if (!depotSnap.exists()) throw new Error(`${partChange.stokAdi} için depo stok satırı bulunamadı.`);
+      const depotData = depotSnap.data();
+      const currentQty = depotData.quantity || 1;
+      if (currentQty <= requestedQuantity) {
+        batch.delete(depotRef);
+      } else {
+        batch.update(depotRef, { quantity: currentQty - requestedQuantity });
+      }
+      return { id: depotSnap.id, ...depotData } as YedekParcaDepoStokItem;
+    }
+    throw new Error('Depo stok ID bulunamadı.');
+  };
+
+  const createDepotBorrowRecord = (partChange: ActionItem, depotEntry: YedekParcaDepoStokItem, batch: any, currentDevice: Device, formId: string, now: Date) => {
+    const borrowedRef = doc(collection(db, 'borrowedSpareParts'));
+    batch.set(borrowedRef, {
+      productCodeId: partChange.action || depotEntry.productCodeId || '',
+      stokKodu: partChange.stokKodu,
+      stokAdi: partChange.stokAdi,
+      anaBirim: partChange.anaBirim || depotEntry.anaBirim || 'Adet',
+      serialNumber: partChange.serialNumber || '',
+      hucreNumarasi: partChange.hucreNumarasi || depotEntry.hucreNumarasi || '',
+      quantity: Math.max(1, partChange.quantity || 1),
+      sourceType: 'depot',
+      sourceActionType: partChange.type,
+      depotStockId: depotEntry.id,
+      deviceId: currentDevice.id,
+      deviceName: currentDevice.cihazAdi || currentDevice.model || '',
+      hospitalId: hospital?.id || '',
+      labName: hospital?.name || '',
+      formId: formId,
+      formType: 'aplikasyon',
+      borrowedByUid: currentUserProfile?.uid || '',
+      borrowedByName: currentUserProfile?.name || '',
+      borrowedAt: Timestamp.fromDate(now),
+      status: 'pending',
+    });
+  };
+
   const handleSaveSignaturesAndFinish = async (finalSignatures: { personnel?: string; technician?: string }, finalTechnicianName?: string) => {
     setIsSaving(true);
     setIsSignatureModalOpen(false);
