@@ -1583,6 +1583,9 @@ export default function AplikasyonIslemFormuPage() {
     const consumedEntries: YedekParcaDepoStokItem[] = [];
     let remainingToConsume = requestedQuantity;
     const isGroupedDepotKey = String(partChange.depotStockId || '').startsWith('group:');
+    const groupedSourceIds = isGroupedDepotKey
+      ? String(partChange.depotStockId).replace('group:', '').split('|').filter(Boolean)
+      : [];
 
     // Case 1: Direct ID provided (Serial or Cell tracked item)
     if (partChange.depotStockId && !isGroupedDepotKey) {
@@ -1602,12 +1605,31 @@ export default function AplikasyonIslemFormuPage() {
       }
     }
 
+    if (remainingToConsume > 0 && groupedSourceIds.length > 0) {
+      for (const sourceId of groupedSourceIds) {
+        if (remainingToConsume <= 0) break;
+        const sourceRef = doc(db, 'yedekParcaDepoStok', sourceId);
+        const sourceSnap = await getDoc(sourceRef);
+        if (!sourceSnap.exists()) continue;
+        const sourceData = sourceSnap.data();
+        const available = sourceData.quantity || 0;
+        if (available <= 0) continue;
+        const toTake = Math.min(available, remainingToConsume);
+        if (toTake === available) {
+          batch.delete(sourceRef);
+        } else {
+          batch.update(sourceRef, { quantity: available - toTake });
+        }
+        consumedEntries.push({ ...sourceData, id: sourceSnap.id, consumedQuantity: toTake } as any);
+        remainingToConsume -= toTake;
+      }
+    }
+
     // Case 2: No ID or remaining quantity for grouped items (Quantity tracked)
     if (remainingToConsume > 0) {
       const q = query(
         collection(db, 'yedekParcaDepoStok'),
-        where('stokKodu', '==', partChange.stokKodu),
-        where('partCondition', '==', 'iyi')
+        where('stokKodu', '==', partChange.stokKodu)
       );
       const snapshot = await getDocs(q);
 
@@ -1621,6 +1643,7 @@ export default function AplikasyonIslemFormuPage() {
         if (remainingToConsume <= 0) break;
         // Don't double-process the same doc if it was already handled by Case 1
         if (partChange.depotStockId === docSnap.id) continue;
+        if (groupedSourceIds.includes(docSnap.id)) continue;
 
         const data = docSnap.data();
         const available = data.quantity || 0;

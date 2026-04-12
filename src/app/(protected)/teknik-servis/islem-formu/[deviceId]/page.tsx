@@ -1617,6 +1617,9 @@ export default function IslemFormuPage() {
     const consumedEntries: YedekParcaDepoStokItem[] = [];
     let remainingToConsume = requestedQuantity;
     const isGroupedDepotKey = String(partChange.depotStockId || '').startsWith('group:');
+    const groupedSourceIds = isGroupedDepotKey
+      ? String(partChange.depotStockId).replace('group:', '').split('|').filter(Boolean)
+      : [];
 
     if (partChange.depotStockId && !isGroupedDepotKey) {
       const depotRef = doc(db, 'yedekParcaDepoStok', partChange.depotStockId);
@@ -1635,11 +1638,30 @@ export default function IslemFormuPage() {
       }
     }
 
+    if (remainingToConsume > 0 && groupedSourceIds.length > 0) {
+      for (const sourceId of groupedSourceIds) {
+        if (remainingToConsume <= 0) break;
+        const sourceRef = doc(db, 'yedekParcaDepoStok', sourceId);
+        const sourceSnap = await getDoc(sourceRef);
+        if (!sourceSnap.exists()) continue;
+        const sourceData = sourceSnap.data();
+        const available = sourceData.quantity || 0;
+        if (available <= 0) continue;
+        const toTake = Math.min(available, remainingToConsume);
+        if (toTake === available) {
+          batch.delete(sourceRef);
+        } else {
+          batch.update(sourceRef, { quantity: available - toTake });
+        }
+        consumedEntries.push({ ...sourceData, id: sourceSnap.id, consumedQuantity: toTake } as any);
+        remainingToConsume -= toTake;
+      }
+    }
+
     if (remainingToConsume > 0) {
       const q = query(
         collection(db, 'yedekParcaDepoStok'),
-        where('stokKodu', '==', partChange.stokKodu),
-        where('partCondition', '==', 'iyi')
+        where('stokKodu', '==', partChange.stokKodu)
       );
       const snapshot = await getDocs(q);
       const docsSorted = [...snapshot.docs].sort((a, b) => {
@@ -1650,6 +1672,7 @@ export default function IslemFormuPage() {
       for (const docSnap of docsSorted) {
         if (remainingToConsume <= 0) break;
         if (partChange.depotStockId === docSnap.id) continue;
+        if (groupedSourceIds.includes(docSnap.id)) continue;
         const data = docSnap.data();
         const available = data.quantity || 0;
         const toTake = Math.min(available, remainingToConsume);
