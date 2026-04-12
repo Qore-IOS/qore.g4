@@ -674,11 +674,26 @@ export default function AplikasyonIslemFormuPage() {
     [depotStockItems]
   );
 
+  const getDepotSelectionKey = (item: DepotSelectableStockItem) =>
+    item.id || `group:${[...item.sourceEntryIds].sort().join('|')}`;
+
   const filteredDepotStock = useMemo(() => {
-    const usedIds = new Set(actions.map((action) => action.depotStockId).filter(Boolean));
-    const available = selectableDepotStock.filter((item) =>
-      item.isGrouped ? true : !usedIds.has(item.id)
-    );
+    const consumedByKey = new Map<string, number>();
+    actions.forEach((action) => {
+      if (action.type !== 'part_change' || !action.isDepotSelection || !action.depotStockId) return;
+      const consumed = consumedByKey.get(action.depotStockId) || 0;
+      consumedByKey.set(action.depotStockId, consumed + Math.max(1, action.quantity || 1));
+    });
+
+    const available = selectableDepotStock
+      .map((item) => {
+        const key = getDepotSelectionKey(item);
+        const consumed = consumedByKey.get(key) || 0;
+        const remainingQty = item.isGrouped ? Math.max(0, item.totalQuantity - consumed) : item.totalQuantity;
+        return { ...item, totalQuantity: remainingQty };
+      })
+      .filter((item) => item.totalQuantity > 0);
+
     if (!partSearchQuery) return available;
     const q = partSearchQuery.toLowerCase();
     return available.filter((item) =>
@@ -688,6 +703,8 @@ export default function AplikasyonIslemFormuPage() {
       (item.hucreNumarasi || '').toLowerCase().includes(q)
     );
   }, [actions, partSearchQuery, selectableDepotStock]);
+
+  const selectedDepotStockKey = selectedDepotStockItem ? getDepotSelectionKey(selectedDepotStockItem) : null;
 
   const selectableDepotHucreStock = useMemo(
     () => buildDepotSelectableItems(depotStockItems, { cellsOnly: true }),
@@ -1055,10 +1072,15 @@ export default function AplikasyonIslemFormuPage() {
     setRemovedPartSerialNumber('');
     setRemovedPartImageFile(null);
     setRemovedPartImagePreview(null);
+    setPartAssignedDeviceId(actualDeviceId || '');
     setIsPartModalOpen(true);
   };
 
   const handleDepotItemSelect = (item: DepotSelectableStockItem) => {
+    if (isLabMode && !partAssignedDeviceId) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen önce işlem yapılacak cihazı seçin.', variant: 'destructive' });
+      return;
+    }
     if (item.isGrouped && item.totalQuantity > 1) {
       setPendingDepotStockItem(item);
       setDepotRequestedQuantity(1);
@@ -1072,6 +1094,10 @@ export default function AplikasyonIslemFormuPage() {
   };
 
   const selectPersonalStockItem = (item: PersonalStockItem) => {
+    if (isLabMode && !partAssignedDeviceId) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen önce işlem yapılacak cihazı seçin.', variant: 'destructive' });
+      return;
+    }
     setSelectedStockItem(item);
     setSelectedPoolStockItem(null);
     setSelectedDepotStockItem(null);
@@ -1080,6 +1106,10 @@ export default function AplikasyonIslemFormuPage() {
   };
 
   const selectPoolStockItem = (item: PoolWarehouseStockItem) => {
+    if (isLabMode && !partAssignedDeviceId) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen önce işlem yapılacak cihazı seçin.', variant: 'destructive' });
+      return;
+    }
     setSelectedPoolStockItem(item);
     setSelectedStockItem(null);
     setSelectedDepotStockItem(null);
@@ -1088,6 +1118,10 @@ export default function AplikasyonIslemFormuPage() {
   };
 
   const activateManualEntry = () => {
+    if (isLabMode && !partAssignedDeviceId) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen önce işlem yapılacak cihazı seçin.', variant: 'destructive' });
+      return;
+    }
     setShowManualEntry(true);
     setSelectedStockItem(null);
     setSelectedPoolStockItem(null);
@@ -1365,7 +1399,7 @@ export default function AplikasyonIslemFormuPage() {
         anaBirim: selectedDepotStockItem.anaBirim || 'Adet',
         serialNumber: selectedDepotStockItem.serialNumber,
         hucreNumarasi: selectedDepotStockItem.hucreNumarasi,
-        depotStockId: selectedDepotStockItem.id,
+        depotStockId: getDepotSelectionKey(selectedDepotStockItem),
         isDepotSelection: true,
         quantity: selectedDepotStockItem.isGrouped ? partQuantity : 1,
         removedPartStokKodu: matchingPeriodic?.stokKodu || '',
@@ -1548,9 +1582,13 @@ export default function AplikasyonIslemFormuPage() {
     const requestedQuantity = Math.max(1, partChange.quantity || 1);
     const consumedEntries: YedekParcaDepoStokItem[] = [];
     let remainingToConsume = requestedQuantity;
+    const isGroupedDepotKey = String(partChange.depotStockId || '').startsWith('group:');
+    const groupedSourceIds = isGroupedDepotKey
+      ? String(partChange.depotStockId).replace('group:', '').split('|').filter(Boolean)
+      : [];
 
     // Case 1: Direct ID provided (Serial or Cell tracked item)
-    if (partChange.depotStockId) {
+    if (partChange.depotStockId && !isGroupedDepotKey) {
       const depotRef = doc(db, 'yedekParcaDepoStok', partChange.depotStockId);
       const depotSnap = await getDoc(depotRef);
       if (depotSnap.exists()) {
@@ -1567,20 +1605,45 @@ export default function AplikasyonIslemFormuPage() {
       }
     }
 
+    if (remainingToConsume > 0 && groupedSourceIds.length > 0) {
+      for (const sourceId of groupedSourceIds) {
+        if (remainingToConsume <= 0) break;
+        const sourceRef = doc(db, 'yedekParcaDepoStok', sourceId);
+        const sourceSnap = await getDoc(sourceRef);
+        if (!sourceSnap.exists()) continue;
+        const sourceData = sourceSnap.data();
+        const available = sourceData.quantity || 0;
+        if (available <= 0) continue;
+        const toTake = Math.min(available, remainingToConsume);
+        if (toTake === available) {
+          batch.delete(sourceRef);
+        } else {
+          batch.update(sourceRef, { quantity: available - toTake });
+        }
+        consumedEntries.push({ ...sourceData, id: sourceSnap.id, consumedQuantity: toTake } as any);
+        remainingToConsume -= toTake;
+      }
+    }
+
     // Case 2: No ID or remaining quantity for grouped items (Quantity tracked)
-    if (remainingToConsume > 0) {
+    if (remainingToConsume > 0 && !isGroupedDepotKey) {
       const q = query(
         collection(db, 'yedekParcaDepoStok'),
-        where('stokKodu', '==', partChange.stokKodu),
-        where('partCondition', '==', 'iyi'),
-        orderBy('createdAt', 'asc')
+        where('stokKodu', '==', partChange.stokKodu)
       );
       const snapshot = await getDocs(q);
-      
-      for (const docSnap of snapshot.docs) {
+
+      const docsSorted = [...snapshot.docs].sort((a, b) => {
+        const aTs = (a.data().createdAt?.toDate?.() || new Date(0)).getTime();
+        const bTs = (b.data().createdAt?.toDate?.() || new Date(0)).getTime();
+        return aTs - bTs;
+      });
+
+      for (const docSnap of docsSorted) {
         if (remainingToConsume <= 0) break;
         // Don't double-process the same doc if it was already handled by Case 1
         if (partChange.depotStockId === docSnap.id) continue;
+        if (groupedSourceIds.includes(docSnap.id)) continue;
 
         const data = docSnap.data();
         const available = data.quantity || 0;
@@ -1640,10 +1703,44 @@ export default function AplikasyonIslemFormuPage() {
         const batch = writeBatch(db);
 
         // Determine which devices to process
-        const devicesToProcess = isLabMode ? devicesByLab : [device];
+        let devicesToProcess = isLabMode ? [...devicesByLab] : [device];
+        if (isLabMode) {
+            const assignedIds = Array.from(new Set(
+                actions
+                  .filter((a) => a.type !== 'operation')
+                  .map((a) => a.assignedDeviceId)
+                  .filter((id): id is string => !!id)
+            ));
+
+            const hasGlobalOnlyActions = assignedIds.length === 0 && actions.some((a) => a.type === 'operation');
+            if (!hasGlobalOnlyActions && assignedIds.length > 0) {
+                const existingMap = new Map(devicesToProcess.filter(Boolean).map((d) => [d.id, d] as const));
+                const resolvedDevices: Device[] = [];
+                for (const id of assignedIds) {
+                    if (existingMap.has(id)) {
+                        resolvedDevices.push(existingMap.get(id)!);
+                        continue;
+                    }
+                    const extraSnap = await getDoc(doc(db, 'devices', id));
+                    if (extraSnap.exists()) {
+                        resolvedDevices.push({ id: extraSnap.id, ...extraSnap.data() } as Device);
+                    }
+                }
+                devicesToProcess = resolvedDevices;
+            }
+        }
+        const createdFormIds: string[] = [];
+        const labDeviceActionSummaries: Array<{
+            deviceId: string;
+            cihazAdi: string;
+            seriNumarasi: string;
+            partAndHucreActions: ActionItem[];
+        }> = [];
+        const labMasterFormRef = isLabMode ? doc(collection(db, 'aplikasyonActionForms')) : null;
         
         // Multi-device loop
         for (const currentDevice of devicesToProcess) {
+            if (!currentDevice) continue;
             // Filter actions for this specific device
             // If it's a global action (assignedDeviceId is null/empty/global), keep it for all.
             // If it's device-specific, keep it only for that device.
@@ -1651,6 +1748,15 @@ export default function AplikasyonIslemFormuPage() {
                 if (!action.assignedDeviceId) return true; // Global or single-device mode
                 return action.assignedDeviceId === currentDevice.id;
             });
+            if (isLabMode && deviceSpecificActions.length === 0) continue;
+            if (isLabMode) {
+                labDeviceActionSummaries.push({
+                    deviceId: currentDevice.id,
+                    cihazAdi: currentDevice.cihazAdi || currentDevice.model || '',
+                    seriNumarasi: currentDevice.seriNumarasi || '',
+                    partAndHucreActions: deviceSpecificActions.filter((a) => a.type === 'part_change' || a.type === 'hucre_degisimi'),
+                });
+            }
 
             // Get selected maintenance plan details for saving
             const selectedMaintenancePlanDetails = maintenancePlans
@@ -1664,7 +1770,9 @@ export default function AplikasyonIslemFormuPage() {
             const resolvedFaultId = isCustomFault ? null : (selectedFault?.id || null);
 
             // Create form document
-            const formRef = doc(collection(db, 'aplikasyonActionForms'));
+            const formRef = isLabMode
+              ? doc(collection(db, 'deviceActionForms'))
+              : doc(collection(db, 'aplikasyonActionForms'));
             const formData = {
                 deviceId: currentDevice.id,
                 cihazAdi: currentDevice.cihazAdi || currentDevice.model,
@@ -1694,15 +1802,20 @@ export default function AplikasyonIslemFormuPage() {
                 isCustomFault: isCustomFault || false,
                 selectedTests: islemTuru === 'ariza' && selectedTests.length > 0 ? selectedTests : null,
                 isBulkLabForm: isLabMode,
+                isLabDeviceChild: isLabMode ? true : undefined,
+                labMasterFormId: isLabMode ? labMasterFormRef?.id : undefined,
             };
             batch.set(formRef, formData);
+            if (!isLabMode) createdFormIds.push(formRef.id);
 
             // Mirror form to deviceActionForms for device history page
-            const deviceActionFormRef = doc(collection(db, 'deviceActionForms'), formRef.id);
-            batch.set(deviceActionFormRef, {
-                ...formData,
-                formId: formRef.id,
-            });
+            if (!isLabMode) {
+                const deviceActionFormRef = doc(collection(db, 'deviceActionForms'), formRef.id);
+                batch.set(deviceActionFormRef, {
+                    ...formData,
+                    formId: formRef.id,
+                });
+            }
 
             // Create closed fault report when ariza is selected
             if (islemTuru === 'ariza' && (selectedFault || isCustomFault)) {
@@ -1892,6 +2005,53 @@ export default function AplikasyonIslemFormuPage() {
             }
         }
 
+        if (isLabMode && labMasterFormRef) {
+            batch.set(labMasterFormRef, {
+                deviceId: `lab-${hospital?.id || hospitalIdFromLab || 'GENEL'}`,
+                cihazAdi: `${hospital?.name || 'Laboratuvar'} (Lab Geneli)`,
+                seriNumarasi: `LAB-${(hospital?.id || hospitalIdFromLab || 'GENEL').slice(0, 8)}`,
+                hospitalId: hospital?.id || hospitalIdFromLab,
+                labName: hospital?.name,
+                actions,
+                islemTuru: islemTuru || null,
+                aciklama: aciklama.trim(),
+                baslangicSaati,
+                bitisSaati,
+                baslangicTarihi,
+                bitisTarihi,
+                cihazDurumu,
+                cihazDurumuAciklama: cihazDurumu === 'diger' ? cihazDurumuAciklama : null,
+                eslikEdenPersonel: eslikEdenPersonel.length > 0 ? eslikEdenPersonel : null,
+                personnelSignature: finalSignatures.personnel || null,
+                technicianSignature: finalSignatures.technician || null,
+                technicianName: finalTechnicianName || null,
+                createdAt: Timestamp.fromDate(now),
+                createdByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+                createdByUid: currentUserProfile?.uid,
+                formType: 'aplikasyon',
+                selectedMaintenanceTasks: null,
+                faultDefinitionId: null,
+                faultName: null,
+                isCustomFault: false,
+                selectedTests: islemTuru === 'ariza' && selectedTests.length > 0 ? selectedTests : null,
+                isBulkLabForm: true,
+                isLabDeviceChild: false,
+                labDeviceActionSummaries,
+            });
+            createdFormIds.push(labMasterFormRef.id);
+        }
+
+        if (createdFormIds.length === 0) {
+            throw new Error('Kaydedilecek cihaz aksiyonu bulunamadı. Lütfen cihaz atamalarını kontrol edin.');
+        }
+
+        await batch.commit();
+        toast({
+            title: 'Başarılı',
+            description: isLabMode
+              ? `Laboratuvar geneli için tek form oluşturuldu. (${labDeviceActionSummaries.length} cihaz işlendi)`
+              : `İşlem formu #${createdFormIds[0]?.substring(0, 6)}... kaydedildi.`,
+        });
         router.back();
     } catch(err) {
         console.error("Error saving action form:", err);
@@ -2232,22 +2392,27 @@ export default function AplikasyonIslemFormuPage() {
               </label>
 
               {isLabMode && (
-                <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, color: 'var(--wz-text-secondary)', marginBottom: '8px' }}>
-                    Takıldığı Cihaz *
+                <div style={{ marginBottom: '12px' }}>
+                  <label style={{ fontSize: '13px', color: 'var(--wz-text-secondary)', display: 'block', marginBottom: '6px' }}>
+                    İşlem Yapılan Cihazı Seçin <span style={{ color: '#ef4444' }}>*</span>
                   </label>
-                  <Select value={partAssignedDeviceId} onValueChange={setPartAssignedDeviceId}>
-                    <SelectTrigger className="wizard-dark-select" style={{ background: 'var(--wz-input-bg)', borderColor: 'var(--wz-input-border)' }}>
-                      <SelectValue placeholder="Cihaz seçin..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {devicesByLab.map(d => (
-                        <SelectItem key={d.id} value={d.id}>
-                          {d.cihazAdi || d.model} ({d.seriNumarasi})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {devicesByLab.map((d) => (
+                      <button
+                        key={d.id}
+                        onClick={() => setPartAssignedDeviceId(d.id)}
+                        className={`flex flex-col items-center p-2 rounded-xl border transition-all ${
+                          partAssignedDeviceId === d.id
+                            ? 'bg-[var(--dashboard-accent)]/10 border-[var(--dashboard-accent)] text-[var(--dashboard-accent)]'
+                            : 'bg-[var(--dashboard-surface)] border-[var(--dashboard-stroke)] hover:bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)]'
+                        }`}
+                      >
+                        <span className="text-[11px] font-bold truncate w-full text-center">{d.cihazAdi || d.model || 'Cihaz'}</span>
+                        <span className="text-[9px] opacity-70 truncate w-full text-center">Model: {d.model || '-'}</span>
+                        <span className="text-[9px] opacity-70 truncate w-full text-center">SN: {d.seriNumarasi || '-'}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -2361,7 +2526,7 @@ export default function AplikasyonIslemFormuPage() {
                         </div>
                       ) : filteredDepotStock.map(item => (
                         <div
-                          key={`${item.id || item.stokKodu}-${item.hucreNumarasi || item.serialNumber || 'qty'}`}
+                          key={getDepotSelectionKey(item)}
                           onClick={() => {
                             handleDepotItemSelect(item);
                             setRemovedPartSerialNumber('');
@@ -2371,8 +2536,8 @@ export default function AplikasyonIslemFormuPage() {
                           style={{
                             display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
                             padding: '12px 14px', borderBottom: '1px solid var(--wz-table-border)', cursor: 'pointer',
-                            background: selectedDepotStockItem?.id === item.id && selectedDepotStockItem?.stokKodu === item.stokKodu ? 'var(--wz-selected-bg)' : 'transparent',
-                            borderLeft: selectedDepotStockItem?.id === item.id && selectedDepotStockItem?.stokKodu === item.stokKodu ? '3px solid #f97316' : '3px solid transparent',
+                            background: selectedDepotStockKey === getDepotSelectionKey(item) ? 'var(--wz-selected-bg)' : 'transparent',
+                            borderLeft: selectedDepotStockKey === getDepotSelectionKey(item) ? '3px solid #f97316' : '3px solid transparent',
                           }}
                         >
                           <div>
@@ -3185,10 +3350,10 @@ export default function AplikasyonIslemFormuPage() {
                       <div className="p-2 space-y-1">
                         {filteredDepotStock.map(item => (
                           <button
-                            key={`${item.id || item.stokKodu}-${item.serialNumber || item.hucreNumarasi || 'qty'}`}
+                            key={getDepotSelectionKey(item)}
                             onClick={() => handleDepotItemSelect(item)}
                             className={`w-full text-left p-3 rounded-lg transition-colors ${
-                              selectedDepotStockItem?.id === item.id && selectedDepotStockItem?.stokKodu === item.stokKodu
+                              selectedDepotStockKey === getDepotSelectionKey(item)
                                 ? 'bg-orange-500/10 border border-orange-500/40'
                                 : 'hover:bg-muted/60 border border-transparent'
                             }`}
