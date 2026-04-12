@@ -674,11 +674,26 @@ export default function AplikasyonIslemFormuPage() {
     [depotStockItems]
   );
 
+  const getDepotSelectionKey = (item: DepotSelectableStockItem) =>
+    item.id || `group:${item.sourceEntryIds.join('|')}`;
+
   const filteredDepotStock = useMemo(() => {
-    const usedIds = new Set(actions.map((action) => action.depotStockId).filter(Boolean));
-    const available = selectableDepotStock.filter((item) =>
-      item.isGrouped ? true : !usedIds.has(item.id)
-    );
+    const consumedByKey = new Map<string, number>();
+    actions.forEach((action) => {
+      if (action.type !== 'part_change' || !action.isDepotSelection || !action.depotStockId) return;
+      const consumed = consumedByKey.get(action.depotStockId) || 0;
+      consumedByKey.set(action.depotStockId, consumed + Math.max(1, action.quantity || 1));
+    });
+
+    const available = selectableDepotStock
+      .map((item) => {
+        const key = getDepotSelectionKey(item);
+        const consumed = consumedByKey.get(key) || 0;
+        const remainingQty = item.isGrouped ? Math.max(0, item.totalQuantity - consumed) : item.totalQuantity;
+        return { ...item, totalQuantity: remainingQty };
+      })
+      .filter((item) => item.totalQuantity > 0);
+
     if (!partSearchQuery) return available;
     const q = partSearchQuery.toLowerCase();
     return available.filter((item) =>
@@ -1055,10 +1070,15 @@ export default function AplikasyonIslemFormuPage() {
     setRemovedPartSerialNumber('');
     setRemovedPartImageFile(null);
     setRemovedPartImagePreview(null);
+    setPartAssignedDeviceId(actualDeviceId || '');
     setIsPartModalOpen(true);
   };
 
   const handleDepotItemSelect = (item: DepotSelectableStockItem) => {
+    if (isLabMode && !partAssignedDeviceId) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen önce işlem yapılacak cihazı seçin.', variant: 'destructive' });
+      return;
+    }
     if (item.isGrouped && item.totalQuantity > 1) {
       setPendingDepotStockItem(item);
       setDepotRequestedQuantity(1);
@@ -1072,6 +1092,10 @@ export default function AplikasyonIslemFormuPage() {
   };
 
   const selectPersonalStockItem = (item: PersonalStockItem) => {
+    if (isLabMode && !partAssignedDeviceId) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen önce işlem yapılacak cihazı seçin.', variant: 'destructive' });
+      return;
+    }
     setSelectedStockItem(item);
     setSelectedPoolStockItem(null);
     setSelectedDepotStockItem(null);
@@ -1080,6 +1104,10 @@ export default function AplikasyonIslemFormuPage() {
   };
 
   const selectPoolStockItem = (item: PoolWarehouseStockItem) => {
+    if (isLabMode && !partAssignedDeviceId) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen önce işlem yapılacak cihazı seçin.', variant: 'destructive' });
+      return;
+    }
     setSelectedPoolStockItem(item);
     setSelectedStockItem(null);
     setSelectedDepotStockItem(null);
@@ -1088,6 +1116,10 @@ export default function AplikasyonIslemFormuPage() {
   };
 
   const activateManualEntry = () => {
+    if (isLabMode && !partAssignedDeviceId) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen önce işlem yapılacak cihazı seçin.', variant: 'destructive' });
+      return;
+    }
     setShowManualEntry(true);
     setSelectedStockItem(null);
     setSelectedPoolStockItem(null);
@@ -1365,7 +1397,7 @@ export default function AplikasyonIslemFormuPage() {
         anaBirim: selectedDepotStockItem.anaBirim || 'Adet',
         serialNumber: selectedDepotStockItem.serialNumber,
         hucreNumarasi: selectedDepotStockItem.hucreNumarasi,
-        depotStockId: selectedDepotStockItem.id,
+        depotStockId: getDepotSelectionKey(selectedDepotStockItem),
         isDepotSelection: true,
         quantity: selectedDepotStockItem.isGrouped ? partQuantity : 1,
         removedPartStokKodu: matchingPeriodic?.stokKodu || '',
