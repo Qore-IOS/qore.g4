@@ -691,11 +691,26 @@ export default function IslemFormuPage() {
     [depotStockItems]
   );
 
+  const getDepotSelectionKey = (item: DepotSelectableStockItem) =>
+    item.id || `group:${[...item.sourceEntryIds].sort().join('|')}`;
+
   const filteredDepotStock = useMemo(() => {
-    const usedIds = new Set(actions.map((action) => action.depotStockId).filter(Boolean));
-    const available = selectableDepotStock.filter((item) =>
-      item.isGrouped ? true : !usedIds.has(item.id)
-    );
+    const consumedByKey = new Map<string, number>();
+    actions.forEach((action) => {
+      if (action.type !== 'part_change' || !action.isDepotSelection || !action.depotStockId) return;
+      const consumed = consumedByKey.get(action.depotStockId) || 0;
+      consumedByKey.set(action.depotStockId, consumed + Math.max(1, action.quantity || 1));
+    });
+
+    const available = selectableDepotStock
+      .map((item) => {
+        const key = getDepotSelectionKey(item);
+        const consumed = consumedByKey.get(key) || 0;
+        const remainingQty = item.isGrouped ? Math.max(0, item.totalQuantity - consumed) : item.totalQuantity;
+        return { ...item, totalQuantity: remainingQty };
+      })
+      .filter((item) => item.totalQuantity > 0);
+
     if (!partSearchQuery) return available;
     const q = partSearchQuery.toLowerCase();
     return available.filter((item) =>
@@ -705,6 +720,8 @@ export default function IslemFormuPage() {
       (item.hucreNumarasi || '').toLowerCase().includes(q)
     );
   }, [actions, partSearchQuery, selectableDepotStock]);
+
+  const selectedDepotStockKey = selectedDepotStockItem ? getDepotSelectionKey(selectedDepotStockItem) : null;
 
   const selectableDepotHucreStock = useMemo(
     () => buildDepotSelectableItems(depotStockItems, { cellsOnly: true }),
@@ -1101,6 +1118,10 @@ export default function IslemFormuPage() {
   };
 
   const handleDepotItemSelect = (item: DepotSelectableStockItem) => {
+    if (isLabMode && !partAssignedDeviceId) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen önce işlem yapılacak cihazı seçin.', variant: 'destructive' });
+      return;
+    }
     if (item.isGrouped && item.totalQuantity > 1) {
       setPendingDepotStockItem(item);
       setDepotRequestedQuantity(1);
@@ -1395,7 +1416,7 @@ export default function IslemFormuPage() {
         anaBirim: selectedDepotStockItem.anaBirim || 'Adet',
         serialNumber: selectedDepotStockItem.serialNumber,
         hucreNumarasi: selectedDepotStockItem.hucreNumarasi,
-        depotStockId: selectedDepotStockItem.id,
+        depotStockId: getDepotSelectionKey(selectedDepotStockItem),
         isDepotSelection: true,
         quantity: selectedDepotStockItem.isGrouped ? partQuantity : 1,
         removedPartStokKodu: matchingPeriodic?.stokKodu || '',
@@ -1595,8 +1616,12 @@ export default function IslemFormuPage() {
     const requestedQuantity = Math.max(1, partChange.quantity || 1);
     const consumedEntries: YedekParcaDepoStokItem[] = [];
     let remainingToConsume = requestedQuantity;
+    const isGroupedDepotKey = String(partChange.depotStockId || '').startsWith('group:');
+    const groupedSourceIds = isGroupedDepotKey
+      ? String(partChange.depotStockId).replace('group:', '').split('|').filter(Boolean)
+      : [];
 
-    if (partChange.depotStockId) {
+    if (partChange.depotStockId && !isGroupedDepotKey) {
       const depotRef = doc(db, 'yedekParcaDepoStok', partChange.depotStockId);
       const depotSnap = await getDoc(depotRef);
       if (depotSnap.exists()) {
@@ -1613,17 +1638,41 @@ export default function IslemFormuPage() {
       }
     }
 
+    if (remainingToConsume > 0 && groupedSourceIds.length > 0) {
+      for (const sourceId of groupedSourceIds) {
+        if (remainingToConsume <= 0) break;
+        const sourceRef = doc(db, 'yedekParcaDepoStok', sourceId);
+        const sourceSnap = await getDoc(sourceRef);
+        if (!sourceSnap.exists()) continue;
+        const sourceData = sourceSnap.data();
+        const available = sourceData.quantity || 0;
+        if (available <= 0) continue;
+        const toTake = Math.min(available, remainingToConsume);
+        if (toTake === available) {
+          batch.delete(sourceRef);
+        } else {
+          batch.update(sourceRef, { quantity: available - toTake });
+        }
+        consumedEntries.push({ ...sourceData, id: sourceSnap.id, consumedQuantity: toTake } as any);
+        remainingToConsume -= toTake;
+      }
+    }
+
     if (remainingToConsume > 0) {
       const q = query(
         collection(db, 'yedekParcaDepoStok'),
-        where('stokKodu', '==', partChange.stokKodu),
-        where('partCondition', '==', 'iyi'),
-        orderBy('createdAt', 'asc')
+        where('stokKodu', '==', partChange.stokKodu)
       );
       const snapshot = await getDocs(q);
-      for (const docSnap of snapshot.docs) {
+      const docsSorted = [...snapshot.docs].sort((a, b) => {
+        const aTs = (a.data().createdAt?.toDate?.() || new Date(0)).getTime();
+        const bTs = (b.data().createdAt?.toDate?.() || new Date(0)).getTime();
+        return aTs - bTs;
+      });
+      for (const docSnap of docsSorted) {
         if (remainingToConsume <= 0) break;
         if (partChange.depotStockId === docSnap.id) continue;
+        if (groupedSourceIds.includes(docSnap.id)) continue;
         const data = docSnap.data();
         const available = data.quantity || 0;
         const toTake = Math.min(available, remainingToConsume);
@@ -2318,6 +2367,31 @@ export default function IslemFormuPage() {
                 1. Parça Seçin
               </label>
 
+              {isLabMode && (
+                <div style={{ marginBottom: '12px' }}>
+                  <label style={{ fontSize: '13px', color: 'var(--wz-text-secondary)', display: 'block', marginBottom: '6px' }}>
+                    İşlem Yapılan Cihazı Seçin <span style={{ color: '#ef4444' }}>*</span>
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {devicesByLab.map((d) => (
+                      <button
+                        key={d.id}
+                        onClick={() => setPartAssignedDeviceId(d.id)}
+                        className={`flex flex-col items-center p-2 rounded-xl border transition-all ${
+                          partAssignedDeviceId === d.id
+                            ? 'bg-[var(--dashboard-accent)]/10 border-[var(--dashboard-accent)] text-[var(--dashboard-accent)]'
+                            : 'bg-[var(--dashboard-surface)] border-[var(--dashboard-stroke)] hover:bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)]'
+                        }`}
+                      >
+                        <span className="text-[11px] font-bold truncate w-full text-center">{d.cihazAdi || d.model || 'Cihaz'}</span>
+                        <span className="text-[9px] opacity-70 truncate w-full text-center">Model: {d.model || '-'}</span>
+                        <span className="text-[9px] opacity-70 truncate w-full text-center">SN: {d.seriNumarasi || '-'}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Stock source tabs */}
               <div className="wizard-sub-tabs" style={{ paddingLeft: 0, marginBottom: '8px' }}>
                 <button
@@ -2428,7 +2502,7 @@ export default function IslemFormuPage() {
                         </div>
                       ) : filteredDepotStock.map(item => (
                         <div
-                          key={`${item.id || item.stokKodu}-${item.hucreNumarasi || item.serialNumber || 'qty'}`}
+                          key={getDepotSelectionKey(item)}
                           onClick={() => {
                             handleDepotItemSelect(item);
                             setRemovedPartSerialNumber('');
@@ -2438,8 +2512,8 @@ export default function IslemFormuPage() {
                           style={{
                             display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
                             padding: '12px 14px', borderBottom: '1px solid var(--wz-table-border)', cursor: 'pointer',
-                            background: selectedDepotStockItem?.id === item.id && selectedDepotStockItem?.stokKodu === item.stokKodu ? 'var(--wz-selected-bg)' : 'transparent',
-                            borderLeft: selectedDepotStockItem?.id === item.id && selectedDepotStockItem?.stokKodu === item.stokKodu ? '3px solid #f97316' : '3px solid transparent',
+                            background: selectedDepotStockKey === getDepotSelectionKey(item) ? 'var(--wz-selected-bg)' : 'transparent',
+                            borderLeft: selectedDepotStockKey === getDepotSelectionKey(item) ? '3px solid #f97316' : '3px solid transparent',
                           }}
                         >
                           <div>
@@ -3305,10 +3379,10 @@ export default function IslemFormuPage() {
                       <div className="p-2 space-y-1">
                         {filteredDepotStock.map(item => (
                           <button
-                            key={`${item.id || item.stokKodu}-${item.hucreNumarasi || item.serialNumber || 'qty'}`}
+                            key={getDepotSelectionKey(item)}
                             onClick={() => { handleDepotItemSelect(item); }}
                             className={`w-full text-left p-3 rounded-xl transition-colors ${
-                              selectedDepotStockItem?.id === item.id && selectedDepotStockItem?.stokKodu === item.stokKodu
+                              selectedDepotStockKey === getDepotSelectionKey(item)
                                 ? 'bg-orange-500/10 border border-orange-500/40'
                                 : 'hover:bg-[var(--dashboard-surface-2)] border border-transparent'
                             }`}
