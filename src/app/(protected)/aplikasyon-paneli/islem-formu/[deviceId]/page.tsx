@@ -1626,7 +1626,7 @@ export default function AplikasyonIslemFormuPage() {
     }
 
     // Case 2: No ID or remaining quantity for grouped items (Quantity tracked)
-    if (remainingToConsume > 0) {
+    if (remainingToConsume > 0 && !isGroupedDepotKey) {
       const q = query(
         collection(db, 'yedekParcaDepoStok'),
         where('stokKodu', '==', partChange.stokKodu)

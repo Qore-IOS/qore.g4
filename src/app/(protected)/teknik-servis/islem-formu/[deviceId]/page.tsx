@@ -1658,7 +1658,7 @@ export default function IslemFormuPage() {
       }
     }
 
-    if (remainingToConsume > 0) {
+    if (remainingToConsume > 0 && !isGroupedDepotKey) {
       const q = query(
         collection(db, 'yedekParcaDepoStok'),
         where('stokKodu', '==', partChange.stokKodu)
