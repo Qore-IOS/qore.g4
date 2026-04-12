@@ -71,6 +71,7 @@ type ActionRecord = {
   }>;
   selectedMaintenanceTasks?: Array<{ id?: string; taskName?: string }>;
   moduleType?: ModuleType;
+  isLabDeviceChild?: boolean;
 };
 
 const ISLEM_TURU_LABELS: Record<string, string> = {
@@ -144,6 +145,7 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
 
   const filteredForms = useMemo(() => {
     return forms
+      .filter((form) => !form.isLabDeviceChild)
       .filter((form) => filterModuleType === 'all' || form.moduleType === filterModuleType)
       .filter((form) => filterLab === 'all' || (form.labName || '-') === filterLab)
       .filter((form) => filterPersonnel === 'all' || (form.createdByName || '-') === filterPersonnel)

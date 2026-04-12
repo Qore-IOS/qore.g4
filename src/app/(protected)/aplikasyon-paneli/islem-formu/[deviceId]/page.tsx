@@ -1730,6 +1730,13 @@ export default function AplikasyonIslemFormuPage() {
             }
         }
         const createdFormIds: string[] = [];
+        const labDeviceActionSummaries: Array<{
+            deviceId: string;
+            cihazAdi: string;
+            seriNumarasi: string;
+            partAndHucreActions: ActionItem[];
+        }> = [];
+        const labMasterFormRef = isLabMode ? doc(collection(db, 'aplikasyonActionForms')) : null;
         
         // Multi-device loop
         for (const currentDevice of devicesToProcess) {
@@ -1742,6 +1749,14 @@ export default function AplikasyonIslemFormuPage() {
                 return action.assignedDeviceId === currentDevice.id;
             });
             if (isLabMode && deviceSpecificActions.length === 0) continue;
+            if (isLabMode) {
+                labDeviceActionSummaries.push({
+                    deviceId: currentDevice.id,
+                    cihazAdi: currentDevice.cihazAdi || currentDevice.model || '',
+                    seriNumarasi: currentDevice.seriNumarasi || '',
+                    partAndHucreActions: deviceSpecificActions.filter((a) => a.type === 'part_change' || a.type === 'hucre_degisimi'),
+                });
+            }
 
             // Get selected maintenance plan details for saving
             const selectedMaintenancePlanDetails = maintenancePlans
@@ -1755,7 +1770,9 @@ export default function AplikasyonIslemFormuPage() {
             const resolvedFaultId = isCustomFault ? null : (selectedFault?.id || null);
 
             // Create form document
-            const formRef = doc(collection(db, 'aplikasyonActionForms'));
+            const formRef = isLabMode
+              ? doc(collection(db, 'deviceActionForms'))
+              : doc(collection(db, 'aplikasyonActionForms'));
             const formData = {
                 deviceId: currentDevice.id,
                 cihazAdi: currentDevice.cihazAdi || currentDevice.model,
@@ -1785,16 +1802,20 @@ export default function AplikasyonIslemFormuPage() {
                 isCustomFault: isCustomFault || false,
                 selectedTests: islemTuru === 'ariza' && selectedTests.length > 0 ? selectedTests : null,
                 isBulkLabForm: isLabMode,
+                isLabDeviceChild: isLabMode ? true : undefined,
+                labMasterFormId: isLabMode ? labMasterFormRef?.id : undefined,
             };
             batch.set(formRef, formData);
-            createdFormIds.push(formRef.id);
+            if (!isLabMode) createdFormIds.push(formRef.id);
 
             // Mirror form to deviceActionForms for device history page
-            const deviceActionFormRef = doc(collection(db, 'deviceActionForms'), formRef.id);
-            batch.set(deviceActionFormRef, {
-                ...formData,
-                formId: formRef.id,
-            });
+            if (!isLabMode) {
+                const deviceActionFormRef = doc(collection(db, 'deviceActionForms'), formRef.id);
+                batch.set(deviceActionFormRef, {
+                    ...formData,
+                    formId: formRef.id,
+                });
+            }
 
             // Create closed fault report when ariza is selected
             if (islemTuru === 'ariza' && (selectedFault || isCustomFault)) {
@@ -1984,6 +2005,42 @@ export default function AplikasyonIslemFormuPage() {
             }
         }
 
+        if (isLabMode && labMasterFormRef) {
+            batch.set(labMasterFormRef, {
+                deviceId: `lab-${hospital?.id || hospitalIdFromLab || 'GENEL'}`,
+                cihazAdi: `${hospital?.name || 'Laboratuvar'} (Lab Geneli)`,
+                seriNumarasi: `LAB-${(hospital?.id || hospitalIdFromLab || 'GENEL').slice(0, 8)}`,
+                hospitalId: hospital?.id || hospitalIdFromLab,
+                labName: hospital?.name,
+                actions,
+                islemTuru: islemTuru || null,
+                aciklama: aciklama.trim(),
+                baslangicSaati,
+                bitisSaati,
+                baslangicTarihi,
+                bitisTarihi,
+                cihazDurumu,
+                cihazDurumuAciklama: cihazDurumu === 'diger' ? cihazDurumuAciklama : null,
+                eslikEdenPersonel: eslikEdenPersonel.length > 0 ? eslikEdenPersonel : null,
+                personnelSignature: finalSignatures.personnel || null,
+                technicianSignature: finalSignatures.technician || null,
+                technicianName: finalTechnicianName || null,
+                createdAt: Timestamp.fromDate(now),
+                createdByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+                createdByUid: currentUserProfile?.uid,
+                formType: 'aplikasyon',
+                selectedMaintenanceTasks: null,
+                faultDefinitionId: null,
+                faultName: null,
+                isCustomFault: false,
+                selectedTests: islemTuru === 'ariza' && selectedTests.length > 0 ? selectedTests : null,
+                isBulkLabForm: true,
+                isLabDeviceChild: false,
+                labDeviceActionSummaries,
+            });
+            createdFormIds.push(labMasterFormRef.id);
+        }
+
         if (createdFormIds.length === 0) {
             throw new Error('Kaydedilecek cihaz aksiyonu bulunamadı. Lütfen cihaz atamalarını kontrol edin.');
         }
@@ -1992,7 +2049,7 @@ export default function AplikasyonIslemFormuPage() {
         toast({
             title: 'Başarılı',
             description: isLabMode
-              ? `Laboratuvar genelinde ${createdFormIds.length} cihaz için işlem formu oluşturuldu.`
+              ? `Laboratuvar geneli için tek form oluşturuldu. (${labDeviceActionSummaries.length} cihaz işlendi)`
               : `İşlem formu #${createdFormIds[0]?.substring(0, 6)}... kaydedildi.`,
         });
         router.back();
