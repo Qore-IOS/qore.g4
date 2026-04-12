@@ -691,11 +691,26 @@ export default function IslemFormuPage() {
     [depotStockItems]
   );
 
+  const getDepotSelectionKey = (item: DepotSelectableStockItem) =>
+    item.id || `group:${item.sourceEntryIds.join('|')}`;
+
   const filteredDepotStock = useMemo(() => {
-    const usedIds = new Set(actions.map((action) => action.depotStockId).filter(Boolean));
-    const available = selectableDepotStock.filter((item) =>
-      item.isGrouped ? true : !usedIds.has(item.id)
-    );
+    const consumedByKey = new Map<string, number>();
+    actions.forEach((action) => {
+      if (action.type !== 'part_change' || !action.isDepotSelection || !action.depotStockId) return;
+      const consumed = consumedByKey.get(action.depotStockId) || 0;
+      consumedByKey.set(action.depotStockId, consumed + Math.max(1, action.quantity || 1));
+    });
+
+    const available = selectableDepotStock
+      .map((item) => {
+        const key = getDepotSelectionKey(item);
+        const consumed = consumedByKey.get(key) || 0;
+        const remainingQty = item.isGrouped ? Math.max(0, item.totalQuantity - consumed) : item.totalQuantity;
+        return { ...item, totalQuantity: remainingQty };
+      })
+      .filter((item) => item.totalQuantity > 0);
+
     if (!partSearchQuery) return available;
     const q = partSearchQuery.toLowerCase();
     return available.filter((item) =>
@@ -1101,6 +1116,10 @@ export default function IslemFormuPage() {
   };
 
   const handleDepotItemSelect = (item: DepotSelectableStockItem) => {
+    if (isLabMode && !partAssignedDeviceId) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen önce işlem yapılacak cihazı seçin.', variant: 'destructive' });
+      return;
+    }
     if (item.isGrouped && item.totalQuantity > 1) {
       setPendingDepotStockItem(item);
       setDepotRequestedQuantity(1);
@@ -1395,7 +1414,7 @@ export default function IslemFormuPage() {
         anaBirim: selectedDepotStockItem.anaBirim || 'Adet',
         serialNumber: selectedDepotStockItem.serialNumber,
         hucreNumarasi: selectedDepotStockItem.hucreNumarasi,
-        depotStockId: selectedDepotStockItem.id,
+        depotStockId: getDepotSelectionKey(selectedDepotStockItem),
         isDepotSelection: true,
         quantity: selectedDepotStockItem.isGrouped ? partQuantity : 1,
         removedPartStokKodu: matchingPeriodic?.stokKodu || '',
@@ -2317,6 +2336,31 @@ export default function IslemFormuPage() {
               <label style={{ display: 'block', fontSize: '15px', fontWeight: 600, color: 'var(--wz-text)', marginBottom: '12px' }}>
                 1. Parça Seçin
               </label>
+
+              {isLabMode && (
+                <div style={{ marginBottom: '12px' }}>
+                  <label style={{ fontSize: '13px', color: 'var(--wz-text-secondary)', display: 'block', marginBottom: '6px' }}>
+                    İşlem Yapılan Cihazı Seçin <span style={{ color: '#ef4444' }}>*</span>
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {devicesByLab.map((d) => (
+                      <button
+                        key={d.id}
+                        onClick={() => setPartAssignedDeviceId(d.id)}
+                        className={`flex flex-col items-center p-2 rounded-xl border transition-all ${
+                          partAssignedDeviceId === d.id
+                            ? 'bg-[var(--dashboard-accent)]/10 border-[var(--dashboard-accent)] text-[var(--dashboard-accent)]'
+                            : 'bg-[var(--dashboard-surface)] border-[var(--dashboard-stroke)] hover:bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)]'
+                        }`}
+                      >
+                        <span className="text-[11px] font-bold truncate w-full text-center">{d.cihazAdi || d.model || 'Cihaz'}</span>
+                        <span className="text-[9px] opacity-70 truncate w-full text-center">Model: {d.model || '-'}</span>
+                        <span className="text-[9px] opacity-70 truncate w-full text-center">SN: {d.seriNumarasi || '-'}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Stock source tabs */}
               <div className="wizard-sub-tabs" style={{ paddingLeft: 0, marginBottom: '8px' }}>
