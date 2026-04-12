@@ -692,7 +692,7 @@ export default function IslemFormuPage() {
   );
 
   const getDepotSelectionKey = (item: DepotSelectableStockItem) =>
-    item.id || `group:${item.sourceEntryIds.join('|')}`;
+    item.id || `group:${[...item.sourceEntryIds].sort().join('|')}`;
 
   const filteredDepotStock = useMemo(() => {
     const consumedByKey = new Map<string, number>();
@@ -720,6 +720,8 @@ export default function IslemFormuPage() {
       (item.hucreNumarasi || '').toLowerCase().includes(q)
     );
   }, [actions, partSearchQuery, selectableDepotStock]);
+
+  const selectedDepotStockKey = selectedDepotStockItem ? getDepotSelectionKey(selectedDepotStockItem) : null;
 
   const selectableDepotHucreStock = useMemo(
     () => buildDepotSelectableItems(depotStockItems, { cellsOnly: true }),
@@ -2472,7 +2474,7 @@ export default function IslemFormuPage() {
                         </div>
                       ) : filteredDepotStock.map(item => (
                         <div
-                          key={`${item.id || item.stokKodu}-${item.hucreNumarasi || item.serialNumber || 'qty'}`}
+                          key={getDepotSelectionKey(item)}
                           onClick={() => {
                             handleDepotItemSelect(item);
                             setRemovedPartSerialNumber('');
@@ -2482,8 +2484,8 @@ export default function IslemFormuPage() {
                           style={{
                             display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
                             padding: '12px 14px', borderBottom: '1px solid var(--wz-table-border)', cursor: 'pointer',
-                            background: selectedDepotStockItem?.id === item.id && selectedDepotStockItem?.stokKodu === item.stokKodu ? 'var(--wz-selected-bg)' : 'transparent',
-                            borderLeft: selectedDepotStockItem?.id === item.id && selectedDepotStockItem?.stokKodu === item.stokKodu ? '3px solid #f97316' : '3px solid transparent',
+                            background: selectedDepotStockKey === getDepotSelectionKey(item) ? 'var(--wz-selected-bg)' : 'transparent',
+                            borderLeft: selectedDepotStockKey === getDepotSelectionKey(item) ? '3px solid #f97316' : '3px solid transparent',
                           }}
                         >
                           <div>
@@ -3349,10 +3351,10 @@ export default function IslemFormuPage() {
                       <div className="p-2 space-y-1">
                         {filteredDepotStock.map(item => (
                           <button
-                            key={`${item.id || item.stokKodu}-${item.hucreNumarasi || item.serialNumber || 'qty'}`}
+                            key={getDepotSelectionKey(item)}
                             onClick={() => { handleDepotItemSelect(item); }}
                             className={`w-full text-left p-3 rounded-xl transition-colors ${
-                              selectedDepotStockItem?.id === item.id && selectedDepotStockItem?.stokKodu === item.stokKodu
+                              selectedDepotStockKey === getDepotSelectionKey(item)
                                 ? 'bg-orange-500/10 border border-orange-500/40'
                                 : 'hover:bg-[var(--dashboard-surface-2)] border border-transparent'
                             }`}
