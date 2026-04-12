@@ -2337,6 +2337,31 @@ export default function IslemFormuPage() {
                 1. Parça Seçin
               </label>
 
+              {isLabMode && (
+                <div style={{ marginBottom: '12px' }}>
+                  <label style={{ fontSize: '13px', color: 'var(--wz-text-secondary)', display: 'block', marginBottom: '6px' }}>
+                    İşlem Yapılan Cihazı Seçin <span style={{ color: '#ef4444' }}>*</span>
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {devicesByLab.map((d) => (
+                      <button
+                        key={d.id}
+                        onClick={() => setPartAssignedDeviceId(d.id)}
+                        className={`flex flex-col items-center p-2 rounded-xl border transition-all ${
+                          partAssignedDeviceId === d.id
+                            ? 'bg-[var(--dashboard-accent)]/10 border-[var(--dashboard-accent)] text-[var(--dashboard-accent)]'
+                            : 'bg-[var(--dashboard-surface)] border-[var(--dashboard-stroke)] hover:bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)]'
+                        }`}
+                      >
+                        <span className="text-[11px] font-bold truncate w-full text-center">{d.cihazAdi || d.model || 'Cihaz'}</span>
+                        <span className="text-[9px] opacity-70 truncate w-full text-center">Model: {d.model || '-'}</span>
+                        <span className="text-[9px] opacity-70 truncate w-full text-center">SN: {d.seriNumarasi || '-'}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Stock source tabs */}
               <div className="wizard-sub-tabs" style={{ paddingLeft: 0, marginBottom: '8px' }}>
                 <button
