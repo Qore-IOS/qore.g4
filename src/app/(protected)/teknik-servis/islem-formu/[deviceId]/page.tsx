@@ -1616,8 +1616,9 @@ export default function IslemFormuPage() {
     const requestedQuantity = Math.max(1, partChange.quantity || 1);
     const consumedEntries: YedekParcaDepoStokItem[] = [];
     let remainingToConsume = requestedQuantity;
+    const isGroupedDepotKey = String(partChange.depotStockId || '').startsWith('group:');
 
-    if (partChange.depotStockId) {
+    if (partChange.depotStockId && !isGroupedDepotKey) {
       const depotRef = doc(db, 'yedekParcaDepoStok', partChange.depotStockId);
       const depotSnap = await getDoc(depotRef);
       if (depotSnap.exists()) {
@@ -1638,11 +1639,15 @@ export default function IslemFormuPage() {
       const q = query(
         collection(db, 'yedekParcaDepoStok'),
         where('stokKodu', '==', partChange.stokKodu),
-        where('partCondition', '==', 'iyi'),
-        orderBy('createdAt', 'asc')
+        where('partCondition', '==', 'iyi')
       );
       const snapshot = await getDocs(q);
-      for (const docSnap of snapshot.docs) {
+      const docsSorted = [...snapshot.docs].sort((a, b) => {
+        const aTs = (a.data().createdAt?.toDate?.() || new Date(0)).getTime();
+        const bTs = (b.data().createdAt?.toDate?.() || new Date(0)).getTime();
+        return aTs - bTs;
+      });
+      for (const docSnap of docsSorted) {
         if (remainingToConsume <= 0) break;
         if (partChange.depotStockId === docSnap.id) continue;
         const data = docSnap.data();
