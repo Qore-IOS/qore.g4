@@ -1727,7 +1727,33 @@ export default function IslemFormuPage() {
     try {
         const now = new Date();
         const batch = writeBatch(db);
-        const targetDevices = isLabMode ? devicesByLab : (device ? [device] : []);
+        let targetDevices = isLabMode ? [...devicesByLab] : (device ? [device] : []);
+
+        if (isLabMode) {
+          const assignedIds = Array.from(new Set(
+            actions
+              .filter((a) => a.type !== 'operation')
+              .map((a) => a.assignedDeviceId)
+              .filter((id): id is string => !!id)
+          ));
+
+          const hasGlobalOnlyActions = assignedIds.length === 0 && actions.some((a) => a.type === 'operation');
+          if (!hasGlobalOnlyActions && assignedIds.length > 0) {
+            const existingMap = new Map(targetDevices.map((d) => [d.id, d]));
+            const resolvedDevices: Device[] = [];
+            for (const id of assignedIds) {
+              if (existingMap.has(id)) {
+                resolvedDevices.push(existingMap.get(id)!);
+                continue;
+              }
+              const extraSnap = await getDoc(doc(db, 'devices', id));
+              if (extraSnap.exists()) {
+                resolvedDevices.push({ id: extraSnap.id, ...extraSnap.data() } as Device);
+              }
+            }
+            targetDevices = resolvedDevices;
+          }
+        }
 
         if (targetDevices.length === 0) {
           throw new Error('İşlem yapılacak cihaz bulunamadı.');
@@ -2009,6 +2035,10 @@ export default function IslemFormuPage() {
               }
             }
           }
+        }
+
+        if (createdFormIds.length === 0) {
+          throw new Error('Kaydedilecek cihaz aksiyonu bulunamadı. Lütfen cihaz atamalarını kontrol edin.');
         }
 
         await batch.commit();

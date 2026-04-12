@@ -1703,10 +1703,37 @@ export default function AplikasyonIslemFormuPage() {
         const batch = writeBatch(db);
 
         // Determine which devices to process
-        const devicesToProcess = isLabMode ? devicesByLab : [device];
+        let devicesToProcess = isLabMode ? [...devicesByLab] : [device];
+        if (isLabMode) {
+            const assignedIds = Array.from(new Set(
+                actions
+                  .filter((a) => a.type !== 'operation')
+                  .map((a) => a.assignedDeviceId)
+                  .filter((id): id is string => !!id)
+            ));
+
+            const hasGlobalOnlyActions = assignedIds.length === 0 && actions.some((a) => a.type === 'operation');
+            if (!hasGlobalOnlyActions && assignedIds.length > 0) {
+                const existingMap = new Map(devicesToProcess.filter(Boolean).map((d) => [d.id, d] as const));
+                const resolvedDevices: Device[] = [];
+                for (const id of assignedIds) {
+                    if (existingMap.has(id)) {
+                        resolvedDevices.push(existingMap.get(id)!);
+                        continue;
+                    }
+                    const extraSnap = await getDoc(doc(db, 'devices', id));
+                    if (extraSnap.exists()) {
+                        resolvedDevices.push({ id: extraSnap.id, ...extraSnap.data() } as Device);
+                    }
+                }
+                devicesToProcess = resolvedDevices;
+            }
+        }
+        const createdFormIds: string[] = [];
         
         // Multi-device loop
         for (const currentDevice of devicesToProcess) {
+            if (!currentDevice) continue;
             // Filter actions for this specific device
             // If it's a global action (assignedDeviceId is null/empty/global), keep it for all.
             // If it's device-specific, keep it only for that device.
@@ -1714,6 +1741,7 @@ export default function AplikasyonIslemFormuPage() {
                 if (!action.assignedDeviceId) return true; // Global or single-device mode
                 return action.assignedDeviceId === currentDevice.id;
             });
+            if (isLabMode && deviceSpecificActions.length === 0) continue;
 
             // Get selected maintenance plan details for saving
             const selectedMaintenancePlanDetails = maintenancePlans
@@ -1759,6 +1787,7 @@ export default function AplikasyonIslemFormuPage() {
                 isBulkLabForm: isLabMode,
             };
             batch.set(formRef, formData);
+            createdFormIds.push(formRef.id);
 
             // Mirror form to deviceActionForms for device history page
             const deviceActionFormRef = doc(collection(db, 'deviceActionForms'), formRef.id);
@@ -1955,6 +1984,17 @@ export default function AplikasyonIslemFormuPage() {
             }
         }
 
+        if (createdFormIds.length === 0) {
+            throw new Error('Kaydedilecek cihaz aksiyonu bulunamadı. Lütfen cihaz atamalarını kontrol edin.');
+        }
+
+        await batch.commit();
+        toast({
+            title: 'Başarılı',
+            description: isLabMode
+              ? `Laboratuvar genelinde ${createdFormIds.length} cihaz için işlem formu oluşturuldu.`
+              : `İşlem formu #${createdFormIds[0]?.substring(0, 6)}... kaydedildi.`,
+        });
         router.back();
     } catch(err) {
         console.error("Error saving action form:", err);
