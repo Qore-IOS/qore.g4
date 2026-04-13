@@ -338,9 +338,27 @@ export default function LaboratuvarYonetimiPanel() {
         reasons.push(`Minimum stok seviyesinde (Min: ${minStock}, Bu lotta: ${row.quantity})`);
       }
 
+      // Min stock reached lot-independent (product total at or below min).
+      // Only add the "toplam" reason when it conveys new info (multi-lot case).
+      if (
+        minStock != null && minStock > 0 &&
+        totalForStokKodu <= minStock &&
+        totalForStokKodu !== row.quantity
+      ) {
+        reasons.push(`Toplam stok min seviyesinde (Min: ${minStock}, Toplam: ${totalForStokKodu})`);
+      }
+
       // Only 1 remaining in this lot — warn when max >= 2 (suppress only when max == 1)
       if (row.quantity === 1 && (maxStock == null || maxStock >= 2)) {
         reasons.push('Bu lottan yalnızca 1 adet kaldı');
+      }
+
+      // Only 1 remaining across all lots of this product — warn when max >= 2.
+      // This also triggers when the single remaining item lives in a lot with
+      // quantity > 1 is impossible, but we surface it on every lot of the
+      // product so the user is alerted when viewing any of its rows.
+      if (totalForStokKodu === 1 && (maxStock == null || maxStock >= 2) && row.quantity !== 1) {
+        reasons.push('Lottan bağımsız üründen yalnızca 1 adet kaldı');
       }
 
       if (reasons.length > 0) {
