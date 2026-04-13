@@ -194,47 +194,74 @@ export default function AnalizPlanlamaPanel() {
   }, [tasks, heatmapDays, selectedUserId]);
 
   return (
-    <div className="min-h-screen bg-[#f7faf8] text-[#2c3432] pb-20">
-      <div className="sticky top-0 z-20 px-4 md:px-8 py-4 md:py-6 bg-white/65 backdrop-blur-2xl">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
+    <div className="fluid-editorial min-h-screen pb-20 relative overflow-x-hidden">
+      {/* Ambient depth blobs */}
+      <div className="fluid-blob-1 -top-20 -right-16 opacity-60" />
+      <div className="fluid-blob-2 top-[50%] -left-20 opacity-50" />
+
+      <div className="sticky top-0 z-20 satin-glass-header" style={{ backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)' }}>
+        <div className="max-w-7xl mx-auto px-4 md:px-8 py-4 md:py-5 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <Link
               href="/satin-alma"
-              className="h-11 w-11 rounded-full bg-[#e9efed] hover:bg-[#dbe4e2] active:scale-95 transition-all flex items-center justify-center"
+              className="w-11 h-11 rounded-2xl flex items-center justify-center transition-all active:scale-95 fluid-card-tap"
+              style={{ background: 'rgba(0,107,104,0.08)', color: '#006b68' }}
             >
               <ArrowLeft className="w-5 h-5" />
             </Link>
             <div>
-              <p className="text-[11px] uppercase tracking-[0.2em] text-[#58615f]">Satın Alma Birimi</p>
-              <h1 className="text-2xl md:text-4xl font-extrabold tracking-tight">Planlama Akışı</h1>
+              <p className="text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: '#006b68' }}>Satın Alma Birimi</p>
+              <h1 className="text-xl md:text-3xl font-extrabold tracking-tight" style={{ color: '#2c3432' }}>Planlama Akışı</h1>
             </div>
           </div>
-          <div className="hidden md:flex items-center gap-2 px-4 py-2 rounded-full bg-[#dbe4e2]/60">
+          <div className="hidden md:flex items-center gap-2 px-4 py-2 rounded-full" style={{ background: 'rgba(0,107,104,0.08)' }}>
             <Sparkles className="w-4 h-4 text-[#006b68]" />
-            <span className="text-xs font-semibold text-[#006b68]">Tek Dokunuş Operasyon Modu</span>
+            <span className="text-xs font-bold text-[#006b68]">Tek Dokunuş Operasyon Modu</span>
           </div>
         </div>
       </div>
 
       {loading ? (
-        <div className="px-4 md:px-8 py-16 text-[#58615f]">Veriler yükleniyor...</div>
+        <div className="px-4 md:px-8 py-12">
+          <div className="max-w-7xl mx-auto space-y-5">
+            {/* Hero skeleton */}
+            <div className="rounded-[2rem] h-40 animate-pulse" style={{ background: 'linear-gradient(135deg, rgba(0,107,104,0.15) 0%, rgba(118,221,216,0.15) 100%)' }} />
+            {/* Two-col skeleton */}
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+              <div className="rounded-[2rem] h-56 bg-white animate-pulse shadow-[0_8px_32px_rgba(44,52,50,0.05)]" />
+              <div className="rounded-[2rem] h-56 bg-white animate-pulse shadow-[0_8px_32px_rgba(44,52,50,0.05)]" />
+            </div>
+            {/* Full-width skeletons */}
+            <div className="rounded-[2rem] h-48 bg-white animate-pulse shadow-[0_8px_32px_rgba(44,52,50,0.05)]" />
+            <div className="rounded-[2rem] h-48 bg-white animate-pulse shadow-[0_8px_32px_rgba(44,52,50,0.05)]" />
+          </div>
+        </div>
       ) : (
         <div className="px-4 md:px-8 py-6 md:py-8">
           <div className="max-w-7xl mx-auto space-y-6">
-            <section className="relative overflow-hidden rounded-[2rem] bg-gradient-to-br from-[#006b68] to-[#76ddd8] text-[#e1fffd] p-6 md:p-8 shadow-[0_24px_70px_rgba(0,107,104,0.24)]">
+
+            {/* ── Hero: Kişisel Plan Özeti ── */}
+            <section className="relative overflow-hidden rounded-[2rem] p-6 md:p-8 satin-hero-card shadow-[0_24px_70px_rgba(0,107,104,0.24)]"
+              style={{ background: 'linear-gradient(135deg, #006b68 0%, #76ddd8 100%)', color: '#e1fffd' }}>
+              {/* Decorative blobs */}
               <div className="absolute -top-16 -right-10 h-52 w-52 rounded-full bg-white/10 blur-3xl pointer-events-none" />
+              <div className="absolute bottom-0 left-8 h-32 w-32 rounded-full bg-white/5 blur-2xl pointer-events-none" />
+
               <div className="relative grid grid-cols-1 md:grid-cols-[1fr_auto] gap-6">
                 <div>
-                  <p className="text-[11px] uppercase tracking-[0.2em] opacity-90 mb-2">Kişisel Plan Özeti</p>
-                  <h2 className="text-3xl md:text-5xl font-extrabold leading-[1.05] tracking-tight">{personalCalendar.tasks.length} aktif görev</h2>
-                  <p className="mt-3 text-sm md:text-base opacity-90">{personalCalendar.rangeLabel}</p>
+                  <p className="text-[11px] uppercase tracking-[0.2em] opacity-80 mb-2 font-bold">Kişisel Plan Özeti</p>
+                  <h2 className="text-3xl md:text-5xl font-extrabold leading-[1.05] tracking-tight">
+                    {personalCalendar.tasks.length}
+                    <span className="text-xl md:text-3xl font-semibold opacity-80 ml-3">aktif görev</span>
+                  </h2>
+                  <p className="mt-3 text-sm md:text-base opacity-80 font-medium">{personalCalendar.rangeLabel}</p>
                 </div>
-                <div className="inline-flex rounded-full bg-white/15 p-1 backdrop-blur-xl self-start">
+                <div className="inline-flex rounded-full p-1 backdrop-blur-xl self-start" style={{ background: 'rgba(255,255,255,0.15)' }}>
                   <button
                     onClick={() => setPersonalCalendarMode('weekly')}
                     className={cn(
-                      'px-4 py-2 text-xs md:text-sm rounded-full font-semibold transition-all active:scale-95',
-                      personalCalendarMode === 'weekly' ? 'bg-white text-[#005654] shadow-sm' : 'text-white/90'
+                      'px-4 py-2 text-xs md:text-sm rounded-full font-bold transition-all active:scale-95',
+                      personalCalendarMode === 'weekly' ? 'bg-white text-[#005654] shadow-md' : 'text-white/90 hover:text-white'
                     )}
                   >
                     1 Hafta
@@ -242,8 +269,8 @@ export default function AnalizPlanlamaPanel() {
                   <button
                     onClick={() => setPersonalCalendarMode('monthly')}
                     className={cn(
-                      'px-4 py-2 text-xs md:text-sm rounded-full font-semibold transition-all active:scale-95',
-                      personalCalendarMode === 'monthly' ? 'bg-white text-[#005654] shadow-sm' : 'text-white/90'
+                      'px-4 py-2 text-xs md:text-sm rounded-full font-bold transition-all active:scale-95',
+                      personalCalendarMode === 'monthly' ? 'bg-white text-[#005654] shadow-md' : 'text-white/90 hover:text-white'
                     )}
                   >
                     1 Ay
@@ -252,45 +279,75 @@ export default function AnalizPlanlamaPanel() {
               </div>
             </section>
 
+            {/* ── Two-col grid: Kişisel Takvim + Lab Ziyaretleri ── */}
             <div className="grid grid-cols-1 xl:grid-cols-[1.15fr_0.85fr] gap-6">
-              <section className="rounded-[2rem] bg-[#f0f5f2] p-4 md:p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg md:text-xl font-bold">Kişisel Takvim</h3>
-                  <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-[#e4dfff] text-[#4f498e] text-xs font-semibold">
+
+              {/* Kişisel Takvim */}
+              <section className="rounded-[2rem] bg-white p-5 md:p-6 shadow-[0_8px_32px_rgba(44,52,50,0.06)]">
+                <div className="flex items-center justify-between mb-5">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'rgba(0,107,104,0.10)' }}>
+                      <CalendarDays className="w-4 h-4 text-[#006b68]" />
+                    </div>
+                    <h3 className="text-lg md:text-xl font-bold" style={{ color: '#2c3432' }}>Kişisel Takvim</h3>
+                  </div>
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold"
+                    style={{ background: 'rgba(0,107,104,0.08)', color: '#006b68' }}>
                     <CircleCheckBig className="w-3.5 h-3.5" />
                     {personalCalendar.tasks.length} görev
                   </span>
                 </div>
 
-                <div className="space-y-3 max-h-[24rem] overflow-y-auto pr-1">
+                <div className="space-y-2.5 max-h-[24rem] overflow-y-auto pr-1">
                   {personalCalendar.tasks.length === 0 ? (
-                    <p className="text-sm text-[#58615f]">Bu aralıkta üzerinize atanmış veya oluşturduğunuz görev bulunmuyor.</p>
+                    <div className="flex flex-col items-center justify-center py-10 rounded-[1.5rem]"
+                      style={{ background: '#f7faf8' }}>
+                      <CalendarDays className="w-8 h-8 mb-3 opacity-30" style={{ color: '#006b68' }} />
+                      <p className="text-sm font-medium text-[#58615f] text-center">Bu aralıkta üzerinize atanmış<br />veya oluşturduğunuz görev bulunmuyor.</p>
+                    </div>
                   ) : (
                     personalCalendar.tasks.map((task) => (
                       <button
                         key={task.id}
-                        className="w-full text-left rounded-[1.5rem] bg-white p-4 shadow-[0_14px_30px_rgba(44,52,50,0.05)] hover:-translate-y-0.5 hover:shadow-[0_20px_36px_rgba(44,52,50,0.08)] active:scale-[0.99] transition-all"
+                        className="w-full text-left rounded-[1.5rem] p-4 transition-all fluid-card-tap hover:-translate-y-0.5 hover:shadow-[0_16px_36px_rgba(44,52,50,0.09)] active:scale-[0.98]"
+                        style={{
+                          background: '#ffffff',
+                          boxShadow: '0 4px 16px rgba(44,52,50,0.05)',
+                          borderLeft: '3px solid rgba(0,107,104,0.3)',
+                        }}
                       >
-                        <p className="text-base font-bold">{task.title}</p>
-                        <p className="text-xs text-[#58615f] mt-1">
-                          {format(parseISO(task.date), 'd MMMM yyyy EEEE', { locale: tr })} • {task.startTime}-{task.endTime}
+                        <p className="text-sm font-bold" style={{ color: '#2c3432' }}>{task.title}</p>
+                        <p className="text-xs font-medium mt-1" style={{ color: '#58615f' }}>
+                          {format(parseISO(task.date), 'd MMMM yyyy EEEE', { locale: tr })}
                         </p>
+                        <span className="inline-flex items-center gap-1 mt-2 px-2.5 py-1 rounded-full text-[10px] font-bold"
+                          style={{ background: 'rgba(0,107,104,0.08)', color: '#006b68' }}>
+                          {task.startTime} – {task.endTime}
+                        </span>
                       </button>
                     ))
                   )}
                 </div>
               </section>
 
-              <section className="rounded-[2rem] bg-[#f0f5f2] p-4 md:p-6">
-                <div className="flex items-center gap-2 mb-4">
-                  <Building2 className="w-4 h-4 text-[#006b68]" />
-                  <h3 className="text-lg md:text-xl font-bold">Laboratuvar Ziyaretleri</h3>
+              {/* Lab Ziyaretleri */}
+              <section className="rounded-[2rem] bg-white p-5 md:p-6 shadow-[0_8px_32px_rgba(44,52,50,0.06)]">
+                <div className="flex items-center gap-2 mb-5">
+                  <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'rgba(0,107,104,0.10)' }}>
+                    <Building2 className="w-4 h-4 text-[#006b68]" />
+                  </div>
+                  <h3 className="text-lg md:text-xl font-bold" style={{ color: '#2c3432' }}>Laboratuvar Ziyaretleri</h3>
                 </div>
 
                 <select
                   value={selectedLabId}
                   onChange={(e) => setSelectedLabId(e.target.value)}
-                  className="w-full px-4 py-3 rounded-2xl bg-white text-sm focus:outline-none focus:ring-2 focus:ring-[#76ddd8]"
+                  className="w-full px-4 py-3 rounded-2xl text-sm focus:outline-none transition-all"
+                  style={{
+                    background: '#f7faf8',
+                    color: '#2c3432',
+                    boxShadow: 'inset 0 2px 6px rgba(44,52,50,0.04)',
+                  }}
                 >
                   {selectableLabs.map((lab) => (
                     <option key={lab.id} value={lab.id}>{lab.name}</option>
@@ -298,20 +355,23 @@ export default function AnalizPlanlamaPanel() {
                 </select>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
-                  <div className="rounded-3xl bg-white p-4">
-                    <p className="text-[11px] uppercase tracking-[0.16em] text-[#58615f]">6 Ay Ziyaret</p>
-                    <p className="text-3xl font-extrabold mt-1">{sixMonthMetrics.visits.length}</p>
+                  <div className="rounded-2xl p-4 transition-all fluid-card-tap hover:-translate-y-0.5"
+                    style={{ background: '#f7faf8', boxShadow: '0 4px 16px rgba(44,52,50,0.04)' }}>
+                    <p className="text-[10px] uppercase tracking-[0.18em] font-bold" style={{ color: '#006b68' }}>6 Ay Ziyaret</p>
+                    <p className="text-3xl font-extrabold mt-1.5" style={{ color: '#2c3432' }}>{sixMonthMetrics.visits.length}</p>
                   </div>
-                  <div className="rounded-3xl bg-white p-4">
-                    <p className="text-[11px] uppercase tracking-[0.16em] text-[#58615f]">Son Ziyaret</p>
-                    <p className="text-sm font-semibold mt-1">
-                      {sixMonthMetrics.lastVisit ? format(parseISO(sixMonthMetrics.lastVisit.date), 'd MMM yyyy', { locale: tr }) : '-'}
+                  <div className="rounded-2xl p-4 transition-all fluid-card-tap hover:-translate-y-0.5"
+                    style={{ background: '#f7faf8', boxShadow: '0 4px 16px rgba(44,52,50,0.04)' }}>
+                    <p className="text-[10px] uppercase tracking-[0.18em] font-bold" style={{ color: '#006b68' }}>Son Ziyaret</p>
+                    <p className="text-sm font-bold mt-1.5" style={{ color: '#2c3432' }}>
+                      {sixMonthMetrics.lastVisit ? format(parseISO(sixMonthMetrics.lastVisit.date), 'd MMM yyyy', { locale: tr }) : '—'}
                     </p>
-                    <p className="text-xs text-[#58615f] mt-1">{sixMonthMetrics.lastVisit?.createdByName || '-'}</p>
+                    <p className="text-xs font-medium mt-0.5" style={{ color: '#58615f' }}>{sixMonthMetrics.lastVisit?.createdByName || '—'}</p>
                   </div>
-                  <div className="rounded-3xl bg-white p-4 sm:col-span-2">
-                    <p className="text-[11px] uppercase tracking-[0.16em] text-[#58615f]">Sıradaki Ziyaret</p>
-                    <p className="text-sm font-semibold mt-1">
+                  <div className="rounded-2xl p-4 sm:col-span-2 transition-all"
+                    style={{ background: 'linear-gradient(135deg, rgba(0,107,104,0.06) 0%, rgba(118,221,216,0.06) 100%)', boxShadow: '0 4px 16px rgba(44,52,50,0.04)' }}>
+                    <p className="text-[10px] uppercase tracking-[0.18em] font-bold" style={{ color: '#006b68' }}>Sıradaki Ziyaret</p>
+                    <p className="text-sm font-bold mt-1.5" style={{ color: '#2c3432' }}>
                       {sixMonthMetrics.nextVisit
                         ? `${format(parseISO(sixMonthMetrics.nextVisit.date), 'd MMM yyyy', { locale: tr })} • ${sixMonthMetrics.nextVisit.startTime}-${sixMonthMetrics.nextVisit.endTime}`
                         : 'Planlı ziyaret bulunmuyor'}
@@ -321,25 +381,42 @@ export default function AnalizPlanlamaPanel() {
               </section>
             </div>
 
-            <section className="rounded-[2rem] bg-[#f0f5f2] p-4 md:p-6">
-              <h3 className="text-lg md:text-xl font-bold mb-3">Ziyaret Notları & Dosyalar</h3>
+            {/* ── Ziyaret Notları & Dosyalar ── */}
+            <section className="rounded-[2rem] bg-white p-5 md:p-6 shadow-[0_8px_32px_rgba(44,52,50,0.06)]">
+              <div className="flex items-center gap-2 mb-5">
+                <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'rgba(0,107,104,0.10)' }}>
+                  <FileText className="w-4 h-4 text-[#006b68]" />
+                </div>
+                <h3 className="text-lg md:text-xl font-bold" style={{ color: '#2c3432' }}>Ziyaret Notları & Dosyalar</h3>
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 max-h-[28rem] overflow-y-auto pr-1">
                 {labNotesAndFiles.length === 0 ? (
-                  <p className="text-sm text-[#58615f]">Kayıt bulunamadı.</p>
+                  <div className="col-span-full flex flex-col items-center justify-center py-10 rounded-[1.5rem]"
+                    style={{ background: '#f7faf8' }}>
+                    <FileText className="w-8 h-8 mb-3 opacity-30 text-[#006b68]" />
+                    <p className="text-sm font-medium text-[#58615f]">Kayıt bulunamadı.</p>
+                  </div>
                 ) : (
                   labNotesAndFiles.map((item) => (
-                    <div key={item.id} className="rounded-[1.75rem] bg-white p-4 shadow-[0_12px_30px_rgba(44,52,50,0.04)]">
-                      <p className="text-xs font-semibold text-[#58615f] mb-2">
-                        {format(parseISO(item.date), 'd MMM yyyy', { locale: tr })} • {item.by}
-                      </p>
+                    <div key={item.id}
+                      className="rounded-[1.75rem] p-4 transition-all fluid-card-tap hover:-translate-y-0.5 hover:shadow-[0_16px_36px_rgba(44,52,50,0.08)]"
+                      style={{ background: '#f7faf8', boxShadow: '0 4px 16px rgba(44,52,50,0.04)' }}>
+                      <div className="flex items-center gap-2 mb-3">
+                        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: '#006b68' }} />
+                        <p className="text-xs font-bold" style={{ color: '#58615f' }}>
+                          {format(parseISO(item.date), 'd MMM yyyy', { locale: tr })} · {item.by}
+                        </p>
+                      </div>
                       {item.comments.length > 0 ? (
                         <ul className="space-y-1.5 mb-3">
                           {item.comments.slice(-2).map((c) => (
-                            <li key={c.id} className="text-xs text-[#58615f]">• {c.message}</li>
+                            <li key={c.id} className="text-xs leading-relaxed" style={{ color: '#58615f' }}>
+                              <span style={{ color: '#006b68' }}>›</span> {c.message}
+                            </li>
                           ))}
                         </ul>
                       ) : (
-                        <p className="text-xs text-[#58615f] mb-3">Not yok</p>
+                        <p className="text-xs italic mb-3" style={{ color: '#9aa09e' }}>Not eklenmemiş</p>
                       )}
 
                       {item.attachments.length > 0 && (
@@ -350,10 +427,11 @@ export default function AnalizPlanlamaPanel() {
                               href={att.url}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className={cn(
-                                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium transition-transform hover:scale-[1.02]',
-                                att.type === 'image' ? 'bg-[#dbe4e2] text-[#006b68]' : 'bg-[#e4dfff] text-[#4f498e]'
-                              )}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold transition-all hover:scale-[1.03] active:scale-[0.97]"
+                              style={{
+                                background: att.type === 'image' ? 'rgba(0,107,104,0.10)' : 'rgba(0,107,104,0.06)',
+                                color: '#006b68',
+                              }}
                             >
                               {att.type === 'image' ? <ImageIcon className="w-3 h-3" /> : <FileText className="w-3 h-3" />}
                               <span className="truncate max-w-[140px]">{att.name}</span>
@@ -367,32 +445,43 @@ export default function AnalizPlanlamaPanel() {
               </div>
             </section>
 
-            <section className="rounded-[2rem] bg-[#f0f5f2] p-4 md:p-6">
-              <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+            {/* ── Personel Aktivite Haritası ── */}
+            <section className="rounded-[2rem] bg-white p-5 md:p-6 shadow-[0_8px_32px_rgba(44,52,50,0.06)]">
+              <div className="flex items-center justify-between flex-wrap gap-3 mb-5">
                 <div className="flex items-center gap-2">
-                  <Flame className="w-4 h-4 text-[#006b68]" />
-                  <h3 className="text-lg md:text-xl font-bold">Personel Aktivite Haritası</h3>
+                  <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'rgba(0,107,104,0.10)' }}>
+                    <Flame className="w-4 h-4 text-[#006b68]" />
+                  </div>
+                  <h3 className="text-lg md:text-xl font-bold" style={{ color: '#2c3432' }}>Personel Aktivite Haritası</h3>
                 </div>
                 <div className="flex items-center flex-wrap gap-2">
                   <select
                     value={selectedUserId}
                     onChange={(e) => setSelectedUserId(e.target.value)}
-                    className="px-4 py-2.5 rounded-full bg-white text-xs md:text-sm"
+                    className="px-4 py-2.5 rounded-full text-xs md:text-sm font-medium focus:outline-none transition-all"
+                    style={{
+                      background: '#f7faf8',
+                      color: '#2c3432',
+                      boxShadow: '0 2px 8px rgba(44,52,50,0.06)',
+                    }}
                   >
                     <option value="all">Tüm personel</option>
                     {users.map((u) => (
                       <option key={u.uid} value={u.uid}>{u.name || u.email}</option>
                     ))}
                   </select>
-                  <div className="inline-flex p-1 rounded-full bg-white">
+                  <div className="inline-flex p-1 rounded-full" style={{ background: '#f0f5f2' }}>
                     {(['weekly', 'monthly'] as const).map((m) => (
                       <button
                         key={m}
                         onClick={() => setHeatmapMode(m)}
                         className={cn(
-                          'px-4 py-2 text-xs rounded-full font-semibold transition-all active:scale-95',
-                          heatmapMode === m ? 'bg-gradient-to-br from-[#006b68] to-[#76ddd8] text-white shadow-sm' : 'text-[#58615f]'
+                          'px-4 py-2 text-xs rounded-full font-bold transition-all active:scale-95',
+                          heatmapMode === m
+                            ? 'text-white shadow-md'
+                            : 'text-[#58615f] hover:text-[#2c3432]'
                         )}
+                        style={heatmapMode === m ? { background: 'linear-gradient(135deg, #006b68, #76ddd8)' } : {}}
                       >
                         {m === 'weekly' ? 'Haftalık' : 'Aylık'}
                       </button>
@@ -401,25 +490,25 @@ export default function AnalizPlanlamaPanel() {
                 </div>
               </div>
 
-              <div className="overflow-x-auto rounded-3xl bg-white p-4">
+              <div className="overflow-x-auto rounded-2xl p-4" style={{ background: '#f7faf8' }}>
                 <div className="min-w-[760px]">
                   <div className="grid" style={{ gridTemplateColumns: `80px repeat(${heatmapDays.length}, minmax(20px, 1fr))` }}>
                     <div />
                     {heatmapDays.map((day) => (
-                      <div key={day.toISOString()} className="text-[10px] text-center text-[#58615f] pb-1">
+                      <div key={day.toISOString()} className="text-[10px] text-center font-bold pb-2" style={{ color: '#58615f' }}>
                         {heatmapMode === 'weekly' ? DAY_LABELS[(day.getDay() + 6) % 7] : format(day, 'd')}
                       </div>
                     ))}
 
                     {HOURS.map((hour, hourIdx) => (
                       <React.Fragment key={hour}>
-                        <div className="text-[10px] text-[#58615f] pr-2 py-1">{`${hour.toString().padStart(2, '0')}:00`}</div>
+                        <div className="text-[10px] font-bold pr-2 py-1" style={{ color: '#58615f' }}>{`${hour.toString().padStart(2, '0')}:00`}</div>
                         {heatmapDays.map((_, dayIdx) => {
                           const value = heatmapData.matrix[dayIdx]?.[hourIdx] || 0;
                           return (
                             <div
                               key={`${dayIdx}-${hourIdx}`}
-                              className={cn('h-6 rounded-md m-[2px] transition-all hover:scale-105', getHeatColor(value, heatmapData.max))}
+                              className={cn('h-6 rounded-lg m-[2px] transition-all hover:scale-110 cursor-default', getHeatColor(value, heatmapData.max))}
                               title={`${value} görev`}
                             />
                           );
@@ -430,11 +519,29 @@ export default function AnalizPlanlamaPanel() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 mt-3 text-xs text-[#58615f]">
-                <CalendarDays className="w-3.5 h-3.5" />
-                <span>Boş bloklar yeşil, yoğun bloklar kırmızı gösterilir.</span>
+              <div className="flex items-center gap-2 mt-4 text-xs font-medium" style={{ color: '#58615f' }}>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-sm bg-emerald-500/15 inline-block" />
+                  <span>Boş</span>
+                </div>
+                <span className="opacity-30">·</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-sm bg-yellow-500/25 inline-block" />
+                  <span>Az yoğun</span>
+                </div>
+                <span className="opacity-30">·</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-sm bg-orange-500/35 inline-block" />
+                  <span>Orta</span>
+                </div>
+                <span className="opacity-30">·</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-sm bg-red-500/45 inline-block" />
+                  <span>Yoğun</span>
+                </div>
               </div>
             </section>
+
           </div>
         </div>
       )}
