@@ -607,8 +607,8 @@ export default function UrunKullanimPanel() {
         if (minStock != null && minStock > 0 && totalRemaining <= minStock) {
           reasons.push(`Minimum stok seviyesine ulaşıldı (Min: ${minStock}, Kalan: ${totalRemaining})`);
         }
-        // Only warn for qty=1 when max stock is greater than 2
-        if (totalRemaining === 1 && (maxStock == null || maxStock > 2)) {
+        // Only warn for qty=1 when max stock is 2 or greater
+        if (totalRemaining === 1 && (maxStock == null || maxStock >= 2)) {
           reasons.push('Laboratuvar stoğunda yalnızca 1 adet kaldı');
         }
         if (reasons.length > 0) {
