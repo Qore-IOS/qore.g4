@@ -283,6 +283,17 @@ export default function UrunKullanimPanel() {
 
   const [lastScannedProduct, setLastScannedProduct] = useState<ConsumptionRecord | null>(null);
   const [lastScannedDeviceGroupImage, setLastScannedDeviceGroupImage] = useState<string | null>(null);
+  const [lastScannedLotRemaining, setLastScannedLotRemaining] = useState<number | null>(null);
+  const [lastScannedTotalRemaining, setLastScannedTotalRemaining] = useState<number | null>(null);
+  const [stockWarnings, setStockWarnings] = useState<Array<{
+    stokKodu: string;
+    stokAdi: string;
+    lotNumarasi?: string;
+    totalRemaining: number;
+    minStock: number | null;
+    maxStock: number | null;
+    reasons: string[];
+  }>>([]);
   const [sessionHistory, setSessionHistory] = useState<ConsumptionRecord[]>([]);
   const [scanStatus, setScanStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
@@ -570,6 +581,57 @@ export default function UrunKullanimPanel() {
       setLastScannedProduct(finalRecord as any);
       setSessionHistory(prev => [finalRecord, ...prev].slice(0, 10)); // Update local history
 
+      // Compute remaining lot and total counts for the consumed product.
+      // labStock may not have refreshed yet, so exclude the item we just consumed.
+      try {
+        const consumedId = itemToConsume.id;
+        const consumedStokKodu = itemToConsume.stokKodu;
+        const consumedLot = itemToConsume.lotNumarasi || '';
+        const lotRemaining = labStock.filter(i =>
+          i.stokKodu === consumedStokKodu &&
+          (i.lotNumarasi || '') === consumedLot &&
+          i.id !== consumedId
+        ).length;
+        const totalRemaining = labStock.filter(i =>
+          i.stokKodu === consumedStokKodu &&
+          i.id !== consumedId
+        ).length;
+        setLastScannedLotRemaining(lotRemaining);
+        setLastScannedTotalRemaining(totalRemaining);
+
+        // Check for stock warnings: min stock reached, and qty=1 when max>2.
+        const rule = minMaxRules.find(r => r.stokKodu === consumedStokKodu);
+        const minStock = rule?.min ?? null;
+        const maxStock = rule?.max ?? null;
+        const reasons: string[] = [];
+        if (minStock != null && minStock > 0 && totalRemaining <= minStock) {
+          reasons.push(`Minimum stok seviyesine ulaşıldı (Min: ${minStock}, Kalan: ${totalRemaining})`);
+        }
+        // Only warn for qty=1 when max stock is greater than 2
+        if (totalRemaining === 1 && (maxStock == null || maxStock > 2)) {
+          reasons.push('Laboratuvar stoğunda yalnızca 1 adet kaldı');
+        }
+        if (reasons.length > 0) {
+          setStockWarnings(prev => {
+            const filtered = prev.filter(w => w.stokKodu !== consumedStokKodu);
+            return [
+              ...filtered,
+              {
+                stokKodu: consumedStokKodu,
+                stokAdi: itemToConsume.stokAdi || '',
+                lotNumarasi: itemToConsume.lotNumarasi,
+                totalRemaining,
+                minStock,
+                maxStock,
+                reasons,
+              },
+            ];
+          });
+        }
+      } catch (computeErr: any) {
+        urunKullanimLogger.warn('Kalan stok hesaplanamadı', { error: computeErr?.message });
+      }
+
       setLastScannedDeviceGroupImage(null);
       setTimeout(() => {
         const productInfo = products.find(p => p.stokKodu === itemToConsume.stokKodu);
@@ -620,7 +682,7 @@ export default function UrunKullanimPanel() {
       // Propagate error for retry mechanism
       throw err;
     }
-  }, [currentUserProfile, selectedLab, laboratories, toast, selectedSubPoint, products, deviceGroups, invalidateDepoStok, invalidateConsumption]);
+  }, [currentUserProfile, selectedLab, laboratories, toast, selectedSubPoint, products, deviceGroups, invalidateDepoStok, invalidateConsumption, labStock, minMaxRules]);
   
   const pickEarliest = (items: DepoStokItem[]) => {
     return items
@@ -1609,6 +1671,26 @@ export default function UrunKullanimPanel() {
                     {lastScannedProduct.subPointName && (
                       <p className="text-xs text-foreground/70 dark:text-foreground/60">Nokta: {lastScannedProduct.subPointName}</p>
                     )}
+                    {(lastScannedLotRemaining !== null || lastScannedTotalRemaining !== null) && (
+                      <div className="mt-2 grid grid-cols-2 gap-2">
+                        <div className="rounded-md border border-foreground/10 bg-foreground/5 px-3 py-2 text-center">
+                          <p className="text-[10px] uppercase tracking-wider text-foreground/60">Bu Lottan Kalan</p>
+                          <p className="text-4xl font-black leading-none mt-1 tabular-nums">
+                            {lastScannedLotRemaining ?? '-'}
+                          </p>
+                          {lastScannedProduct.lotNumarasi && (
+                            <p className="text-[10px] text-foreground/60 mt-1 truncate">Lot: {lastScannedProduct.lotNumarasi}</p>
+                          )}
+                        </div>
+                        <div className="rounded-md border border-foreground/10 bg-foreground/5 px-3 py-2 text-center">
+                          <p className="text-[10px] uppercase tracking-wider text-foreground/60">Toplam Kalan</p>
+                          <p className="text-4xl font-black leading-none mt-1 tabular-nums">
+                            {lastScannedTotalRemaining ?? '-'}
+                          </p>
+                          <p className="text-[10px] text-foreground/60 mt-1">(tüm lotlar)</p>
+                        </div>
+                      </div>
+                    )}
                     {scanStatus === 'success' && <p className="text-green-500 text-xs font-medium mt-1">Stoktan Düşüldü!</p>}
                   </div>
                   {/* Device group image - larger */}
@@ -2324,6 +2406,72 @@ export default function UrunKullanimPanel() {
           </div>
           <DialogFooter>
             <Button onClick={handleManualDeduction} aria-label="Manuel düşüm işlemini başlat">Düşüm Yap</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Centered stock warning modal: stays on screen until user confirms.
+          Shown when a consumed product hits min stock OR has 1 remaining (max>2). */}
+      <Dialog
+        open={stockWarnings.length > 0}
+        onOpenChange={(open) => {
+          if (!open) setStockWarnings([]);
+        }}
+      >
+        <DialogContent
+          className="max-w-lg border-4 border-red-500 stock-warning-blink bg-background"
+          onInteractOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => e.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-500 text-xl">
+              <AlertTriangle className="h-6 w-6 animate-pulse" />
+              Stok Uyarısı
+            </DialogTitle>
+            <DialogDescription>
+              Aşağıdaki ürün(ler) için laboratuvar stoğunda kritik seviyeye ulaşıldı.
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="max-h-[50vh] pr-3">
+            <div className="space-y-3 py-2">
+              {stockWarnings.map((w) => (
+                <div
+                  key={w.stokKodu}
+                  className="rounded-md border-2 border-red-500/70 bg-red-500/10 p-3 space-y-1"
+                >
+                  <p className="font-semibold text-base">
+                    {w.stokAdi || w.stokKodu}{' '}
+                    <span className="text-xs text-foreground/60 font-mono">({w.stokKodu})</span>
+                  </p>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                    <span>
+                      Kalan: <span className="text-2xl font-black text-red-500 tabular-nums">{w.totalRemaining}</span>
+                    </span>
+                    {w.minStock != null && (
+                      <span className="text-foreground/70">Min: <span className="font-semibold">{w.minStock}</span></span>
+                    )}
+                    {w.maxStock != null && (
+                      <span className="text-foreground/70">Max: <span className="font-semibold">{w.maxStock}</span></span>
+                    )}
+                  </div>
+                  <ul className="list-disc list-inside text-sm text-red-600 dark:text-red-400">
+                    {w.reasons.map((r, i) => (
+                      <li key={i}>{r}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+          <DialogFooter>
+            <Button
+              variant="destructive"
+              className="w-full"
+              onClick={() => setStockWarnings([])}
+              aria-label="Uyarıyı onayla"
+            >
+              Tamam
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

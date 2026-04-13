@@ -2264,3 +2264,25 @@
     filter: brightness(0.9);
   }
 }
+
+/* ─────────────────────────────────────────────
+   Stock warning: blinking red border
+   Used on rows in lab stock management panel for items
+   that are: expiring soon, at min-stock, or qty=1 (max>2)
+   ───────────────────────────────────────────── */
+@keyframes stockWarningBlink {
+  0%, 100% {
+    border-color: rgba(239, 68, 68, 1);
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6), 0 0 14px rgba(239, 68, 68, 0.45);
+  }
+  50% {
+    border-color: rgba(239, 68, 68, 0.25);
+    box-shadow: 0 0 0 6px rgba(239, 68, 68, 0), 0 0 0 rgba(239, 68, 68, 0);
+  }
+}
+
+.stock-warning-blink {
+  border: 2px solid rgba(239, 68, 68, 1);
+  border-radius: 0.5rem;
+  animation: stockWarningBlink 1.1s ease-in-out infinite;
+}
