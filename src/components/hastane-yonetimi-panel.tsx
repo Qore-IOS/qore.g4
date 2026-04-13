@@ -282,10 +282,10 @@ export default function LaboratuvarYonetimiPanel() {
 
   /**
    * Stock warnings shown at the top of the panel.
-   * Covers rows that match at least one of these conditions:
+   * Evaluated per LOT row (since the panel is displayed lot-by-lot):
    *  - Miadı yaklaşan: remaining days <= 60 or already expired
-   *  - Min stoğa gelen: total (across lots) <= rule.min
-   *  - Adedi 1 kalan: total (across lots) == 1 AND rule.max > 2
+   *  - Min stoğa gelen: row.quantity <= rule.min
+   *  - Adedi 1 kalan: row.quantity == 1 AND rule.max >= 2 (not warned when max == 1)
    */
   const stockWarningRows = useMemo(() => {
     if (!summaryList.length) return [] as Array<GroupedStockItem & {
@@ -297,7 +297,7 @@ export default function LaboratuvarYonetimiPanel() {
       maxStock: number | null;
     }>;
 
-    // Compute total quantity per stokKodu (sum across lots)
+    // Compute total quantity per stokKodu (sum across lots) — informational only
     const totalByStokKodu: Record<string, number> = {};
     summaryList.forEach(r => {
       totalByStokKodu[r.stokKodu] = (totalByStokKodu[r.stokKodu] ?? 0) + r.quantity;
@@ -321,7 +321,7 @@ export default function LaboratuvarYonetimiPanel() {
 
       const reasons: string[] = [];
 
-      // Expiring soon or expired
+      // Expiring soon or expired (lot-level)
       if (miadInfo.severity === 'expired') {
         reasons.push(`Miadı geçti (${Math.abs(miadInfo.days)} gün önce)`);
       } else if (
@@ -333,14 +333,32 @@ export default function LaboratuvarYonetimiPanel() {
         reasons.push(`Miadı yaklaşıyor (${miadInfo.days} gün kaldı)`);
       }
 
-      // Min stock reached (by total)
-      if (minStock != null && minStock > 0 && totalForStokKodu <= minStock) {
-        reasons.push(`Minimum stok seviyesine düştü (Min: ${minStock}, Kalan: ${totalForStokKodu})`);
+      // Min stock reached (this lot's quantity at or below min)
+      if (minStock != null && minStock > 0 && row.quantity <= minStock) {
+        reasons.push(`Minimum stok seviyesinde (Min: ${minStock}, Bu lotta: ${row.quantity})`);
       }
 
-      // Only 1 remaining, and only if max > 2
-      if (totalForStokKodu === 1 && (maxStock == null || maxStock > 2)) {
-        reasons.push('Laboratuvar stoğunda yalnızca 1 adet kaldı');
+      // Min stock reached lot-independent (product total at or below min).
+      // Only add the "toplam" reason when it conveys new info (multi-lot case).
+      if (
+        minStock != null && minStock > 0 &&
+        totalForStokKodu <= minStock &&
+        totalForStokKodu !== row.quantity
+      ) {
+        reasons.push(`Toplam stok min seviyesinde (Min: ${minStock}, Toplam: ${totalForStokKodu})`);
+      }
+
+      // Only 1 remaining in this lot — warn when max >= 2 (suppress only when max == 1)
+      if (row.quantity === 1 && (maxStock == null || maxStock >= 2)) {
+        reasons.push('Bu lottan yalnızca 1 adet kaldı');
+      }
+
+      // Only 1 remaining across all lots of this product — warn when max >= 2.
+      // This also triggers when the single remaining item lives in a lot with
+      // quantity > 1 is impossible, but we surface it on every lot of the
+      // product so the user is alerted when viewing any of its rows.
+      if (totalForStokKodu === 1 && (maxStock == null || maxStock >= 2) && row.quantity !== 1) {
+        reasons.push('Lottan bağımsız üründen yalnızca 1 adet kaldı');
       }
 
       if (reasons.length > 0) {
