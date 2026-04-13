@@ -1,4 +1,6 @@
 
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -205,6 +207,182 @@
     .satin-task-item {
       box-shadow: 0 6px 16px rgba(70, 70, 70, 0.08);
       border: 1px solid color-mix(in srgb, var(--dashboard-stroke) 76%, #ffffff 24%);
+    }
+
+    /* ============================================================
+       FLUID EDITORIAL DESIGN SYSTEM — Satın Alma Planning Panel
+       Scope: .fluid-editorial wrapper — overrides dashboard tokens
+       ============================================================ */
+
+    .fluid-editorial {
+      --dashboard-accent: #006b68;
+      --dashboard-accent-glow: rgba(0, 107, 104, 0.20);
+      --dashboard-surface: #f7faf8;
+      --dashboard-surface-2: #f0f5f2;
+      --dashboard-text: #2c3432;
+      --dashboard-muted: #58615f;
+      --dashboard-stroke: rgba(171, 180, 177, 0.10);
+      --dashboard-raised: 0 20px 50px rgba(44, 52, 50, 0.04), 0 2px 8px rgba(44, 52, 50, 0.03);
+      --dashboard-raised-soft: 0 8px 28px rgba(44, 52, 50, 0.04), 0 1px 4px rgba(44, 52, 50, 0.02);
+      --dashboard-pressed: none;
+      --dashboard-bg: #f7faf8;
+      --dashboard-focus-glow: rgba(0, 107, 104, 0.25);
+      background: #f7faf8;
+      font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+    }
+
+    .fluid-editorial .satin-alma-fluid-shell,
+    .fluid-editorial {
+      background:
+        radial-gradient(900px 500px at 85% -8%, rgba(0, 107, 104, 0.06), transparent 60%),
+        radial-gradient(700px 400px at 5% 10%, rgba(118, 221, 216, 0.06), transparent 60%),
+        #f7faf8;
+    }
+
+    .fluid-editorial .satin-glass-header {
+      background: rgba(247, 250, 248, 0.85) !important;
+      border-bottom: none !important;
+      box-shadow: 0 8px 32px rgba(0, 107, 104, 0.04) !important;
+    }
+
+    .fluid-editorial .satin-pill {
+      background: rgba(0, 107, 104, 0.08) !important;
+      border: none !important;
+      box-shadow: none !important;
+      color: #006b68;
+    }
+
+    .fluid-editorial .satin-hero-card {
+      background: linear-gradient(135deg, #006b68 0%, #76ddd8 100%) !important;
+      color: #e1fffd !important;
+      border: none !important;
+      box-shadow: 0 24px 70px rgba(0, 107, 104, 0.22), 0 4px 16px rgba(0, 107, 104, 0.12) !important;
+    }
+
+    .fluid-editorial .satin-metric {
+      background: rgba(255, 255, 255, 0.25) !important;
+      border: none !important;
+      box-shadow: none !important;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+
+    .fluid-editorial .satin-float-action {
+      will-change: transform, box-shadow;
+      transition: transform .25s cubic-bezier(.22,1,.36,1), box-shadow .25s ease;
+    }
+
+    .fluid-editorial .satin-float-action:hover {
+      transform: translateY(-2px) scale(1.01);
+      box-shadow: 0 12px 28px rgba(0, 107, 104, 0.22) !important;
+    }
+
+    .fluid-editorial .satin-soft-list {
+      background: #ffffff !important;
+      border: none !important;
+      box-shadow: 0 8px 32px rgba(44, 52, 50, 0.04), 0 1px 4px rgba(44, 52, 50, 0.02) !important;
+    }
+
+    .fluid-editorial .satin-task-item {
+      background: #ffffff !important;
+      border: none !important;
+      box-shadow: 0 4px 16px rgba(44, 52, 50, 0.04) !important;
+      transition: transform .2s cubic-bezier(.22,1,.36,1), box-shadow .2s ease;
+    }
+
+    .fluid-editorial .satin-task-item:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 24px rgba(0, 107, 104, 0.08) !important;
+    }
+
+    .fluid-editorial .cihaz-card {
+      background: #ffffff !important;
+      border: none !important;
+      box-shadow: 0 8px 28px rgba(44, 52, 50, 0.04), 0 1px 4px rgba(44, 52, 50, 0.02) !important;
+      border-radius: 1.5rem !important;
+      transition: transform .2s cubic-bezier(.22,1,.36,1), box-shadow .2s ease;
+    }
+
+    .fluid-editorial .cihaz-card:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 16px 40px rgba(0, 107, 104, 0.07) !important;
+    }
+
+    .fluid-editorial .cihaz-card-strong {
+      background: #ffffff !important;
+      border: none !important;
+      box-shadow: 0 20px 50px rgba(44, 52, 50, 0.05), 0 2px 8px rgba(44, 52, 50, 0.03) !important;
+      border-radius: 2rem !important;
+    }
+
+    .fluid-editorial .cihaz-pressed {
+      background: #f0f5f2 !important;
+      box-shadow: none !important;
+      border: none !important;
+      border-radius: 1rem !important;
+    }
+
+    /* Fluid card tap ripple */
+    .fluid-editorial .fluid-card-tap {
+      transition: transform .15s cubic-bezier(.22,1,.36,1), box-shadow .15s ease;
+    }
+    .fluid-editorial .fluid-card-tap:active {
+      transform: scale(0.98);
+    }
+
+    /* Fluid gradient button */
+    .fluid-editorial .fluid-btn-primary {
+      background: linear-gradient(135deg, #006b68, #76ddd8);
+      color: #e1fffd;
+      border: none;
+      border-radius: 9999px;
+      box-shadow: 0 8px 24px rgba(0, 107, 104, 0.22);
+      transition: transform .2s cubic-bezier(.22,1,.36,1), box-shadow .2s ease;
+      font-weight: 700;
+    }
+    .fluid-editorial .fluid-btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 12px 32px rgba(0, 107, 104, 0.30);
+    }
+    .fluid-editorial .fluid-btn-primary:active {
+      transform: scale(0.97);
+    }
+
+    /* Fluid date pill — selected */
+    .fluid-editorial .fluid-date-selected {
+      background: linear-gradient(135deg, #006b68, #5bccca);
+      color: #ffffff;
+      box-shadow: 0 8px 20px rgba(0, 107, 104, 0.28);
+    }
+
+    /* Swipe hint reveal */
+    .fluid-editorial .fluid-swipe-hint-complete {
+      background: rgba(0, 107, 104, 0.10);
+      color: #006b68;
+    }
+    .fluid-editorial .fluid-swipe-hint-postpone {
+      background: rgba(245, 158, 11, 0.10);
+      color: #b45309;
+    }
+
+    /* Ambient gradient blobs for depth */
+    .fluid-blob-1 {
+      position: absolute;
+      width: 420px;
+      height: 420px;
+      border-radius: 9999px;
+      background: radial-gradient(circle, rgba(0, 107, 104, 0.06), transparent 70%);
+      filter: blur(60px);
+      pointer-events: none;
+    }
+    .fluid-blob-2 {
+      position: absolute;
+      width: 360px;
+      height: 360px;
+      border-radius: 9999px;
+      background: radial-gradient(circle, rgba(118, 221, 216, 0.07), transparent 70%);
+      filter: blur(80px);
+      pointer-events: none;
     }
 
     /* E1 – subtle card / list-item (small elevation) */
