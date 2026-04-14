@@ -19,6 +19,7 @@ export interface ProductCode {
   stokAdi: string;
   urunGrubu?: 'kit' | 'sarf' | 'yedek_parca';
   ambalajDegeri?: number;
+  testAdeti?: number;
   anaBirim?: string;
   cost?: number;
   currency?: 'EUR' | 'USD' | 'TRY';
@@ -143,6 +144,8 @@ export interface Company {
   createdAt?: Date;
   createdByUid?: string;
   createdByName?: string;
+  responsibleUserId?: string;   // Firma sorumlusu (admin)
+  responsibleUserName?: string; // Firma sorumlusu adı
 }
 
 export interface User {
@@ -1334,6 +1337,11 @@ export interface PurchasingTask {
   // Completion flow metadata
   completionChecklist?: PurchasingCompletionChecklistItem[];
   expectedCompletionFileName?: string;
+
+  // New Workflow & Approval fields
+  approvalStatus?: 'none' | 'pending' | 'approved' | 'rejected';
+  weeklyPlanId?: string; // Groups tasks created by a weekly plan
+  rejectionReason?: string;
 }
 
 export interface PurchasingCompletionChecklistItem {

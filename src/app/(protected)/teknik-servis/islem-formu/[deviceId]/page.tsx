@@ -29,6 +29,7 @@ import WizardFormShell, { haptic } from '@/components/islem-formu/WizardFormShel
 import type { WizardHeading } from '@/components/islem-formu/WizardFormShell';
 import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { emitExternalStockUsage } from '@/lib/notifications';
 
 // Operation types (Yapılan İşlem)
 type OperationType =
@@ -2105,6 +2106,25 @@ export default function IslemFormuPage() {
         }
 
         await batch.commit();
+
+        // Send notifications for external stock usage (Depot or Pool)
+        actions.forEach(action => {
+          if (action.type === 'part_change' || action.type === 'hucre_degisimi') {
+            if (action.poolStockId || action.isDepotSelection) {
+              emitExternalStockUsage({
+                actor: { uid: currentUserProfile?.uid || '', name: currentUserProfile?.name || 'Bilinmeyen' },
+                sourceType: action.poolStockId ? 'pool' : 'depot',
+                sourceName: action.poolStockId ? (action.poolWarehouseName || 'Havuz') : 'Depo',
+                stokKodu: action.stokKodu || '',
+                stokAdi: action.stokAdi || '',
+                serialNumber: action.serialNumber || action.hucreNumarasi,
+                quantity: action.quantity || 1,
+                deviceName: device?.cihazAdi || device?.model,
+                hospitalName: hospital?.name,
+              }).catch(err => console.error("Error sending external stock notification:", err));
+            }
+          }
+        });
 
         if (currentDraftId) await deleteDoc(doc(db, 'draftActionForms', currentDraftId));
 

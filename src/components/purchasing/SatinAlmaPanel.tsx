@@ -93,6 +93,7 @@ import {
 import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { emitPlanningApprovalRequest, emitPlanningStatusUpdate } from '@/lib/notifications';
 import PurchasingAgentChat from '@/components/purchasing/PurchasingAgentChat';
 import WorkflowCanvasPanel from '@/components/purchasing/WorkflowCanvasPanel';
 
@@ -432,6 +433,7 @@ interface TaskFormData {
   workflowNodeX?: number;
   workflowNodeY?: number;
   recurring?: PurchasingTaskRecurrence;
+  isWeeklyPlan?: boolean; // NEW
 }
 
 
@@ -542,7 +544,7 @@ function parseNaturalTaskInputForPlanning(
 // ==========================================
 
 export default function SatinAlmaPanel() {
-  const { currentUserProfile, isAdmin } = useAuth();
+  const { currentUserProfile, isAdmin, isSuperAdmin } = useAuth();
   const userName = currentUserProfile?.name || 'Kullanıcı';
 
   // State
@@ -559,6 +561,7 @@ export default function SatinAlmaPanel() {
   const [tasksLoading, setTasksLoading] = useState(true);
   const [taskDefinitions, setTaskDefinitions] = useState<PurchasingTaskDefinition[]>([]);
   const [workflows, setWorkflows] = useState<PurchasingWorkflowProject[]>([]);
+  const [currentUserCompany, setCurrentUserCompany] = useState<Company | null>(null);
   const [showTaskDefinitionModal, setShowTaskDefinitionModal] = useState(false);
   const [mobileMonthModalDate, setMobileMonthModalDate] = useState<Date | null>(null);
   const [myDayTaskIds, setMyDayTaskIds] = useState<string[]>([]);
@@ -637,6 +640,18 @@ export default function SatinAlmaPanel() {
     );
     return () => unsub();
   }, []);
+
+  // Company fetcher
+  useEffect(() => {
+    if (currentUserProfile?.companyId) {
+      const unsub = onSnapshot(doc(db, 'companies', currentUserProfile.companyId), (snap) => {
+        if (snap.exists()) {
+          setCurrentUserCompany({ id: snap.id, ...snap.data() } as Company);
+        }
+      });
+      return () => unsub();
+    }
+  }, [currentUserProfile?.companyId]);
 
   useEffect(() => {
     const q = query(collection(db, 'deviceFaultReports'));
@@ -1188,52 +1203,98 @@ export default function SatinAlmaPanel() {
           taskDoc.recurringGroupId = `rg_${Date.now()}`;
         }
 
+        if (data.isWeeklyPlan) {
+          taskDoc.approvalStatus = 'pending';
+          taskDoc.weeklyPlanId = `wp_${Date.now()}`;
+        }
+
         let createdTaskId = '';
         if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          // ... (offline logic keeps working for single tasks, 
+          // but weekly plans usually require online for batch/notifications)
           createdTaskId = `offline_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
           const localTask = { ...taskDoc, id: createdTaskId } as PurchasingTask;
           setTasks((prev) => [...prev, localTask]);
           enqueueMutation({ action: 'create', taskId: createdTaskId, payload: taskDoc });
-          if (data.files?.length) {
-            toast.warning('Çevrimdışı modda dosya yükleme desteklenmiyor. İnternete bağlanınca düzenleyip ekleyebilirsiniz.');
-          }
-          toast.info('Çevrimdışı: görev yerel olarak kaydedildi ve senkron kuyruğuna alındı');
+          toast.info('Çevrimdışı: görev yerel olarak kaydedildi');
         } else {
-          const docRef = await addDoc(collection(db, 'purchasingTasks'), taskDoc);
-          createdTaskId = docRef.id;
-
-          if (data.workflowProjectId) {
-            const targetWorkflow = workflows.find((w) => w.id === data.workflowProjectId);
-            if (targetWorkflow) {
-              const nodeX = Math.max(12, Math.min(4200 - 236 - 12, (data.workflowNodeX ?? 220) - 118));
-              const nodeY = Math.max(12, Math.min(2400 - 84 - 12, (data.workflowNodeY ?? 220) - 42));
-              await updateDoc(doc(db, 'purchasingWorkflows', data.workflowProjectId), {
-                taskIds: [...(targetWorkflow.taskIds || []), docRef.id],
-                nodes: [...(targetWorkflow.nodes || []), { taskId: docRef.id, x: nodeX, y: nodeY }],
-                updatedAt: Timestamp.now(),
-              });
+          if (data.isWeeklyPlan) {
+            // Bulk create 7 tasks
+            const batch = writeBatch(db);
+            const startDate = parseISO(data.date);
+            const createdTaskIds: string[] = [];
+            
+            for (let i = 0; i < 7; i++) {
+              const currentDate = format(addDays(startDate, i), 'yyyy-MM-dd');
+              const dayDoc = { 
+                ...taskDoc, 
+                date: currentDate,
+                createdAt: Timestamp.now(),
+                activityLogs: [
+                  createActivityLog('created', `Haftalık plan kapsamında oluşturuldu (${currentUserProfile.name || 'Kullanıcı'}, ${format(new Date(), 'HH:mm')})`, currentUserProfile)
+                ]
+              };
+              const newRef = doc(collection(db, 'purchasingTasks'));
+              batch.set(newRef, dayDoc);
+              createdTaskIds.push(newRef.id);
             }
-          }
+            await batch.commit();
+            toast.success('7 günlük haftalık plan oluşturuldu ve onaya gönderildi.');
 
-          // Upload files
-          if (data.files?.length) {
-            const attachments: PurchasingTaskAttachment[] = [];
-            for (const file of data.files) {
-              try {
-                attachments.push(await uploadAttachment(file, docRef.id));
-              } catch (err) {
-                console.error('File upload error:', err);
-                toast.error(`"${file.name}" yüklenemedi`);
+            // Notify responsible person
+            if (currentUserProfile.companyId) {
+              const compSnap = await getDoc(doc(db, 'companies', currentUserProfile.companyId));
+              if (compSnap.exists()) {
+                const compData = compSnap.data();
+                if (compData.responsibleUserId) {
+                  const endDate = format(addDays(startDate, 6), 'dd.MM.yyyy');
+                  const startDateStr = format(startDate, 'dd.MM.yyyy');
+                  await emitPlanningApprovalRequest({
+                    actor: { uid: currentUserProfile.uid, name: currentUserProfile.name || 'Kullanıcı' },
+                    targetUid: compData.responsibleUserId,
+                    weeklyPlanId: taskDoc.weeklyPlanId,
+                    dateRange: `${startDateStr} - ${endDate}`
+                  });
+                }
               }
             }
-            if (attachments.length > 0) {
-              await updateDoc(doc(db, 'purchasingTasks', docRef.id), { attachments });
+          } else {
+            const docRef = await addDoc(collection(db, 'purchasingTasks'), taskDoc);
+            createdTaskId = docRef.id;
+
+            if (data.workflowProjectId) {
+              const targetWorkflow = workflows.find((w) => w.id === data.workflowProjectId);
+              if (targetWorkflow) {
+                const nodeX = Math.max(12, Math.min(4200 - 236 - 12, (data.workflowNodeX ?? 220) - 118));
+                const nodeY = Math.max(12, Math.min(2400 - 84 - 12, (data.workflowNodeY ?? 220) - 42));
+                await updateDoc(doc(db, 'purchasingWorkflows', data.workflowProjectId), {
+                  taskIds: [...(targetWorkflow.taskIds || []), docRef.id],
+                  nodes: [...(targetWorkflow.nodes || []), { taskId: docRef.id, x: nodeX, y: nodeY }],
+                  updatedAt: Timestamp.now(),
+                });
+              }
+            }
+
+            // Upload files
+            if (data.files?.length) {
+              const attachments: PurchasingTaskAttachment[] = [];
+              for (const file of data.files) {
+                try {
+                  attachments.push(await uploadAttachment(file, docRef.id));
+                } catch (err) {
+                  console.error('File upload error:', err);
+                  toast.error(`"${file.name}" yüklenemedi`);
+                }
+              }
+              if (attachments.length > 0) {
+                await updateDoc(doc(db, 'purchasingTasks', docRef.id), { attachments });
+              }
             }
           }
         }
 
-        // Create recurring instances
-        if (data.recurring && (typeof navigator === 'undefined' || navigator.onLine)) {
+        // Create recurring instances (only for non-weekly plans)
+        if (!data.isWeeklyPlan && data.recurring && (typeof navigator === 'undefined' || navigator.onLine)) {
           const futureDates = generateRecurringDates(data.date, data.recurring);
           const filteredFutureDates = futureDates.filter((dateStr) => getSpecialDay(dateStr)?.type !== 'holiday');
           const skippedDates = futureDates.length - filteredFutureDates.length;
@@ -1373,6 +1434,40 @@ export default function SatinAlmaPanel() {
     },
     [editingTask, currentUserProfile, tasks, enqueueMutation, canOperateOnTask]
   );
+
+  // Approval Flow handler
+  const handlePlanDecision = useCallback(async (task: PurchasingTask, status: 'approved' | 'rejected', reason?: string) => {
+    if (!currentUserProfile) return;
+    try {
+      await updateDoc(doc(db, 'purchasingTasks', task.id), {
+        approvalStatus: status,
+        ...(reason && { rejectionReason: reason }),
+        updatedAt: Timestamp.now(),
+        activityLogs: arrayUnion(
+          createActivityLog(
+            'updated',
+            `Görev ${status === 'approved' ? 'onaylandı' : 'reddedildi'}${reason ? ` (Sebep: ${reason})` : ''} (${currentUserProfile.name || 'Sorumlu'})`,
+            currentUserProfile
+          )
+        )
+      });
+
+      // Notify the person who created the task
+      await emitPlanningStatusUpdate({
+        actor: { uid: currentUserProfile.uid, name: currentUserProfile.name || 'Sorumlu' },
+        targetUid: task.createdByUid,
+        status: status,
+        date: task.date,
+        title: task.title,
+        ...(reason && { rejectionReason: reason })
+      });
+
+      toast.success(status === 'approved' ? 'Görev onaylandı' : 'Görev reddedildi');
+    } catch (err) {
+      console.error(err);
+      toast.error('Giriş kaydedilemedi');
+    }
+  }, [currentUserProfile]);
 
   // Drag & drop reorder (native HTML5 DnD)
   const handleDragOver = useCallback((e: React.DragEvent, targetTaskId: string) => {
@@ -1616,7 +1711,7 @@ export default function SatinAlmaPanel() {
   const [justAddedTaskId, setJustAddedTaskId] = useState<string | null>(null);
 
   return (
-    <div className="fluid-editorial min-h-screen pb-28 relative overflow-x-hidden">
+    <div className="fluid-editorial min-h-screen pb-[80px] relative overflow-x-hidden" style={{ background: '#f0f5f2' }}>
       {/* Ambient depth blobs */}
       <div className="fluid-blob-1 -top-24 -right-16 opacity-50" />
       <div className="fluid-blob-2 top-[55%] -left-20 opacity-40" />
@@ -2269,20 +2364,26 @@ export default function SatinAlmaPanel() {
 
 function TaskCard({
   task,
+  isResponsible,
   onToggle,
   onToggleSubtask,
   onEdit,
   onDelete,
   onAddComment,
   onPostpone,
+  onApprove,
+  onReject,
 }: {
   task: PurchasingTask;
+  isResponsible?: boolean;
   onToggle: () => void;
   onToggleSubtask: (subtaskId: string) => void;
   onEdit: () => void;
   onDelete: () => void;
   onAddComment: (message: string) => void;
   onPostpone: () => void;
+  onApprove?: () => void;
+  onReject?: (reason: string) => void;
 }) {
   const durationMin = parseTime(task.endTime) - parseTime(task.startTime);
   const hours = Math.floor(durationMin / 60);
@@ -2290,6 +2391,8 @@ function TaskCard({
   const isVisit = task.taskType === 'kurum_ziyareti' || !!task.laboratoryId;
   const priority = (task.priority || 'normal') as Priority;
   const priorityConf = PRIORITY_CONFIG[priority];
+  const isPending = task.approvalStatus === 'pending';
+  const isRejected = task.approvalStatus === 'rejected';
   const completedSubtasks = task.subtasks?.filter((s) => s.completed).length || 0;
   const totalSubtasks = task.subtasks?.length || 0;
   const assignedPersonnel = task.assignedPersonnel || [];
@@ -2385,7 +2488,7 @@ function TaskCard({
   );
 
   return (
-    <div className="relative overflow-hidden rounded-2xl">
+    <div className={cn('relative overflow-hidden rounded-2xl', (isPending || isRejected) && 'opacity-75')}>
       {/* Swipe reveal layer */}
       <div className={cn(
         'absolute inset-0 flex items-center justify-between px-5 text-[11px] font-bold rounded-2xl pointer-events-none',
@@ -2444,6 +2547,16 @@ function TaskCard({
               {task.recurring && (
                 <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full font-bold mt-0.5 bg-purple-500/10 text-purple-400">
                   <Repeat className="w-2.5 h-2.5 inline" />
+                </span>
+              )}
+              {isPending && (
+                <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full font-bold mt-0.5 bg-amber-500/10 text-amber-600 border border-amber-500/20">
+                  Onay Bekliyor
+                </span>
+              )}
+              {isRejected && (
+                <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full font-bold mt-0.5 bg-rose-500/10 text-rose-600 border border-rose-500/20">
+                  Reddedildi
                 </span>
               )}
             </div>
@@ -2507,6 +2620,27 @@ function TaskCard({
             </button>
           </div>
         </div>
+
+        {/* Approval buttons for responsible person */}
+        {isPending && isResponsible && (
+          <div className="px-5 pb-3 flex gap-2" onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={onApprove}
+              className="flex-1 py-1.5 rounded-xl text-[10px] font-bold bg-emerald-500 text-white hover:bg-emerald-600 transition-all flex items-center justify-center gap-1"
+            >
+              <Check className="w-3 h-3" strokeWidth={3} /> Onayla
+            </button>
+            <button
+              onClick={() => {
+                const reason = window.prompt('Reddetme nedeni:', '');
+                if (reason !== null && onReject) onReject(reason);
+              }}
+              className="flex-1 py-1.5 rounded-xl text-[10px] font-bold bg-rose-500 text-white hover:bg-rose-600 transition-all flex items-center justify-center gap-1"
+            >
+              <X className="w-3 h-3" strokeWidth={3} /> Reddet
+            </button>
+          </div>
+        )}
 
         {/* Expandable: subtasks, comments, attachments, logs */}
         {(showComments || showActivityLogs || (task.subtasks && task.subtasks.length > 0)) && (
@@ -2852,6 +2986,7 @@ function TaskFormModal({
   const [endTime, setEndTime] = useState(isEdit ? task.endTime : '10:00');
   const [priority, setPriority] = useState<Priority>(isEdit ? (task.priority || 'normal') as Priority : 'normal');
   const [submitting, setSubmitting] = useState(false);
+  const [isWeeklyPlan, setIsWeeklyPlan] = useState(false);
 
   // Kurum ziyareti
   const [selectedLabId, setSelectedLabId] = useState(isEdit ? task.laboratoryId || '' : '');
@@ -3029,6 +3164,7 @@ function TaskFormModal({
           ...(recurringEndDate && { endDate: recurringEndDate }),
         },
       }),
+      isWeeklyPlan: !isEdit && isWeeklyPlan,
     });
     setSubmitting(false);
   };
@@ -3533,6 +3669,27 @@ function TaskFormModal({
                     <input type="date" value={recurringEndDate} onChange={(e) => setRecurringEndDate(e.target.value)} className={cn(inputCls, 'py-2 text-xs')} style={{ color: 'var(--dashboard-text)', border: '1px solid var(--dashboard-stroke)' }} />
                   </div>
                 </div>
+              )}
+            </div>
+
+            {/* Weekly Plan Toggle */}
+            <div className="mt-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <button
+                  type="button"
+                  onClick={() => { setIsWeeklyPlan(!isWeeklyPlan); if (!isWeeklyPlan) setIsRecurring(false); }}
+                  className="w-5 h-5 rounded border-2 flex items-center justify-center transition-all"
+                  style={isWeeklyPlan ? { background: 'var(--dashboard-accent)', borderColor: 'var(--dashboard-accent)' } : { borderColor: 'rgba(108,114,122,.4)' }}
+                >
+                  {isWeeklyPlan && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
+                </button>
+                <CalendarClock className="w-3.5 h-3.5" style={{ color: 'var(--dashboard-muted)' }} />
+                <span className="text-xs font-medium" style={{ color: 'var(--dashboard-muted)' }}>Haftalık Plan Olarak Oluştur (7 Gün)</span>
+              </label>
+              {isWeeklyPlan && (
+                <p className="mt-1 text-[10px] text-amber-600 px-7">
+                  Bu seçenek seçilen tarihten itibaren 7 gün boyunca aynı görevi oluşturur ve onay sürecini başlatır.
+                </p>
               )}
             </div>
           )}

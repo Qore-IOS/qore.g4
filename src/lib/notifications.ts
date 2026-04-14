@@ -28,6 +28,8 @@ export type NotificationType =
   | "user_request_completed"
   | "fault_reminder"
   | "external_stock_usage"
+  | "planning_approval"
+  | "planning_result"
   | "custom";
 
 export type ResourceType =
@@ -552,6 +554,58 @@ export async function emitExternalStockUsage(params: {
     targets: targetRoles,
     meta: {
       ...params,
+    },
+  });
+}
+
+/**
+ * Notifies the company responsible person about a new planning approval request.
+ */
+export async function emitPlanningApprovalRequest(params: {
+  actor: Actor;
+  targetUid: string;
+  weeklyPlanId: string;
+  dateRange: string;
+}) {
+  await createNotification({
+    type: 'planning_approval',
+    channel: 'push',
+    title: 'Planlama Onayı Bekleniyor',
+    message: `${params.actor.name} yeni bir haftalık plan oluşturdu (${params.dateRange}). Onayınız bekleniyor.`,
+    href: '/satin-alma',
+    actor: params.actor,
+    targets: [`user:${params.targetUid}`],
+    meta: {
+      weeklyPlanId: params.weeklyPlanId,
+      dateRange: params.dateRange,
+    },
+  });
+}
+
+/**
+ * Notifies the plan creator about the approval/rejection result.
+ */
+export async function emitPlanningStatusUpdate(params: {
+  actor: Actor; // The person who approved/rejected
+  targetUid: string; // The person who created the plan
+  status: 'approved' | 'rejected';
+  date: string;
+  title: string;
+  rejectionReason?: string;
+}) {
+  const statusLabel = params.status === 'approved' ? 'onaylandı' : 'reddedildi';
+  await createNotification({
+    type: 'planning_result',
+    channel: 'push',
+    title: `Planlama ${params.status === 'approved' ? 'Onaylandı' : 'Reddedildi'}`,
+    message: `"${params.title}" başlıklı ${params.date} tarihli plan görevini ${params.actor.name} ${statusLabel}.${params.rejectionReason ? ` Sebep: ${params.rejectionReason}` : ''}`,
+    href: '/satin-alma',
+    actor: params.actor,
+    targets: [`user:${params.targetUid}`],
+    meta: {
+      status: params.status,
+      date: params.date,
+      title: params.title,
     },
   });
 }

@@ -253,10 +253,16 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
       const enrichedItems = s.items.map(item => {
         const product = productMap.get(item.stokKodu);
         if (!product?.cost) return { ...item, calculatedCost: 0, nativeCurrency: 'TRY' as Currency };
+        const isKit = product.urunGrubu === 'kit';
         const ambalaj = product.ambalajDegeri || 1;
-        const totalTest = (item.stokAdedi * ambalaj) + item.cihazUstuAdedi;
-        const costPerTest = product.cost / ambalaj;
-        const totalNative = costPerTest * totalTest;
+        const testAdeti = product.testAdeti || 1;
+        let totalNative = 0;
+        if (isKit) {
+          const totalTests = (item.stokAdedi * ambalaj * testAdeti) + item.cihazUstuAdedi;
+          totalNative = (product.cost / (ambalaj * testAdeti)) * totalTests;
+        } else {
+          totalNative = (product.cost / ambalaj) * (item.stokAdedi * ambalaj + item.cihazUstuAdedi);
+        }
         const productCurrency = (product.currency || 'TRY') as Currency;
         let costEUR: number;
         switch (productCurrency) {
@@ -293,10 +299,16 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
         const brand = item.marka || 'Diğer';
         const product = productMap.get(item.stokKodu);
         if (!product?.cost) return;
+        const isKit = product.urunGrubu === 'kit';
         const ambalaj = product.ambalajDegeri || 1;
-        const totalTest = (item.stokAdedi * ambalaj) + item.cihazUstuAdedi;
-        const costPerTest = product.cost / ambalaj;
-        const totalNative = costPerTest * totalTest;
+        const testAdeti = product.testAdeti || 1;
+        let totalNative = 0;
+        if (isKit) {
+          const totalTests = (item.stokAdedi * ambalaj * testAdeti) + item.cihazUstuAdedi;
+          totalNative = (product.cost / (ambalaj * testAdeti)) * totalTests;
+        } else {
+          totalNative = (product.cost / ambalaj) * (item.stokAdedi * ambalaj + item.cihazUstuAdedi);
+        }
         const productCurrency = (product.currency || 'TRY') as Currency;
 
         let costEUR: number;
@@ -329,10 +341,16 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
           : product.urunGrubu === 'sarf' ? 'Sarf Malzeme'
           : product.urunGrubu === 'yedek_parca' ? 'Yedek Parça'
           : 'Diğer';
+        const isKit = product.urunGrubu === 'kit';
         const ambalaj = product.ambalajDegeri || 1;
-        const totalTest = (item.stokAdedi * ambalaj) + item.cihazUstuAdedi;
-        const costPerTest = product.cost / ambalaj;
-        const totalNative = costPerTest * totalTest;
+        const testAdeti = product.testAdeti || 1;
+        let totalNative = 0;
+        if (isKit) {
+          const totalTests = (item.stokAdedi * ambalaj * testAdeti) + item.cihazUstuAdedi;
+          totalNative = (product.cost / (ambalaj * testAdeti)) * totalTests;
+        } else {
+          totalNative = (product.cost / ambalaj) * (item.stokAdedi * ambalaj + item.cihazUstuAdedi);
+        }
         const productCurrency = (product.currency || 'TRY') as Currency;
 
         let costEUR: number;
@@ -403,10 +421,16 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
         .forEach(item => {
           const product = productMap.get(item.stokKodu);
           if (!product?.cost) return;
+          const isKit = product.urunGrubu === 'kit';
           const ambalaj = product.ambalajDegeri || 1;
-          const totalTest = (item.stokAdedi * ambalaj) + item.cihazUstuAdedi;
-          const costPerTest = product.cost / ambalaj;
-          const totalNative = costPerTest * totalTest;
+          const testAdeti = product.testAdeti || 1;
+          let totalNative = 0;
+          if (isKit) {
+            const totalTests = (item.stokAdedi * ambalaj * testAdeti) + item.cihazUstuAdedi;
+            totalNative = (product.cost / (ambalaj * testAdeti)) * totalTests;
+          } else {
+            totalNative = (product.cost / ambalaj) * (item.stokAdedi * ambalaj + item.cihazUstuAdedi);
+          }
           const productCurrency = (product.currency || 'TRY') as Currency;
           let costEUR: number;
           switch (productCurrency) {

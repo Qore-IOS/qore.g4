@@ -83,13 +83,26 @@ export function getProductCostInCurrency(
   targetCurrency: Currency
 ): number {
   const product = productMap.get(stokKodu);
-  if (!product?.cost || !product?.ambalajDegeri) return 0;
+  if (!product?.cost) return 0;
 
-  const totalTest = (quantity * product.ambalajDegeri) + cihazUstu;
-  const costPerTest = product.cost / product.ambalajDegeri;
-  const totalCostNative = costPerTest * totalTest;
+  const isKit = product.urunGrubu === 'kit';
+  const ambalaj = product.ambalajDegeri || 1;
+  const testAdeti = product.testAdeti || 1;
+
+  let totalCostNative = 0;
+  if (isKit) {
+    // Kit: Calculate based on tests
+    const totalTests = (quantity * ambalaj * testAdeti) + cihazUstu;
+    const costPerTest = product.cost / (ambalaj * testAdeti);
+    totalCostNative = costPerTest * totalTests;
+  } else {
+    // Sarf / Yedek Parça: Calculate based on boxes/units
+    // (product.cost / ambalaj) gives unit cost if ambalaj > 1, 
+    // total unitsCount = quantity * ambalaj + cihazUstu
+    totalCostNative = (product.cost / ambalaj) * (quantity * ambalaj + cihazUstu);
+  }
+
   const productCurrency = (product.currency || 'TRY') as Currency;
-
   let costEUR = totalCostNative;
   if (productCurrency === 'USD') costEUR = totalCostNative / (rates.USD || 1);
   if (productCurrency === 'TRY') costEUR = totalCostNative / (rates.TRY || 1);

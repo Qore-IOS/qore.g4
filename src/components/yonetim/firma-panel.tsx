@@ -22,14 +22,23 @@ export default function FirmaPanel() {
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentCompany, setCurrentCompany] = useState<Partial<Company>>({});
+  const [adminUsers, setAdminUsers] = useState<{uid: string, name: string}[]>([]);
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
       const snap = await getDocs(collection(db, 'companies'));
       setCompanies(snap.docs.map(d => ({ id: d.id, ...d.data() } as Company)));
+
+      // Fetch admin users for the responsible selector
+      const usersSnap = await getDocs(collection(db, 'users'));
+      const admins = usersSnap.docs
+        .map(d => ({ uid: d.id, ...d.data() } as any))
+        .filter(u => u.role === 'admin')
+        .map(u => ({ uid: u.uid, name: u.name || u.email || u.uid }));
+      setAdminUsers(admins);
     } catch (e) {
-      toast({ title: 'Hata', description: 'Firmalar yüklenemedi.', variant: 'destructive' });
+      toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
     } finally {
       setIsLoading(false);
     }
@@ -73,6 +82,8 @@ export default function FirmaPanel() {
         await setDoc(doc(db, 'companies', currentCompany.id), {
           name: currentCompany.name.trim(),
           description: currentCompany.description?.trim() || '',
+          responsibleUserId: currentCompany.responsibleUserId || null,
+          responsibleUserName: currentCompany.responsibleUserName || null,
         }, { merge: true });
         toast({ title: 'Başarılı', description: 'Firma güncellendi.' });
       } else {
@@ -81,6 +92,8 @@ export default function FirmaPanel() {
         await setDoc(newRef, {
           name: currentCompany.name.trim(),
           description: currentCompany.description?.trim() || '',
+          responsibleUserId: currentCompany.responsibleUserId || null,
+          responsibleUserName: currentCompany.responsibleUserName || null,
           createdAt: new Date(),
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || '',
@@ -144,6 +157,7 @@ export default function FirmaPanel() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Firma Adı</TableHead>
+                      <TableHead>Firma Sorumlusu</TableHead>
                       <TableHead>Açıklama</TableHead>
                       <TableHead>Oluşturan</TableHead>
                       <TableHead className="text-right">İşlemler</TableHead>
@@ -160,6 +174,7 @@ export default function FirmaPanel() {
                       companies.map(c => (
                         <TableRow key={c.id}>
                           <TableCell className="font-medium">{c.name}</TableCell>
+                          <TableCell>{c.responsibleUserName || <span className="text-[10px] text-muted-foreground">Atanmamış</span>}</TableCell>
                           <TableCell className="text-muted-foreground">{c.description || '-'}</TableCell>
                           <TableCell>{c.createdByName || '-'}</TableCell>
                           <TableCell className="text-right space-x-1">
@@ -197,6 +212,23 @@ export default function FirmaPanel() {
               value={currentCompany.description || ''}
               onChange={(e) => setCurrentCompany({ ...currentCompany, description: e.target.value })}
             />
+            <div className="space-y-2">
+              <label className="text-xs font-semibold text-muted-foreground">Firma Sorumlusu (Plan Onaylayacak Kişi)</label>
+              <select
+                className="w-full flex h-10 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                value={currentCompany.responsibleUserId || ''}
+                onChange={(e) => {
+                  const uid = e.target.value;
+                  const name = adminUsers.find(u => u.uid === uid)?.name || '';
+                  setCurrentCompany({ ...currentCompany, responsibleUserId: uid, responsibleUserName: name });
+                }}
+              >
+                <option value="">Sorumlu Seçilmedi</option>
+                {adminUsers.map(u => (
+                  <option key={u.uid} value={u.uid}>{u.name}</option>
+                ))}
+              </select>
+            </div>
           </div>
           <DialogFooter>
             <DialogClose asChild><Button variant="outline">İptal</Button></DialogClose>

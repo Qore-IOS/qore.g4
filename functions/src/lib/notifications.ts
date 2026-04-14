@@ -18,6 +18,8 @@ type NotificationType =
   | 'user_request_completed'
   | 'fault_reminder'
   | 'external_stock_usage'
+  | 'planning_approval'
+  | 'planning_result'
   | 'custom';
 
 export type ResourceType =

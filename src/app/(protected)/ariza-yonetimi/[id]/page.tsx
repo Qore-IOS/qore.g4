@@ -19,6 +19,7 @@ import { tr } from 'date-fns/locale';
 import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
 import { closeDeviceFaultReport, resolveEjectedKitFault, assignFaultToSelf, startIntervention, transferFaultToOtherUnit, verifyLocationForIntervention } from '@/lib/faults';
+import { emitExternalStockUsage } from '@/lib/notifications';
 import { useAuth } from '@/contexts/auth-context';
 import type { Device, DeviceFaultReport, DeviceFaultStatus, InterventionType, ProductCode, User, PersonalStockItem, PoolWarehouseStockItem, Depot, DeviceLabPool, YedekParcaDepoStokItem } from '@/lib/types';
 import { Input } from '@/components/ui/input';
@@ -1032,6 +1033,20 @@ export default function FaultDetailPage() {
         timestamp: Timestamp.fromDate(now),
       });
       await batch.commit();
+
+      if (hucreStockSourceTab === 'depot') {
+        emitExternalStockUsage({
+          actor: { uid: currentUser.uid, name: currentUserProfile?.name || 'Bilinmeyen' },
+          sourceType: 'depot',
+          sourceName: 'Depo',
+          stokKodu: item.stokKodu,
+          stokAdi: item.stokAdi,
+          serialNumber: hn,
+          quantity: 1,
+          deviceName: fault.model || '',
+          hospitalName: fault.labName || '',
+        }).catch(err => console.error("Error sending external stock notification:", err));
+      }
       toast({ title: 'Hücre Değişimi Eklendi' });
       setIsHucreDegisimiModalOpen(false);
       setHucreDegisimiSelectedItem(null);
@@ -1291,6 +1306,20 @@ export default function FaultDetailPage() {
       }
 
       await batch.commit();
+
+      if (selectedPoolStockItem || selectedDepotStockItem) {
+        emitExternalStockUsage({
+          actor: { uid: currentUser.uid, name: currentUserProfile?.name || 'Bilinmeyen' },
+          sourceType: selectedPoolStockItem ? 'pool' : 'depot',
+          sourceName: selectedPoolStockItem ? (selectedPoolStockItem.poolWarehouseName || 'Havuz') : 'Depo',
+          stokKodu: resolvedStokKodu,
+          stokAdi: resolvedStokAdi,
+          serialNumber: resolvedSerialNumber,
+          quantity: resolvedQuantity,
+          deviceName: fault.model || '',
+          hospitalName: fault.labName || '',
+        }).catch(err => console.error("Error sending external stock notification:", err));
+      }
 
       toast({ title: 'Başarılı', description: isPostClosure ? 'Parça değişimi sonradan eklendi ve loglandı.' : 'Parça değişimi eklendi.' });
       resetPartModalState();

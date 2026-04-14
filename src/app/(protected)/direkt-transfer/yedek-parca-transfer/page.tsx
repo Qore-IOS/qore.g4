@@ -97,6 +97,7 @@ interface GroupedDepoStokItem {
 
 interface ManualPersonnelStockRow {
   id: string;
+  productCodeId: string;
   stokKodu: string;
   stokAdi: string;
   anaBirim?: string;
@@ -1482,6 +1483,7 @@ export default function YedekParcaTransferPage() {
 
   const createManualStockRow = (): ManualPersonnelStockRow => ({
     id: `manual_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    productCodeId: '',
     stokKodu: '',
     stokAdi: '',
     serialNumber: '',
@@ -1521,6 +1523,7 @@ export default function YedekParcaTransferPage() {
     const cleanedRows = manualStockRows
       .map(row => ({
         ...row,
+        productCodeId: row.productCodeId,
         stokKodu: row.stokKodu.trim(),
         stokAdi: row.stokAdi.trim(),
         serialNumber: row.serialNumber.trim(),
@@ -1557,35 +1560,33 @@ export default function YedekParcaTransferPage() {
         for (let i = 0; i < quantityToCreate; i++) {
           const stockRef = doc(collection(db, 'personalStock'));
           stockRefIds.push(stockRef.id);
-          batch.set(stockRef, withCompanyScope({
-            ownerUid: menuSelection.personnelUid,
-            ownerName: menuSelection.personnelName,
-            productCodeId: '',
-            stokKodu: row.stokKodu,
-            stokAdi: row.stokAdi,
-            anaBirim: row.anaBirim || 'Adet',
-            serialNumber: row.serialNumber,
-            source: 'manual',
-            // Manuel eklemelerde de personelin onayı aranır; onaylanmayan ürün
-            // doğrudan kullanıcının stoğuna dahil edilmez.
-            status: 'pending_approval',
-            createdAt: now,
-            transferredByUid: currentUserProfile?.uid || '',
-            transferredByName: currentUserProfile?.name || '',
-            manualEntry: true,
-          }, currentCompanyId));
-        }
-
-        const logNotes = row.serialNumber
-          ? `[Manuel] Personele doğrudan eklendi: ${row.stokKodu} (SN: ${row.serialNumber}) -> ${menuSelection.personnelName}`
-          : `[Manuel] Personele doğrudan eklendi: ${row.stokKodu} x${quantityToCreate} -> ${menuSelection.personnelName}`;
-
-        const logRef = doc(collection(db, 'sparePartTransferLogs'));
-        batch.set(logRef, withCompanyScope({
-          action: 'transfer_to_personnel',
-          productCodeId: '',
+        batch.set(stockRef, withCompanyScope({
+          ownerUid: menuSelection.personnelUid,
+          ownerName: menuSelection.personnelName,
+          productCodeId: row.productCodeId || '',
           stokKodu: row.stokKodu,
           stokAdi: row.stokAdi,
+          anaBirim: row.anaBirim || 'Adet',
+          serialNumber: row.serialNumber,
+          source: 'manual',
+          status: 'pending_approval',
+          createdAt: now,
+          transferredByUid: currentUserProfile?.uid || '',
+          transferredByName: currentUserProfile?.name || '',
+          manualEntry: true,
+        }, currentCompanyId));
+      }
+
+      const logNotes = row.serialNumber
+        ? `[Manuel] Personele doğrudan eklendi: ${row.stokKodu} (SN: ${row.serialNumber}) -> ${menuSelection.personnelName}`
+        : `[Manuel] Personele doğrudan eklendi: ${row.stokKodu} x${quantityToCreate} -> ${menuSelection.personnelName}`;
+
+      const logRef = doc(collection(db, 'sparePartTransferLogs'));
+      batch.set(logRef, withCompanyScope({
+        action: 'transfer_to_personnel',
+        productCodeId: row.productCodeId || '',
+        stokKodu: row.stokKodu,
+        stokAdi: row.stokAdi,
           anaBirim: row.anaBirim || 'Adet',
           serialNumber: row.serialNumber,
           toUid: menuSelection.personnelUid,
@@ -4855,23 +4856,55 @@ export default function YedekParcaTransferPage() {
           <div className="space-y-3">
             {manualStockRows.map((row, index) => (
               <div key={row.id} className="cihaz-pressed p-3 grid grid-cols-1 md:grid-cols-12 gap-3" style={{ borderRadius: 14 }}>
-                <div className="md:col-span-3 space-y-1">
-                  <label className="text-[10px] font-semibold uppercase" style={{ color: 'var(--dashboard-muted)' }}>Stok Kodu</label>
-                  <Input value={row.stokKodu} onChange={(e) => updateManualStockRow(row.id, 'stokKodu', e.target.value)} placeholder="05521521001" className="!border-0 !ring-0 h-9 text-xs bg-white" style={{ borderRadius: 10 }} />
+                <div className="md:col-span-12 space-y-1">
+                  <label className="text-[10px] font-semibold uppercase" style={{ color: 'var(--dashboard-muted)' }}>Yedek Parça Seçimi</label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <button className="flex items-center justify-between w-full h-9 px-3 bg-white text-xs border-0 outline-none" style={{ borderRadius: 10 }}>
+                        <span className={!row.stokKodu ? "text-[var(--dashboard-muted)]" : "text-[var(--dashboard-text)]"}>
+                          {row.stokKodu ? `[${row.stokKodu}] ${row.stokAdi}` : 'Yedek parça ara ve seç...'}
+                        </span>
+                        <Search className="h-3 w-3 text-[var(--dashboard-muted)]" />
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent className="p-0 w-[var(--radix-popover-trigger-width)] max-h-[300px]" align="start">
+                      <Command>
+                        <CommandInput placeholder="Stok kodu veya ürün adı ara..." className="h-9 text-xs" />
+                        <CommandList className="max-h-[250px]">
+                          <CommandEmpty className="py-2 text-xs">Ürün bulunamadı.</CommandEmpty>
+                          <CommandGroup>
+                            {productCodes.map((p) => (
+                              <CommandItem
+                                key={p.id}
+                                value={`${p.stokKodu} ${p.stokAdi}`}
+                                onSelect={() => {
+                                  updateManualStockRow(row.id, 'stokKodu', p.stokKodu);
+                                  updateManualStockRow(row.id, 'stokAdi', p.stokAdi);
+                                  updateManualStockRow(row.id, 'productCodeId', p.id);
+                                  updateManualStockRow(row.id, 'anaBirim', p.anaBirim || 'Adet');
+                                }}
+                                className="text-xs py-2 cursor-pointer"
+                              >
+                                <span className="font-medium">[{p.stokKodu}]</span>
+                                <span className="ml-2">{p.stokAdi}</span>
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
                 </div>
-                <div className="md:col-span-4 space-y-1">
-                  <label className="text-[10px] font-semibold uppercase" style={{ color: 'var(--dashboard-muted)' }}>Stok Adı</label>
-                  <Input value={row.stokAdi} onChange={(e) => updateManualStockRow(row.id, 'stokAdi', e.target.value)} placeholder="Ürün adı" className="!border-0 !ring-0 h-9 text-xs bg-white" style={{ borderRadius: 10 }} />
-                </div>
-                <div className="md:col-span-3 space-y-1">
+
+                <div className="md:col-span-6 space-y-1">
                   <label className="text-[10px] font-semibold uppercase" style={{ color: 'var(--dashboard-muted)' }}>Seri No</label>
                   <Input value={row.serialNumber} onChange={(e) => updateManualStockRow(row.id, 'serialNumber', e.target.value)} placeholder="Opsiyonel" className="!border-0 !ring-0 h-9 text-xs bg-white" style={{ borderRadius: 10 }} />
                 </div>
-                <div className="md:col-span-1 space-y-1">
+                <div className="md:col-span-4 space-y-1">
                   <label className="text-[10px] font-semibold uppercase" style={{ color: 'var(--dashboard-muted)' }}>Adet</label>
                   <Input type="number" min={1} value={row.quantity} onChange={(e) => updateManualStockRow(row.id, 'quantity', Number(e.target.value))} disabled={!!row.serialNumber.trim()} className="!border-0 !ring-0 h-9 text-xs bg-white" style={{ borderRadius: 10 }} />
                 </div>
-                <div className="md:col-span-1 flex items-end">
+                <div className="md:col-span-2 flex items-end">
                   <button onClick={() => removeManualStockRow(row.id)} disabled={manualStockRows.length === 1} className="p-2 rounded-lg hover:bg-black/5 transition disabled:opacity-30"><Trash2 className="w-3.5 h-3.5" style={{ color: '#B91C1C' }} /></button>
                 </div>
               </div>
