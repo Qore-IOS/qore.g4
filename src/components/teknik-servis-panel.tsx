@@ -204,7 +204,7 @@ export default function TeknikServisPanel({
                 <button
                   key={hospital.id}
                   onClick={() => router.push(`/teknik-servis/${hospital.id}`)}
-                  className="cihaz-card cihaz-focus-ring w-full text-left p-4 sm:p-5 flex flex-col bg-white/30 backdrop-blur-sm border border-white/40 shadow-sm hover:shadow-md transition-all hover:-translate-y-0.5"
+                  className="cihaz-card cihaz-focus-ring w-full text-left p-4 sm:p-5 flex flex-col bg-white/40 backdrop-blur-sm border border-white/40 shadow-sm hover:shadow-md transition-all hover:-translate-y-0.5"
                 >
                   <div className="flex items-start justify-between gap-2">
                     <h3 className="text-sm sm:text-[15px] font-semibold text-[var(--dashboard-text)] truncate leading-snug flex-1" title={hospital.name}>
