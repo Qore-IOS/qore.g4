@@ -661,135 +661,441 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
       wb.creator = 'QORE';
       wb.created = new Date();
 
-      // ==== ÖZET SAYFASI ====
-      const wsOzet = wb.addWorksheet('Özet Maliyet');
-      wsOzet.columns = [
-        { header: 'Konum', key: 'name', width: 32 },
-        { header: 'Tip', key: 'type', width: 14 },
-        { header: 'Ürün Sayısı', key: 'count', width: 14 },
-        { header: 'Maliyet', key: 'cost', width: 18 }
-      ];
+      // ── Style Constants (matching reference Excel) ──
+      const HEADER_FILL: any = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E79' } };
+      const HEADER_FONT: any = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11, name: 'Calibri' };
+      const SUBTOTAL_FILL: any = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFF00' } };
+      const SUBTOTAL_FONT: any = { bold: true, color: { argb: 'FFFF0000' }, size: 11, name: 'Calibri' };
+      const GRAND_FILL: any = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF92D050' } };
+      const GRAND_FONT: any = { bold: true, color: { argb: 'FFFF0000' }, size: 12, name: 'Calibri' };
+      const TITLE_FILL: any = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E79' } };
+      const TITLE_FONT: any = { bold: true, color: { argb: 'FFFFFFFF' }, size: 14, name: 'Calibri' };
+      const SECTION_TITLE_FONT: any = { bold: true, color: { argb: 'FFFFFFFF' }, size: 12, name: 'Calibri' };
+      const BRAND_HEADER_FILL: any = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD6E4F0' } };
+      const BRAND_HEADER_FONT: any = { bold: true, size: 11, name: 'Calibri' };
+      const THIN_BORDER: any = {
+        top: { style: 'thin' }, left: { style: 'thin' },
+        bottom: { style: 'thin' }, right: { style: 'thin' }
+      };
+      const CENTER: any = { vertical: 'middle', horizontal: 'center', wrapText: true };
+      const CENTER_LEFT: any = { vertical: 'middle', horizontal: 'left', wrapText: true };
+      const NUM_FMT = '#,##0.00';
 
-      wsOzet.insertRow(1, ['QORE Maliyet Gözlem Raporu']);
-      wsOzet.insertRow(2, [`Tarih: ${new Date().toLocaleString('tr-TR')}`]);
-      wsOzet.insertRow(3, [`Para Birimi: ${currency}`]);
-      wsOzet.insertRow(4, [`Konsolide Toplam: ${fmtCurrency(consolidatedCost, sym)}`]);
-      wsOzet.insertRow(5, []);
-      // Shift header to row 6
-      wsOzet.getRow(6).values = ['Konum', 'Tip', 'Ürün Sayısı', 'Maliyet'];
-      wsOzet.getRow(6).font = { bold: true };
-      
-      let rowIndex = 7;
-      locationBreakdown.forEach(l => {
-        wsOzet.insertRow(rowIndex, [l.name, l.type === 'lab' ? 'Lab' : 'Depo', l.productCount, Number(l.cost.toFixed(2))]);
-        rowIndex++;
-      });
+      // ── Helper: style a row of N columns ──
+      const styleRow = (row: any, colCount: number, opts: { fill?: any; font?: any; numFmtCols?: number[]; leftAlignCols?: number[] }) => {
+        for (let c = 1; c <= colCount; c++) {
+          const cell = row.getCell(c);
+          cell.border = THIN_BORDER;
+          cell.alignment = (opts.leftAlignCols && opts.leftAlignCols.includes(c)) ? CENTER_LEFT : CENTER;
+          if (opts.fill) cell.fill = opts.fill;
+          if (opts.font) cell.font = opts.font;
+          if (opts.numFmtCols && opts.numFmtCols.includes(c)) cell.numFmt = NUM_FMT;
+        }
+      };
 
-      // Style Ozet cells (Alignment and Borders)
-      wsOzet.eachRow((row, rowNumber) => {
-        row.eachCell((cell) => {
-          if (rowNumber > 5) {
-             cell.border = {
-               top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'}
-             };
+      // ── Helper: calculate item cost in selected currency ──
+      const calcItemCost = (item: any) => {
+        const product = productMap.get(item.stokKodu);
+        if (!product?.cost || !product?.ambalajDegeri) return 0;
+        const totalTest = (item.stokAdedi * product.ambalajDegeri) + item.cihazUstuAdedi;
+        const costPerTest = product.cost / product.ambalajDegeri;
+        const totalNative = costPerTest * totalTest;
+        const productCurrency = (product.currency || 'TRY') as Currency;
+        let costEUR: number;
+        switch (productCurrency) {
+          case 'EUR': costEUR = totalNative; break;
+          case 'USD': costEUR = totalNative / (rates!.USD || 1); break;
+          case 'TRY': costEUR = totalNative / (rates!.TRY || 1); break;
+          default: costEUR = totalNative / (rates!.TRY || 1);
+        }
+        return costEUR * (rates![currency] || 1);
+      };
+
+      // ── Build per-brand, per-location data ──
+      interface BrandLocData {
+        name: string;
+        type: 'lab' | 'depot';
+        totalCost: number;
+        kitCost: number;
+        sarfCost: number;
+        yedekCost: number;
+        itemCount: number;
+      }
+
+      const getBrandLocations = (brandName: string): BrandLocData[] => {
+        const locations: BrandLocData[] = [];
+        latestPerLocation.forEach(session => {
+          let totalCost = 0, kitCost = 0, sarfCost = 0, yedekCost = 0, itemCount = 0;
+          session.items.filter(item => (item.marka || 'Diğer') === brandName).forEach(item => {
+            const product = productMap.get(item.stokKodu);
+            const cost = calcItemCost(item);
+            totalCost += cost;
+            itemCount++;
+            if (product?.urunGrubu === 'sarf') sarfCost += cost;
+            else if (product?.urunGrubu === 'yedek_parca') yedekCost += cost;
+            else kitCost += cost; // kit + diğer default to kit
+          });
+          if (totalCost > 0) {
+            locations.push({ name: session.locationName, type: session.locationType, totalCost, kitCost, sarfCost, yedekCost, itemCount });
           }
-          cell.alignment = { vertical: 'middle', horizontal: 'center' };
         });
+        return locations.sort((a, b) => b.totalCost - a.totalCost);
+      };
+
+      // ════════════════════════════════════════════════════
+      // SHEET 1: GENEL TABLO (Total Cost Overview)
+      // ════════════════════════════════════════════════════
+      const wsG = wb.addWorksheet('Genel Tablo');
+      wsG.getColumn(1).width = 6;
+      wsG.getColumn(2).width = 35;
+      wsG.getColumn(3).width = 30;
+      wsG.getColumn(4).width = 25;
+      wsG.getColumn(5).width = 22;
+      wsG.getColumn(6).width = 25;
+      wsG.getColumn(7).width = 22;
+      wsG.getColumn(8).width = 16;
+
+      // Row 1: Title
+      wsG.mergeCells('A1:F1');
+      const gTitleCell = wsG.getCell('A1');
+      gTitleCell.value = 'STOK MALİYET ÇALIŞMASI';
+      gTitleCell.fill = TITLE_FILL;
+      gTitleCell.font = TITLE_FONT;
+      gTitleCell.alignment = CENTER;
+      wsG.getRow(1).height = 38;
+      // Ensure merged area gets the fill
+      for (let c = 2; c <= 6; c++) {
+        const mc = wsG.getRow(1).getCell(c);
+        mc.fill = TITLE_FILL;
+        mc.alignment = CENTER;
+      }
+
+      // Row 2: Column Headers
+      const gHdr = wsG.getRow(2);
+      gHdr.values = ['No', 'Firma Adı', 'Konum', 'Toplam Stok Maliyeti TL', 'Stok Maliyet', 'Toplam Tutar TL'];
+      gHdr.height = 32;
+      styleRow(gHdr, 6, { fill: HEADER_FILL, font: HEADER_FONT });
+
+      // Exchange rate info (right side like reference)
+      const dateNow = new Date();
+      wsG.getCell('G1').value = `Hesaplama`;
+      wsG.getCell('G1').font = { bold: true, size: 10 };
+      wsG.getCell('G1').alignment = CENTER;
+      wsG.getCell('G1').border = THIN_BORDER;
+      wsG.getCell('H1').value = `${dateNow.toLocaleDateString('tr-TR')} Tarihi ile`;
+      wsG.getCell('H1').font = { bold: true, size: 10 };
+      wsG.getCell('H1').alignment = CENTER;
+      wsG.getCell('H1').border = THIN_BORDER;
+
+      if (rates) {
+        wsG.getCell('G2').value = 'Euro';
+        wsG.getCell('G2').font = { size: 10 }; wsG.getCell('G2').alignment = CENTER; wsG.getCell('G2').border = THIN_BORDER;
+        wsG.getCell('H2').value = Number(rates.TRY?.toFixed(4));
+        wsG.getCell('H2').font = { size: 10 }; wsG.getCell('H2').alignment = CENTER; wsG.getCell('H2').border = THIN_BORDER;
+        wsG.getCell('H2').numFmt = '#,##0.0000';
+
+        wsG.getCell('G3').value = 'USD';
+        wsG.getCell('G3').font = { size: 10 }; wsG.getCell('G3').alignment = CENTER; wsG.getCell('G3').border = THIN_BORDER;
+        const usdToTry = rates.TRY / (rates.USD || 1);
+        wsG.getCell('H3').value = Number(usdToTry.toFixed(4));
+        wsG.getCell('H3').font = { size: 10 }; wsG.getCell('H3').alignment = CENTER; wsG.getCell('H3').border = THIN_BORDER;
+        wsG.getCell('H3').numFmt = '#,##0.0000';
+      }
+
+      let gRow = 3;
+      let gBrandNo = 1;
+      let gGrandTotal = 0;
+
+      // For each brand, list locations and brand total
+      brandCosts.forEach(b => {
+        const locations = getBrandLocations(b.name);
+        const depots = locations.filter(l => l.type === 'depot');
+        const hospitals = locations.filter(l => l.type === 'lab');
+        const allLocs = [...depots, ...hospitals];
+
+        if (allLocs.length === 0) {
+          // Brand with no detailed locations - show single row
+          const row = wsG.getRow(gRow);
+          row.values = [gBrandNo, b.name, '-', Number(b.cost.toFixed(2)), `${b.name} Stok`, Number(b.cost.toFixed(2))];
+          styleRow(row, 6, { numFmtCols: [4, 6], leftAlignCols: [2, 3] });
+          row.getCell(1).font = { bold: true };
+          row.getCell(2).font = { bold: true };
+          gRow++;
+        } else {
+          // First location row: show brand number, brand name, and total in col E/F
+          allLocs.forEach((loc, i) => {
+            const row = wsG.getRow(gRow);
+            const isFirst = i === 0;
+
+            // Determine location label
+            let locLabel = loc.name;
+            if (loc.type === 'depot') {
+              const kitSarf = loc.kitCost + loc.sarfCost;
+              if (kitSarf > 0 && loc.yedekCost > 0) {
+                locLabel = `${loc.name} Kit+Sarf`;
+              } else if (kitSarf > 0) {
+                locLabel = `${loc.name} Kit+Sarf`;
+              }
+            }
+
+            row.values = [
+              isFirst ? gBrandNo : '',
+              isFirst ? b.name : '',
+              locLabel,
+              Number(loc.totalCost.toFixed(2)),
+              isFirst ? `${b.name} Stok` : '',
+              isFirst ? Number(b.cost.toFixed(2)) : ''
+            ];
+            styleRow(row, 6, { numFmtCols: [4, 6], leftAlignCols: [2, 3, 5] });
+            if (isFirst) {
+              row.getCell(1).font = { bold: true };
+              row.getCell(2).font = { bold: true };
+              row.getCell(5).font = { bold: true };
+            }
+            gRow++;
+          });
+
+          // For depots with yedek parca, add extra row
+          depots.filter(d => d.yedekCost > 0).forEach(loc => {
+            const row = wsG.getRow(gRow);
+            row.values = ['', '', 'Yedek Parça + Bakım Kit', Number(loc.yedekCost.toFixed(2)), '', ''];
+            styleRow(row, 6, { numFmtCols: [4], leftAlignCols: [3] });
+            gRow++;
+          });
+        }
+
+        gGrandTotal += b.cost;
+        gBrandNo++;
       });
 
-      // ==== MARKA DETAY SAYFALARI ====
+      // Separator row
+      const gSepRow = wsG.getRow(gRow);
+      for (let c = 1; c <= 6; c++) { gSepRow.getCell(c).border = THIN_BORDER; }
+      gRow++;
+
+      // Grand total row
+      const gTotalRow = wsG.getRow(gRow);
+      gTotalRow.values = ['', '', 'Toplam', '', 'Toplam Stok Maliyeti', Number(gGrandTotal.toFixed(2))];
+      gTotalRow.height = 30;
+      styleRow(gTotalRow, 6, { fill: GRAND_FILL, font: GRAND_FONT, numFmtCols: [6], leftAlignCols: [3, 5] });
+
+      // Summary boxes (Roche Stok / Non-Roche Stok / Total) on the right side of row 3-5
+      if (brandCosts.length > 0) {
+        // Show top brand separate from others (like reference)
+        const topBrandCost = brandCosts[0]?.cost || 0;
+        const otherBrandsCost = gGrandTotal - topBrandCost;
+
+        wsG.getCell('E3').value = `${brandCosts[0]?.name || '-'} Stok`;
+        wsG.getCell('E3').font = { bold: true, size: 10 }; wsG.getCell('E3').alignment = CENTER; wsG.getCell('E3').border = THIN_BORDER;
+        wsG.getCell('E3').fill = BRAND_HEADER_FILL;
+        wsG.getCell('F3').value = Number(topBrandCost.toFixed(2));
+        wsG.getCell('F3').numFmt = NUM_FMT; wsG.getCell('F3').alignment = CENTER; wsG.getCell('F3').border = THIN_BORDER;
+        wsG.getCell('F3').fill = BRAND_HEADER_FILL;
+
+        wsG.getCell('E4').value = `Non ${brandCosts[0]?.name || '-'} Stok`;
+        wsG.getCell('E4').font = { bold: true, size: 10 }; wsG.getCell('E4').alignment = CENTER; wsG.getCell('E4').border = THIN_BORDER;
+        wsG.getCell('E4').fill = BRAND_HEADER_FILL;
+        wsG.getCell('F4').value = Number(otherBrandsCost.toFixed(2));
+        wsG.getCell('F4').numFmt = NUM_FMT; wsG.getCell('F4').alignment = CENTER; wsG.getCell('F4').border = THIN_BORDER;
+        wsG.getCell('F4').fill = BRAND_HEADER_FILL;
+
+        wsG.getCell('E5').value = 'Toplam Stok Maliyeti';
+        wsG.getCell('E5').font = { bold: true, size: 10 }; wsG.getCell('E5').alignment = CENTER; wsG.getCell('E5').border = THIN_BORDER;
+        wsG.getCell('E5').fill = SUBTOTAL_FILL;
+        wsG.getCell('F5').value = Number(gGrandTotal.toFixed(2));
+        wsG.getCell('F5').numFmt = NUM_FMT; wsG.getCell('F5').alignment = CENTER; wsG.getCell('F5').border = THIN_BORDER;
+        wsG.getCell('F5').fill = SUBTOTAL_FILL;
+        wsG.getCell('F5').font = SUBTOTAL_FONT;
+      }
+
+      // ════════════════════════════════════════════════════
+      // BRAND DETAIL SHEETS (per brand)
+      // ════════════════════════════════════════════════════
       brandCosts.forEach(b => {
-         const safeSheetName = b.name.replace(/[\[\]\*\\\/\?]/g, '').substring(0, 31);
-         const wsBrand = wb.addWorksheet(safeSheetName);
-         
-         wsBrand.columns = [
-           { key: 'col1', width: 35 },
-           { key: 'col2', width: 15 },
-           { key: 'col3', width: 20 },
-         ];
+        const safeSheetName = b.name.replace(/[\[\]\*\\\/\?:]/g, '').substring(0, 31);
+        const ws = wb.addWorksheet(safeSheetName);
 
-         wsBrand.addRow([`${b.name} Marka Maliyet Raporu`]);
-         wsBrand.addRow([`Toplam Marka Maliyeti: ${fmtCurrency(b.cost, sym)}`]);
-         wsBrand.addRow([]);
-         
-         wsBrand.addRow(['Konum Bazlı Maliyet']);
-         wsBrand.lastRow.font = { bold: true, size: 12 };
-         
-         const locHeaderRow = wsBrand.addRow(['Konum', 'Ürün Sayısı', 'Maliyet']);
-         locHeaderRow.font = { bold: true };
-         
-         let locStart = locHeaderRow.number;
-         
-         const locMap = new Map<string, {count: number, cost: number}>();
-         const grpMap = new Map<string, number>();
+        ws.getColumn(1).width = 42;
+        ws.getColumn(2).width = 28;
 
-         latestPerLocation.forEach(session => {
-            let locCost = 0;
-            let locCount = 0;
-            session.items.filter(item => (item.marka || 'Diğer') === b.name).forEach(item => {
-               const product = productMap.get(item.stokKodu);
-               if (!product?.cost || !product?.ambalajDegeri) return;
-               const totalTest = (item.stokAdedi * product.ambalajDegeri) + item.cihazUstuAdedi;
-               const costPerTest = product.cost / product.ambalajDegeri;
-               const totalNative = costPerTest * totalTest;
-               const productCurrency = (product.currency || 'TRY') as Currency;
-               let costEUR: number;
-               switch (productCurrency) {
-                 case 'EUR': costEUR = totalNative; break;
-                 case 'USD': costEUR = totalNative / (rates!.USD || 1); break;
-                 case 'TRY': costEUR = totalNative / (rates!.TRY || 1); break;
-                 default: costEUR = totalNative / (rates!.TRY || 1);
-               }
-               const itemCost = costEUR * (rates![currency] || 1);
-               
-               locCost += itemCost;
-               locCount++;
-               
-               const group = product.urunGrubu === 'kit' ? 'Kit'
-                  : product.urunGrubu === 'sarf' ? 'Sarf Malzeme'
-                  : product.urunGrubu === 'yedek_parca' ? 'Yedek Parça'
-                  : 'Diğer';
-                  
-               grpMap.set(group, (grpMap.get(group) || 0) + itemCost);
-            });
-            if (locCost > 0) {
-               locMap.set(session.locationName, { count: locCount, cost: locCost });
+        // ── SECTION 1: DEPO | Stok Maliyet TL ──
+        const hRow = ws.getRow(1);
+        hRow.values = ['DEPO', 'Stok Maliyet TL'];
+        hRow.height = 30;
+        styleRow(hRow, 2, { fill: HEADER_FILL, font: HEADER_FONT });
+
+        const locations = getBrandLocations(b.name);
+        const depots = locations.filter(l => l.type === 'depot');
+        const hospitals = locations.filter(l => l.type === 'lab');
+
+        let r = 2;
+
+        // Depot entries: Kit+Sarf combined, Yedek Parça separately (matching reference)
+        depots.forEach(loc => {
+          const kitSarf = loc.kitCost + loc.sarfCost;
+          if (kitSarf > 0) {
+            const row = ws.getRow(r);
+            row.values = [`${loc.name} Kit+Sarf`, Number(kitSarf.toFixed(2))];
+            styleRow(row, 2, { numFmtCols: [2], leftAlignCols: [1] });
+            r++;
+          }
+          if (loc.yedekCost > 0) {
+            const row = ws.getRow(r);
+            row.values = ['Yedek Parça + Bakım Kit', Number(loc.yedekCost.toFixed(2))];
+            styleRow(row, 2, { numFmtCols: [2], leftAlignCols: [1] });
+            r++;
+          }
+        });
+
+        // Special entries like PCR/INR if depots have sub-categories
+        // (these would show as separate depot sessions in the data)
+
+        // Hospital entries
+        let hospTotal = 0;
+        hospitals.forEach(loc => {
+          const row = ws.getRow(r);
+          row.values = [loc.name, Number(loc.totalCost.toFixed(2))];
+          styleRow(row, 2, { numFmtCols: [2], leftAlignCols: [1] });
+          hospTotal += loc.totalCost;
+          r++;
+        });
+
+        // Hastaneler toplam (yellow background, red bold text - matching reference)
+        if (hospitals.length > 0) {
+          const stRow = ws.getRow(r);
+          stRow.values = ['Hastaneler toplam', Number(hospTotal.toFixed(2))];
+          stRow.height = 26;
+          styleRow(stRow, 2, { fill: SUBTOTAL_FILL, font: SUBTOTAL_FONT, numFmtCols: [2] });
+          r++;
+        }
+
+        // Genel toplam (green background, red bold text - matching reference)
+        const gtRow = ws.getRow(r);
+        gtRow.values = ['Genel toplam', Number(b.cost.toFixed(2))];
+        gtRow.height = 26;
+        styleRow(gtRow, 2, { fill: GRAND_FILL, font: GRAND_FONT, numFmtCols: [2] });
+        r += 3; // 2 empty rows before next section
+
+        // ── SECTION 2: Kurum Bazlı Kit / Sarf Ayrımı ──
+        ws.getColumn(3).width = 22;
+        ws.getColumn(4).width = 22;
+        ws.getColumn(5).width = 22;
+
+        // Section title (merged, dark header)
+        ws.mergeCells(`A${r}:E${r}`);
+        const secTitleRow = ws.getRow(r);
+        secTitleRow.getCell(1).value = `${b.name} — Kurum Bazlı Kit / Sarf Ayrımı`;
+        secTitleRow.getCell(1).fill = TITLE_FILL;
+        secTitleRow.getCell(1).font = SECTION_TITLE_FONT;
+        secTitleRow.getCell(1).alignment = CENTER;
+        secTitleRow.height = 32;
+        for (let c = 2; c <= 5; c++) {
+          secTitleRow.getCell(c).fill = TITLE_FILL;
+          secTitleRow.getCell(c).alignment = CENTER;
+        }
+        r++;
+
+        // Sub-headers
+        const ksfHdr = ws.getRow(r);
+        ksfHdr.values = ['Kurum', 'Kit Maliyet', 'Sarf Maliyet', 'Yedek Parça', 'Toplam'];
+        ksfHdr.height = 28;
+        styleRow(ksfHdr, 5, { fill: HEADER_FILL, font: HEADER_FONT });
+        r++;
+
+        // Data: all locations with kit/sarf/yedek breakdown
+        const allLocs = [...depots, ...hospitals].sort((a, b2) => b2.totalCost - a.totalCost);
+        allLocs.forEach(loc => {
+          const row = ws.getRow(r);
+          row.values = [
+            loc.name,
+            Number(loc.kitCost.toFixed(2)),
+            Number(loc.sarfCost.toFixed(2)),
+            Number(loc.yedekCost.toFixed(2)),
+            Number(loc.totalCost.toFixed(2))
+          ];
+          styleRow(row, 5, { numFmtCols: [2, 3, 4, 5], leftAlignCols: [1] });
+          r++;
+        });
+
+        // Kit/Sarf section total
+        const totKit = allLocs.reduce((s, l) => s + l.kitCost, 0);
+        const totSarf = allLocs.reduce((s, l) => s + l.sarfCost, 0);
+        const totYedek = allLocs.reduce((s, l) => s + l.yedekCost, 0);
+        const ksfTotalRow = ws.getRow(r);
+        ksfTotalRow.values = [
+          'TOPLAM',
+          Number(totKit.toFixed(2)),
+          Number(totSarf.toFixed(2)),
+          Number(totYedek.toFixed(2)),
+          Number(b.cost.toFixed(2))
+        ];
+        ksfTotalRow.height = 28;
+        styleRow(ksfTotalRow, 5, { fill: GRAND_FILL, font: GRAND_FONT, numFmtCols: [2, 3, 4, 5] });
+        r += 3; // 2 empty rows before next section
+
+        // ── SECTION 3: Ürün Grubu Bazlı Konum Detayı (Kurum × Ürün Grubu matrix) ──
+        // Depot locations: show Kit, Sarf, Yedek Parça as separate sub-rows
+        ws.mergeCells(`A${r}:E${r}`);
+        const sec3Title = ws.getRow(r);
+        sec3Title.getCell(1).value = `${b.name} — Konum Detay Dökümü (Kit / Sarf / Yedek Parça)`;
+        sec3Title.getCell(1).fill = TITLE_FILL;
+        sec3Title.getCell(1).font = SECTION_TITLE_FONT;
+        sec3Title.getCell(1).alignment = CENTER;
+        sec3Title.height = 32;
+        for (let c = 2; c <= 5; c++) {
+          sec3Title.getCell(c).fill = TITLE_FILL;
+          sec3Title.getCell(c).alignment = CENTER;
+        }
+        r++;
+
+        const detHdr = ws.getRow(r);
+        detHdr.values = ['Kurum', 'Ürün Grubu', 'Ürün Sayısı', 'Maliyet', '% Oran'];
+        detHdr.height = 28;
+        styleRow(detHdr, 5, { fill: HEADER_FILL, font: HEADER_FONT });
+        r++;
+
+        // For each location, detail kit/sarf/yedek
+        allLocs.forEach(loc => {
+          const groups = [
+            { name: 'Kit', cost: loc.kitCost },
+            { name: 'Sarf Malzeme', cost: loc.sarfCost },
+            { name: 'Yedek Parça', cost: loc.yedekCost },
+          ].filter(g => g.cost > 0);
+
+          groups.forEach((g, gi) => {
+            const row = ws.getRow(r);
+            const pct = loc.totalCost > 0 ? ((g.cost / loc.totalCost) * 100) : 0;
+            row.values = [
+              gi === 0 ? loc.name : '',
+              g.name,
+              '', // item count not tracked per group per location
+              Number(g.cost.toFixed(2)),
+              `%${pct.toFixed(1)}`
+            ];
+            styleRow(row, 5, { numFmtCols: [4], leftAlignCols: [1, 2] });
+            if (gi === 0) {
+              row.getCell(1).font = { bold: true };
             }
-         });
-         
-         Array.from(locMap.entries()).sort((x,y) => y[1].cost - x[1].cost).forEach(([locName, data]) => {
-            wsBrand.addRow([locName, data.count, Number(data.cost.toFixed(2))]);
-         });
-         let locEnd = wsBrand.lastRow.number;
+            r++;
+          });
 
-         wsBrand.addRow([]);
-         wsBrand.addRow([]);
+          // Location subtotal
+          const locTotalRow = ws.getRow(r);
+          locTotalRow.values = ['', 'Toplam', '', Number(loc.totalCost.toFixed(2)), '%100'];
+          styleRow(locTotalRow, 5, { fill: BRAND_HEADER_FILL, font: BRAND_HEADER_FONT, numFmtCols: [4] });
+          r++;
+        });
 
-         wsBrand.addRow(['Ürün Grubu Maliyeti']);
-         wsBrand.lastRow.font = { bold: true, size: 12 };
-         
-         const grpHeaderRow = wsBrand.addRow(['Ürün Grubu', '', 'Maliyet']);
-         grpHeaderRow.font = { bold: true };
-         let grpStart = grpHeaderRow.number;
-         
-         Array.from(grpMap.entries()).sort((x,y) => y[1] - x[1]).forEach(([grpName, cost]) => {
-            wsBrand.addRow([grpName, '', Number(cost.toFixed(2))]);
-         });
-         let grpEnd = wsBrand.lastRow.number;
-         
-         wsBrand.eachRow((row, rowNumber) => {
-            row.eachCell((cell) => {
-               if ((rowNumber >= locStart && rowNumber <= locEnd) || (rowNumber >= grpStart && rowNumber <= grpEnd)) {
-                  cell.border = { top: {style:'thin'}, left: {style:'thin'}, bottom: {style:'thin'}, right: {style:'thin'} };
-               }
-               cell.alignment = { vertical: 'middle', horizontal: 'center' };
-            });
-         });
+        // Grand total for this section
+        const sec3Total = ws.getRow(r);
+        sec3Total.values = ['GENEL TOPLAM', '', '', Number(b.cost.toFixed(2)), ''];
+        sec3Total.height = 28;
+        styleRow(sec3Total, 5, { fill: GRAND_FILL, font: GRAND_FONT, numFmtCols: [4] });
       });
 
       const buffer = await wb.xlsx.writeBuffer();
-      saveAs(new Blob([buffer]), `Maliyet_Gozlem_${new Date().toISOString().slice(0, 10)}.xlsx`);
-      toast({ title: 'Başarılı', description: 'Excel raporu detaylı bir şekilde indirildi.' });
+      saveAs(new Blob([buffer]), `Stok_Maliyet_Calismasi_${new Date().toISOString().slice(0, 10)}.xlsx`);
+      toast({ title: 'Başarılı', description: 'Stok Maliyet Çalışması Excel raporu indirildi.' });
     } catch (error) {
       console.error(error);
       toast({ title: 'Hata', description: 'Excel raporu oluşturulamadı.', variant: 'destructive' });
