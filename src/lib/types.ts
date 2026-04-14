@@ -143,6 +143,10 @@ export interface Company {
   createdAt?: Date;
   createdByUid?: string;
   createdByName?: string;
+  // Firma sorumlusu - adminler arasından seçilir. Haftalık plan onay akışında
+  // planı oluşturulan kullanıcının firmasına ait sorumluya bildirim gider.
+  responsibleUid?: string;
+  responsibleName?: string;
 }
 
 export interface User {
@@ -1334,6 +1338,16 @@ export interface PurchasingTask {
   // Completion flow metadata
   completionChecklist?: PurchasingCompletionChecklistItem[];
   expectedCompletionFileName?: string;
+  // Haftalık plan onay akışı
+  weeklyPlanGroupId?: string;          // aynı haftalık plandan üretilen tüm görevler için ortak id
+  weeklyPlanWeekStart?: string;        // haftanın başlangıç tarihi (YYYY-MM-DD)
+  approvalStatus?: 'pending' | 'approved' | 'rejected';
+  approvalRequiredFromUid?: string;    // onay bekleyen firma sorumlusunun uid'i
+  approvalRequiredFromName?: string;
+  approvedByUid?: string;
+  approvedByName?: string;
+  approvedAt?: TimestampLike;
+  rejectedReason?: string;
 }
 
 export interface PurchasingCompletionChecklistItem {

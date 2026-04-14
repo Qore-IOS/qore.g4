@@ -90,6 +90,11 @@ import {
   isBefore,
   startOfDay,
 } from 'date-fns';
+import {
+  emitWeeklyPlanApprovalRequested,
+  emitWeeklyPlanApproved,
+  emitWeeklyPlanRejected,
+} from '@/lib/notifications';
 import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -432,6 +437,10 @@ interface TaskFormData {
   workflowNodeX?: number;
   workflowNodeY?: number;
   recurring?: PurchasingTaskRecurrence;
+  // Haftalık plan modu — aynı girdilerle Pzt-Cum günleri için görev üretir,
+  // firma sorumlusuna onay için bildirim gider.
+  weeklyPlan?: boolean;
+  weeklyPlanStart?: string; // Haftanın başlangıç tarihi (Pazartesi)
 }
 
 
@@ -542,7 +551,7 @@ function parseNaturalTaskInputForPlanning(
 // ==========================================
 
 export default function SatinAlmaPanel() {
-  const { currentUserProfile, isAdmin } = useAuth();
+  const { currentUserProfile, isAdmin, isSuperAdmin } = useAuth();
   const userName = currentUserProfile?.name || 'Kullanıcı';
 
   // State
@@ -1126,11 +1135,235 @@ export default function SatinAlmaPanel() {
     }
   }, [editingTask, tasks, enqueueMutation, canOperateOnTask]);
 
+  // ==========================================
+  // Haftalık plan oluşturma & onay akışı
+  // ==========================================
+
+  // Kullanıcının bağlı olduğu firmanın sorumlusunu getirir.
+  const fetchCompanyResponsible = useCallback(async (companyId?: string) => {
+    if (!companyId) return null;
+    try {
+      const snap = await getDoc(doc(db, 'companies', companyId));
+      if (!snap.exists()) return null;
+      const data = snap.data() as any;
+      if (!data.responsibleUid) return null;
+      return {
+        uid: data.responsibleUid as string,
+        name: (data.responsibleName as string) || '',
+        companyName: (data.name as string) || '',
+      };
+    } catch (err) {
+      console.error('Error fetching company responsible', err);
+      return null;
+    }
+  }, []);
+
+  const createWeeklyPlan = useCallback(async (data: TaskFormData) => {
+    if (!currentUserProfile) return;
+
+    const baseDate = data.weeklyPlanStart
+      ? parseISO(data.weeklyPlanStart)
+      : parseISO(data.date);
+    // Pazartesi başlangıçlı hafta
+    const weekStart = startOfWeek(baseDate, { weekStartsOn: 1 });
+    const weekEnd = endOfWeek(baseDate, { weekStartsOn: 1 });
+
+    // Pzt-Cum günleri (5 iş günü), resmi tatil olanlar atlanır.
+    const weekdayOffsets = [0, 1, 2, 3, 4];
+    const planDates = weekdayOffsets
+      .map((offset) => format(addDays(weekStart, offset), 'yyyy-MM-dd'))
+      .filter((d) => getSpecialDay(d)?.type !== 'holiday');
+
+    if (planDates.length === 0) {
+      toast.warning('Seçilen haftada iş günü bulunamadı.');
+      return;
+    }
+
+    // Firma sorumlusunu çöz — onay akışı için gereklidir.
+    const responsible = await fetchCompanyResponsible(currentUserProfile.companyId);
+
+    const weeklyPlanGroupId = `wp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const weekStartStr = format(weekStart, 'yyyy-MM-dd');
+    const weekEndStr = format(weekEnd, 'yyyy-MM-dd');
+
+    const basePayload: Record<string, any> = {
+      title: data.title,
+      description: data.description,
+      taskType: data.taskType,
+      taskTypeLabel: data.taskTypeLabel || null,
+      startTime: data.startTime,
+      endTime: data.endTime,
+      priority: data.priority,
+      completed: false,
+      createdByUid: currentUserProfile.uid,
+      createdByName: currentUserProfile.name || '',
+      weeklyPlanGroupId,
+      weeklyPlanWeekStart: weekStartStr,
+      // Sorumlu tanımlıysa onay bekliyor, yoksa otomatik onaylı.
+      approvalStatus: responsible ? 'pending' : 'approved',
+      ...(responsible && {
+        approvalRequiredFromUid: responsible.uid,
+        approvalRequiredFromName: responsible.name || '',
+      }),
+    };
+
+    if (data.laboratoryId) basePayload.laboratoryId = data.laboratoryId;
+    if (data.laboratoryName) basePayload.laboratoryName = data.laboratoryName;
+    if (data.accompanyingPersonnel?.length) basePayload.accompanyingPersonnel = data.accompanyingPersonnel;
+    if (data.assignedPersonnel?.length) basePayload.assignedPersonnel = data.assignedPersonnel;
+    if (data.subtasks?.length) basePayload.subtasks = data.subtasks;
+    if (data.completionChecklist?.length) basePayload.completionChecklist = data.completionChecklist;
+    if (data.expectedCompletionFileName) basePayload.expectedCompletionFileName = data.expectedCompletionFileName;
+
+    try {
+      const batch = writeBatch(db);
+      for (const planDate of planDates) {
+        const ref = doc(collection(db, 'purchasingTasks'));
+        batch.set(ref, {
+          ...basePayload,
+          date: planDate,
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now(),
+          sortOrder: Date.now() + Math.random(),
+          activityLogs: [
+            createActivityLog(
+              'created',
+              `Haftalık plan kapsamında oluşturuldu (${currentUserProfile.name || currentUserProfile.email || 'Kullanıcı'}, ${format(new Date(), 'HH:mm')})`,
+              currentUserProfile
+            ),
+          ],
+        });
+      }
+      await batch.commit();
+
+      // Firma sorumlusuna sistem içi + push bildirim gönder.
+      if (responsible) {
+        try {
+          await emitWeeklyPlanApprovalRequested({
+            actor: { uid: currentUserProfile.uid, name: currentUserProfile.name || currentUserProfile.email || 'Kullanıcı' },
+            responsibleUid: responsible.uid,
+            responsibleName: responsible.name,
+            weeklyPlanGroupId,
+            weekStart: weekStartStr,
+            weekEnd: weekEndStr,
+            taskCount: planDates.length,
+            companyName: responsible.companyName,
+          });
+          toast.success(`Haftalık plan oluşturuldu. Onay için ${responsible.name || 'firma sorumlusu'} bilgilendirildi.`);
+        } catch (notifErr) {
+          console.error('Weekly plan notification failed', notifErr);
+          toast.warning('Plan oluşturuldu fakat bildirim gönderilemedi.');
+        }
+      } else {
+        toast.info('Firma sorumlusu tanımlı olmadığı için plan otomatik olarak onaylandı.');
+      }
+
+      setShowAddModal(false);
+      setSelectedDate(weekStart);
+    } catch (err) {
+      console.error('Error creating weekly plan', err);
+      toast.error('Haftalık plan oluşturulamadı');
+    }
+  }, [currentUserProfile, fetchCompanyResponsible]);
+
+  // Haftalık plan onayı — grup içindeki tüm görevleri approved yapar ve
+  // planı oluşturan kullanıcıya bildirim gönderir.
+  const approveWeeklyPlan = useCallback(async (groupId: string) => {
+    if (!currentUserProfile) return;
+    const groupTasks = tasks.filter((t) => t.weeklyPlanGroupId === groupId);
+    if (groupTasks.length === 0) return;
+    const first = groupTasks[0];
+    // Yetki kontrolü — sadece onay beklenen kişi onaylayabilir.
+    if (first.approvalRequiredFromUid && first.approvalRequiredFromUid !== currentUserProfile.uid && !isSuperAdmin) {
+      toast.error('Bu planı onaylama yetkiniz yok.');
+      return;
+    }
+    try {
+      const batch = writeBatch(db);
+      const now = Timestamp.now();
+      for (const t of groupTasks) {
+        batch.update(doc(db, 'purchasingTasks', t.id), {
+          approvalStatus: 'approved',
+          approvedByUid: currentUserProfile.uid,
+          approvedByName: currentUserProfile.name || '',
+          approvedAt: now,
+          updatedAt: now,
+          activityLogs: arrayUnion(createActivityLog(
+            'approved',
+            `Haftalık plan onaylandı (${currentUserProfile.name || 'Sorumlu'}, ${format(new Date(), 'HH:mm')})`,
+            currentUserProfile
+          )),
+        });
+      }
+      await batch.commit();
+      await emitWeeklyPlanApproved({
+        actor: { uid: currentUserProfile.uid, name: currentUserProfile.name || currentUserProfile.email || 'Sorumlu' },
+        createdByUid: first.createdByUid,
+        weeklyPlanGroupId: groupId,
+        weekStart: first.weeklyPlanWeekStart || first.date,
+        weekEnd: format(endOfWeek(parseISO(first.weeklyPlanWeekStart || first.date), { weekStartsOn: 1 }), 'yyyy-MM-dd'),
+        taskCount: groupTasks.length,
+      });
+      toast.success('Haftalık plan onaylandı.');
+    } catch (err) {
+      console.error('Error approving weekly plan', err);
+      toast.error('Plan onaylanamadı');
+    }
+  }, [currentUserProfile, tasks, isSuperAdmin]);
+
+  const rejectWeeklyPlan = useCallback(async (groupId: string, reason?: string) => {
+    if (!currentUserProfile) return;
+    const groupTasks = tasks.filter((t) => t.weeklyPlanGroupId === groupId);
+    if (groupTasks.length === 0) return;
+    const first = groupTasks[0];
+    if (first.approvalRequiredFromUid && first.approvalRequiredFromUid !== currentUserProfile.uid && !isSuperAdmin) {
+      toast.error('Bu planı reddetme yetkiniz yok.');
+      return;
+    }
+    try {
+      const batch = writeBatch(db);
+      const now = Timestamp.now();
+      for (const t of groupTasks) {
+        batch.update(doc(db, 'purchasingTasks', t.id), {
+          approvalStatus: 'rejected',
+          rejectedReason: reason || '',
+          updatedAt: now,
+          activityLogs: arrayUnion(createActivityLog(
+            'rejected',
+            `Haftalık plan reddedildi (${currentUserProfile.name || 'Sorumlu'}${reason ? `, sebep: ${reason}` : ''})`,
+            currentUserProfile
+          )),
+        });
+      }
+      await batch.commit();
+      await emitWeeklyPlanRejected({
+        actor: { uid: currentUserProfile.uid, name: currentUserProfile.name || currentUserProfile.email || 'Sorumlu' },
+        createdByUid: first.createdByUid,
+        weeklyPlanGroupId: groupId,
+        weekStart: first.weeklyPlanWeekStart || first.date,
+        weekEnd: format(endOfWeek(parseISO(first.weeklyPlanWeekStart || first.date), { weekStartsOn: 1 }), 'yyyy-MM-dd'),
+        reason,
+      });
+      toast.success('Plan reddedildi.');
+    } catch (err) {
+      console.error('Error rejecting weekly plan', err);
+      toast.error('Plan reddedilemedi');
+    }
+  }, [currentUserProfile, tasks, isSuperAdmin]);
+
   // Add task
   const handleAddTask = useCallback(
     async (data: TaskFormData) => {
       if (!currentUserProfile) return;
       try {
+        // ===== Haftalık plan modu =====
+        // Aynı girdiyle Pzt-Cum günleri için 5 görev oluşturur ve firma
+        // sorumlusuna onay için bildirim gönderir.
+        if (data.weeklyPlan) {
+          await createWeeklyPlan(data);
+          return;
+        }
+
         const specialDay = getSpecialDay(data.date);
         if (specialDay?.type === 'holiday') {
           toast.warning(`Seçilen tarih resmi tatil (${specialDay.name}). Bu güne görev oluşturulmadı.`);
@@ -1615,8 +1848,17 @@ export default function SatinAlmaPanel() {
   // Inline feedback state
   const [justAddedTaskId, setJustAddedTaskId] = useState<string | null>(null);
 
+  // Panel aktifken body'e sınıf ekleyerek sistem UI rengi sızmasını engelle.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.body.classList.add('satin-alma-active');
+    return () => {
+      document.body.classList.remove('satin-alma-active');
+    };
+  }, []);
+
   return (
-    <div className="fluid-editorial min-h-screen pb-28 relative overflow-x-hidden">
+    <div className="fluid-editorial fluid-safe-content min-h-[100dvh] pb-28 relative overflow-x-hidden">
       {/* Ambient depth blobs */}
       <div className="fluid-blob-1 -top-24 -right-16 opacity-50" />
       <div className="fluid-blob-2 top-[55%] -left-20 opacity-40" />
@@ -2030,6 +2272,19 @@ export default function SatinAlmaPanel() {
                     onDelete={() => deleteTask(task)}
                     onAddComment={(message) => addTaskComment(task, message)}
                     onPostpone={() => postponeTaskToTomorrow(task)}
+                    canApprove={
+                      !!task.weeklyPlanGroupId &&
+                      task.approvalStatus === 'pending' &&
+                      (task.approvalRequiredFromUid === currentUserProfile?.uid || isSuperAdmin)
+                    }
+                    onApprove={() => task.weeklyPlanGroupId && approveWeeklyPlan(task.weeklyPlanGroupId)}
+                    onReject={() => {
+                      if (!task.weeklyPlanGroupId) return;
+                      const reason = typeof window !== 'undefined'
+                        ? (window.prompt('Reddetme sebebi (opsiyonel):') || '')
+                        : '';
+                      rejectWeeklyPlan(task.weeklyPlanGroupId, reason);
+                    }}
                   />
                 </div>
               ))}
@@ -2275,6 +2530,9 @@ function TaskCard({
   onDelete,
   onAddComment,
   onPostpone,
+  canApprove,
+  onApprove,
+  onReject,
 }: {
   task: PurchasingTask;
   onToggle: () => void;
@@ -2283,6 +2541,9 @@ function TaskCard({
   onDelete: () => void;
   onAddComment: (message: string) => void;
   onPostpone: () => void;
+  canApprove?: boolean;
+  onApprove?: () => void;
+  onReject?: () => void;
 }) {
   const durationMin = parseTime(task.endTime) - parseTime(task.startTime);
   const hours = Math.floor(durationMin / 60);
@@ -2446,6 +2707,27 @@ function TaskCard({
                   <Repeat className="w-2.5 h-2.5 inline" />
                 </span>
               )}
+              {task.approvalStatus === 'pending' && (
+                <span
+                  className="shrink-0 inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full font-bold mt-0.5"
+                  style={{ background: 'rgba(245,158,11,0.15)', color: '#b45309' }}
+                  title={task.approvalRequiredFromName ? `Onay: ${task.approvalRequiredFromName}` : 'Onay bekliyor'}
+                >
+                  <Clock className="w-2.5 h-2.5" />
+                  Onay Bekliyor
+                </span>
+              )}
+              {task.approvalStatus === 'rejected' && (
+                <span className="shrink-0 inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full font-bold mt-0.5" style={{ background: 'rgba(239,68,68,0.12)', color: '#ef4444' }}>
+                  <X className="w-2.5 h-2.5" />
+                  Reddedildi
+                </span>
+              )}
+              {task.weeklyPlanGroupId && task.approvalStatus === 'approved' && (
+                <span className="shrink-0 inline-flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full font-bold mt-0.5" style={{ background: 'rgba(0,107,104,0.10)', color: '#006b68' }}>
+                  Haftalık
+                </span>
+              )}
             </div>
 
             {/* Meta row: duration, lab, people */}
@@ -2507,6 +2789,31 @@ function TaskCard({
             </button>
           </div>
         </div>
+
+        {/* Haftalık plan onay aksiyonları — yalnızca onay bekleyen sorumluya gösterilir */}
+        {task.approvalStatus === 'pending' && canApprove && (onApprove || onReject) && (
+          <div
+            className="flex items-center gap-2 px-5 pb-3 -mt-1"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => onApprove?.()}
+              className="flex-1 py-2 rounded-xl text-[11px] font-bold transition-all active:scale-[0.97]"
+              style={{ background: '#006b68', color: '#e1fffd', boxShadow: '0 4px 12px rgba(0,107,104,0.25)' }}
+            >
+              <Check className="w-3 h-3 inline mr-1" strokeWidth={3} />
+              Onayla
+            </button>
+            <button
+              onClick={() => onReject?.()}
+              className="flex-1 py-2 rounded-xl text-[11px] font-bold transition-all active:scale-[0.97]"
+              style={{ background: 'rgba(239,68,68,0.08)', color: '#ef4444' }}
+            >
+              <X className="w-3 h-3 inline mr-1" strokeWidth={3} />
+              Reddet
+            </button>
+          </div>
+        )}
 
         {/* Expandable: subtasks, comments, attachments, logs */}
         {(showComments || showActivityLogs || (task.subtasks && task.subtasks.length > 0)) && (
@@ -2888,6 +3195,14 @@ function TaskFormModal({
   const [recurringInterval, setRecurringInterval] = useState(1);
   const [recurringEndDate, setRecurringEndDate] = useState('');
 
+  // Haftalık plan modu — aynı girdilerle Pzt-Cum görev üretir, firma sorumlusu onayına düşer.
+  const [weeklyPlanMode, setWeeklyPlanMode] = useState(false);
+  const [weeklyPlanStart, setWeeklyPlanStart] = useState<string>(
+    isEdit
+      ? format(startOfWeek(parseISO(task.date), { weekStartsOn: 1 }), 'yyyy-MM-dd')
+      : format(startOfWeek(parseISO(defaultDate), { weekStartsOn: 1 }), 'yyyy-MM-dd')
+  );
+
   const labDropdownRef = useRef<HTMLDivElement>(null);
   const personnelDropdownRef = useRef<HTMLDivElement>(null);
   const assignedDropdownRef = useRef<HTMLDivElement>(null);
@@ -3028,6 +3343,10 @@ function TaskFormModal({
           interval: recurringInterval,
           ...(recurringEndDate && { endDate: recurringEndDate }),
         },
+      }),
+      ...(weeklyPlanMode && !isEdit && {
+        weeklyPlan: true,
+        weeklyPlanStart,
       }),
     });
     setSubmitting(false);
@@ -3197,6 +3516,67 @@ function TaskFormModal({
               <p className="text-[10px] font-semibold text-red-500">Bitiş saati başlangıçtan sonra olmalıdır</p>
             )}
           </div>
+
+          {/* ===== SECTION B2: Plan Modu — Günlük / Haftalık ===== */}
+          {!isEdit && (
+            <div className="rounded-2xl p-4 space-y-3" style={{ background: '#f7faf8' }}>
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: '#006b68' }}>Plan Modu</p>
+                {weeklyPlanMode && (
+                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-full" style={{ background: 'rgba(245,158,11,0.12)', color: '#b45309' }}>
+                    Onay Bekleyecek
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setWeeklyPlanMode(false)}
+                  className="py-2.5 rounded-2xl text-xs font-bold transition-all fluid-card-tap"
+                  style={!weeklyPlanMode
+                    ? { background: '#006b68', color: '#e1fffd', boxShadow: '0 4px 12px rgba(0,107,104,0.28)' }
+                    : { background: '#ffffff', color: 'var(--dashboard-muted)' }}
+                >
+                  Günlük Görev
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setWeeklyPlanMode(true)}
+                  className="py-2.5 rounded-2xl text-xs font-bold transition-all fluid-card-tap"
+                  style={weeklyPlanMode
+                    ? { background: '#006b68', color: '#e1fffd', boxShadow: '0 4px 12px rgba(0,107,104,0.28)' }
+                    : { background: '#ffffff', color: 'var(--dashboard-muted)' }}
+                >
+                  Haftalık Plan
+                </button>
+              </div>
+              {weeklyPlanMode && (
+                <>
+                  <div>
+                    <label className="block text-[10px] font-semibold mb-1.5" style={{ color: 'var(--dashboard-muted)' }}>
+                      Haftanın Başlangıcı (Pazartesi)
+                    </label>
+                    <input
+                      type="date"
+                      value={weeklyPlanStart}
+                      onChange={(e) => {
+                        const picked = e.target.value ? parseISO(e.target.value) : parseISO(weeklyPlanStart);
+                        const mon = format(startOfWeek(picked, { weekStartsOn: 1 }), 'yyyy-MM-dd');
+                        setWeeklyPlanStart(mon);
+                      }}
+                      className={cn(inputCls, 'py-2.5 text-xs text-center dark:[color-scheme:dark]')}
+                      style={{ color: 'var(--dashboard-text)', background: '#ffffff' }}
+                    />
+                  </div>
+                  <p className="text-[10px] leading-relaxed" style={{ color: 'var(--dashboard-muted)' }}>
+                    Pzt–Cum günleri için aynı girdilerle 5 görev oluşturulur. Plan, firmanızın sorumlusuna
+                    onay için bildirim olarak iletilir. Onaylandığında takvimde aktif olur; aksi hâlde
+                    <span className="font-semibold"> "Onay Bekliyor"</span> etiketiyle görünür.
+                  </p>
+                </>
+              )}
+            </div>
+          )}
 
           {/* ===== SECTION C: Priority — segmented, single row ===== */}
           <div>
@@ -3619,7 +3999,11 @@ function TaskFormModal({
             ) : (
               <>
                 {!isEdit && <Plus className="w-4 h-4" strokeWidth={2.5} />}
-                {isEdit ? 'Kaydet' : `Görev Ekle${files.length > 0 ? ` (${files.length} dosya)` : ''}`}
+                {isEdit
+                  ? 'Kaydet'
+                  : weeklyPlanMode
+                  ? 'Haftalık Plan Oluştur'
+                  : `Görev Ekle${files.length > 0 ? ` (${files.length} dosya)` : ''}`}
               </>
             )}
           </button>
