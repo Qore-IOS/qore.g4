@@ -53,7 +53,20 @@ const normalizeKey = (s: string) =>
 
 const parseNum = (v: any): number | undefined => {
   if (v === undefined || v === null || v === '') return undefined;
-  const n = Number(String(v).replace(',', '.'));
+  let s = String(v).trim();
+  // Remove currency symbols and whitespace
+  s = s.replace(/[₺€$\s]/g, '');
+  // Turkish format: dots are thousands separators, comma is decimal
+  // e.g. "6.552,98" → "6552.98"
+  if (s.includes(',') && s.includes('.')) {
+    // Both present: dots are thousands seps, comma is decimal
+    s = s.replace(/\./g, '').replace(',', '.');
+  } else if (s.includes(',')) {
+    // Only comma: it's the decimal separator
+    s = s.replace(',', '.');
+  }
+  // else: only dots or no separators — standard format
+  const n = Number(s);
   return Number.isFinite(n) ? n : undefined;
 };
 
