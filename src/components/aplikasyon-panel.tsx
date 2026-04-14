@@ -200,11 +200,7 @@ export default function AplikasyonPanel({
 
     return (
       <div className={"device-module-page space-y-6 p-4 sm:p-6"}>
-        <UiButton variant="ghost" onClick={() => setExpandedPoolId(null)} className="mb-2">
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Geri
-        </UiButton>
-        <Card className="cihaz-card-strong border-0">
+        <Card className="cihaz-card-strong border-0 bg-white/40 backdrop-blur-md border border-white/50 shadow-sm relative">
           <CardHeader>
             <div className="flex justify-between items-center">
               <CardTitle className="text-xl sm:text-2xl font-headline flex items-center text-[var(--dashboard-text)]">
@@ -227,7 +223,7 @@ export default function AplikasyonPanel({
                   key={hospital.id}
                   onClick={() => router.push(`/aplikasyon-paneli/${hospital.id}`)}
                   className={cn(
-                    "cihaz-card cihaz-focus-ring cursor-pointer border-0 transition-all hover:-translate-y-0.5"
+                    "cihaz-card cihaz-focus-ring cursor-pointer border-0 transition-all hover:-translate-y-0.5 bg-white/30 backdrop-blur-sm border border-white/40 shadow-sm"
                   )}
                 >
                   <CardHeader className="pb-1 pt-3">
@@ -250,25 +246,25 @@ export default function AplikasyonPanel({
   // Main view - show pools and standalone labs
   return (
     <div className={"cihaz-shell space-y-4 sm:space-y-6 p-4 sm:p-6"}>
-      <BackButton fallback="/cihaz-yonetimi-ana" />
-      <Card className="cihaz-card-strong border-0">
+      <Card className="cihaz-card-strong border-0 bg-white/40 backdrop-blur-md border border-white/50 shadow-sm relative">
         <CardHeader>
-          <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
-            <CardTitle className="text-xl sm:text-2xl font-headline flex items-center text-[var(--dashboard-text)]"><FlaskConical className="mr-3 h-7 w-7" />Aplikasyon Paneli</CardTitle>
-            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
-              <UiButton variant="outline" onClick={() => router.push('/aplikasyon-paneli/tum-formlar')} className="w-full sm:w-auto">
-                <FileText className="mr-2 h-4 w-4" />
-                Tüm İşlem Formları
-              </UiButton>
-              <UiButton variant="outline" onClick={() => router.push('/direkt-transfer/yedek-parca-transfer')} className="w-full sm:w-auto">
-                <Package className="mr-2 h-4 w-4" />
-                Yedek Parça Stokları
-              </UiButton>
-              <UiButton variant="outline" onClick={() => router.push('/aplikasyon-harita')} className="w-full sm:w-auto">
-                <MapIcon className="mr-2 h-4 w-4" />
-                Harita
-              </UiButton>
-            </div>
+          {/* Harita button top-right */}
+          <div className="absolute top-4 right-4 animate-in fade-in slide-in-from-right-2 duration-500">
+            <UiButton 
+              variant="outline" 
+              onClick={() => router.push('/aplikasyon-harita')} 
+              className="px-3 py-1.5 h-auto text-xs sm:text-sm bg-white/50 hover:bg-white/80 border-white/40"
+            >
+              <MapIcon className="mr-2 h-4 w-4 text-[var(--dashboard-accent)]" />
+              <span className="hidden sm:inline">Harita</span>
+            </UiButton>
+          </div>
+
+          <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center pr-24 sm:pr-0">
+            <CardTitle className="text-xl sm:text-2xl font-headline flex items-center text-[var(--dashboard-text)]">
+              <FlaskConical className="mr-3 h-7 w-7 text-[var(--dashboard-accent)]" />
+              Aplikasyon Paneli
+            </CardTitle>
           </div>
           <CardDescription>Hastanelerdeki cihazların aplikasyon durumlarını görüntüleyin.</CardDescription>
         </CardHeader>
@@ -284,7 +280,7 @@ export default function AplikasyonPanel({
                 key={pool.id}
                 onClick={() => setExpandedPoolId(pool.id)}
                 className={cn(
-                  "cihaz-card cihaz-focus-ring cursor-pointer border border-amber-300/40 transition-all hover:-translate-y-0.5"
+                  "cihaz-card cihaz-focus-ring cursor-pointer transition-all hover:-translate-y-0.5 bg-white/30 backdrop-blur-sm border border-white/40 shadow-sm"
                 )}
               >
                 <CardHeader className="pb-1 pt-3">
