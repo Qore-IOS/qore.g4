@@ -146,7 +146,9 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
       {/* Desktop / Tablet sidebar */}
       <aside className="qore-technic-sidebar hidden md:flex">
         <div className="qore-technic-sidebar__brand">
-          {collapsed ? <QoreTechnicBrand iconOnly /> : <QoreTechnicBrand size="md" />}
+          <div className="qore-technic-sidebar__brand-inner">
+            {collapsed ? <QoreTechnicBrand iconOnly /> : <QoreTechnicBrand size="md" />}
+          </div>
           <button
             type="button"
             aria-label={collapsed ? 'Menüyü genişlet' : 'Menüyü daralt'}

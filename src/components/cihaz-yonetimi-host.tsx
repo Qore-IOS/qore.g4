@@ -522,10 +522,10 @@ export default function CihazYonetimiHost() {
           label="Arızalı Cihaz"
           value={faultyDeviceCount}
           unit="açık arıza"
-          footer={faultyDeviceCount > 0 ? 'Arıza yönetimine git' : 'Açık arıza yok'}
+          footer={faultyDeviceCount > 0 ? 'Atama bekleyenler' : 'Açık arıza yok'}
           icon={ShieldAlert}
           tone={faultyDeviceCount > 0 ? 'danger' : 'success'}
-          onClick={() => router.push('/ariza-yonetimi')}
+          onClick={() => router.push('/ariza-yonetimi?tab=atama_bekliyor')}
         />
         <MetricCard
           label="Bakımı Yaklaşan"
