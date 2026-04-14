@@ -192,9 +192,8 @@ export default function TeknikServisPanel({
                     <span className="text-red-600 font-medium"> &middot; {poolStats.arizaSayisi} arızalı</span>
                   )}
                 </p>
-              </div>
             </div>
-          </div>
+        </div>
 
           {/* Member lab cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
@@ -216,6 +215,7 @@ export default function TeknikServisPanel({
                 </button>
               );
             })}
+          </div>
           </div>
         </div>
       </div>
@@ -274,7 +274,6 @@ export default function TeknikServisPanel({
               </div>
             </div>
 
-            </div>
           </div>
         </div>
 

@@ -302,7 +302,7 @@ export default function YedekParcaStokGirisPage() {
       title: 'Eklendi',
       description: `${rowStokAdi} (${label}) listeye eklendi.`,
     });
-  }, [selectedProduct, serialNumber, hucreNumarasi, quantity, rows, toast, manualStokKodu, manualStokAdi, address]);
+  }, [selectedProduct, serialNumber, hucreNumarasi, quantity, rows, toast, address]);
 
   const findMissingCardsFromRows = useCallback((targetRows: StokGirisRow[]) => {
     const existingCodes = new Set(allProductCodes.map(p => (p.stokKodu || '').trim().toUpperCase()).filter(Boolean));
@@ -653,7 +653,7 @@ export default function YedekParcaStokGirisPage() {
           status: hasMismatch ? 'open' : 'completed',
           completedAt: hasMismatch ? null : Timestamp.fromDate(now),
           lastStockEntryAt: Timestamp.fromDate(now),
-          relatedStockEntryIds: createdStockEntryIds,
+          relatedStockEntryIds: stockRefIds,
           stockEntrySummary: {
             isExact: selectedOrderComparison.isExact,
             detail: selectedOrderComparison.detail.map(item => ({
@@ -864,6 +864,7 @@ export default function YedekParcaStokGirisPage() {
       {activeTab === 'manual' && (
         <section className="cihaz-card p-4 sm:p-5 space-y-4">
           <p className="cihaz-section-label">Yeni Ürün Ekle</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
 
             {/* Product selection is mandatory */}
             <div className="sm:col-span-2 lg:col-span-3 lg:col-start-1">
