@@ -223,7 +223,7 @@ export default function AplikasyonPanel({
                   key={hospital.id}
                   onClick={() => router.push(`/aplikasyon-paneli/${hospital.id}`)}
                   className={cn(
-                    "cihaz-card cihaz-focus-ring cursor-pointer border-0 transition-all hover:-translate-y-0.5 bg-white/30 backdrop-blur-sm border border-white/40 shadow-sm"
+                    "cihaz-card cihaz-focus-ring cursor-pointer transition-all hover:-translate-y-0.5 bg-white/40 backdrop-blur-sm border border-white/40 shadow-sm"
                   )}
                 >
                   <CardHeader className="pb-1 pt-3">
