@@ -28,6 +28,9 @@ export type NotificationType =
   | "user_request_completed"
   | "fault_reminder"
   | "external_stock_usage"
+  | "weekly_plan_approval_requested"
+  | "weekly_plan_approved"
+  | "weekly_plan_rejected"
   | "custom";
 
 export type ResourceType =
@@ -552,6 +555,91 @@ export async function emitExternalStockUsage(params: {
     targets: targetRoles,
     meta: {
       ...params,
+    },
+  });
+}
+
+/**
+ * Satın Alma haftalık planı oluşturulduğunda firma sorumlusuna onay bildirimi gönderir.
+ * Hem sistem içi bildirim hem de push notification olarak iletilir.
+ */
+export async function emitWeeklyPlanApprovalRequested(params: {
+  actor: Actor;
+  responsibleUid: string;
+  responsibleName?: string;
+  weeklyPlanGroupId: string;
+  weekStart: string;
+  weekEnd: string;
+  taskCount: number;
+  companyName?: string;
+}) {
+  await createNotification({
+    type: "weekly_plan_approval_requested",
+    channel: "push",
+    title: "Haftalık Plan Onayı Bekliyor",
+    message: `${params.actor.name}, ${params.weekStart} - ${params.weekEnd} tarihleri için ${params.taskCount} görevlik haftalık plan oluşturdu. Onayınız bekleniyor.`,
+    href: `/satin-alma?planApproval=${params.weeklyPlanGroupId}`,
+    actor: params.actor,
+    // Hedefe özel: sadece firma sorumlusu bu bildirimi görsün
+    targets: [`user:${params.responsibleUid}`],
+    meta: {
+      weeklyPlanGroupId: params.weeklyPlanGroupId,
+      weekStart: params.weekStart,
+      weekEnd: params.weekEnd,
+      taskCount: params.taskCount,
+      companyName: params.companyName,
+      responsibleUid: params.responsibleUid,
+      responsibleName: params.responsibleName,
+    },
+  });
+}
+
+export async function emitWeeklyPlanApproved(params: {
+  actor: Actor;
+  createdByUid: string;
+  weeklyPlanGroupId: string;
+  weekStart: string;
+  weekEnd: string;
+  taskCount: number;
+}) {
+  await createNotification({
+    type: "weekly_plan_approved",
+    channel: "push",
+    title: "Haftalık Planınız Onaylandı",
+    message: `${params.weekStart} - ${params.weekEnd} için haftalık planınız ${params.actor.name} tarafından onaylandı. Plan artık takvimde aktif.`,
+    href: `/satin-alma?week=${params.weekStart}`,
+    actor: params.actor,
+    targets: [`user:${params.createdByUid}`],
+    meta: {
+      weeklyPlanGroupId: params.weeklyPlanGroupId,
+      weekStart: params.weekStart,
+      weekEnd: params.weekEnd,
+      taskCount: params.taskCount,
+    },
+  });
+}
+
+export async function emitWeeklyPlanRejected(params: {
+  actor: Actor;
+  createdByUid: string;
+  weeklyPlanGroupId: string;
+  weekStart: string;
+  weekEnd: string;
+  reason?: string;
+}) {
+  await createNotification({
+    type: "weekly_plan_rejected",
+    channel: "push",
+    title: "Haftalık Planınız Onaylanmadı",
+    message: `${params.weekStart} - ${params.weekEnd} için oluşturduğunuz haftalık plan ${params.actor.name} tarafından reddedildi.${params.reason ? ` Sebep: ${params.reason}` : ''}`,
+    href: `/satin-alma?week=${params.weekStart}`,
+    actor: params.actor,
+    targets: [`user:${params.createdByUid}`],
+    meta: {
+      weeklyPlanGroupId: params.weeklyPlanGroupId,
+      weekStart: params.weekStart,
+      weekEnd: params.weekEnd,
+      reason: params.reason,
     },
   });
 }
