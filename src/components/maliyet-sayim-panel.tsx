@@ -150,12 +150,13 @@ function expiryColor(days: number | null): string {
 
 /** Calculate total cost for a single product based on count data */
 function calcProductCost(product: ProductCode, entry?: ProductCountEntry): { amount: number; currency: string } {
-  if (!entry || !product.cost || !product.ambalajDegeri) return { amount: 0, currency: product.currency || 'TRY' };
+  if (!entry || !product.cost) return { amount: 0, currency: product.currency || 'TRY' };
+  const ambalaj = product.ambalajDegeri || 1;
   const stokNum = parseInt(entry.stokAdedi, 10) || 0;
   const cihazNum = parseInt(entry.cihazUstuAdedi, 10) || 0;
-  const toplamTest = (stokNum * product.ambalajDegeri) + cihazNum;
+  const toplamTest = (stokNum * ambalaj) + cihazNum;
   if (toplamTest <= 0) return { amount: 0, currency: product.currency || 'TRY' };
-  return { amount: (product.cost / product.ambalajDegeri) * toplamTest, currency: product.currency || 'TRY' };
+  return { amount: (product.cost / ambalaj) * toplamTest, currency: product.currency || 'TRY' };
 }
 
 /** Format CostByCurrency as display string */
@@ -313,16 +314,16 @@ function ProductCountCard({
 }) {
   const [accordionOpen, setAccordionOpen] = useState(false);
 
-  const ambalajDegeri = product.ambalajDegeri || 0;
+  const ambalajDegeri = product.ambalajDegeri || 1;
   const anaBirim = product.anaBirim || 'Adet';
   const stokNum = parseInt(entry.stokAdedi, 10) || 0;
   const cihazNum = parseInt(entry.cihazUstuAdedi, 10) || 0;
-  const toplamTest = ambalajDegeri > 0 ? (stokNum * ambalajDegeri) + cihazNum : 0;
+  const toplamTest = (stokNum * ambalajDegeri) + cihazNum;
 
   const productCost = product.cost || 0;
   const currency = product.currency || 'TRY';
   const currencySymbol = currency === 'EUR' ? '€' : currency === 'USD' ? '$' : '₺';
-  const testBasinaMaliyet = ambalajDegeri > 0 && productCost > 0 ? productCost / ambalajDegeri : 0;
+  const testBasinaMaliyet = productCost > 0 ? productCost / ambalajDegeri : 0;
   const toplamMaliyet = testBasinaMaliyet * toplamTest;
 
   const hasTrackingData = entry.lots.length > 0 || entry.serials.length > 0;
