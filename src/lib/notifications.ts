@@ -522,3 +522,35 @@ export async function emitMaliyetSayimDavet(params: {
     },
   });
 }
+
+/**
+ * Sends a notification to all technical staff when a part is used from external stocks (Depot or Pool).
+ */
+export async function emitExternalStockUsage(params: {
+  actor: Actor;
+  sourceType: 'depot' | 'pool' | 'depo' | 'havuz';
+  sourceName: string;
+  stokKodu: string;
+  stokAdi: string;
+  serialNumber?: string;
+  quantity: number;
+  deviceName?: string;
+  hospitalName?: string;
+  labName?: string;
+}) {
+  const sourceLabel = (params.sourceType === 'depot' || params.sourceType === 'depo') ? 'Depo' : 'Havuz';
+  const targetRoles = ['role:teknik_servis', 'role:aplikasyon', 'role:teknik_lojistik', 'role:admin'];
+
+  await createNotification({
+    type: 'spare_part_transfer',
+    channel: 'push',
+    title: `${sourceLabel} Stok Kullanımı`,
+    message: `${params.actor.name}, ${params.sourceName} kaynağından ${params.stokAdi} (${params.stokKodu}${params.serialNumber ? `, SN: ${params.serialNumber}` : ''}) ${params.quantity} adet ürün kullandı.`,
+    href: '/direkt-transfer/yedek-parca-transfer',
+    actor: params.actor,
+    targets: targetRoles,
+    meta: {
+      ...params,
+    },
+  });
+}

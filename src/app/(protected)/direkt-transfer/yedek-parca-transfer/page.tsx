@@ -68,7 +68,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import SparePartTransferTutanakPDFButton from '@/components/exports/SparePartTransferTutanakPDFButton';
 import TeknikServisTutanakPDFButton from '@/components/exports/TeknikServisTutanakPDFButton';
 import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
-import { emitSparePartTransfer } from '@/lib/notifications';
+import { emitSparePartTransfer, emitExternalStockUsage } from '@/lib/notifications';
 import MinMaxSettingsPanel from '@/components/MinMaxSettingsPanel';
 
 // Menu selection types
@@ -1419,6 +1419,24 @@ export default function YedekParcaTransferPage() {
           targetName: data.targetName,
           items: data.items,
         }).catch(e => console.error('Spare part transfer notification error:', e));
+      }
+
+      // Emit external stock usage notification (Depot usage)
+      for (const row of transferRows) {
+        emitExternalStockUsage({
+          actor: {
+            uid: currentUserProfile?.uid || '',
+            name: currentUserProfile?.name || currentUserProfile?.email || 'Bilinmeyen Kullanıcı',
+          },
+          sourceType: 'depot',
+          sourceName: 'Merkez Depo',
+          stokKodu: row.stokKodu,
+          stokAdi: row.stokAdi,
+          serialNumber: row.serialNumber,
+          quantity: row.quantity,
+          deviceName: '—',
+          hospitalName: row.targetName,
+        }).catch(err => console.error('External stock usage notification error:', err));
       }
 
       const totalItems = transferRows.reduce((s, r) => s + r.quantity, 0);

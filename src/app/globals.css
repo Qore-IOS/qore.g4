@@ -471,14 +471,18 @@
     }
 
     .dark .cihaz-card {
-      background: var(--dashboard-surface);
-      border: 1px solid var(--dashboard-stroke);
+      background: rgba(17, 17, 17, 0.6);
+      backdrop-filter: blur(12px) saturate(140%);
+      -webkit-backdrop-filter: blur(12px) saturate(140%);
+      border: 1px solid rgba(255, 255, 255, 0.08);
       box-shadow: var(--dashboard-raised-soft);
     }
 
     .dark .cihaz-card-strong {
-      background: var(--dashboard-surface);
-      border: 1px solid var(--dashboard-stroke);
+      background: rgba(17, 17, 17, 0.75);
+      backdrop-filter: blur(16px) saturate(160%);
+      -webkit-backdrop-filter: blur(16px) saturate(160%);
+      border: 1px solid rgba(255, 255, 255, 0.12);
       box-shadow: var(--dashboard-raised);
     }
 
