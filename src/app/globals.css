@@ -3157,10 +3157,14 @@ html.qt-active { color: var(--qt-text); }
 .qt-primary-btn:active { transform: translateY(0); }
 
 /* ============================================
-   Hub content overrides for legacy module pages.
-   When a module page is rendered inside QoreTechnicShell (.qt-content),
-   strip its own neumorphic background so the hub gradient shows through
-   and the page looks like a native panel of the hub.
+   Hub content overrides for ALL module pages rendered inside
+   QoreTechnicShell (.qt-content). Strips neumorphic backgrounds,
+   turns shadcn Cards into transparent glass surfaces, and applies
+   consistent glass styling across every sub-panel (arıza-yönetimi,
+   teknik-servis, aplikasyon-paneli, lab detail, wizard forms,
+   yedek parça panels, transfer şablonları, etc.)
+   NOTE: hub's own `qt-*` components are whitelisted via :not() so
+   they keep their dedicated styles.
    ============================================ */
 .qt-content {
   color: var(--qt-text);
@@ -3175,105 +3179,191 @@ html.qt-active { color: var(--qt-text); }
   padding: 0;
 }
 
-/* Transparent glass cards for module content */
-.qt-content .device-module-page .bg-card,
-.qt-content .device-module-page [data-slot="card"],
-.qt-content .device-module-page > .space-y-4 > div[class*="rounded"],
-.qt-content .device-module-page .rounded-lg,
-.qt-content .device-module-page .rounded-xl,
-.qt-content .device-module-page .rounded-2xl {
+/* Transparent glass cards for ANY shadcn card / rounded container */
+.qt-content .bg-card,
+.qt-content [data-slot="card"],
+.qt-content .neu-card,
+.qt-content [class~="bg-card"],
+.qt-content .glass-card {
   background: var(--qt-surface-strong) !important;
   backdrop-filter: blur(14px) saturate(140%);
   -webkit-backdrop-filter: blur(14px) saturate(140%);
   border: 1px solid var(--qt-stroke) !important;
-  box-shadow: var(--qt-elev-sm);
-}
-
-/* shadcn Card root element (neu-card) */
-.qt-content .device-module-page .bg-card,
-.qt-content .device-module-page .neu-card,
-.qt-content .neu-card,
-.qt-content [class~="bg-card"] {
-  background: var(--qt-surface-strong) !important;
   box-shadow: var(--qt-elev-sm) !important;
-  border: 1px solid var(--qt-stroke) !important;
+  color: var(--qt-text);
 }
 
-.qt-content .device-module-page .bg-background,
-.qt-content .device-module-page .bg-popover {
+/* Neutralise opaque surface utilities */
+.qt-content .bg-background,
+.qt-content .bg-popover,
+.qt-content .bg-white,
+.qt-content .bg-white\/90,
+.qt-content .bg-white\/80,
+.qt-content .bg-white\/70 {
   background: transparent !important;
 }
 
-.qt-content .device-module-page .bg-muted,
-.qt-content .device-module-page .bg-muted\/30,
-.qt-content .device-module-page .bg-muted\/50 {
+.qt-content .bg-muted,
+.qt-content .bg-muted\/30,
+.qt-content .bg-muted\/40,
+.qt-content .bg-muted\/50,
+.qt-content .bg-muted\/60,
+.qt-content .bg-secondary,
+.qt-content .bg-accent {
   background: var(--qt-surface-soft) !important;
 }
 
-.qt-content .device-module-page .text-muted-foreground {
+.qt-content .text-muted-foreground,
+.qt-content .text-secondary-foreground {
   color: var(--qt-muted) !important;
 }
 
-.qt-content .device-module-page .text-primary {
+.qt-content .text-primary {
   color: var(--qt-accent) !important;
 }
 
-.qt-content .device-module-page .border,
-.qt-content .device-module-page [class*="border-"] {
+.qt-content .border {
   border-color: var(--qt-stroke) !important;
 }
 
-/* Table header — subtle frosted strip */
-.qt-content .device-module-page thead,
-.qt-content .device-module-page thead tr,
-.qt-content .device-module-page thead th {
+/* Tables — frosted look */
+.qt-content thead,
+.qt-content thead tr,
+.qt-content thead th {
   background: var(--qt-surface-soft) !important;
   color: var(--qt-text-soft) !important;
   border-color: var(--qt-stroke) !important;
 }
 
-.qt-content .device-module-page tbody tr {
+.qt-content tbody tr {
   background: transparent !important;
   border-color: var(--qt-stroke) !important;
 }
 
-.qt-content .device-module-page tbody tr:hover {
+.qt-content tbody tr:hover {
   background: var(--qt-surface-soft) !important;
 }
 
-/* Inputs / selects inside the hub shouldn't stay pure white/black */
-.qt-content .device-module-page input,
-.qt-content .device-module-page textarea,
-.qt-content .device-module-page [role="combobox"],
-.qt-content .device-module-page select {
+.qt-content td,
+.qt-content th {
+  border-color: var(--qt-stroke) !important;
+  color: var(--qt-text);
+}
+
+/* Inputs / selects / comboboxes inside the hub */
+.qt-content input:not([type="checkbox"]):not([type="radio"]),
+.qt-content textarea,
+.qt-content [role="combobox"],
+.qt-content select {
   background: var(--qt-surface) !important;
   border-color: var(--qt-stroke) !important;
   color: var(--qt-text) !important;
 }
 
 /* Tabs list (pill strip) */
-.qt-content .device-module-page [role="tablist"] {
+.qt-content [role="tablist"] {
   background: var(--qt-surface-soft) !important;
   border: 1px solid var(--qt-stroke) !important;
 }
-.qt-content .device-module-page [role="tab"][data-state="active"] {
+.qt-content [role="tab"] {
+  color: var(--qt-text-soft) !important;
+}
+.qt-content [role="tab"][data-state="active"] {
   background: linear-gradient(135deg, var(--qt-accent), var(--qt-accent-2)) !important;
   color: #fff !important;
   box-shadow: 0 8px 18px -10px rgba(124, 58, 237, 0.55);
 }
 
 /* Sticky headers should blend, not show solid white */
-.qt-content .device-module-page .sticky,
-.qt-content .device-module-page .sticky.top-0,
-.qt-content .device-module-page .sticky.bottom-0 {
+.qt-content .sticky,
+.qt-content .sticky.top-0,
+.qt-content .sticky.bottom-0 {
   background: var(--qt-surface) !important;
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
 }
 
 /* BackButton — align to hub theme */
-.qt-content .device-module-page a[href*="cihaz-yonetimi-ana"],
-.qt-content .device-module-page button:has(svg.lucide-arrow-left) {
-  color: var(--qt-text-soft);
+.qt-content a[href*="cihaz-yonetimi-ana"],
+.qt-content button:has(svg.lucide-arrow-left) {
+  color: var(--qt-text-soft) !important;
+}
+.qt-content a[href*="cihaz-yonetimi-ana"]:hover,
+.qt-content button:has(svg.lucide-arrow-left):hover {
+  color: var(--qt-accent) !important;
+}
+
+/* shadcn Button inside the hub — neutral ghost look by default.
+   We leave `.qt-*-btn` and destructive variants alone. */
+.qt-content button[data-slot="button"]:not(.qt-icon-btn):not(.qt-ghost-btn):not(.qt-primary-btn):not([data-variant="destructive"]):not(.qore-technic-navitem):not(.qore-technic-bottom-item):not(.qore-technic-collapse-btn) {
+  background: var(--qt-surface) !important;
+  border: 1px solid var(--qt-stroke) !important;
+  color: var(--qt-text) !important;
+  box-shadow: var(--qt-elev-sm);
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease, transform 160ms ease, box-shadow 180ms ease;
+}
+.qt-content button[data-slot="button"]:not(.qt-icon-btn):not(.qt-ghost-btn):not(.qt-primary-btn):not([data-variant="destructive"]):not(.qore-technic-navitem):not(.qore-technic-bottom-item):not(.qore-technic-collapse-btn):hover {
+  background: var(--qt-surface-strong) !important;
+  border-color: rgba(124, 58, 237, 0.28) !important;
+  color: var(--qt-accent) !important;
+  transform: translateY(-1px);
+  box-shadow: var(--qt-elev-md);
+}
+
+/* Primary / default shadcn Button variant — promote to gradient */
+.qt-content button[data-variant="default"]:not(.qore-technic-navitem):not(.qore-technic-bottom-item):not(.qore-technic-collapse-btn) {
+  background: linear-gradient(135deg, var(--qt-accent), var(--qt-accent-2)) !important;
+  color: #fff !important;
+  border: 1px solid transparent !important;
+  box-shadow: 0 10px 22px -12px rgba(124, 58, 237, 0.55), 0 3px 8px -4px rgba(6, 182, 212, 0.35) !important;
+}
+
+/* Accordion (transfer-gecmis) */
+.qt-content [data-slot="accordion-item"],
+.qt-content [data-slot="accordion-trigger"],
+.qt-content [data-slot="accordion-content"] {
+  background: transparent !important;
+  border-color: var(--qt-stroke) !important;
+}
+
+/* Command palette surfaces (shown in popovers for form pages) */
+.qt-content [cmdk-root],
+.qt-content [cmdk-list],
+.qt-content [cmdk-input] {
+  background: var(--qt-surface) !important;
+  color: var(--qt-text) !important;
+}
+
+/* Badges should not look like opaque chips inside the hub */
+.qt-content [data-slot="badge"] {
+  background: rgba(124, 58, 237, 0.12) !important;
+  color: var(--qt-accent) !important;
+  border-color: rgba(124, 58, 237, 0.22) !important;
+}
+
+/* Dialog / popover (portaled) content — theme in dark/light hub */
+html.qt-active [data-slot="dialog-content"],
+html.qt-active [data-slot="popover-content"],
+html.qt-active [data-slot="alert-dialog-content"] {
+  background: var(--qt-surface-strong) !important;
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border: 1px solid var(--qt-stroke) !important;
+  color: var(--qt-text) !important;
+}
+
+/* Wizard form shell / step containers — allow gradient bg through */
+.qt-content .wizard-form-shell,
+.qt-content .wizard-step,
+.qt-content form {
+  background: transparent !important;
+}
+
+/* Generic container padding normalization for non-module pages
+   (transfer-sablonlari uses p-4, yedek-parca-analizi uses container) */
+.qt-content > .qore-technic-main__inner > div[class*="container"],
+.qt-content > .qore-technic-main__inner > div.p-4,
+.qt-content > .qore-technic-main__inner > div.p-6 {
+  background: transparent !important;
 }
 
