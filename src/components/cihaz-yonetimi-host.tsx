@@ -480,12 +480,8 @@ export default function CihazYonetimiHost() {
           Here we render a compact top-area with title + status buttons. */}
       <div className="qt-hub-header">
         <div className="flex items-center gap-4 flex-wrap">
-          {/* Keep mobile brand visible above content for non-shell contexts */}
-          <div className="md:hidden">
-            <QoreTechnicBrandMark size="md" align="center" />
-          </div>
           <div>
-            <h1 className="qt-hub-title">Cihaz Yönetim Merkezi</h1>
+            <h1 className="qt-hub-title hidden md:block">Cihaz Yönetim Merkezi</h1>
             <p className="qt-hub-subtitle">
               {hospitals.length} kurum · {devices.length} cihaz · {hospitalDeviceAssignments.length} atama
             </p>

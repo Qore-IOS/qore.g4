@@ -7,8 +7,6 @@ import { cn } from '@/lib/utils';
 import {
   Home,
   ShieldAlert,
-  CalendarClock,
-  Map as MapIcon,
   BarChart3,
   Settings,
   Wrench,
@@ -16,6 +14,8 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
+  ClipboardList,
+  Package,
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
@@ -117,11 +117,12 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
     primaryPanel,
     { key: 'arizalar', label: 'Tüm Arızalar', icon: ShieldAlert, href: '/ariza-yonetimi',
       match: (p) => p.startsWith('/ariza-yonetimi') && !p.startsWith('/ariza-yonetimi/istatistikler') },
-    { key: 'nobet', label: 'Nöbet', icon: CalendarClock, href: '/nobet-yonetimi',
-      match: (p) => p.startsWith('/nobet-yonetimi') },
-    { key: 'harita', label: 'Harita', icon: MapIcon,
-      href: isAplikasyon ? '/aplikasyon-harita' : '/teknik-harita',
-      match: (p) => p.startsWith('/teknik-harita') || p.startsWith('/aplikasyon-harita') },
+    { key: 'islem-formu', label: 'İşlem Formları', icon: ClipboardList,
+      href: isAplikasyon ? '/aplikasyon-paneli' : '/teknik-servis',
+      match: (p) => p.includes('/islem-formu') },
+    { key: 'yedek-parca', label: 'Yedek Parça', icon: Package,
+      href: '/direkt-transfer/yedek-parca-transfer',
+      match: (p) => p.startsWith('/direkt-transfer/yedek-parca-transfer') },
     { key: 'istatistik', label: 'İstatistikler', icon: BarChart3, href: '/ariza-yonetimi/istatistikler',
       match: (p) => p.startsWith('/ariza-yonetimi/istatistikler') },
     { key: 'tanim', label: 'Tanımlamalar', icon: Settings, href: '/cihaz-tanimlamalari',
@@ -208,7 +209,7 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
 
       {/* Mobile bottom nav */}
       <nav className="qore-technic-bottom-nav md:hidden" aria-label="QOREtechnic menü">
-        <div className="qore-technic-bottom-nav__scroll">
+        <div className="qore-technic-bottom-nav__scroll" style={{ justifyContent: 'space-around', gap: 0, overflowX: 'visible', paddingInline: '4px' }}>
           {navItems.map((item) => {
             const active = isActive(item);
             const Icon = item.icon;
@@ -218,9 +219,10 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
                 type="button"
                 onClick={() => router.push(item.href)}
                 className={cn('qore-technic-bottom-item', active && 'qore-technic-bottom-item--active')}
+                style={{ minWidth: 0, padding: '6px 2px', fontSize: '9px' }}
               >
-                <Icon className="h-5 w-5" />
-                <span>{item.label}</span>
+                <Icon className="h-4 w-4" />
+                <span style={{ lineHeight: 1.1 }}>{item.label}</span>
               </button>
             );
           })}

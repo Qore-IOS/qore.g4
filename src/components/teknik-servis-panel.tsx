@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import type { Hospital, Device, AssignedDevice, CihazYonetimiSubView, LabPool } from '@/lib/types';
 import {
   Wrench, ArrowLeft, Layers, ChevronRight, FileText,
-  Package,
+  Package, CalendarClock, Map as MapIcon,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import BackButton from './BackButton';
@@ -265,20 +265,34 @@ export default function TeknikServisPanel({
             </div>
 
             {/* Action buttons */}
-            <div className="flex flex-col gap-2 sm:flex-row sm:gap-2.5 w-full sm:w-auto">
+            <div className="flex flex-col gap-2 sm:flex-row sm:gap-2 sm:flex-wrap sm:justify-end w-full sm:w-auto">
               <button
                 onClick={() => router.push('/teknik-servis/tum-formlar')}
-                className="cihaz-tool-item cihaz-focus-ring flex items-center gap-2.5 px-4 py-2.5 text-sm"
+                className="cihaz-tool-item cihaz-focus-ring flex items-center gap-2 px-3 py-2 text-sm"
               >
                 <FileText className="h-4 w-4 text-[var(--dashboard-accent)]" />
                 <span className="text-[var(--dashboard-text)] font-medium">İşlem Formları</span>
               </button>
               <button
                 onClick={() => router.push('/direkt-transfer/yedek-parca-transfer')}
-                className="cihaz-tool-item cihaz-focus-ring flex items-center gap-2.5 px-4 py-2.5 text-sm"
+                className="cihaz-tool-item cihaz-focus-ring flex items-center gap-2 px-3 py-2 text-sm"
               >
                 <Package className="h-4 w-4 text-[var(--dashboard-accent)]" />
                 <span className="text-[var(--dashboard-text)] font-medium">Yedek Parça</span>
+              </button>
+              <button
+                onClick={() => router.push('/nobet-yonetimi')}
+                className="cihaz-tool-item cihaz-focus-ring flex items-center gap-2 px-3 py-2 text-sm"
+              >
+                <CalendarClock className="h-4 w-4 text-[var(--dashboard-accent)]" />
+                <span className="text-[var(--dashboard-text)] font-medium">Nöbet</span>
+              </button>
+              <button
+                onClick={() => router.push('/teknik-harita')}
+                className="cihaz-tool-item cihaz-focus-ring flex items-center gap-2 px-3 py-2 text-sm"
+              >
+                <MapIcon className="h-4 w-4 text-[var(--dashboard-accent)]" />
+                <span className="text-[var(--dashboard-text)] font-medium">Harita</span>
               </button>
             </div>
           </div>

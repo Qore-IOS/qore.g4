@@ -3,7 +3,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import type { Hospital, Device, AssignedDevice, CihazYonetimiSubView, LabPool } from '@/lib/types';
 import { Button as UiButton } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { FlaskConical, ArrowLeft, Layers, ChevronRight, FileText, Package, Loader2 } from 'lucide-react';
+import { FlaskConical, ArrowLeft, Layers, ChevronRight, FileText, Package, Loader2, Map as MapIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import BackButton from './BackButton';
 import { useRouter } from 'next/navigation';
@@ -255,14 +255,18 @@ export default function AplikasyonPanel({
         <CardHeader>
           <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
             <CardTitle className="text-xl sm:text-2xl font-headline flex items-center text-[var(--dashboard-text)]"><FlaskConical className="mr-3 h-7 w-7" />Aplikasyon Paneli</CardTitle>
-            <div className="flex w-full flex-col gap-2 sm:w-auto">
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
               <UiButton variant="outline" onClick={() => router.push('/aplikasyon-paneli/tum-formlar')} className="w-full sm:w-auto">
                 <FileText className="mr-2 h-4 w-4" />
-                Tüm İşlem Formlarını Göster
+                Tüm İşlem Formları
               </UiButton>
               <UiButton variant="outline" onClick={() => router.push('/direkt-transfer/yedek-parca-transfer')} className="w-full sm:w-auto">
                 <Package className="mr-2 h-4 w-4" />
                 Yedek Parça Stokları
+              </UiButton>
+              <UiButton variant="outline" onClick={() => router.push('/aplikasyon-harita')} className="w-full sm:w-auto">
+                <MapIcon className="mr-2 h-4 w-4" />
+                Harita
               </UiButton>
             </div>
           </div>
