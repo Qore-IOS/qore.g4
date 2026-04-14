@@ -27,6 +27,7 @@ export type NotificationType =
   | "user_request_created"
   | "user_request_completed"
   | "fault_reminder"
+  | "external_stock_usage"
   | "custom";
 
 export type ResourceType =
@@ -542,7 +543,7 @@ export async function emitExternalStockUsage(params: {
   const targetRoles = ['role:teknik_servis', 'role:aplikasyon', 'role:teknik_lojistik', 'role:admin'];
 
   await createNotification({
-    type: 'spare_part_transfer',
+    type: 'external_stock_usage',
     channel: 'push',
     title: `${sourceLabel} Stok Kullanımı`,
     message: `${params.actor.name}, ${params.sourceName} kaynağından ${params.stokAdi} (${params.stokKodu}${params.serialNumber ? `, SN: ${params.serialNumber}` : ''}) ${params.quantity} adet ürün kullandı.`,
