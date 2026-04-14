@@ -146,7 +146,7 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
         p.startsWith('/direkt-transfer/yedek-parca-transfer'),
       subItems: [
         { label: 'Form Oluştur', icon: PlusCircle, href: primaryPanel.href },
-        { label: 'İşlem Formları', icon: ClipboardList, href: primaryPanel.href },
+        { label: 'İşlem Formları', icon: ClipboardList, href: isAplikasyon ? '/aplikasyon-paneli/tum-formlar' : '/teknik-servis/tum-formlar' },
         { label: 'Yedek Parça', icon: Package, href: '/direkt-transfer/yedek-parca-transfer' },
       ],
     },

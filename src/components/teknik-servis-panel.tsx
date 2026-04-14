@@ -175,15 +175,7 @@ export default function TeknikServisPanel({
       <div className="cihaz-shell px-4 py-6 sm:px-8 sm:py-10">
         <div className="max-w-5xl mx-auto space-y-5">
           {/* Back + Header */}
-          <button
-            onClick={() => setExpandedPoolId(null)}
-            className="cihaz-focus-ring flex items-center gap-1.5 text-sm text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-colors"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Geri
-          </button>
-
-          <div className="cihaz-card-strong p-5 sm:p-7">
+          <div className="cihaz-card-strong p-5 sm:p-7 bg-white/40 backdrop-blur-md border border-white/50 shadow-sm">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2.5 mb-1">
@@ -212,7 +204,7 @@ export default function TeknikServisPanel({
                 <button
                   key={hospital.id}
                   onClick={() => router.push(`/teknik-servis/${hospital.id}`)}
-                  className="cihaz-card cihaz-focus-ring w-full text-left p-4 sm:p-5 flex flex-col"
+                  className="cihaz-card cihaz-focus-ring w-full text-left p-4 sm:p-5 flex flex-col bg-white/30 backdrop-blur-sm border border-white/40 shadow-sm hover:shadow-md transition-all hover:-translate-y-0.5"
                 >
                   <div className="flex items-start justify-between gap-2">
                     <h3 className="text-sm sm:text-[15px] font-semibold text-[var(--dashboard-text)] truncate leading-snug flex-1" title={hospital.name}>
@@ -240,11 +232,29 @@ export default function TeknikServisPanel({
   return (
     <div className="cihaz-shell px-4 py-6 sm:px-8 sm:py-10">
       <div className="max-w-5xl mx-auto space-y-5">
-        <BackButton fallback="/cihaz-yonetimi-ana" />
-
         {/* ── Header card ── */}
-        <div className="cihaz-card-strong p-5 sm:p-7">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="cihaz-card-strong p-5 sm:p-7 bg-white/40 backdrop-blur-md border border-white/50 shadow-sm relative">
+          {/* Action buttons top-right aligned */}
+          <div className="absolute top-4 right-4 flex items-center gap-2">
+            <button
+              onClick={() => router.push('/nobet-yonetimi')}
+              className="cihaz-tool-item cihaz-focus-ring flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg hover:bg-white/50 transition-colors"
+              title="Nöbet"
+            >
+              <CalendarClock className="h-4 w-4 text-[var(--dashboard-accent)]" />
+              <span className="text-[var(--dashboard-text)] font-medium hidden sm:inline">Nöbet</span>
+            </button>
+            <button
+              onClick={() => router.push('/teknik-harita')}
+              className="cihaz-tool-item cihaz-focus-ring flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg hover:bg-white/50 transition-colors"
+              title="Harita"
+            >
+              <MapIcon className="h-4 w-4 text-[var(--dashboard-accent)]" />
+              <span className="text-[var(--dashboard-text)] font-medium hidden sm:inline">Harita</span>
+            </button>
+          </div>
+
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between pr-32">
             <div>
               <div className="flex items-center gap-2.5 mb-1">
                 <span className="flex items-center justify-center w-10 h-10 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
@@ -264,36 +274,6 @@ export default function TeknikServisPanel({
               </div>
             </div>
 
-            {/* Action buttons */}
-            <div className="flex flex-col gap-2 sm:flex-row sm:gap-2 sm:flex-wrap sm:justify-end w-full sm:w-auto">
-              <button
-                onClick={() => router.push('/teknik-servis/tum-formlar')}
-                className="cihaz-tool-item cihaz-focus-ring flex items-center gap-2 px-3 py-2 text-sm"
-              >
-                <FileText className="h-4 w-4 text-[var(--dashboard-accent)]" />
-                <span className="text-[var(--dashboard-text)] font-medium">İşlem Formları</span>
-              </button>
-              <button
-                onClick={() => router.push('/direkt-transfer/yedek-parca-transfer')}
-                className="cihaz-tool-item cihaz-focus-ring flex items-center gap-2 px-3 py-2 text-sm"
-              >
-                <Package className="h-4 w-4 text-[var(--dashboard-accent)]" />
-                <span className="text-[var(--dashboard-text)] font-medium">Yedek Parça</span>
-              </button>
-              <button
-                onClick={() => router.push('/nobet-yonetimi')}
-                className="cihaz-tool-item cihaz-focus-ring flex items-center gap-2 px-3 py-2 text-sm"
-              >
-                <CalendarClock className="h-4 w-4 text-[var(--dashboard-accent)]" />
-                <span className="text-[var(--dashboard-text)] font-medium">Nöbet</span>
-              </button>
-              <button
-                onClick={() => router.push('/teknik-harita')}
-                className="cihaz-tool-item cihaz-focus-ring flex items-center gap-2 px-3 py-2 text-sm"
-              >
-                <MapIcon className="h-4 w-4 text-[var(--dashboard-accent)]" />
-                <span className="text-[var(--dashboard-text)] font-medium">Harita</span>
-              </button>
             </div>
           </div>
         </div>
