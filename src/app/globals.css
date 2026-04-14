@@ -3058,6 +3058,20 @@ html.qt-active { color: var(--qt-text); }
    ============================================ */
 .qt-content {
   color: var(--qt-text);
+  /* Re-map legacy neumorphic dashboard tokens so inline styles
+     (style={{ background: 'var(--dashboard-surface)' }}) that are
+     sprinkled across the module pages pick up the hub glass palette
+     instead of opaque white/off-white. */
+  --dashboard-surface: var(--qt-surface-strong);
+  --dashboard-surface-2: var(--qt-surface-soft);
+  --dashboard-text: var(--qt-text);
+  --dashboard-muted: var(--qt-muted);
+  --dashboard-stroke: var(--qt-stroke);
+  --dashboard-accent: var(--qt-accent);
+  --dashboard-focus-glow: rgba(124, 58, 237, 0.35);
+  --dashboard-raised: var(--qt-elev-sm);
+  --dashboard-raised-soft: var(--qt-elev-sm);
+  --dashboard-pressed: inset 0 1px 0 rgba(255, 255, 255, 0.45);
 }
 
 /* Kill the per-module background so the hub gradient is visible. */
@@ -3069,18 +3083,56 @@ html.qt-active { color: var(--qt-text); }
   padding: 0;
 }
 
-/* Transparent glass cards for ANY shadcn card / rounded container */
+/* Transparent glass cards for ANY shadcn card / rounded container
+   and all legacy neumorphic module-page card classes. */
 .qt-content .bg-card,
 .qt-content [data-slot="card"],
 .qt-content .neu-card,
 .qt-content [class~="bg-card"],
-.qt-content .glass-card {
+.qt-content .glass-card,
+.qt-content .cihaz-card,
+.qt-content .cihaz-card-strong {
   background: var(--qt-surface-strong) !important;
   backdrop-filter: blur(14px) saturate(140%);
   -webkit-backdrop-filter: blur(14px) saturate(140%);
   border: 1px solid var(--qt-stroke) !important;
   box-shadow: var(--qt-elev-sm) !important;
   color: var(--qt-text);
+  border-radius: 18px;
+}
+
+/* Pressed / inset neumorphic elements → subtle frosted well */
+.qt-content .cihaz-pressed {
+  background: var(--qt-surface-soft) !important;
+  border: 1px solid var(--qt-stroke) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35) !important;
+  color: var(--qt-text);
+}
+
+/* Small tool chips / utility buttons inside module pages */
+.qt-content .cihaz-tool-item,
+.qt-content .cihaz-action-tile {
+  background: var(--qt-surface) !important;
+  border: 1px solid var(--qt-stroke) !important;
+  box-shadow: var(--qt-elev-sm) !important;
+  color: var(--qt-text);
+  border-radius: 12px;
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease, transform 160ms ease, box-shadow 180ms ease;
+}
+.qt-content .cihaz-tool-item:hover,
+.qt-content .cihaz-action-tile:hover {
+  background: var(--qt-surface-strong) !important;
+  border-color: rgba(124, 58, 237, 0.28) !important;
+  color: var(--qt-accent) !important;
+  transform: translateY(-1px);
+  box-shadow: var(--qt-elev-md) !important;
+}
+
+/* Hover accent tint on neumorphic cards that are clickable */
+.qt-content .cihaz-card:hover {
+  background: var(--qt-surface) !important;
+  border-color: rgba(124, 58, 237, 0.22) !important;
+  box-shadow: var(--qt-elev-md) !important;
 }
 
 /* Neutralise opaque surface utilities */
@@ -3255,5 +3307,38 @@ html.qt-active [data-slot="alert-dialog-content"] {
 .qt-content > .qore-technic-main__inner > div.p-4,
 .qt-content > .qore-technic-main__inner > div.p-6 {
   background: transparent !important;
+}
+
+/* ---- Mobile menu overlay (yedek-parça transfer page) ----
+   The page uses <div class="fixed inset-0 z-50"> with an internal
+   <div class="... cihaz-shell ...">. Our transparency rule above
+   would let the QOREtechnic bottom nav bleed through that drawer.
+   Force the in-drawer cihaz-shell back to opaque hub glass surface
+   and make sure it sits ABOVE the bottom nav (z-50 > z-40). */
+.qt-content .fixed.inset-0 .cihaz-shell,
+.qt-content .fixed.inset-0 [class*="cihaz-shell"] {
+  background: var(--qt-surface-strong) !important;
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  border-right: 1px solid var(--qt-stroke);
+  min-height: 100dvh;
+}
+
+/* Also: hide the QOREtechnic bottom nav when a full-screen overlay
+   is active on the page (body gets [data-scroll-locked] on modals). */
+html.qt-active body[data-scroll-locked] .qore-technic-bottom-nav {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+}
+
+/* Ensure page content doesn't tuck UNDER the sidebar/bottom nav.
+   yedek-parça transfer header uses `flex items-center justify-between`
+   with a back button — add a little inline-start padding on mobile so
+   it doesn't collide with the mobile brand/area. */
+@media (max-width: 767px) {
+  .qt-content > .qore-technic-main__inner {
+    padding-top: 4px;
+  }
 }
 
