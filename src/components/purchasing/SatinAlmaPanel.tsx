@@ -41,6 +41,7 @@ import {
   ChevronRight,
   Calendar as CalendarIcon,
   CalendarClock,
+  CalendarRange,
   Clock,
   Trash2,
   X,
@@ -81,6 +82,7 @@ import {
   eachDayOfInterval,
   isSameDay,
   isToday,
+  isWeekend,
   startOfWeek,
   endOfWeek,
   parseISO,
@@ -437,10 +439,23 @@ interface TaskFormData {
   workflowNodeX?: number;
   workflowNodeY?: number;
   recurring?: PurchasingTaskRecurrence;
-  // Haftalık plan modu — aynı girdilerle Pzt-Cum günleri için görev üretir,
+  // Haftalık plan modu — her güne ayrı görev girişi yapılarak
   // firma sorumlusuna onay için bildirim gider.
   weeklyPlan?: boolean;
-  weeklyPlanStart?: string; // Haftanın başlangıç tarihi (Pazartesi)
+  weeklyPlanStart?: string;
+  weeklyPlanEnd?: string;
+  weeklyPlanDayEntries?: WeeklyPlanDayEntry[];
+}
+
+interface WeeklyPlanDayEntry {
+  date: string; // YYYY-MM-DD
+  title: string;
+  description: string;
+  startTime: string;
+  endTime: string;
+  priority: Priority;
+  laboratoryId?: string;
+  laboratoryName?: string;
 }
 
 
@@ -1161,21 +1176,9 @@ export default function SatinAlmaPanel() {
   const createWeeklyPlan = useCallback(async (data: TaskFormData) => {
     if (!currentUserProfile) return;
 
-    const baseDate = data.weeklyPlanStart
-      ? parseISO(data.weeklyPlanStart)
-      : parseISO(data.date);
-    // Pazartesi başlangıçlı hafta
-    const weekStart = startOfWeek(baseDate, { weekStartsOn: 1 });
-    const weekEnd = endOfWeek(baseDate, { weekStartsOn: 1 });
-
-    // Pzt-Cum günleri (5 iş günü), resmi tatil olanlar atlanır.
-    const weekdayOffsets = [0, 1, 2, 3, 4];
-    const planDates = weekdayOffsets
-      .map((offset) => format(addDays(weekStart, offset), 'yyyy-MM-dd'))
-      .filter((d) => getSpecialDay(d)?.type !== 'holiday');
-
-    if (planDates.length === 0) {
-      toast.warning('Seçilen haftada iş günü bulunamadı.');
+    const dayEntries = data.weeklyPlanDayEntries || [];
+    if (dayEntries.length === 0) {
+      toast.warning('Haftalık planda en az bir iş günü olmalıdır.');
       return;
     }
 
@@ -1183,45 +1186,32 @@ export default function SatinAlmaPanel() {
     const responsible = await fetchCompanyResponsible(currentUserProfile.companyId);
 
     const weeklyPlanGroupId = `wp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    const weekStartStr = format(weekStart, 'yyyy-MM-dd');
-    const weekEndStr = format(weekEnd, 'yyyy-MM-dd');
-
-    const basePayload: Record<string, any> = {
-      title: data.title,
-      description: data.description,
-      taskType: data.taskType,
-      taskTypeLabel: data.taskTypeLabel || null,
-      startTime: data.startTime,
-      endTime: data.endTime,
-      priority: data.priority,
-      completed: false,
-      createdByUid: currentUserProfile.uid,
-      createdByName: currentUserProfile.name || '',
-      weeklyPlanGroupId,
-      weeklyPlanWeekStart: weekStartStr,
-      // Sorumlu tanımlıysa onay bekliyor, yoksa otomatik onaylı.
-      approvalStatus: responsible ? 'pending' : 'approved',
-      ...(responsible && {
-        approvalRequiredFromUid: responsible.uid,
-        approvalRequiredFromName: responsible.name || '',
-      }),
-    };
-
-    if (data.laboratoryId) basePayload.laboratoryId = data.laboratoryId;
-    if (data.laboratoryName) basePayload.laboratoryName = data.laboratoryName;
-    if (data.accompanyingPersonnel?.length) basePayload.accompanyingPersonnel = data.accompanyingPersonnel;
-    if (data.assignedPersonnel?.length) basePayload.assignedPersonnel = data.assignedPersonnel;
-    if (data.subtasks?.length) basePayload.subtasks = data.subtasks;
-    if (data.completionChecklist?.length) basePayload.completionChecklist = data.completionChecklist;
-    if (data.expectedCompletionFileName) basePayload.expectedCompletionFileName = data.expectedCompletionFileName;
+    const weekStartStr = data.weeklyPlanStart || dayEntries[0].date;
+    const weekEndStr = data.weeklyPlanEnd || dayEntries[dayEntries.length - 1].date;
 
     try {
       const batch = writeBatch(db);
-      for (const planDate of planDates) {
+      for (const entry of dayEntries) {
         const ref = doc(collection(db, 'purchasingTasks'));
-        batch.set(ref, {
-          ...basePayload,
-          date: planDate,
+        const taskPayload: Record<string, any> = {
+          title: entry.title,
+          description: entry.description,
+          taskType: data.taskType,
+          taskTypeLabel: data.taskTypeLabel || null,
+          startTime: entry.startTime,
+          endTime: entry.endTime,
+          priority: entry.priority,
+          date: entry.date,
+          completed: false,
+          createdByUid: currentUserProfile.uid,
+          createdByName: currentUserProfile.name || '',
+          weeklyPlanGroupId,
+          weeklyPlanWeekStart: weekStartStr,
+          approvalStatus: responsible ? 'pending' : 'approved',
+          ...(responsible && {
+            approvalRequiredFromUid: responsible.uid,
+            approvalRequiredFromName: responsible.name || '',
+          }),
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now(),
           sortOrder: Date.now() + Math.random(),
@@ -1232,7 +1222,17 @@ export default function SatinAlmaPanel() {
               currentUserProfile
             ),
           ],
-        });
+        };
+
+        if (entry.laboratoryId) taskPayload.laboratoryId = entry.laboratoryId;
+        if (entry.laboratoryName) taskPayload.laboratoryName = entry.laboratoryName;
+        if (data.assignedPersonnel?.length) taskPayload.assignedPersonnel = data.assignedPersonnel;
+        if (data.accompanyingPersonnel?.length) taskPayload.accompanyingPersonnel = data.accompanyingPersonnel;
+        if (data.subtasks?.length) taskPayload.subtasks = data.subtasks;
+        if (data.completionChecklist?.length) taskPayload.completionChecklist = data.completionChecklist;
+        if (data.expectedCompletionFileName) taskPayload.expectedCompletionFileName = data.expectedCompletionFileName;
+
+        batch.set(ref, taskPayload);
       }
       await batch.commit();
 
@@ -1246,10 +1246,10 @@ export default function SatinAlmaPanel() {
             weeklyPlanGroupId,
             weekStart: weekStartStr,
             weekEnd: weekEndStr,
-            taskCount: planDates.length,
+            taskCount: dayEntries.length,
             companyName: responsible.companyName,
           });
-          toast.success(`Haftalık plan oluşturuldu. Onay için ${responsible.name || 'firma sorumlusu'} bilgilendirildi.`);
+          toast.success(`Haftalık plan oluşturuldu (${dayEntries.length} gün). Onay için ${responsible.name || 'firma sorumlusu'} bilgilendirildi.`);
         } catch (notifErr) {
           console.error('Weekly plan notification failed', notifErr);
           toast.warning('Plan oluşturuldu fakat bildirim gönderilemedi.');
@@ -1259,7 +1259,7 @@ export default function SatinAlmaPanel() {
       }
 
       setShowAddModal(false);
-      setSelectedDate(weekStart);
+      setSelectedDate(parseISO(dayEntries[0].date));
     } catch (err) {
       console.error('Error creating weekly plan', err);
       toast.error('Haftalık plan oluşturulamadı');
@@ -3195,13 +3195,43 @@ function TaskFormModal({
   const [recurringInterval, setRecurringInterval] = useState(1);
   const [recurringEndDate, setRecurringEndDate] = useState('');
 
-  // Haftalık plan modu — aynı girdilerle Pzt-Cum görev üretir, firma sorumlusu onayına düşer.
+  // Haftalık plan modu — tarih aralığı seçilir, her güne ayrı görev girilir.
   const [weeklyPlanMode, setWeeklyPlanMode] = useState(false);
   const [weeklyPlanStart, setWeeklyPlanStart] = useState<string>(
-    isEdit
-      ? format(startOfWeek(parseISO(task.date), { weekStartsOn: 1 }), 'yyyy-MM-dd')
-      : format(startOfWeek(parseISO(defaultDate), { weekStartsOn: 1 }), 'yyyy-MM-dd')
+    format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd')
   );
+  const [weeklyPlanEnd, setWeeklyPlanEnd] = useState<string>(
+    format(addDays(startOfWeek(new Date(), { weekStartsOn: 1 }), 4), 'yyyy-MM-dd')
+  );
+  // Per-day entries for weekly plan
+  const [wpDayEntries, setWpDayEntries] = useState<{ date: string; title: string; description: string; startTime: string; endTime: string; priority: Priority }[]>([]);
+  const [wpExpandedDay, setWpExpandedDay] = useState<string | null>(null);
+
+  // Compute business days from the selected range
+  const wpBusinessDays = useMemo(() => {
+    try {
+      const start = parseISO(weeklyPlanStart);
+      const end = parseISO(weeklyPlanEnd);
+      if (isBefore(end, start)) return [];
+      return eachDayOfInterval({ start, end })
+        .filter((d) => !isWeekend(d))
+        .filter((d) => getSpecialDay(format(d, 'yyyy-MM-dd'))?.type !== 'holiday')
+        .map((d) => format(d, 'yyyy-MM-dd'));
+    } catch { return []; }
+  }, [weeklyPlanStart, weeklyPlanEnd]);
+
+  // Sync day entries when business days change
+  useEffect(() => {
+    if (!weeklyPlanMode) return;
+    setWpDayEntries((prev) => {
+      const prevMap = new Map(prev.map((e) => [e.date, e]));
+      return wpBusinessDays.map((d) => prevMap.get(d) || { date: d, title: '', description: '', startTime: '09:00', endTime: '10:00', priority: 'normal' as Priority });
+    });
+    // auto-expand first day if none expanded
+    if (wpBusinessDays.length > 0 && !wpBusinessDays.includes(wpExpandedDay || '')) {
+      setWpExpandedDay(wpBusinessDays[0]);
+    }
+  }, [wpBusinessDays, weeklyPlanMode]);
 
   const labDropdownRef = useRef<HTMLDivElement>(null);
   const personnelDropdownRef = useRef<HTMLDivElement>(null);
@@ -3246,7 +3276,15 @@ function TaskFormModal({
   const descriptionValid = description.trim().length > 0;
   const titleValid = isVisitType || title.trim().length > 0;
   const labValid = !isVisitType || selectedLabId !== '';
-  const valid = titleValid && descriptionValid && timeValid && labValid;
+
+  // Weekly plan validation: every day must have title + description + valid time
+  const wpAllDaysValid = weeklyPlanMode
+    ? wpDayEntries.length > 0 && wpDayEntries.every((e) => e.title.trim().length > 0 && e.description.trim().length > 0 && parseTime(e.endTime) > parseTime(e.startTime))
+    : true;
+
+  const valid = weeklyPlanMode
+    ? wpAllDaysValid && wpDayEntries.length > 0
+    : titleValid && descriptionValid && timeValid && labValid;
 
   const togglePersonnel = (user: User) => {
     setSelectedPersonnel((prev) => {
@@ -3311,15 +3349,15 @@ function TaskFormModal({
     if (!valid || submitting) return;
     setSubmitting(true);
     await onSubmit({
-      title: effectiveTitle,
-      description: description.trim(),
+      title: weeklyPlanMode ? wpDayEntries[0]?.title || 'Haftalık Plan' : effectiveTitle,
+      description: weeklyPlanMode ? wpDayEntries[0]?.description || '' : description.trim(),
       taskType,
       taskTypeLabel: selectedDefinition?.name || (taskType === 'custom' ? 'Serbest Görev' : taskType),
-      date,
-      startTime,
-      endTime,
-      priority,
-      ...(isVisitType && {
+      date: weeklyPlanMode ? wpDayEntries[0]?.date || date : date,
+      startTime: weeklyPlanMode ? wpDayEntries[0]?.startTime || '09:00' : startTime,
+      endTime: weeklyPlanMode ? wpDayEntries[0]?.endTime || '10:00' : endTime,
+      priority: weeklyPlanMode ? wpDayEntries[0]?.priority || 'normal' : priority,
+      ...(isVisitType && !weeklyPlanMode && {
         laboratoryId: selectedLabId,
         laboratoryName: selectedLab?.name || '',
         accompanyingPersonnel: selectedPersonnel.length > 0 ? selectedPersonnel : undefined,
@@ -3337,7 +3375,7 @@ function TaskFormModal({
         workflowNodeX: defaultWorkflowPreset.x,
         workflowNodeY: defaultWorkflowPreset.y,
       }),
-      ...(isRecurring && !isEdit && {
+      ...(isRecurring && !isEdit && !weeklyPlanMode && {
         recurring: {
           type: recurringType,
           interval: recurringInterval,
@@ -3347,6 +3385,8 @@ function TaskFormModal({
       ...(weeklyPlanMode && !isEdit && {
         weeklyPlan: true,
         weeklyPlanStart,
+        weeklyPlanEnd,
+        weeklyPlanDayEntries: wpDayEntries,
       }),
     });
     setSubmitting(false);
@@ -3446,7 +3486,8 @@ function TaskFormModal({
             </div>
           </div>
 
-          {/* ===== SECTION B: Time — big preset buttons ===== */}
+          {/* ===== SECTION B: Time — big preset buttons (hidden in weekly plan mode) ===== */}
+          {!weeklyPlanMode && (
           <div className="rounded-2xl p-4 space-y-3" style={{ background: '#f7faf8' }}>
             <p className="text-[10px] font-bold uppercase tracking-[0.2em]" style={{ color: '#006b68' }}>Zaman</p>
             {/* Date presets */}
@@ -3516,6 +3557,7 @@ function TaskFormModal({
               <p className="text-[10px] font-semibold text-red-500">Bitiş saati başlangıçtan sonra olmalıdır</p>
             )}
           </div>
+          )}
 
           {/* ===== SECTION B2: Plan Modu — Günlük / Haftalık ===== */}
           {!isEdit && (
@@ -3551,34 +3593,201 @@ function TaskFormModal({
                 </button>
               </div>
               {weeklyPlanMode && (
-                <>
-                  <div>
-                    <label className="block text-[10px] font-semibold mb-1.5" style={{ color: 'var(--dashboard-muted)' }}>
-                      Haftanın Başlangıcı (Pazartesi)
-                    </label>
-                    <input
-                      type="date"
-                      value={weeklyPlanStart}
-                      onChange={(e) => {
-                        const picked = e.target.value ? parseISO(e.target.value) : parseISO(weeklyPlanStart);
-                        const mon = format(startOfWeek(picked, { weekStartsOn: 1 }), 'yyyy-MM-dd');
-                        setWeeklyPlanStart(mon);
-                      }}
-                      className={cn(inputCls, 'py-2.5 text-xs text-center dark:[color-scheme:dark]')}
-                      style={{ color: 'var(--dashboard-text)', background: '#ffffff' }}
-                    />
+                <div className="space-y-3 animate-in slide-in-from-top-2 duration-200">
+                  {/* Date range selection */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] font-semibold mb-1.5" style={{ color: 'var(--dashboard-muted)' }}>
+                        Başlangıç Tarihi
+                      </label>
+                      <input
+                        type="date"
+                        value={weeklyPlanStart}
+                        onChange={(e) => setWeeklyPlanStart(e.target.value)}
+                        className={cn(inputCls, 'py-2.5 text-xs text-center dark:[color-scheme:dark]')}
+                        style={{ color: 'var(--dashboard-text)', background: '#ffffff' }}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-semibold mb-1.5" style={{ color: 'var(--dashboard-muted)' }}>
+                        Bitiş Tarihi
+                      </label>
+                      <input
+                        type="date"
+                        value={weeklyPlanEnd}
+                        onChange={(e) => setWeeklyPlanEnd(e.target.value)}
+                        className={cn(inputCls, 'py-2.5 text-xs text-center dark:[color-scheme:dark]')}
+                        style={{ color: 'var(--dashboard-text)', background: '#ffffff' }}
+                      />
+                    </div>
                   </div>
+
+                  {/* Business days info */}
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-2xl" style={{ background: 'rgba(0,107,104,0.07)' }}>
+                    <CalendarRange className="w-3.5 h-3.5" style={{ color: '#006b68' }} />
+                    <span className="text-[11px] font-semibold" style={{ color: '#006b68' }}>
+                      {wpBusinessDays.length > 0 ? `${wpBusinessDays.length} iş günü bulundu` : 'Seçilen aralıkta iş günü yok'}
+                    </span>
+                  </div>
+
+                  {/* Per-day task entry cards */}
+                  {wpDayEntries.map((entry, idx) => {
+                    const dayDate = parseISO(entry.date);
+                    const dayLabel = format(dayDate, 'EEEE', { locale: tr });
+                    const dayFormatted = format(dayDate, 'd MMMM', { locale: tr });
+                    const isExpanded = wpExpandedDay === entry.date;
+                    const dayTimeValid = parseTime(entry.endTime) > parseTime(entry.startTime);
+                    const dayFilled = entry.title.trim().length > 0 && entry.description.trim().length > 0 && dayTimeValid;
+
+                    const updateEntry = (updates: Partial<typeof entry>) => {
+                      setWpDayEntries((prev) => prev.map((e, i) => i === idx ? { ...e, ...updates } : e));
+                    };
+
+                    return (
+                      <div
+                        key={entry.date}
+                        className="rounded-xl overflow-hidden transition-all"
+                        style={{ border: `1px solid ${dayFilled ? 'rgba(0,107,104,0.3)' : isExpanded ? 'rgba(0,107,104,0.2)' : 'var(--dashboard-stroke)'}`, background: '#ffffff' }}
+                      >
+                        {/* Day header — clickable accordion */}
+                        <button
+                          type="button"
+                          onClick={() => setWpExpandedDay(isExpanded ? null : entry.date)}
+                          className="w-full flex items-center justify-between px-4 py-3 text-left transition-all hover:brightness-[0.98]"
+                        >
+                          <div className="flex items-center gap-2">
+                            <div className={cn('w-2 h-2 rounded-full', dayFilled ? 'bg-emerald-500' : 'bg-gray-300')} />
+                            <span className="text-xs font-bold capitalize" style={{ color: 'var(--dashboard-text)' }}>
+                              {dayLabel}
+                            </span>
+                            <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>
+                              {dayFormatted}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {dayFilled && (
+                              <span className="text-[9px] font-semibold px-2 py-0.5 rounded-full" style={{ background: 'rgba(0,107,104,0.08)', color: '#006b68' }}>
+                                {entry.startTime}–{entry.endTime}
+                              </span>
+                            )}
+                            <ChevronDown className={cn('w-3.5 h-3.5 transition-transform', isExpanded && 'rotate-180')} style={{ color: 'var(--dashboard-muted)' }} />
+                          </div>
+                        </button>
+
+                        {/* Day form — expanded */}
+                        {isExpanded && (
+                          <div className="px-4 pb-4 pt-1 space-y-3 border-t animate-in slide-in-from-top-1 duration-150" style={{ borderColor: 'var(--dashboard-stroke)' }}>
+                            {/* Title */}
+                            <div>
+                              <label className="block text-[10px] font-semibold mb-1" style={{ color: 'var(--dashboard-muted)' }}>Başlık *</label>
+                              <input
+                                type="text"
+                                value={entry.title}
+                                onChange={(e) => updateEntry({ title: e.target.value })}
+                                placeholder="Bu gün ne yapılacak?"
+                                className={cn(inputCls, 'py-2.5 text-xs')}
+                                style={{ color: 'var(--dashboard-text)', border: '1px solid var(--dashboard-stroke)' }}
+                              />
+                            </div>
+                            {/* Description */}
+                            <div>
+                              <label className="block text-[10px] font-semibold mb-1" style={{ color: 'var(--dashboard-muted)' }}>Açıklama *</label>
+                              <textarea
+                                value={entry.description}
+                                onChange={(e) => updateEntry({ description: e.target.value })}
+                                placeholder="Detaylı açıklama"
+                                rows={2}
+                                className={cn(inputCls, 'resize-none py-2.5 text-xs')}
+                                style={{ color: 'var(--dashboard-text)', border: '1px solid var(--dashboard-stroke)' }}
+                              />
+                            </div>
+                            {/* Time */}
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="block text-[10px] font-semibold mb-1" style={{ color: 'var(--dashboard-muted)' }}>Başlangıç</label>
+                                <input
+                                  type="time"
+                                  value={entry.startTime}
+                                  onChange={(e) => updateEntry({ startTime: e.target.value })}
+                                  className={cn(inputCls, 'py-2 text-xs dark:[color-scheme:dark]')}
+                                  style={{ background: '#ffffff', color: 'var(--dashboard-text)', border: '1px solid var(--dashboard-stroke)' }}
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-semibold mb-1" style={{ color: 'var(--dashboard-muted)' }}>Bitiş</label>
+                                <input
+                                  type="time"
+                                  value={entry.endTime}
+                                  onChange={(e) => updateEntry({ endTime: e.target.value })}
+                                  className={cn(inputCls, 'py-2 text-xs dark:[color-scheme:dark]')}
+                                  style={{ background: '#ffffff', color: 'var(--dashboard-text)', border: '1px solid var(--dashboard-stroke)' }}
+                                />
+                              </div>
+                            </div>
+                            {!dayTimeValid && entry.startTime && entry.endTime && (
+                              <p className="text-[9px] font-semibold text-red-500">Bitiş saati başlangıçtan sonra olmalı</p>
+                            )}
+                            {/* Duration presets */}
+                            <div className="flex gap-1">
+                              {[
+                                { label: '30dk', mins: 30 },
+                                { label: '1s', mins: 60 },
+                                { label: '2s', mins: 120 },
+                                { label: '4s', mins: 240 },
+                              ].map((dur) => {
+                                const computedEnd = `${Math.floor((parseTime(entry.startTime) + dur.mins) / 60).toString().padStart(2, '0')}:${((parseTime(entry.startTime) + dur.mins) % 60).toString().padStart(2, '0')}`;
+                                return (
+                                  <button
+                                    key={dur.label}
+                                    type="button"
+                                    onClick={() => updateEntry({ endTime: computedEnd })}
+                                    className={cn('flex-1 py-1.5 rounded-full text-[9px] font-bold transition-all fluid-card-tap')}
+                                    style={entry.endTime === computedEnd ? { background: '#006b68', color: '#e1fffd' } : { background: '#f0f5f2', color: 'var(--dashboard-muted)' }}
+                                  >
+                                    {dur.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            {/* Priority */}
+                            <div>
+                              <label className="block text-[10px] font-semibold mb-1" style={{ color: 'var(--dashboard-muted)' }}>Öncelik</label>
+                              <div className="grid grid-cols-4 gap-1">
+                                {(Object.entries(PRIORITY_CONFIG) as [Priority, typeof PRIORITY_CONFIG[Priority]][]).map(([key, conf]) => (
+                                  <button
+                                    key={key}
+                                    type="button"
+                                    onClick={() => updateEntry({ priority: key })}
+                                    className={cn('flex items-center justify-center gap-0.5 py-2 rounded-xl text-[9px] font-bold transition-all fluid-card-tap')}
+                                    style={entry.priority === key
+                                      ? { background: '#006b68', color: '#e1fffd', boxShadow: '0 2px 8px rgba(0,107,104,0.2)' }
+                                      : { background: '#f0f5f2', color: 'var(--dashboard-muted)' }}
+                                  >
+                                    <conf.icon className="w-2.5 h-2.5" />
+                                    {conf.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {/* Info text */}
                   <p className="text-[10px] leading-relaxed" style={{ color: 'var(--dashboard-muted)' }}>
-                    Pzt–Cum günleri için aynı girdilerle 5 görev oluşturulur. Plan, firmanızın sorumlusuna
+                    Her güne ayrı görev detayı girilir. Plan, firmanızın sorumlusuna
                     onay için bildirim olarak iletilir. Onaylandığında takvimde aktif olur; aksi hâlde
                     <span className="font-semibold"> "Onay Bekliyor"</span> etiketiyle görünür.
                   </p>
-                </>
+                </div>
               )}
             </div>
           )}
 
-          {/* ===== SECTION C: Priority — segmented, single row ===== */}
+          {/* ===== SECTION C: Priority — segmented, single row (hidden in weekly plan mode) ===== */}
+          {!weeklyPlanMode && (
           <div>
             <p className="text-[10px] font-bold uppercase tracking-[0.2em] mb-2" style={{ color: 'var(--dashboard-muted)' }}>Öncelik Seviyesi</p>
             <div className="grid grid-cols-4 gap-1.5">
@@ -3600,6 +3809,7 @@ function TaskFormModal({
               ))}
             </div>
           </div>
+          )}
 
           {/* ===== SECTION D: Assignees — single big button ===== */}
           <div ref={assignedDropdownRef} className="relative">
@@ -3998,11 +4208,12 @@ function TaskFormModal({
               </>
             ) : (
               <>
-                {!isEdit && <Plus className="w-4 h-4" strokeWidth={2.5} />}
+                {!isEdit && !weeklyPlanMode && <Plus className="w-4 h-4" strokeWidth={2.5} />}
+                {!isEdit && weeklyPlanMode && <Send className="w-4 h-4" strokeWidth={2.5} />}
                 {isEdit
                   ? 'Kaydet'
                   : weeklyPlanMode
-                  ? 'Haftalık Plan Oluştur'
+                  ? `Haftalık Planı Onaya Gönder (${wpDayEntries.length} gün)`
                   : `Görev Ekle${files.length > 0 ? ` (${files.length} dosya)` : ''}`}
               </>
             )}
