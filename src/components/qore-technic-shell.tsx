@@ -16,6 +16,8 @@ import {
   ChevronRight,
   ClipboardList,
   Package,
+  Eye,
+  PlusCircle,
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
@@ -73,6 +75,8 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
   const role = currentUserProfile?.role;
   const isAplikasyon = role === 'aplikasyon';
 
+  const [expandedMenu, setExpandedMenu] = useState<string | null>(null);
+
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     try { return window.localStorage.getItem('qt:sidebar:collapsed') === '1'; } catch { return false; }
@@ -127,6 +131,38 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
       match: (p) => p.startsWith('/ariza-yonetimi/istatistikler') },
     { key: 'tanim', label: 'Tanımlamalar', icon: Settings, href: '/cihaz-tanimlamalari',
       match: (p) => p.startsWith('/cihaz-tanimlamalari') || p.startsWith('/ariza-tanimlamalari') },
+  ];
+
+  const mobileNavItems = [
+    { key: 'home', label: 'Ana Panel', icon: Home, href: '/cihaz-yonetimi-ana', match: (p: string) => p === '/cihaz-yonetimi-ana' },
+    { key: 'arizalar', label: 'Tüm Arızalar', icon: ShieldAlert, href: '/ariza-yonetimi', match: (p: string) => p.startsWith('/ariza-yonetimi') && !p.startsWith('/ariza-yonetimi/istatistikler') },
+    {
+      key: 'primary',
+      label: primaryPanel.label,
+      icon: primaryPanel.icon,
+      match: (p: string) => 
+        p.startsWith('/aplikasyon-paneli') || 
+        p.startsWith('/teknik-servis') || 
+        p.startsWith('/direkt-transfer/yedek-parca-transfer'),
+      subItems: [
+        { label: 'Form Oluştur', icon: PlusCircle, href: primaryPanel.href },
+        { label: 'İşlem Formları', icon: ClipboardList, href: primaryPanel.href },
+        { label: 'Yedek Parça', icon: Package, href: '/direkt-transfer/yedek-parca-transfer' },
+      ],
+    },
+    {
+      key: 'gozlem',
+      label: 'Gözlem',
+      icon: Eye,
+      match: (p: string) => 
+        p.startsWith('/ariza-yonetimi/istatistikler') || 
+        p.startsWith('/cihaz-tanimlamalari') || 
+        p.startsWith('/ariza-tanimlamalari'),
+      subItems: [
+        { label: 'İstatistikler', icon: BarChart3, href: '/ariza-yonetimi/istatistikler' },
+        { label: 'Tanımlamalar', icon: Settings, href: '/cihaz-tanimlamalari' },
+      ],
+    },
   ];
 
   const isActive = (item: NavItem) => (item.match ? item.match(pathname) : pathname === item.href);
@@ -209,17 +245,56 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
 
       {/* Mobile bottom nav */}
       <nav className="qore-technic-bottom-nav md:hidden" aria-label="QOREtechnic menü">
+        {/* Backdrop for closing popovers */}
+        <div 
+          className={cn('qt-popover-overlay', expandedMenu && 'qt-popover-overlay--open')}
+          onClick={() => setExpandedMenu(null)}
+          aria-hidden="true"
+        />
+
+        {/* Popover Container */}
+        <div className={cn('qt-mobile-popover', expandedMenu && 'qt-mobile-popover--open')} aria-hidden={!expandedMenu}>
+          {expandedMenu && 
+            mobileNavItems.find(g => g.key === expandedMenu)?.subItems?.map((sub, idx) => {
+              const SubIcon = sub.icon;
+              return (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => {
+                    setExpandedMenu(null);
+                    router.push(sub.href);
+                  }}
+                  className="qt-popover-item"
+                >
+                  <span className="qt-popover-item-icon">
+                    <SubIcon className="w-5 h-5" />
+                  </span>
+                  <span>{sub.label}</span>
+                </button>
+              );
+            })
+          }
+        </div>
+
         <div className="qore-technic-bottom-nav__scroll" style={{ justifyContent: 'space-around', gap: 0, overflowX: 'visible', paddingInline: '4px' }}>
-          {navItems.map((item) => {
-            const active = isActive(item);
+          {mobileNavItems.map((item) => {
+            const active = item.match ? item.match(pathname) : false;
             const Icon = item.icon;
             return (
               <button
                 key={item.key}
                 type="button"
-                onClick={() => router.push(item.href)}
+                onClick={() => {
+                  if (item.subItems) {
+                    setExpandedMenu(expandedMenu === item.key ? null : item.key);
+                  } else if (item.href) {
+                    setExpandedMenu(null);
+                    router.push(item.href);
+                  }
+                }}
                 className={cn('qore-technic-bottom-item', active && 'qore-technic-bottom-item--active')}
-                style={{ minWidth: 0, padding: '6px 2px', fontSize: '9px' }}
+                style={{ minWidth: 0, padding: '6px 2px', fontSize: '9px', position: 'relative', zIndex: 40 }}
               >
                 <Icon className="h-4 w-4" />
                 <span style={{ lineHeight: 1.1 }}>{item.label}</span>

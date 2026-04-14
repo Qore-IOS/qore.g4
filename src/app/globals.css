@@ -2681,6 +2681,87 @@ html.qt-active { color: var(--qt-text); }
   box-shadow: 0 8px 20px -8px rgba(124, 58, 237, 0.55);
 }
 
+/* Mobile Popover Backdrops & Containers */
+.qt-popover-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  background: rgba(0, 0, 0, 0.05);
+  backdrop-filter: blur(1px);
+  -webkit-backdrop-filter: blur(1px);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 250ms ease;
+}
+
+.qt-popover-overlay--open {
+  pointer-events: auto;
+  opacity: 1;
+}
+
+.qt-mobile-popover {
+  position: absolute;
+  bottom: calc(100% + 12px);
+  /* The nav is pinned left/right, so we can position this anywhere inside */
+  left: 10px;
+  right: 10px;
+  background: rgba(255, 255, 255, 0.70);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 20px;
+  box-shadow: 0 -4px 24px 0 rgba(31, 38, 135, 0.08);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  
+  /* Animation setup */
+  transform: translateY(20px) scale(0.98);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 250ms ease;
+  transform-origin: bottom center;
+  z-index: 36;
+}
+
+.qt-mobile-popover--open {
+  transform: translateY(0) scale(1);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.qt-popover-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  color: var(--qt-text);
+  font-weight: 600;
+  font-size: 14px;
+  transition: background 200ms ease, transform 160ms ease, box-shadow 200ms ease;
+}
+
+.qt-popover-item:active {
+  background: var(--qt-surface);
+  transform: scale(0.98);
+  box-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.05);
+}
+
+.qt-popover-item-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.1), rgba(6, 182, 212, 0.1));
+  color: var(--qt-accent);
+}
+
 /* ============================================
    QOREtechnic Hub Content styles
    ============================================ */
