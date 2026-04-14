@@ -2426,39 +2426,51 @@ html.qt-active { color: var(--qt-text); }
 
 .qore-technic-sidebar__brand {
   position: relative;
-  padding: 6px 10px 14px;
+  padding: 6px 6px 14px;
   border-bottom: 1px solid var(--qt-stroke);
-  min-height: 44px;
+  min-height: 52px;
   display: flex;
   align-items: center;
+  gap: 8px;
+}
+
+.qore-technic-sidebar__brand-inner {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
 }
 
 .qore-technic-shell--collapsed .qore-technic-sidebar__brand {
-  padding: 6px 0 14px;
+  flex-direction: column;
+  gap: 10px;
+  padding: 6px 0 12px;
+}
+
+.qore-technic-shell--collapsed .qore-technic-sidebar__brand-inner {
   justify-content: center;
 }
 
 .qore-technic-collapse-btn {
-  position: absolute;
-  right: -14px;
-  top: 6px;
-  width: 26px;
-  height: 26px;
+  position: relative;
+  width: 28px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 999px;
-  background: var(--qt-surface-strong);
+  border-radius: 8px;
+  background: var(--qt-surface-soft);
   border: 1px solid var(--qt-stroke);
   color: var(--qt-text-soft);
-  box-shadow: var(--qt-elev-sm);
   transition: transform 160ms ease, color 160ms ease, background 160ms ease;
-  z-index: 2;
+  flex-shrink: 0;
 }
 
 .qore-technic-collapse-btn:hover {
   color: var(--qt-accent);
-  transform: scale(1.06);
+  background: var(--qt-surface-strong);
+  transform: scale(1.05);
 }
 
 /* Brand icon-only badge shown when sidebar is collapsed */
@@ -2541,12 +2553,21 @@ html.qt-active { color: var(--qt-text); }
 
 .qore-technic-shell--collapsed .qore-technic-navitem {
   justify-content: center;
-  padding: 10px 6px;
+  padding: 8px 0;
+  gap: 0;
+}
+
+.qore-technic-shell--collapsed .qore-technic-navitem__icon {
+  margin: 0 auto;
 }
 
 .qore-technic-shell--collapsed .qore-technic-navitem__label {
   opacity: 0;
   max-width: 0;
+  width: 0;
+  flex: 0 0 0;
+  margin: 0;
+  padding: 0;
   pointer-events: none;
 }
 
@@ -2957,6 +2978,73 @@ html.qt-active { color: var(--qt-text); }
   font-size: 13px;
   color: var(--qt-muted);
 }
+
+/* Hub-themed action buttons (module pages) */
+.qt-action-bar { gap: 8px; }
+
+.qt-icon-btn,
+.qt-ghost-btn,
+.qt-primary-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  transition: transform 160ms ease, box-shadow 180ms ease, filter 180ms ease, background 180ms ease, color 180ms ease, border-color 180ms ease;
+}
+
+.qt-icon-btn {
+  width: 38px;
+  padding: 0;
+  justify-content: center;
+  background: var(--qt-surface);
+  border: 1px solid var(--qt-stroke);
+  color: var(--qt-text-soft);
+  box-shadow: var(--qt-elev-sm);
+}
+
+.qt-icon-btn:hover:not(:disabled) {
+  color: var(--qt-accent);
+  transform: translateY(-1px);
+  box-shadow: var(--qt-elev-md);
+}
+
+.qt-icon-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.qt-ghost-btn {
+  background: var(--qt-surface);
+  border: 1px solid var(--qt-stroke);
+  color: var(--qt-text);
+  box-shadow: var(--qt-elev-sm);
+}
+
+.qt-ghost-btn:hover {
+  background: var(--qt-surface-strong);
+  border-color: rgba(124, 58, 237, 0.28);
+  color: var(--qt-accent);
+  transform: translateY(-1px);
+  box-shadow: var(--qt-elev-md);
+}
+
+.qt-primary-btn {
+  background: linear-gradient(135deg, var(--qt-accent), var(--qt-accent-2));
+  color: #fff;
+  border: 1px solid transparent;
+  box-shadow: 0 10px 22px -12px rgba(124, 58, 237, 0.55), 0 3px 8px -4px rgba(6, 182, 212, 0.35);
+}
+
+.qt-primary-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.04);
+  box-shadow: 0 14px 28px -12px rgba(124, 58, 237, 0.6), 0 4px 10px -4px rgba(6, 182, 212, 0.4);
+}
+
+.qt-primary-btn:active { transform: translateY(0); }
 
 /* ============================================
    Hub content overrides for legacy module pages.
