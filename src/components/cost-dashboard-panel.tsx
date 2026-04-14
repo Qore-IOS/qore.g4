@@ -929,8 +929,9 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
         const hospitals = locations.filter(l => l.type === 'lab');
 
         let r = 2;
+        let depotTotal = 0;
 
-        // Depot entries: Kit+Sarf combined, Yedek Parça separately (matching reference)
+        // Depot entries
         depots.forEach(loc => {
           const kitSarf = loc.kitCost + loc.sarfCost;
           if (kitSarf > 0) {
@@ -945,23 +946,36 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
             styleRow(row, 2, { numFmtCols: [2], leftAlignCols: [1] });
             r++;
           }
+          depotTotal += loc.totalCost;
         });
 
-        // Special entries like PCR/INR if depots have sub-categories
-        // (these would show as separate depot sessions in the data)
-
-        // Hospital entries
-        let hospTotal = 0;
-        hospitals.forEach(loc => {
-          const row = ws.getRow(r);
-          row.values = [loc.name, Number(loc.totalCost.toFixed(2))];
-          styleRow(row, 2, { numFmtCols: [2], leftAlignCols: [1] });
-          hospTotal += loc.totalCost;
+        // Depolar toplam
+        if (depots.length > 0) {
+          const dtRow = ws.getRow(r);
+          dtRow.values = ['Depolar toplam', Number(depotTotal.toFixed(2))];
+          dtRow.height = 26;
+          styleRow(dtRow, 2, { fill: SUBTOTAL_FILL, font: SUBTOTAL_FONT, numFmtCols: [2] });
           r++;
-        });
+        }
 
-        // Hastaneler toplam (yellow background, red bold text - matching reference)
+        // ── SECTION 1.1: KURUMLAR (only if labs exist) ──
+        let hospTotal = 0;
         if (hospitals.length > 0) {
+          const kHdr = ws.getRow(r);
+          kHdr.values = ['KURUMLAR', 'Stok Maliyet TL'];
+          kHdr.height = 30;
+          styleRow(kHdr, 2, { fill: HEADER_FILL, font: HEADER_FONT });
+          r++;
+
+          hospitals.forEach(loc => {
+            const row = ws.getRow(r);
+            row.values = [loc.name, Number(loc.totalCost.toFixed(2))];
+            styleRow(row, 2, { numFmtCols: [2], leftAlignCols: [1] });
+            hospTotal += loc.totalCost;
+            r++;
+          });
+
+          // Hastaneler toplam (yellow)
           const stRow = ws.getRow(r);
           stRow.values = ['Hastaneler toplam', Number(hospTotal.toFixed(2))];
           stRow.height = 26;
