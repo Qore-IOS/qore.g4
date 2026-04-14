@@ -3171,9 +3171,12 @@ html.qt-active { color: var(--qt-text); }
   /* Re-map legacy neumorphic dashboard tokens so inline styles
      (style={{ background: 'var(--dashboard-surface)' }}) that are
      sprinkled across the module pages pick up the hub glass palette
-     instead of opaque white/off-white. */
-  --dashboard-surface: var(--qt-surface-strong);
-  --dashboard-surface-2: var(--qt-surface-soft);
+     instead of opaque white/off-white.
+     Using low-alpha rgba directly so cards stay visibly translucent
+     even when backdrop-filter is disabled by a 3D parent
+     (e.g. .device-flip-inner uses transform-style: preserve-3d). */
+  --dashboard-surface: rgba(255, 255, 255, 0.45);
+  --dashboard-surface-2: rgba(255, 255, 255, 0.3);
   --dashboard-text: var(--qt-text);
   --dashboard-muted: var(--qt-muted);
   --dashboard-stroke: var(--qt-stroke);
@@ -3182,6 +3185,11 @@ html.qt-active { color: var(--qt-text); }
   --dashboard-raised: var(--qt-elev-sm);
   --dashboard-raised-soft: var(--qt-elev-sm);
   --dashboard-pressed: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+.dark .qt-content {
+  --dashboard-surface: rgba(17, 24, 39, 0.5);
+  --dashboard-surface-2: rgba(17, 24, 39, 0.35);
 }
 
 /* Kill the per-module background so the hub gradient is visible. */
@@ -3194,7 +3202,11 @@ html.qt-active { color: var(--qt-text); }
 }
 
 /* Transparent glass cards for ANY shadcn card / rounded container
-   and all legacy neumorphic module-page card classes. */
+   and all legacy neumorphic module-page card classes.
+   NOTE: we use explicit low-alpha rgba (not var(--qt-surface-strong))
+   because some cards live inside `transform-style: preserve-3d`
+   containers (e.g. device-flip-inner) that break backdrop-filter.
+   With low alpha we stay visibly glassy even without blur. */
 .qt-content .bg-card,
 .qt-content [data-slot="card"],
 .qt-content .neu-card,
@@ -3202,7 +3214,7 @@ html.qt-active { color: var(--qt-text); }
 .qt-content .glass-card,
 .qt-content .cihaz-card,
 .qt-content .cihaz-card-strong {
-  background: var(--qt-surface-strong) !important;
+  background: rgba(255, 255, 255, 0.45) !important;
   backdrop-filter: blur(14px) saturate(140%);
   -webkit-backdrop-filter: blur(14px) saturate(140%);
   border: 1px solid var(--qt-stroke) !important;
@@ -3211,36 +3223,59 @@ html.qt-active { color: var(--qt-text); }
   border-radius: 18px;
 }
 
+.dark .qt-content .bg-card,
+.dark .qt-content [data-slot="card"],
+.dark .qt-content .neu-card,
+.dark .qt-content [class~="bg-card"],
+.dark .qt-content .glass-card,
+.dark .qt-content .cihaz-card,
+.dark .qt-content .cihaz-card-strong {
+  background: rgba(17, 24, 39, 0.5) !important;
+}
+
 /* Pressed / inset neumorphic elements → subtle frosted well */
 .qt-content .cihaz-pressed {
-  background: var(--qt-surface-soft) !important;
+  background: rgba(255, 255, 255, 0.3) !important;
   border: 1px solid var(--qt-stroke) !important;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35) !important;
   color: var(--qt-text);
+}
+.dark .qt-content .cihaz-pressed {
+  background: rgba(17, 24, 39, 0.35) !important;
 }
 
 /* Small tool chips / utility buttons inside module pages */
 .qt-content .cihaz-tool-item,
 .qt-content .cihaz-action-tile {
-  background: var(--qt-surface) !important;
+  background: rgba(255, 255, 255, 0.4) !important;
   border: 1px solid var(--qt-stroke) !important;
   box-shadow: var(--qt-elev-sm) !important;
   color: var(--qt-text);
   border-radius: 12px;
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
   transition: background 160ms ease, color 160ms ease, border-color 160ms ease, transform 160ms ease, box-shadow 180ms ease;
 }
 .qt-content .cihaz-tool-item:hover,
 .qt-content .cihaz-action-tile:hover {
-  background: var(--qt-surface-strong) !important;
+  background: rgba(255, 255, 255, 0.6) !important;
   border-color: rgba(124, 58, 237, 0.28) !important;
   color: var(--qt-accent) !important;
   transform: translateY(-1px);
   box-shadow: var(--qt-elev-md) !important;
 }
+.dark .qt-content .cihaz-tool-item,
+.dark .qt-content .cihaz-action-tile {
+  background: rgba(17, 24, 39, 0.4) !important;
+}
+.dark .qt-content .cihaz-tool-item:hover,
+.dark .qt-content .cihaz-action-tile:hover {
+  background: rgba(17, 24, 39, 0.6) !important;
+}
 
 /* Hover accent tint on neumorphic cards that are clickable */
 .qt-content .cihaz-card:hover {
-  background: var(--qt-surface) !important;
+  background: rgba(255, 255, 255, 0.6) !important;
   border-color: rgba(124, 58, 237, 0.22) !important;
   box-shadow: var(--qt-elev-md) !important;
 }
