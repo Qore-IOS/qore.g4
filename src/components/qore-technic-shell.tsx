@@ -178,6 +178,11 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
     }));
   });
 
+  // Mobile bottom nav uses the same item list as navItems. Items with a
+  // `submenu` open the selection sheet; items with `subItems` open the
+  // mobile popover (currently none, but kept for future grouping).
+  const mobileNavItems = navItems as (NavItem & { subItems?: { label: string; icon: React.ElementType; href: string }[] })[];
+
   const isActive = (item: NavItem) => (item.match ? item.match(pathname) : pathname === item.href);
 
   const handleLogout = async () => {
