@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import type { DeviceFaultReport, DeviceFaultStatus } from '@/lib/types';
 import {
   Card,
@@ -135,12 +135,15 @@ function normalizeStatus(status: string): DeviceFaultStatus {
   return status as DeviceFaultStatus;
 }
 
+const VALID_STATUS_TABS: StatusTab[] = ['all', 'atama_bekliyor', 'mudahale_bekliyor', 'mudahale_ediliyor', 'cozuldu'];
+
 export default function ArizaYonetimiPage() {
   const [reports, setReports] = useState<DeviceFaultReport[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const { toast } = useToast();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { isAdmin, currentCompanyId, isSuperAdmin } = useAuth();
 
   const [currentPage, setCurrentPage] = useState(1);
@@ -149,8 +152,22 @@ export default function ArizaYonetimiPage() {
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
 
-  // Yeni 5 sekmeli filtre sistemi
-  const [statusTab, setStatusTab] = useState<StatusTab>('all');
+  // Yeni 5 sekmeli filtre sistemi. ?tab=atama_bekliyor gibi query parametresiyle
+  // başlangıç sekmesi seçili gelebilir (ör. hub ana panelinden "Arızalı Cihaz"
+  // metric kartına tıklama akışı).
+  const initialTab = (() => {
+    const q = searchParams?.get('tab');
+    return q && (VALID_STATUS_TABS as string[]).includes(q) ? (q as StatusTab) : 'all';
+  })();
+  const [statusTab, setStatusTab] = useState<StatusTab>(initialTab);
+
+  useEffect(() => {
+    const q = searchParams?.get('tab');
+    if (q && (VALID_STATUS_TABS as string[]).includes(q)) {
+      setStatusTab(q as StatusTab);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
   const [labFilter, setLabFilter] = useState<string>('all');
   const [deviceFilter, setDeviceFilter] = useState<string>('all');
   const [openerFilter, setOpenerFilter] = useState<string>('all');
@@ -256,10 +273,6 @@ export default function ArizaYonetimiPage() {
     }
   };
 
-  const handleOpenHtmlReport = () => {
-    window.open('/ariza-yonetimi/html', '_blank');
-  };
-
   const getExportData = () => {
     return reports.map(r => {
       const normalized = normalizeStatus(r.status);
@@ -334,9 +347,9 @@ export default function ArizaYonetimiPage() {
   return (
     <PageShell>
       <div className="device-module-page space-y-4">
-        <BackButton fallback="/cihaz-yonetimi-ana" />
 
-        <Card>
+
+        <Card className="bg-white/40 backdrop-blur-md border border-white/50 shadow-sm">
           <CardHeader>
             <div className="flex flex-col sm:flex-row justify-between items-start gap-4">
               <div>
@@ -347,25 +360,32 @@ export default function ArizaYonetimiPage() {
                       Sistemdeki tüm açık ve kapalı cihaz arıza kayıtlarının listesi.
                   </CardDescription>
               </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <Button
-                  variant="outline"
-                  size="icon"
+              <div className="qt-action-bar flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
                   onClick={() => fetchReports(true)}
                   disabled={refreshing}
                   title="Yenile"
+                  className="qt-icon-btn"
                 >
                   <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
-                </Button>
-                <Button variant="outline" onClick={() => router.push('/ariza-yonetimi/diger-firma-gecmisi')}>
-                  <Building2 className="h-4 w-4 mr-2" /> Diğer Firma Geçmişi
-                </Button>
-                <Button variant="secondary" onClick={() => setExportModalOpen(true)}>
-                  <FileDown className="h-4 w-4 mr-2" /> Döküm Al
-                </Button>
-                <Button variant="secondary" onClick={handleOpenHtmlReport}>
-                  <FileDown className="h-4 w-4 mr-2" /> HTML Raporu
-                </Button>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => router.push('/ariza-yonetimi/diger-firma-gecmisi')}
+                  className="qt-ghost-btn"
+                >
+                  <Building2 className="h-4 w-4" />
+                  <span>Diğer Firma Geçmişi</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setExportModalOpen(true)}
+                  className="qt-primary-btn"
+                >
+                  <FileDown className="h-4 w-4" />
+                  <span>Döküm Al</span>
+                </button>
               </div>
             </div>
           </CardHeader>

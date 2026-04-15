@@ -52,6 +52,7 @@ const PushNotificationsClient = dynamic(
   () => import("./PushNotificationsClient"),
   { ssr: false }
 );
+const QoreTechnicShell = dynamic(() => import('./qore-technic-shell'), { ssr: false });
 
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -67,6 +68,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   // Check if user is a teknisyen - hide dock for them
   const isTeknisyen = currentUserProfile?.role === 'teknisyen';
+  // QOREtechnic hub users: teknik_servis and aplikasyon get the new hub shell and no global dock
+  const isQoreTechnicRole =
+    currentUserProfile?.role === 'teknik_servis' ||
+    currentUserProfile?.role === 'aplikasyon';
   const { setTheme } = useTheme();
   const pathname = usePathname();
   const router = useRouter();
@@ -98,6 +103,27 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   if (isLoadingAuth || !currentUser) {
     return null;
+  }
+
+  // QOREtechnic hub — dedicated shell for teknik_servis and aplikasyon roles.
+  // No global dock / sidebar / mobile dock. The shell provides its own navigation.
+  if (isQoreTechnicRole) {
+    return (
+      <>
+        <PushNotificationsErrorBoundary>
+          <PushNotificationsClient />
+        </PushNotificationsErrorBoundary>
+        <PresenceManager />
+        <AutoRedirectOnLogin />
+        <OnlyUsageAutoRedirect />
+        <PersistentNotificationToast />
+        <QoreTechnicShell>{children}</QoreTechnicShell>
+        <TaskPlannerPanel
+          open={isPlannerPanelOpen}
+          onClose={() => setIsPlannerPanelOpen(false)}
+        />
+      </>
+    );
   }
 
   if (navMode === "sidebar" && !isTeknisyen) {

@@ -1,4 +1,6 @@
 
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -157,6 +159,257 @@
       min-height: 100dvh;
     }
 
+    .satin-alma-fluid-shell {
+      background:
+        radial-gradient(900px 460px at 90% -10%, rgba(102, 199, 196, 0.16), transparent 60%),
+        radial-gradient(850px 500px at 8% 4%, rgba(242, 153, 74, 0.12), transparent 70%),
+        linear-gradient(var(--dashboard-bg), #e6e3de);
+    }
+
+    .satin-glass-header {
+      border-bottom: 1px solid rgba(255, 255, 255, 0.45);
+      box-shadow: 0 8px 24px rgba(60, 60, 60, 0.08);
+    }
+
+    .satin-pill {
+      background: color-mix(in srgb, var(--dashboard-surface) 86%, #ffffff 14%);
+      border: 1px solid color-mix(in srgb, var(--dashboard-stroke) 82%, #ffffff 18%);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.6);
+    }
+
+    .satin-hero-card {
+      background:
+        radial-gradient(600px 200px at 85% -12%, rgba(102, 199, 196, 0.22), transparent 65%),
+        radial-gradient(520px 180px at 8% -15%, rgba(242, 153, 74, 0.20), transparent 70%),
+        var(--dashboard-surface);
+    }
+
+    .satin-metric {
+      border: 1px solid rgba(255, 255, 255, 0.42);
+      background: color-mix(in srgb, var(--dashboard-surface) 82%, #ffffff 18%);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 8px 20px rgba(74, 74, 74, 0.08);
+    }
+
+    .satin-float-action {
+      will-change: transform, box-shadow, filter;
+      transition: transform .22s cubic-bezier(.22,1,.36,1), box-shadow .22s ease, filter .22s ease;
+    }
+
+    .satin-float-action:hover {
+      transform: translateY(-2px) scale(1.01);
+      box-shadow: 0 10px 24px rgba(50, 50, 50, 0.14);
+    }
+
+    .satin-soft-list {
+      background: linear-gradient(180deg, color-mix(in srgb, var(--dashboard-surface) 92%, #fff 8%) 0%, var(--dashboard-surface) 100%);
+    }
+
+    .satin-task-item {
+      box-shadow: 0 6px 16px rgba(70, 70, 70, 0.08);
+      border: 1px solid color-mix(in srgb, var(--dashboard-stroke) 76%, #ffffff 24%);
+    }
+
+    /* ============================================================
+       FLUID EDITORIAL DESIGN SYSTEM — Satın Alma Planning Panel
+       Scope: .fluid-editorial wrapper — overrides dashboard tokens
+       ============================================================ */
+
+    .fluid-editorial {
+      --dashboard-accent: #006b68;
+      --dashboard-accent-glow: rgba(0, 107, 104, 0.20);
+      --dashboard-surface: #f7faf8;
+      --dashboard-surface-2: #f0f5f2;
+      --dashboard-text: #2c3432;
+      --dashboard-muted: #58615f;
+      --dashboard-stroke: rgba(171, 180, 177, 0.10);
+      --dashboard-raised: 0 20px 50px rgba(44, 52, 50, 0.04), 0 2px 8px rgba(44, 52, 50, 0.03);
+      --dashboard-raised-soft: 0 8px 28px rgba(44, 52, 50, 0.04), 0 1px 4px rgba(44, 52, 50, 0.02);
+      --dashboard-pressed: none;
+      --dashboard-bg: #f7faf8;
+      --dashboard-focus-glow: rgba(0, 107, 104, 0.25);
+      background: #f7faf8;
+      font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+    }
+
+    .fluid-editorial .satin-alma-fluid-shell,
+    .fluid-editorial {
+      background:
+        radial-gradient(900px 500px at 85% -8%, rgba(0, 107, 104, 0.06), transparent 60%),
+        radial-gradient(700px 400px at 5% 10%, rgba(118, 221, 216, 0.06), transparent 60%),
+        #f7faf8;
+      background-attachment: fixed;
+      min-height: 100dvh;
+    }
+
+    /* Panel aktifken tüm görünür alan tek renk — üst / alt / yanlardan farklı
+       sistem UI rengi sızmasın. Body ve main arka planlarını panelin rengine
+       eşitleriz. */
+    html:has(.fluid-editorial),
+    body:has(.fluid-editorial),
+    body:has(.fluid-editorial) main,
+    body:has(.fluid-editorial) .page-shell {
+      background: #f7faf8 !important;
+    }
+    body.satin-alma-active,
+    body.satin-alma-active main,
+    body.satin-alma-active .page-shell {
+      background: #f7faf8 !important;
+    }
+
+    /* İçerik safe zone'u — panel kenarlarında nefes payı */
+    .fluid-editorial .fluid-safe-content {
+      padding-left: clamp(1rem, 3vw, 2rem);
+      padding-right: clamp(1rem, 3vw, 2rem);
+      padding-top: 0.75rem;
+      padding-bottom: max(2rem, env(safe-area-inset-bottom));
+    }
+
+    .fluid-editorial .satin-glass-header {
+      background: rgba(247, 250, 248, 0.85) !important;
+      border-bottom: none !important;
+      box-shadow: 0 8px 32px rgba(0, 107, 104, 0.04) !important;
+    }
+
+    .fluid-editorial .satin-pill {
+      background: rgba(0, 107, 104, 0.08) !important;
+      border: none !important;
+      box-shadow: none !important;
+      color: #006b68;
+    }
+
+    .fluid-editorial .satin-hero-card {
+      background: linear-gradient(135deg, #006b68 0%, #76ddd8 100%) !important;
+      color: #e1fffd !important;
+      border: none !important;
+      box-shadow: 0 24px 70px rgba(0, 107, 104, 0.22), 0 4px 16px rgba(0, 107, 104, 0.12) !important;
+    }
+
+    .fluid-editorial .satin-metric {
+      background: rgba(255, 255, 255, 0.25) !important;
+      border: none !important;
+      box-shadow: none !important;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+
+    .fluid-editorial .satin-float-action {
+      will-change: transform, box-shadow;
+      transition: transform .25s cubic-bezier(.22,1,.36,1), box-shadow .25s ease;
+    }
+
+    .fluid-editorial .satin-float-action:hover {
+      transform: translateY(-2px) scale(1.01);
+      box-shadow: 0 12px 28px rgba(0, 107, 104, 0.22) !important;
+    }
+
+    .fluid-editorial .satin-soft-list {
+      background: #ffffff !important;
+      border: none !important;
+      box-shadow: 0 8px 32px rgba(44, 52, 50, 0.04), 0 1px 4px rgba(44, 52, 50, 0.02) !important;
+    }
+
+    .fluid-editorial .satin-task-item {
+      background: #ffffff !important;
+      border: none !important;
+      box-shadow: 0 4px 16px rgba(44, 52, 50, 0.04) !important;
+      transition: transform .2s cubic-bezier(.22,1,.36,1), box-shadow .2s ease;
+    }
+
+    .fluid-editorial .satin-task-item:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 8px 24px rgba(0, 107, 104, 0.08) !important;
+    }
+
+    .fluid-editorial .cihaz-card {
+      background: #ffffff !important;
+      border: none !important;
+      box-shadow: 0 8px 28px rgba(44, 52, 50, 0.04), 0 1px 4px rgba(44, 52, 50, 0.02) !important;
+      border-radius: 1.5rem !important;
+      transition: transform .2s cubic-bezier(.22,1,.36,1), box-shadow .2s ease;
+    }
+
+    .fluid-editorial .cihaz-card:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 16px 40px rgba(0, 107, 104, 0.07) !important;
+    }
+
+    .fluid-editorial .cihaz-card-strong {
+      background: #ffffff !important;
+      border: none !important;
+      box-shadow: 0 20px 50px rgba(44, 52, 50, 0.05), 0 2px 8px rgba(44, 52, 50, 0.03) !important;
+      border-radius: 2rem !important;
+    }
+
+    .fluid-editorial .cihaz-pressed {
+      background: #f0f5f2 !important;
+      box-shadow: none !important;
+      border: none !important;
+      border-radius: 1rem !important;
+    }
+
+    /* Fluid card tap ripple */
+    .fluid-editorial .fluid-card-tap {
+      transition: transform .15s cubic-bezier(.22,1,.36,1), box-shadow .15s ease;
+    }
+    .fluid-editorial .fluid-card-tap:active {
+      transform: scale(0.98);
+    }
+
+    /* Fluid gradient button */
+    .fluid-editorial .fluid-btn-primary {
+      background: linear-gradient(135deg, #006b68, #76ddd8);
+      color: #e1fffd;
+      border: none;
+      border-radius: 9999px;
+      box-shadow: 0 8px 24px rgba(0, 107, 104, 0.22);
+      transition: transform .2s cubic-bezier(.22,1,.36,1), box-shadow .2s ease;
+      font-weight: 700;
+    }
+    .fluid-editorial .fluid-btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 12px 32px rgba(0, 107, 104, 0.30);
+    }
+    .fluid-editorial .fluid-btn-primary:active {
+      transform: scale(0.97);
+    }
+
+    /* Fluid date pill — selected */
+    .fluid-editorial .fluid-date-selected {
+      background: linear-gradient(135deg, #006b68, #5bccca);
+      color: #ffffff;
+      box-shadow: 0 8px 20px rgba(0, 107, 104, 0.28);
+    }
+
+    /* Swipe hint reveal */
+    .fluid-editorial .fluid-swipe-hint-complete {
+      background: rgba(0, 107, 104, 0.10);
+      color: #006b68;
+    }
+    .fluid-editorial .fluid-swipe-hint-postpone {
+      background: rgba(245, 158, 11, 0.10);
+      color: #b45309;
+    }
+
+    /* Ambient gradient blobs for depth */
+    .fluid-blob-1 {
+      position: absolute;
+      width: 420px;
+      height: 420px;
+      border-radius: 9999px;
+      background: radial-gradient(circle, rgba(0, 107, 104, 0.06), transparent 70%);
+      filter: blur(60px);
+      pointer-events: none;
+    }
+    .fluid-blob-2 {
+      position: absolute;
+      width: 360px;
+      height: 360px;
+      border-radius: 9999px;
+      background: radial-gradient(circle, rgba(118, 221, 216, 0.07), transparent 70%);
+      filter: blur(80px);
+      pointer-events: none;
+    }
+
     /* E1 – subtle card / list-item (small elevation) */
     .cihaz-card {
       background: var(--dashboard-surface);
@@ -243,14 +496,18 @@
     }
 
     .dark .cihaz-card {
-      background: var(--dashboard-surface);
-      border: 1px solid var(--dashboard-stroke);
+      background: rgba(17, 17, 17, 0.6);
+      backdrop-filter: blur(12px) saturate(140%);
+      -webkit-backdrop-filter: blur(12px) saturate(140%);
+      border: 1px solid rgba(255, 255, 255, 0.08);
       box-shadow: var(--dashboard-raised-soft);
     }
 
     .dark .cihaz-card-strong {
-      background: var(--dashboard-surface);
-      border: 1px solid var(--dashboard-stroke);
+      background: rgba(17, 17, 17, 0.75);
+      backdrop-filter: blur(16px) saturate(160%);
+      -webkit-backdrop-filter: blur(16px) saturate(160%);
+      border: 1px solid rgba(255, 255, 255, 0.12);
       box-shadow: var(--dashboard-raised);
     }
 
@@ -2036,3 +2293,1419 @@
     filter: brightness(0.9);
   }
 }
+
+/* ─────────────────────────────────────────────
+   Stock warning: blinking red border
+   Used on rows in lab stock management panel for items
+   that are: expiring soon, at min-stock, or qty=1 (max>2)
+   ───────────────────────────────────────────── */
+@keyframes stockWarningBlink {
+  0%, 100% {
+    border-color: rgba(239, 68, 68, 1);
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6), 0 0 14px rgba(239, 68, 68, 0.45);
+  }
+  50% {
+    border-color: rgba(239, 68, 68, 0.25);
+    box-shadow: 0 0 0 6px rgba(239, 68, 68, 0), 0 0 0 rgba(239, 68, 68, 0);
+  }
+}
+
+.stock-warning-blink {
+  border: 2px solid rgba(239, 68, 68, 1);
+  border-radius: 0.5rem;
+  animation: stockWarningBlink 1.1s ease-in-out infinite;
+}
+
+/* ============================================
+   QOREtechnic Hub Shell
+   Sidebar (desktop/tablet) + Bottom nav (mobile)
+   Soft gradient background, modern operational hub
+   ============================================ */
+:root {
+  --qt-sidebar-w: 248px;
+  --qt-sidebar-w-compact: 84px;
+  --qt-sidebar-current-w: var(--qt-sidebar-w);
+  --qt-bottom-h: 72px;
+  --qt-radius: 20px;
+  --qt-radius-sm: 14px;
+
+  /* Base fill used on html/body so scroll past the fixed gradient still
+     shows the hub palette rather than the app's default white/black. */
+  --qt-bg-base: #DCE8FA;
+
+  --qt-text: #0F172A;
+  --qt-text-soft: #334155;
+  --qt-muted: #64748B;
+  --qt-stroke: rgba(15, 23, 42, 0.08);
+  --qt-surface: rgba(255, 255, 255, 0.72);
+  --qt-surface-strong: rgba(255, 255, 255, 0.9);
+  --qt-surface-soft: rgba(255, 255, 255, 0.55);
+
+  /* Brand accent — soft gradient hub palette */
+  --qt-accent: #7C3AED;       /* violet */
+  --qt-accent-2: #06B6D4;     /* cyan */
+  --qt-accent-3: #F59E0B;     /* amber for warnings */
+  --qt-accent-danger: #EF4444;
+  --qt-accent-success: #10B981;
+
+  --qt-elev-sm: 0 2px 6px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --qt-elev-md: 0 12px 28px -12px rgba(15, 23, 42, 0.18), 0 4px 10px -6px rgba(15, 23, 42, 0.12);
+  --qt-elev-lg: 0 30px 60px -24px rgba(15, 23, 42, 0.28), 0 8px 20px -10px rgba(15, 23, 42, 0.15);
+}
+
+.dark {
+  --qt-text: #F8FAFC;
+  --qt-text-soft: #CBD5E1;
+  --qt-muted: #94A3B8;
+  --qt-stroke: rgba(255, 255, 255, 0.08);
+  --qt-surface: rgba(15, 23, 42, 0.3);
+  --qt-surface-strong: rgba(15, 23, 42, 0.55);
+  --qt-surface-soft: rgba(15, 23, 42, 0.2);
+  --qt-bg-base: #0A1526;
+  --qt-elev-sm: 0 2px 6px rgba(0, 0, 0, 0.5);
+  --qt-elev-md: 0 14px 30px -14px rgba(0, 0, 0, 0.6), 0 6px 14px -8px rgba(0, 0, 0, 0.45);
+  --qt-elev-lg: 0 30px 60px -22px rgba(0, 0, 0, 0.7), 0 10px 24px -12px rgba(0, 0, 0, 0.55);
+}
+
+/* When QoreTechnicShell is mounted, make the whole document fall back
+   to the hub palette so scrolling never reveals app default background.
+   The gradient image itself is fixed to the viewport via .qore-technic-bg. */
+html.qt-active, body.qt-active {
+  background: var(--qt-bg-base) !important;
+}
+html.qt-active { color: var(--qt-text); }
+
+.qore-technic-shell {
+  position: relative;
+  min-height: 100vh;
+  min-height: 100dvh;
+  width: 100%;
+  color: var(--qt-text);
+  font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  isolation: isolate;
+}
+
+.qore-technic-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(1200px 700px at 85% 110%, rgba(6, 182, 212, 0.22), transparent 60%),
+    radial-gradient(1000px 800px at 10% -10%, rgba(124, 58, 237, 0.20), transparent 55%),
+    radial-gradient(900px 600px at 50% 50%, rgba(59, 130, 246, 0.12), transparent 60%),
+    linear-gradient(140deg, #EEF2FF 0%, #DBEAFE 45%, #CFFAFE 100%);
+  background-attachment: fixed;
+}
+
+.dark .qore-technic-bg {
+  background:
+    radial-gradient(1200px 700px at 85% 110%, rgba(6, 182, 212, 0.18), transparent 60%),
+    radial-gradient(1000px 800px at 10% -10%, rgba(124, 58, 237, 0.22), transparent 55%),
+    radial-gradient(900px 600px at 50% 50%, rgba(30, 64, 175, 0.18), transparent 60%),
+    linear-gradient(150deg, #0B1220 0%, #0A1628 50%, #071326 100%);
+}
+
+/* Brand logotype */
+.qore-technic-brand {
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+.qore-technic-brand__qore {
+  color: var(--qt-text);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+}
+.qore-technic-brand__technic {
+  margin-left: 2px;
+  font-family: 'Plus Jakarta Sans', ui-rounded, 'SF Pro Rounded', system-ui, sans-serif;
+  font-weight: 500;
+  font-style: italic;
+  letter-spacing: -0.01em;
+  background: linear-gradient(135deg, var(--qt-accent) 0%, var(--qt-accent-2) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* Sidebar */
+.qore-technic-sidebar {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  bottom: 16px;
+  width: var(--qt-sidebar-current-w, var(--qt-sidebar-w));
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px 14px 14px;
+  background: var(--qt-surface);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid var(--qt-stroke);
+  border-radius: var(--qt-radius);
+  box-shadow: var(--qt-elev-md);
+  z-index: 40;
+  transition: width 220ms cubic-bezier(.22, .61, .36, 1), padding 220ms ease;
+}
+
+.qore-technic-shell--collapsed .qore-technic-sidebar {
+  width: var(--qt-sidebar-w-compact);
+  padding: 20px 10px 14px;
+}
+
+.qore-technic-sidebar__brand {
+  position: relative;
+  padding: 6px 6px 14px;
+  border-bottom: 1px solid var(--qt-stroke);
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.qore-technic-sidebar__brand-inner {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.qore-technic-shell--collapsed .qore-technic-sidebar__brand {
+  flex-direction: column;
+  gap: 10px;
+  padding: 6px 0 12px;
+}
+
+.qore-technic-shell--collapsed .qore-technic-sidebar__brand-inner {
+  justify-content: center;
+}
+
+.qore-technic-collapse-btn {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: var(--qt-surface-soft);
+  border: 1px solid var(--qt-stroke);
+  color: var(--qt-text-soft);
+  transition: transform 160ms ease, color 160ms ease, background 160ms ease;
+  flex-shrink: 0;
+}
+
+.qore-technic-collapse-btn:hover {
+  color: var(--qt-accent);
+  background: var(--qt-surface-strong);
+  transform: scale(1.05);
+}
+
+/* Brand icon-only badge shown when sidebar is collapsed */
+.qore-technic-brand-mark {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  font-weight: 800;
+  font-size: 20px;
+  color: #fff;
+  letter-spacing: -0.02em;
+  background: linear-gradient(135deg, var(--qt-accent), var(--qt-accent-2));
+  box-shadow: 0 8px 18px -8px rgba(124, 58, 237, 0.6);
+}
+
+.qore-technic-sidebar__nav {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  margin-top: 4px;
+  padding: 2px;
+}
+
+.qore-technic-sidebar__footer {
+  border-top: 1px solid var(--qt-stroke);
+  padding-top: 8px;
+}
+
+.qore-technic-navitem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--qt-text-soft);
+  font-size: 14px;
+  font-weight: 500;
+  text-align: left;
+  transition: transform 160ms ease, background 180ms ease, color 180ms ease, box-shadow 180ms ease;
+}
+
+.qore-technic-navitem:hover {
+  background: var(--qt-surface-strong);
+  color: var(--qt-text);
+  transform: translateX(2px);
+}
+
+.qore-technic-navitem__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--qt-surface-soft);
+  color: var(--qt-text-soft);
+  flex-shrink: 0;
+  transition: background 180ms ease, color 180ms ease;
+}
+
+.qore-technic-navitem:hover .qore-technic-navitem__icon {
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.12), rgba(6, 182, 212, 0.12));
+  color: var(--qt-accent);
+}
+
+.qore-technic-navitem__label {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: opacity 160ms ease, max-width 220ms ease;
+}
+
+.qore-technic-shell--collapsed .qore-technic-navitem {
+  justify-content: center;
+  padding: 8px 0;
+  gap: 0;
+}
+
+.qore-technic-shell--collapsed .qore-technic-navitem__icon {
+  margin: 0 auto;
+}
+
+.qore-technic-shell--collapsed .qore-technic-navitem__label {
+  opacity: 0;
+  max-width: 0;
+  width: 0;
+  flex: 0 0 0;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
+}
+
+.qore-technic-navitem--active {
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.14), rgba(6, 182, 212, 0.14));
+  color: var(--qt-text);
+  box-shadow: inset 0 0 0 1px rgba(124, 58, 237, 0.22);
+}
+
+.qore-technic-navitem--active .qore-technic-navitem__icon {
+  background: linear-gradient(135deg, var(--qt-accent), var(--qt-accent-2));
+  color: #ffffff;
+  box-shadow: 0 6px 16px -6px rgba(124, 58, 237, 0.6);
+}
+
+.qore-technic-navitem--logout:hover {
+  background: rgba(239, 68, 68, 0.08);
+  color: var(--qt-accent-danger);
+}
+
+.qore-technic-navitem--logout:hover .qore-technic-navitem__icon {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--qt-accent-danger);
+}
+
+.qore-technic-sidebar__footer {
+  position: relative;
+}
+
+.qore-technic-navitem--profile {
+  width: 100%;
+}
+
+/* Profile popover (desktop) */
+.qt-profile-popover {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: calc(100% + 6px);
+  z-index: 30;
+  padding: 6px;
+  border-radius: 14px;
+  background: var(--qt-surface-strong, rgba(255, 255, 255, 0.9));
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border: 1px solid var(--qt-stroke);
+  box-shadow: 0 18px 40px -16px rgba(15, 23, 42, 0.28), 0 4px 10px -4px rgba(15, 23, 42, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: qt-pop-in 160ms ease-out;
+}
+
+.qore-technic-shell--collapsed .qt-profile-popover {
+  left: calc(100% + 8px);
+  right: auto;
+  bottom: 0;
+  width: 200px;
+}
+
+.qt-profile-popover__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--qt-text-soft);
+  background: transparent;
+  text-align: left;
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.qt-profile-popover__item:hover {
+  background: var(--qt-surface-soft);
+  color: var(--qt-text);
+}
+
+.qt-profile-popover__item--danger {
+  color: var(--qt-accent-danger);
+}
+
+.qt-profile-popover__item--danger:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--qt-accent-danger);
+}
+
+@keyframes qt-pop-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Mobile bottom-sheet (stats selection, profile) */
+.qt-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(15, 23, 42, 0.42);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  animation: qt-fade-in 180ms ease-out;
+}
+
+@keyframes qt-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.qt-sheet {
+  width: 100%;
+  max-width: 520px;
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 14px 16px 24px;
+  border-top-left-radius: 22px;
+  border-top-right-radius: 22px;
+  background: var(--qt-surface-strong, rgba(255, 255, 255, 0.95));
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid var(--qt-stroke);
+  border-bottom: 0;
+  box-shadow: 0 -24px 60px -20px rgba(15, 23, 42, 0.35);
+  animation: qt-sheet-up 220ms ease-out;
+}
+
+@media (min-width: 768px) {
+  .qt-sheet-overlay {
+    align-items: center;
+  }
+  .qt-sheet {
+    border-radius: 22px;
+    border-bottom: 1px solid var(--qt-stroke);
+    margin: 0 16px;
+  }
+}
+
+@keyframes qt-sheet-up {
+  from { transform: translateY(32px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+
+.qt-sheet__handle {
+  width: 42px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--qt-stroke);
+  margin: 0 auto 12px;
+}
+
+.qt-sheet__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.qt-sheet__title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--qt-text);
+}
+
+.qt-sheet__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  background: var(--qt-surface-soft);
+  color: var(--qt-text-soft);
+  transition: background 160ms ease, color 160ms ease;
+}
+
+.qt-sheet__close:hover {
+  background: var(--qt-surface-strong);
+  color: var(--qt-text);
+}
+
+.qt-sheet__list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.qt-sheet__item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 12px;
+  border-radius: 14px;
+  background: var(--qt-surface-soft);
+  border: 1px solid var(--qt-stroke);
+  color: var(--qt-text);
+  font-size: 14px;
+  font-weight: 500;
+  text-align: left;
+  transition: background 160ms ease, transform 160ms ease, border-color 160ms ease;
+}
+
+.qt-sheet__item:hover {
+  background: var(--qt-surface-strong);
+  border-color: rgba(124, 58, 237, 0.24);
+  transform: translateX(2px);
+}
+
+.qt-sheet__item--danger {
+  color: var(--qt-accent-danger);
+}
+
+.qt-sheet__item--danger:hover {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.24);
+}
+
+.qt-sheet__item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.12), rgba(6, 182, 212, 0.12));
+  color: var(--qt-accent);
+  flex-shrink: 0;
+}
+
+.qt-sheet__item--danger .qt-sheet__item-icon {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--qt-accent-danger);
+}
+
+.qt-sheet__item-label {
+  flex: 1;
+}
+
+/* Profile status button (ana-panel mobile row) */
+.qt-status-btn--profile {
+  background: linear-gradient(135deg, #0EA5E9, #6366F1);
+  box-shadow: 0 12px 24px -12px rgba(14, 165, 233, 0.55), 0 4px 10px -4px rgba(99, 102, 241, 0.35);
+}
+
+/* Mobile header */
+.qore-technic-mobile-header {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px 16px 10px;
+  background: transparent;
+}
+
+/* Main content */
+.qore-technic-main {
+  padding: 24px;
+  padding-left: calc(var(--qt-sidebar-current-w, var(--qt-sidebar-w)) + 40px);
+  padding-bottom: 40px;
+  min-height: 100vh;
+  min-height: 100dvh;
+  transition: padding-left 220ms cubic-bezier(.22, .61, .36, 1);
+}
+
+@media (max-width: 767px) {
+  .qore-technic-main {
+    padding: 8px 14px calc(var(--qt-bottom-h) + 24px);
+  }
+}
+
+.qore-technic-main__inner {
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+/* Mobile bottom nav */
+.qore-technic-bottom-nav {
+  position: fixed;
+  left: 10px;
+  right: 10px;
+  bottom: 10px;
+  z-index: 40;
+  background: var(--qt-surface);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  border: 1px solid var(--qt-stroke);
+  border-radius: 18px;
+  box-shadow: var(--qt-elev-md);
+  padding: 6px;
+}
+
+.qore-technic-bottom-nav__scroll {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.qore-technic-bottom-nav__scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.qore-technic-bottom-item {
+  flex: 1 0 auto;
+  min-width: 72px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  color: var(--qt-muted);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  transition: color 180ms ease, background 180ms ease, transform 160ms ease;
+}
+
+.qore-technic-bottom-item:active {
+  transform: scale(0.96);
+}
+
+.qore-technic-bottom-item--active {
+  color: #fff;
+  background: linear-gradient(135deg, var(--qt-accent), var(--qt-accent-2));
+  box-shadow: 0 8px 20px -8px rgba(124, 58, 237, 0.55);
+}
+
+/* Mobile Popover Backdrops & Containers */
+.qt-popover-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  background: rgba(0, 0, 0, 0.05);
+  backdrop-filter: blur(1px);
+  -webkit-backdrop-filter: blur(1px);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 250ms ease;
+}
+
+.qt-popover-overlay--open {
+  pointer-events: auto;
+  opacity: 1;
+}
+
+.qt-mobile-popover {
+  position: absolute;
+  bottom: calc(100% + 12px);
+  /* The nav is pinned left/right, so we can position this anywhere inside */
+  left: 10px;
+  right: 10px;
+  background: rgba(255, 255, 255, 0.70);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  border-radius: 20px;
+  box-shadow: 0 -4px 24px 0 rgba(31, 38, 135, 0.08);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  
+  /* Animation setup */
+  transform: translateY(20px) scale(0.98);
+  opacity: 0;
+  pointer-events: none;
+  transition: transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 250ms ease;
+  transform-origin: bottom center;
+  z-index: 36;
+}
+
+.qt-mobile-popover--open {
+  transform: translateY(0) scale(1);
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.qt-popover-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  color: var(--qt-text);
+  font-weight: 600;
+  font-size: 14px;
+  transition: background 200ms ease, transform 160ms ease, box-shadow 200ms ease;
+}
+
+.qt-popover-item:active {
+  background: var(--qt-surface);
+  transform: scale(0.98);
+  box-shadow: 0 2px 8px 0 rgba(0, 0, 0, 0.05);
+}
+
+.qt-popover-item-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.1), rgba(6, 182, 212, 0.1));
+  color: var(--qt-accent);
+}
+
+/* ============================================
+   QOREtechnic Hub Content styles
+   ============================================ */
+.qt-hub-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.qt-hub-title {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--qt-text);
+  line-height: 1.1;
+}
+
+.qt-hub-subtitle {
+  margin-top: 6px;
+  font-size: 14px;
+  color: var(--qt-muted);
+}
+
+@media (min-width: 768px) {
+  .qt-hub-title { font-size: 34px; }
+}
+
+.qt-status-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 18px;
+  border-radius: 14px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, var(--qt-accent), var(--qt-accent-2));
+  box-shadow: 0 12px 24px -12px rgba(124, 58, 237, 0.55), 0 4px 10px -4px rgba(6, 182, 212, 0.35);
+  transition: transform 160ms ease, box-shadow 180ms ease, filter 180ms ease;
+}
+
+.qt-status-btn--training {
+  background: linear-gradient(135deg, #F59E0B, #EF4444);
+  box-shadow: 0 12px 24px -12px rgba(245, 158, 11, 0.55), 0 4px 10px -4px rgba(239, 68, 68, 0.35);
+}
+
+.qt-status-btn--ai {
+  background: linear-gradient(135deg, #8B5CF6, #EC4899);
+  box-shadow: 0 12px 24px -12px rgba(139, 92, 246, 0.55);
+}
+
+.qt-status-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.04);
+}
+
+.qt-status-btn:active {
+  transform: translateY(0);
+}
+
+/* Metric cards (stat tiles) */
+.qt-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(1, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+@media (min-width: 640px) {
+  .qt-metric-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+.qt-metric-card {
+  position: relative;
+  padding: 18px 18px 16px;
+  border-radius: var(--qt-radius);
+  background: rgba(255, 255, 255, 0.45);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
+  text-align: left;
+  width: 100%;
+  transition: transform 180ms ease, box-shadow 200ms ease, border-color 200ms ease;
+  overflow: hidden;
+}
+
+.qt-metric-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--qt-elev-md);
+  border-color: rgba(124, 58, 237, 0.26);
+}
+
+.qt-metric-card__label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--qt-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.qt-metric-card__value {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 40px;
+  font-weight: 800;
+  color: var(--qt-text);
+  letter-spacing: -0.03em;
+  line-height: 1;
+}
+
+.qt-metric-card__unit {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--qt-muted);
+}
+
+.qt-metric-card__footer {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--qt-text-soft);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.qt-metric-card__icon {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.14), rgba(6, 182, 212, 0.14));
+  color: var(--qt-accent);
+}
+
+.qt-metric-card--danger .qt-metric-card__icon {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.16), rgba(245, 158, 11, 0.16));
+  color: var(--qt-accent-danger);
+}
+
+.qt-metric-card--warn .qt-metric-card__icon {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.18), rgba(239, 68, 68, 0.14));
+  color: var(--qt-accent-3);
+}
+
+.qt-metric-card--success .qt-metric-card__icon {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.16), rgba(6, 182, 212, 0.14));
+  color: var(--qt-accent-success);
+}
+
+.qt-metric-card--link::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.0), rgba(6, 182, 212, 0.0));
+  transition: background 220ms ease;
+  pointer-events: none;
+}
+
+.qt-metric-card--link:hover::after {
+  background: linear-gradient(135deg, rgba(124, 58, 237, 0.05), rgba(6, 182, 212, 0.05));
+}
+
+/* Panels */
+.qt-panel {
+  background: rgba(255, 255, 255, 0.4);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: var(--qt-radius);
+  box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.05);
+  padding: 20px;
+}
+
+.qt-panel + .qt-panel {
+  margin-top: 16px;
+}
+
+.qt-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.qt-panel__title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--qt-text);
+  letter-spacing: -0.01em;
+}
+
+.qt-panel__subtitle {
+  font-size: 12.5px;
+  color: var(--qt-muted);
+  margin-top: 2px;
+}
+
+/* Personnel rows */
+.qt-personnel-group {
+  margin-top: 10px;
+}
+.qt-personnel-group + .qt-personnel-group {
+  margin-top: 18px;
+}
+
+.qt-personnel-group__label {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--qt-muted);
+  margin-bottom: 8px;
+}
+
+.qt-personnel-row {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: var(--qt-radius-sm);
+  border: 1px solid var(--qt-stroke);
+  background: var(--qt-surface-soft);
+  text-align: left;
+  width: 100%;
+  transition: transform 160ms ease, background 180ms ease, box-shadow 180ms ease;
+}
+
+.qt-personnel-row + .qt-personnel-row {
+  margin-top: 8px;
+}
+
+@media (min-width: 640px) {
+  .qt-personnel-row {
+    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+  }
+}
+
+.qt-personnel-row:hover {
+  background: var(--qt-surface-strong);
+  transform: translateX(2px);
+  box-shadow: var(--qt-elev-sm);
+}
+
+.qt-personnel-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--qt-text);
+  letter-spacing: -0.01em;
+}
+
+.qt-personnel-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--qt-text-soft);
+}
+
+.qt-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.qt-pill--success { color: #047857; background: rgba(16, 185, 129, 0.14); }
+.qt-pill--info { color: #1D4ED8; background: rgba(59, 130, 246, 0.14); }
+.qt-pill--warn { color: #B45309; background: rgba(245, 158, 11, 0.16); }
+.qt-pill--neutral { color: var(--qt-muted); background: rgba(100, 116, 139, 0.12); }
+
+.dark .qt-pill--success { color: #6EE7B7; background: rgba(16, 185, 129, 0.18); }
+.dark .qt-pill--info { color: #93C5FD; background: rgba(59, 130, 246, 0.2); }
+.dark .qt-pill--warn { color: #FCD34D; background: rgba(245, 158, 11, 0.2); }
+
+.qt-personnel-lab {
+  font-size: 13px;
+  color: var(--qt-muted);
+}
+
+/* Hub-themed action buttons (module pages) */
+.qt-action-bar { gap: 8px; }
+
+.qt-icon-btn,
+.qt-ghost-btn,
+.qt-primary-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  transition: transform 160ms ease, box-shadow 180ms ease, filter 180ms ease, background 180ms ease, color 180ms ease, border-color 180ms ease;
+}
+
+.qt-icon-btn {
+  width: 38px;
+  padding: 0;
+  justify-content: center;
+  background: var(--qt-surface);
+  border: 1px solid var(--qt-stroke);
+  color: var(--qt-text-soft);
+  box-shadow: var(--qt-elev-sm);
+}
+
+.qt-icon-btn:hover:not(:disabled) {
+  color: var(--qt-accent);
+  transform: translateY(-1px);
+  box-shadow: var(--qt-elev-md);
+}
+
+.qt-icon-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.qt-ghost-btn {
+  background: var(--qt-surface);
+  border: 1px solid var(--qt-stroke);
+  color: var(--qt-text);
+  box-shadow: var(--qt-elev-sm);
+}
+
+.qt-ghost-btn:hover {
+  background: var(--qt-surface-strong);
+  border-color: rgba(124, 58, 237, 0.28);
+  color: var(--qt-accent);
+  transform: translateY(-1px);
+  box-shadow: var(--qt-elev-md);
+}
+
+.qt-primary-btn {
+  background: linear-gradient(135deg, var(--qt-accent), var(--qt-accent-2));
+  color: #fff;
+  border: 1px solid transparent;
+  box-shadow: 0 10px 22px -12px rgba(124, 58, 237, 0.55), 0 3px 8px -4px rgba(6, 182, 212, 0.35);
+}
+
+.qt-primary-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.04);
+  box-shadow: 0 14px 28px -12px rgba(124, 58, 237, 0.6), 0 4px 10px -4px rgba(6, 182, 212, 0.4);
+}
+
+.qt-primary-btn:active { transform: translateY(0); }
+
+/* ============================================
+   Hub content overrides for ALL module pages rendered inside
+   QoreTechnicShell (.qt-content). Strips neumorphic backgrounds,
+   turns shadcn Cards into transparent glass surfaces, and applies
+   consistent glass styling across every sub-panel (arıza-yönetimi,
+   teknik-servis, aplikasyon-paneli, lab detail, wizard forms,
+   yedek parça panels, transfer şablonları, etc.)
+   NOTE: hub's own `qt-*` components are whitelisted via :not() so
+   they keep their dedicated styles.
+   ============================================ */
+.qt-content {
+  color: var(--qt-text);
+  /* Re-map legacy neumorphic dashboard tokens so inline styles
+     (style={{ background: 'var(--dashboard-surface)' }}) that are
+     sprinkled across the module pages pick up the hub glass palette
+     instead of opaque white/off-white.
+     Using low-alpha rgba directly so cards stay visibly translucent
+     even when backdrop-filter is disabled by a 3D parent
+     (e.g. .device-flip-inner uses transform-style: preserve-3d). */
+  --dashboard-surface: rgba(255, 255, 255, 0.45);
+  --dashboard-surface-2: rgba(255, 255, 255, 0.3);
+  --dashboard-text: var(--qt-text);
+  --dashboard-muted: var(--qt-muted);
+  --dashboard-stroke: var(--qt-stroke);
+  --dashboard-accent: var(--qt-accent);
+  --dashboard-focus-glow: rgba(124, 58, 237, 0.35);
+  --dashboard-raised: var(--qt-elev-sm);
+  --dashboard-raised-soft: var(--qt-elev-sm);
+  --dashboard-pressed: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+.dark .qt-content {
+  --dashboard-surface: rgba(17, 24, 39, 0.5);
+  --dashboard-surface-2: rgba(17, 24, 39, 0.35);
+}
+
+/* Kill the per-module background so the hub gradient is visible. */
+.qt-content .device-module-page,
+.qt-content .cihaz-shell {
+  background: transparent !important;
+  color: var(--qt-text);
+  min-height: 0;
+  padding: 0;
+}
+
+/* Transparent glass cards for ANY shadcn card / rounded container
+   and all legacy neumorphic module-page card classes.
+   NOTE: we use explicit low-alpha rgba (not var(--qt-surface-strong))
+   because some cards live inside `transform-style: preserve-3d`
+   containers (e.g. device-flip-inner) that break backdrop-filter.
+   With low alpha we stay visibly glassy even without blur. */
+.qt-content .bg-card,
+.qt-content [data-slot="card"],
+.qt-content .neu-card,
+.qt-content [class~="bg-card"],
+.qt-content .glass-card,
+.qt-content .cihaz-card,
+.qt-content .cihaz-card-strong {
+  background: rgba(255, 255, 255, 0.45) !important;
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  border: 1px solid var(--qt-stroke) !important;
+  box-shadow: var(--qt-elev-sm) !important;
+  color: var(--qt-text);
+  border-radius: 18px;
+}
+
+.dark .qt-content .bg-card,
+.dark .qt-content [data-slot="card"],
+.dark .qt-content .neu-card,
+.dark .qt-content [class~="bg-card"],
+.dark .qt-content .glass-card,
+.dark .qt-content .cihaz-card,
+.dark .qt-content .cihaz-card-strong {
+  background: rgba(17, 24, 39, 0.5) !important;
+}
+
+/* Pressed / inset neumorphic elements → subtle frosted well */
+.qt-content .cihaz-pressed {
+  background: rgba(255, 255, 255, 0.3) !important;
+  border: 1px solid var(--qt-stroke) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35) !important;
+  color: var(--qt-text);
+}
+.dark .qt-content .cihaz-pressed {
+  background: rgba(17, 24, 39, 0.35) !important;
+}
+
+/* Small tool chips / utility buttons inside module pages */
+.qt-content .cihaz-tool-item,
+.qt-content .cihaz-action-tile {
+  background: rgba(255, 255, 255, 0.4) !important;
+  border: 1px solid var(--qt-stroke) !important;
+  box-shadow: var(--qt-elev-sm) !important;
+  color: var(--qt-text);
+  border-radius: 12px;
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease, transform 160ms ease, box-shadow 180ms ease;
+}
+.qt-content .cihaz-tool-item:hover,
+.qt-content .cihaz-action-tile:hover {
+  background: rgba(255, 255, 255, 0.6) !important;
+  border-color: rgba(124, 58, 237, 0.28) !important;
+  color: var(--qt-accent) !important;
+  transform: translateY(-1px);
+  box-shadow: var(--qt-elev-md) !important;
+}
+.dark .qt-content .cihaz-tool-item,
+.dark .qt-content .cihaz-action-tile {
+  background: rgba(17, 24, 39, 0.4) !important;
+}
+.dark .qt-content .cihaz-tool-item:hover,
+.dark .qt-content .cihaz-action-tile:hover {
+  background: rgba(17, 24, 39, 0.6) !important;
+}
+
+/* Hover accent tint on neumorphic cards that are clickable */
+.qt-content .cihaz-card:hover {
+  background: rgba(255, 255, 255, 0.6) !important;
+  border-color: rgba(124, 58, 237, 0.22) !important;
+  box-shadow: var(--qt-elev-md) !important;
+}
+
+/* Neutralise opaque surface utilities */
+.qt-content .bg-background,
+.qt-content .bg-popover,
+.qt-content .bg-white,
+.qt-content .bg-white\/90,
+.qt-content .bg-white\/80,
+.qt-content .bg-white\/70 {
+  background: transparent !important;
+}
+
+.qt-content .bg-muted,
+.qt-content .bg-muted\/30,
+.qt-content .bg-muted\/40,
+.qt-content .bg-muted\/50,
+.qt-content .bg-muted\/60,
+.qt-content .bg-secondary,
+.qt-content .bg-accent {
+  background: var(--qt-surface-soft) !important;
+}
+
+.qt-content .text-muted-foreground,
+.qt-content .text-secondary-foreground {
+  color: var(--qt-muted) !important;
+}
+
+.qt-content .text-primary {
+  color: var(--qt-accent) !important;
+}
+
+.qt-content .border {
+  border-color: var(--qt-stroke) !important;
+}
+
+/* Tables — frosted look */
+.qt-content thead,
+.qt-content thead tr,
+.qt-content thead th {
+  background: var(--qt-surface-soft) !important;
+  color: var(--qt-text-soft) !important;
+  border-color: var(--qt-stroke) !important;
+}
+
+.qt-content tbody tr {
+  background: transparent !important;
+  border-color: var(--qt-stroke) !important;
+}
+
+.qt-content tbody tr:hover {
+  background: var(--qt-surface-soft) !important;
+}
+
+.qt-content td,
+.qt-content th {
+  border-color: var(--qt-stroke) !important;
+  color: var(--qt-text);
+}
+
+/* Inputs / selects / comboboxes inside the hub */
+.qt-content input:not([type="checkbox"]):not([type="radio"]),
+.qt-content textarea,
+.qt-content [role="combobox"],
+.qt-content select {
+  background: var(--qt-surface) !important;
+  border-color: var(--qt-stroke) !important;
+  color: var(--qt-text) !important;
+}
+
+/* Tabs list (pill strip) */
+.qt-content [role="tablist"] {
+  background: var(--qt-surface-soft) !important;
+  border: 1px solid var(--qt-stroke) !important;
+}
+.qt-content [role="tab"] {
+  color: var(--qt-text-soft) !important;
+}
+.qt-content [role="tab"][data-state="active"] {
+  background: linear-gradient(135deg, var(--qt-accent), var(--qt-accent-2)) !important;
+  color: #fff !important;
+  box-shadow: 0 8px 18px -10px rgba(124, 58, 237, 0.55);
+}
+
+/* Sticky headers should blend, not show solid white */
+.qt-content .sticky,
+.qt-content .sticky.top-0,
+.qt-content .sticky.bottom-0 {
+  background: var(--qt-surface) !important;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+/* BackButton — align to hub theme */
+.qt-content a[href*="cihaz-yonetimi-ana"],
+.qt-content button:has(svg.lucide-arrow-left) {
+  color: var(--qt-text-soft) !important;
+}
+.qt-content a[href*="cihaz-yonetimi-ana"]:hover,
+.qt-content button:has(svg.lucide-arrow-left):hover {
+  color: var(--qt-accent) !important;
+}
+
+/* shadcn Button inside the hub — neutral ghost look by default.
+   We leave `.qt-*-btn` and destructive variants alone. */
+.qt-content button[data-slot="button"]:not(.qt-icon-btn):not(.qt-ghost-btn):not(.qt-primary-btn):not([data-variant="destructive"]):not(.qore-technic-navitem):not(.qore-technic-bottom-item):not(.qore-technic-collapse-btn) {
+  background: var(--qt-surface) !important;
+  border: 1px solid var(--qt-stroke) !important;
+  color: var(--qt-text) !important;
+  box-shadow: var(--qt-elev-sm);
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease, transform 160ms ease, box-shadow 180ms ease;
+}
+.qt-content button[data-slot="button"]:not(.qt-icon-btn):not(.qt-ghost-btn):not(.qt-primary-btn):not([data-variant="destructive"]):not(.qore-technic-navitem):not(.qore-technic-bottom-item):not(.qore-technic-collapse-btn):hover {
+  background: var(--qt-surface-strong) !important;
+  border-color: rgba(124, 58, 237, 0.28) !important;
+  color: var(--qt-accent) !important;
+  transform: translateY(-1px);
+  box-shadow: var(--qt-elev-md);
+}
+
+/* Primary / default shadcn Button variant — promote to gradient */
+.qt-content button[data-variant="default"]:not(.qore-technic-navitem):not(.qore-technic-bottom-item):not(.qore-technic-collapse-btn) {
+  background: linear-gradient(135deg, var(--qt-accent), var(--qt-accent-2)) !important;
+  color: #fff !important;
+  border: 1px solid transparent !important;
+  box-shadow: 0 10px 22px -12px rgba(124, 58, 237, 0.55), 0 3px 8px -4px rgba(6, 182, 212, 0.35) !important;
+}
+
+/* Accordion (transfer-gecmis) */
+.qt-content [data-slot="accordion-item"],
+.qt-content [data-slot="accordion-trigger"],
+.qt-content [data-slot="accordion-content"] {
+  background: transparent !important;
+  border-color: var(--qt-stroke) !important;
+}
+
+/* Command palette surfaces (shown in popovers for form pages) */
+.qt-content [cmdk-root],
+.qt-content [cmdk-list],
+.qt-content [cmdk-input] {
+  background: var(--qt-surface) !important;
+  color: var(--qt-text) !important;
+}
+
+/* Badges should not look like opaque chips inside the hub */
+.qt-content [data-slot="badge"] {
+  background: rgba(124, 58, 237, 0.12) !important;
+  color: var(--qt-accent) !important;
+  border-color: rgba(124, 58, 237, 0.22) !important;
+}
+
+/* Dialog / popover (portaled) content — theme in dark/light hub */
+html.qt-active [data-slot="dialog-content"],
+html.qt-active [data-slot="popover-content"],
+html.qt-active [data-slot="alert-dialog-content"] {
+  background: var(--qt-surface-strong) !important;
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border: 1px solid var(--qt-stroke) !important;
+  color: var(--qt-text) !important;
+}
+
+/* Wizard form shell / step containers — allow gradient bg through */
+.qt-content .wizard-form-shell,
+.qt-content .wizard-step,
+.qt-content form {
+  background: transparent !important;
+}
+
+/* Generic container padding normalization for non-module pages
+   (transfer-sablonlari uses p-4, yedek-parca-analizi uses container) */
+.qt-content > .qore-technic-main__inner > div[class*="container"],
+.qt-content > .qore-technic-main__inner > div.p-4,
+.qt-content > .qore-technic-main__inner > div.p-6 {
+  background: transparent !important;
+}
+
+/* ---- Mobile menu overlay (yedek-parça transfer page) ----
+   The page uses <div class="fixed inset-0 z-50"> with an internal
+   <div class="... cihaz-shell ...">. Our transparency rule above
+   would let the QOREtechnic bottom nav bleed through that drawer.
+   Force the in-drawer cihaz-shell back to opaque hub glass surface
+   and make sure it sits ABOVE the bottom nav (z-50 > z-40). */
+.qt-content .fixed.inset-0 .cihaz-shell,
+.qt-content .fixed.inset-0 [class*="cihaz-shell"] {
+  background: var(--qt-surface-strong) !important;
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  border-right: 1px solid var(--qt-stroke);
+  min-height: 100dvh;
+}
+
+/* Also: hide the QOREtechnic bottom nav when a full-screen overlay
+   is active on the page (body gets [data-scroll-locked] on modals). */
+html.qt-active body[data-scroll-locked] .qore-technic-bottom-nav {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+}
+
+/* Ensure page content doesn't tuck UNDER the sidebar/bottom nav.
+   yedek-parça transfer header uses `flex items-center justify-between`
+   with a back button — add a little inline-start padding on mobile so
+   it doesn't collide with the mobile brand/area. */
+@media (max-width: 767px) {
+  .qt-content > .qore-technic-main__inner {
+    padding-top: 4px;
+  }
+}
+

@@ -53,7 +53,20 @@ const normalizeKey = (s: string) =>
 
 const parseNum = (v: any): number | undefined => {
   if (v === undefined || v === null || v === '') return undefined;
-  const n = Number(String(v).replace(',', '.'));
+  let s = String(v).trim();
+  // Remove currency symbols and whitespace
+  s = s.replace(/[₺€$\s]/g, '');
+  // Turkish format: dots are thousands separators, comma is decimal
+  // e.g. "6.552,98" → "6552.98"
+  if (s.includes(',') && s.includes('.')) {
+    // Both present: dots are thousands seps, comma is decimal
+    s = s.replace(/\./g, '').replace(',', '.');
+  } else if (s.includes(',')) {
+    // Only comma: it's the decimal separator
+    s = s.replace(',', '.');
+  }
+  // else: only dots or no separators — standard format
+  const n = Number(s);
   return Number.isFinite(n) ? n : undefined;
 };
 
@@ -553,10 +566,15 @@ export default function UrunKoduPanel() {
 
   const createReferenceSheet = () => {
     const trackingModes = Object.entries(TRACKING_MODE_LABEL).map(([key, label]) => ({ TakipTuru_Kodu: key, Aciklama: label }));
+    const currencyOptions = [
+      { Kod: 'EUR', Aciklama: 'Euro' },
+      { Kod: 'USD', Aciklama: 'ABD Doları' },
+      { Kod: 'TRY', Aciklama: 'Türk Lirası' },
+    ];
     const maxLength = Math.max(
       definitions.brands.length, definitions.labGroups.length, definitions.testGroups.length,
       definitions.deviceGroups.length, definitions.productGroups.length, definitions.mainUnits.length,
-      trackingModes.length
+      trackingModes.length, currencyOptions.length
     );
     const sheetData: any[] = [];
     for (let i = 0; i < maxLength; i++) {
@@ -569,6 +587,8 @@ export default function UrunKoduPanel() {
         'Ana Birimler': definitions.mainUnits[i] || '',
         'Takip Turu Kodu': trackingModes[i]?.TakipTuru_Kodu || '',
         'Takip Turu Aciklama': trackingModes[i]?.Aciklama || '',
+        'Doviz Birimi Kodu': currencyOptions[i]?.Kod || '',
+        'Doviz Birimi Aciklama': currencyOptions[i]?.Aciklama || '',
       });
     }
     return XLSX.utils.json_to_sheet(sheetData);
@@ -648,7 +668,14 @@ export default function UrunKoduPanel() {
           ambalajDegeri: urunGrubu === 'kit' ? ambalajDegeri : undefined,
           anaBirim: (row['anabirim'] as ProductCode['anaBirim']) || 'Kutu',
           cost: parseNum(row['maliyet'] ?? row['cost']),
-          currency: (String(row['parabirimi'] ?? row['currency'] ?? 'EUR').toUpperCase() as ProductCode['currency']) || undefined,
+          currency: (() => {
+            const raw = String(row['dovizbirimi'] ?? row['parabirimi'] ?? row['currency'] ?? '').toUpperCase().trim();
+            if (raw === 'EUR' || raw === 'EURO') return 'EUR' as const;
+            if (raw === 'USD' || raw === 'DOLAR' || raw === 'ABD DOLARI') return 'USD' as const;
+            if (raw === 'TRY' || raw === 'TL' || raw === 'TURK LIRASI') return 'TRY' as const;
+            if (raw === '') return undefined;
+            return 'EUR' as const; // default
+          })(),
           marka: row['marka'] || undefined,
           laboratuvarGrubu: row['laboratuvargrubu'] || undefined,
           testGrubu: row['testgrubu'] || undefined,

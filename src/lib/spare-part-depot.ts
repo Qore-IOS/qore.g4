@@ -42,15 +42,18 @@ export function buildDepotSelectableItems(
   const result: DepotSelectableStockItem[] = [];
 
   for (const item of filtered) {
-    if (item.hucreNumarasi) {
+    const normalizedHucreNumarasi = (item.hucreNumarasi || '').trim();
+    const normalizedSerialNumber = (item.serialNumber || '').trim();
+
+    if (normalizedHucreNumarasi) {
       result.push({
         id: item.id,
         productCodeId: item.productCodeId,
         stokKodu: item.stokKodu,
         stokAdi: item.stokAdi,
         anaBirim: item.anaBirim,
-        serialNumber: item.serialNumber || '',
-        hucreNumarasi: item.hucreNumarasi,
+        serialNumber: normalizedSerialNumber,
+        hucreNumarasi: normalizedHucreNumarasi,
         address: item.address,
         totalQuantity: 1,
         trackingType: 'cell',
@@ -61,7 +64,7 @@ export function buildDepotSelectableItems(
       continue;
     }
 
-    if (item.serialNumber) {
+    if (normalizedSerialNumber) {
       if (cellsOnly) continue;
       result.push({
         id: item.id,
@@ -69,7 +72,7 @@ export function buildDepotSelectableItems(
         stokKodu: item.stokKodu,
         stokAdi: item.stokAdi,
         anaBirim: item.anaBirim,
-        serialNumber: item.serialNumber,
+        serialNumber: normalizedSerialNumber,
         address: item.address,
         totalQuantity: 1,
         trackingType: 'serial',

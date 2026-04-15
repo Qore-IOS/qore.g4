@@ -260,6 +260,9 @@ function parseTableRow(line: string, productCodes: ProductCode[], headerInfo: Ta
   // Never allow UTS code to be used as lot
   if (looksLikeUtsCode(lot)) lot = undefined;
 
+  // Never allow UTS code to be used as lot
+  if (looksLikeUtsCode(lot)) lot = undefined;
+
   console.log(`[İrsaliye Parser] Extracted -> qty: ${quantity}, lot: ${lot}, miad: ${miad}`);
 
   if (quantity <= 0) {

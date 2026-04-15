@@ -25,17 +25,15 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, AlertTriangle, CheckCircle, Server, Clock, ShieldCheck, RotateCcw, Building, ChevronsUpDown, Check as CheckIcon, Calendar, Package, ChevronDown, ChevronUp, Wrench, FlaskConical, Phone, MapPin, Timer, TrendingUp, Layers } from 'lucide-react';
-import BackButton from '@/components/BackButton';
-import { differenceInMinutes, startOfDay, endOfDay, subMonths, format } from 'date-fns';
+import { differenceInMinutes, subMonths, format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { useAuth } from '@/contexts/auth-context';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { classifyStopFault, type StopFaultType } from '@/lib/stop-fault';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
-import { DatePickerWithRange } from '@/components/ui/date-range-picker';
-import { DateRange } from 'react-day-picker';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Collapsible,
@@ -85,7 +83,6 @@ export default function ArizaIstatistikleriPage() {
 
   const [selectedLabId, setSelectedLabId] = useState<string>('all');
   const [isLabPopoverOpen, setIsLabPopoverOpen] = useState(false);
-  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
 
   // Global fault type filter
   const [selectedFaultType, setSelectedFaultType] = useState<'all' | 'teknik_servis' | 'aplikasyon'>('all');
@@ -96,6 +93,8 @@ export default function ArizaIstatistikleriPage() {
   const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [isProductPopoverOpen, setIsProductPopoverOpen] = useState(false);
   const [expandedLabs, setExpandedLabs] = useState<Set<string>>(new Set());
+  const [selectedStopType, setSelectedStopType] = useState<StopFaultType>('e_stop');
+  const [selectedStopLabId, setSelectedStopLabId] = useState<string | null>(null);
   const [hospitalMinMaxRules, setHospitalMinMaxRules] = useState<Map<string, Set<string>>>(new Map());
 
   const TARGET_RESOLUTION_TIME = 480; // 8 hours in minutes
@@ -206,22 +205,27 @@ export default function ArizaIstatistikleriPage() {
       if (selectedLabId !== 'all') {
           filtered = filtered.filter(report => report.hospitalId === selectedLabId);
       }
-      if (dateRange?.from) {
-          const from = startOfDay(dateRange.from);
-          filtered = filtered.filter(report => report.openedAt && report.openedAt >= from);
-      }
-      if (dateRange?.to) {
-          const to = endOfDay(dateRange.to);
-          filtered = filtered.filter(report => report.openedAt && report.openedAt <= to);
-      }
       if (selectedFaultType !== 'all') {
           filtered = filtered.filter(report => report.faultType === selectedFaultType);
       }
       return filtered;
-  }, [reports, selectedLabId, dateRange, selectedFaultType]);
+  }, [reports, selectedLabId, selectedFaultType]);
 
   // Main statistics
   const stats = useMemo(() => {
+    // NOTE: fault *record* counts (totalFaults, openFaults, closedFaults,
+    // teknik/aplikasyon/kurum/telefon, faultsExceedingTarget) treat each
+    // fault report as a single occurrence — matching the Arıza Yönetimi
+    // page. The per-device impact multiplier is reserved for device-level
+    // analytics (topDevices below) where attributing group faults to each
+    // affected device is meaningful.
+    const getImpactCount = (report: any) => {
+      if (report?.affectsAllDevices && Array.isArray(report?.affectedDeviceIds)) {
+        return Math.max(1, report.affectedDeviceIds.filter(Boolean).length);
+      }
+      return 1;
+    };
+
     if (filteredReports.length === 0) {
       return {
         topDevices: [],
@@ -238,9 +242,13 @@ export default function ArizaIstatistikleriPage() {
     }
 
     const faultCounts = filteredReports.reduce((acc, report) => {
-      if (report.deviceId) {
-        acc[report.deviceId] = (acc[report.deviceId] || 0) + 1;
+      if (report?.affectsAllDevices && Array.isArray(report?.affectedDeviceIds)) {
+        report.affectedDeviceIds.filter(Boolean).forEach((id: string) => {
+          acc[id] = (acc[id] || 0) + 1;
+        });
+        return acc;
       }
+      if (report.deviceId) acc[report.deviceId] = (acc[report.deviceId] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
 
@@ -263,7 +271,8 @@ export default function ArizaIstatistikleriPage() {
     }, 0);
     const avgResolutionTime = closedReports.length > 0 ? totalResolutionTime / closedReports.length : 0;
 
-    const openFaults = filteredReports.filter(r => r.status !== 'closed' && r.status !== 'cozuldu').length;
+    const openFaults = filteredReports
+      .filter(r => r.status !== 'closed' && r.status !== 'cozuldu').length;
     const closedFaults = closedReports.length;
 
     // Count faults exceeding target time
@@ -315,11 +324,15 @@ export default function ArizaIstatistikleriPage() {
   // Fault definitions bar chart data - uses faultName field from fault definitions
   const faultDefinitionsBarData = useMemo(() => {
     const countByFaultName: Record<string, number> = {};
+    const getImpactCount = (report: any) =>
+      report?.affectsAllDevices && Array.isArray(report?.affectedDeviceIds)
+        ? Math.max(1, report.affectedDeviceIds.filter(Boolean).length)
+        : 1;
 
     filteredReports.forEach(r => {
         // Use faultName (from faultDefinitions) instead of title (which includes lab/device info)
         const faultName = r.faultName || 'Belirtilmemiş';
-        countByFaultName[faultName] = (countByFaultName[faultName] || 0) + 1;
+        countByFaultName[faultName] = (countByFaultName[faultName] || 0) + getImpactCount(r);
       });
 
     return Object.entries(countByFaultName)
@@ -330,6 +343,11 @@ export default function ArizaIstatistikleriPage() {
 
   // Faults exceeding target time list - uses faultName field from fault definitions
   const faultsExceedingTargetList = useMemo(() => {
+    const getImpactCount = (report: any) =>
+      report?.affectsAllDevices && Array.isArray(report?.affectedDeviceIds)
+        ? Math.max(1, report.affectedDeviceIds.filter(Boolean).length)
+        : 1;
+
     const closedReports = filteredReports.filter(r =>
       (r.status === 'closed' || r.status === 'cozuldu') && r.openedAt && r.closedAt
     );
@@ -351,8 +369,9 @@ export default function ArizaIstatistikleriPage() {
       if (!byFaultName[faultName]) {
         byFaultName[faultName] = { count: 0, totalExceed: 0 };
       }
-      byFaultName[faultName].count++;
-      byFaultName[faultName].totalExceed += exceedMinutes;
+      const impactCount = getImpactCount(r);
+      byFaultName[faultName].count += impactCount;
+      byFaultName[faultName].totalExceed += exceedMinutes * impactCount;
     });
 
     return Object.entries(byFaultName)
@@ -548,6 +567,63 @@ export default function ArizaIstatistikleriPage() {
     });
   };
 
+  const stopStats = useMemo(() => {
+    const stopReports = filteredReports
+      .map((report) => ({ report, type: classifyStopFault(report) }))
+      .filter((row): row is { report: any; type: StopFaultType } => !!row.type);
+
+    const counts = {
+      e_stop: 0,
+      s_stop: 0,
+      normal_stop: 0,
+    } as Record<StopFaultType, number>;
+
+    const labMap: Record<StopFaultType, Map<string, { labId: string; labName: string; count: number }>> = {
+      e_stop: new Map(),
+      s_stop: new Map(),
+      normal_stop: new Map(),
+    };
+
+    const deviceMap: Record<StopFaultType, Map<string, Map<string, { deviceId: string; model: string; count: number }>>> = {
+      e_stop: new Map(),
+      s_stop: new Map(),
+      normal_stop: new Map(),
+    };
+
+    stopReports.forEach(({ report, type }) => {
+      counts[type] += 1;
+      const labId = report.hospitalId || 'unknown';
+      const labName = hospitals.find(h => h.id === labId)?.name || report.labName || 'Bilinmeyen Laboratuvar';
+      const existingLab = labMap[type].get(labId);
+      labMap[type].set(labId, {
+        labId,
+        labName,
+        count: (existingLab?.count || 0) + 1,
+      });
+
+      const byLab = deviceMap[type].get(labId) || new Map();
+      const deviceId = report.deviceId || 'unknown-device';
+      const deviceName = report.model || devices.find(d => d.id === deviceId)?.cihazAdi || devices.find(d => d.id === deviceId)?.model || 'Bilinmeyen Cihaz';
+      const existingDevice = byLab.get(deviceId);
+      byLab.set(deviceId, {
+        deviceId,
+        model: deviceName,
+        count: (existingDevice?.count || 0) + 1,
+      });
+      deviceMap[type].set(labId, byLab);
+    });
+
+    return {
+      counts,
+      labsByType: {
+        e_stop: Array.from(labMap.e_stop.values()).sort((a, b) => b.count - a.count),
+        s_stop: Array.from(labMap.s_stop.values()).sort((a, b) => b.count - a.count),
+        normal_stop: Array.from(labMap.normal_stop.values()).sort((a, b) => b.count - a.count),
+      } as Record<StopFaultType, { labId: string; labName: string; count: number }[]>,
+      devicesByTypeAndLab: deviceMap,
+    };
+  }, [filteredReports, hospitals, devices]);
+
   // Custom tooltip for bar chart
   const CustomBarTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
@@ -573,8 +649,7 @@ export default function ArizaIstatistikleriPage() {
   return (
     <div className="device-module-page p-4 space-y-6">
       {/* Header with filters */}
-      <div className="flex justify-between items-center flex-wrap gap-4">
-        <BackButton fallback="/cihaz-yonetimi-ana" />
+      <div className="flex justify-end items-center flex-wrap gap-4">
         <div className="flex items-center gap-2 flex-wrap">
           <Popover open={isLabPopoverOpen} onOpenChange={setIsLabPopoverOpen}>
             <PopoverTrigger asChild>
@@ -582,7 +657,8 @@ export default function ArizaIstatistikleriPage() {
                 variant="outline"
                 role="combobox"
                 aria-expanded={isLabPopoverOpen}
-                className="w-[250px] justify-between"
+                className="w-[250px] justify-between cihaz-tool-item border-0 shadow-none"
+                style={{ color: 'var(--dashboard-text)' }}
               >
                 {selectedLabId === 'all'
                   ? 'Tüm Laboratuvarlar'
@@ -625,7 +701,6 @@ export default function ArizaIstatistikleriPage() {
               </Command>
             </PopoverContent>
           </Popover>
-          <DatePickerWithRange date={dateRange} setDate={setDateRange} />
         </div>
       </div>
 
@@ -702,36 +777,134 @@ export default function ArizaIstatistikleriPage() {
         </Card>
       </div>
 
+      {/* Stop Fault Statistics */}
+      <Card className="glass-card">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <AlertTriangle className="h-5 w-5 text-red-500" />
+            Stop Arızası İstatistikleri
+          </CardTitle>
+          <CardDescription>E Stop, S Stop ve Normal Stop kayıtları</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {([
+              { key: 'e_stop' as StopFaultType, label: 'E Stop' },
+              { key: 's_stop' as StopFaultType, label: 'S Stop' },
+              { key: 'normal_stop' as StopFaultType, label: 'Normal Stop' },
+            ]).map((item) => (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => {
+                  setSelectedStopType(item.key);
+                  setSelectedStopLabId(null);
+                }}
+                className="cihaz-tool-item w-full flex items-center justify-between px-4 py-2.5 text-sm font-semibold rounded-xl transition-all active:scale-[0.99]"
+                style={{
+                  color: selectedStopType === item.key ? 'var(--dashboard-accent)' : 'var(--dashboard-text)',
+                  background: selectedStopType === item.key ? 'color-mix(in srgb, var(--dashboard-accent) 14%, white)' : undefined,
+                  border: selectedStopType === item.key ? '1px solid color-mix(in srgb, var(--dashboard-accent) 30%, transparent)' : undefined,
+                }}
+              >
+                <span>{item.label}</span>
+                <span
+                  className="inline-flex items-center justify-center min-w-7 h-7 px-2 rounded-full text-xs font-bold"
+                  style={{
+                    background: selectedStopType === item.key ? 'color-mix(in srgb, var(--dashboard-accent) 18%, white)' : 'var(--dashboard-pressed)',
+                    color: selectedStopType === item.key ? 'var(--dashboard-accent)' : 'var(--dashboard-muted)',
+                  }}
+                >
+                  {stopStats.counts[item.key]}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="rounded-lg border p-3 space-y-2">
+              <p className="text-sm font-semibold">Laboratuvar Dağılımı</p>
+              <div className="space-y-1 max-h-56 overflow-y-auto">
+                {stopStats.labsByType[selectedStopType].length === 0 && (
+                  <p className="text-xs text-muted-foreground">Bu tipte kayıt yok.</p>
+                )}
+                {stopStats.labsByType[selectedStopType].map((lab) => (
+                  <button
+                    key={lab.labId}
+                    type="button"
+                    onClick={() => setSelectedStopLabId(lab.labId)}
+                    className={cn(
+                      'w-full text-left px-2 py-1.5 rounded-md text-sm flex items-center justify-between',
+                      selectedStopLabId === lab.labId ? 'bg-muted' : 'hover:bg-muted/60'
+                    )}
+                  >
+                    <span>{lab.labName}</span>
+                    <Badge variant="outline">{lab.count}</Badge>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="rounded-lg border p-3 space-y-2">
+              <p className="text-sm font-semibold">Cihaz Dağılımı</p>
+              <div className="space-y-1 max-h-56 overflow-y-auto">
+                {!selectedStopLabId && (
+                  <p className="text-xs text-muted-foreground">Cihaz listesini görmek için soldan laboratuvar seçin.</p>
+                )}
+                {selectedStopLabId && (
+                  Array.from(stopStats.devicesByTypeAndLab[selectedStopType].get(selectedStopLabId)?.values() || [])
+                    .sort((a, b) => b.count - a.count)
+                    .map((device) => (
+                      <div key={device.deviceId} className="px-2 py-1.5 rounded-md text-sm flex items-center justify-between hover:bg-muted/60">
+                        <span className="truncate pr-2">{device.model}</span>
+                        <Badge variant="outline">{device.count}</Badge>
+                      </div>
+                    ))
+                )}
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Fault Type Toggle */}
       <div className="flex justify-center">
-        <div className="inline-flex rounded-lg p-1 bg-muted">
-          <Button
-            variant={selectedFaultType === 'all' ? 'default' : 'ghost'}
-            size="sm"
+        <div className="inline-flex rounded-xl p-1.5 cihaz-pressed">
+          <button
+            type="button"
             onClick={() => setSelectedFaultType('all')}
-            className="gap-2"
+            className="cihaz-tool-item inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-lg transition-all"
+            style={{
+              color: selectedFaultType === 'all' ? 'var(--dashboard-accent)' : 'var(--dashboard-text)',
+              background: selectedFaultType === 'all' ? 'color-mix(in srgb, var(--dashboard-accent) 14%, white)' : undefined,
+            }}
           >
             <Layers className="h-4 w-4" />
             Tümü
-          </Button>
-          <Button
-            variant={selectedFaultType === 'teknik_servis' ? 'default' : 'ghost'}
-            size="sm"
+          </button>
+          <button
+            type="button"
             onClick={() => setSelectedFaultType('teknik_servis')}
-            className="gap-2"
+            className="cihaz-tool-item inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-lg transition-all"
+            style={{
+              color: selectedFaultType === 'teknik_servis' ? 'var(--dashboard-accent)' : 'var(--dashboard-text)',
+              background: selectedFaultType === 'teknik_servis' ? 'color-mix(in srgb, var(--dashboard-accent) 14%, white)' : undefined,
+            }}
           >
             <Wrench className="h-4 w-4" />
             Teknik Servis
-          </Button>
-          <Button
-            variant={selectedFaultType === 'aplikasyon' ? 'default' : 'ghost'}
-            size="sm"
+          </button>
+          <button
+            type="button"
             onClick={() => setSelectedFaultType('aplikasyon')}
-            className="gap-2"
+            className="cihaz-tool-item inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-lg transition-all"
+            style={{
+              color: selectedFaultType === 'aplikasyon' ? 'var(--dashboard-accent)' : 'var(--dashboard-text)',
+              background: selectedFaultType === 'aplikasyon' ? 'color-mix(in srgb, var(--dashboard-accent) 14%, white)' : undefined,
+            }}
           >
             <FlaskConical className="h-4 w-4" />
             Aplikasyon
-          </Button>
+          </button>
         </div>
       </div>
 
@@ -803,7 +976,8 @@ export default function ArizaIstatistikleriPage() {
                   <YAxis
                     type="category"
                     dataKey="name"
-                    width={120}
+                    width={220}
+                    interval={0}
                     tick={{ fontSize: 11 }}
                   />
                   <Tooltip content={<CustomBarTooltip />} />
@@ -1003,8 +1177,9 @@ export default function ArizaIstatistikleriPage() {
                   <Button
                     variant="outline"
                     role="combobox"
-                    className="w-full justify-between"
+                    className="w-full justify-between cihaz-tool-item border-0 shadow-none"
                     disabled={filteredProducts.length === 0}
+                    style={{ color: 'var(--dashboard-text)' }}
                   >
                     {selectedProduct
                       ? `${selectedProduct.stokKodu} - ${selectedProduct.stokAdi?.substring(0, 30)}...`
@@ -1110,17 +1285,17 @@ export default function ArizaIstatistikleriPage() {
                               </TableCell>
                               <TableCell>
                                 <CollapsibleTrigger asChild>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
+                                  <button
+                                    type="button"
                                     onClick={() => toggleLabExpand(lab.hospitalId)}
+                                    className="cihaz-tool-item inline-flex items-center justify-center h-8 w-8 rounded-lg"
                                   >
                                     {expandedLabs.has(lab.hospitalId) ? (
                                       <ChevronUp className="h-4 w-4" />
                                     ) : (
                                       <ChevronDown className="h-4 w-4" />
                                     )}
-                                  </Button>
+                                  </button>
                                 </CollapsibleTrigger>
                               </TableCell>
                             </TableRow>

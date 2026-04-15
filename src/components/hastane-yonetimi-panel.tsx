@@ -280,6 +280,119 @@ export default function LaboratuvarYonetimiPanel() {
     return set;
   }, [productMeta]);
 
+  /**
+   * Stock warnings shown at the top of the panel.
+   * Evaluated per LOT row (since the panel is displayed lot-by-lot):
+   *  - Miadı yaklaşan: remaining days <= 60 or already expired
+   *  - Min stoğa gelen: row.quantity <= rule.min
+   *  - Adedi 1 kalan: row.quantity == 1 AND rule.max >= 2 (not warned when max == 1)
+   */
+  const stockWarningRows = useMemo(() => {
+    if (!summaryList.length) return [] as Array<GroupedStockItem & {
+      warningReasons: string[];
+      totalForStokKodu: number;
+      miadDays: number;
+      miadSeverity: MiadSeverity;
+      minStock: number | null;
+      maxStock: number | null;
+    }>;
+
+    // Compute total quantity per stokKodu (sum across lots) — informational only
+    const totalByStokKodu: Record<string, number> = {};
+    summaryList.forEach(r => {
+      totalByStokKodu[r.stokKodu] = (totalByStokKodu[r.stokKodu] ?? 0) + r.quantity;
+    });
+
+    const result: Array<GroupedStockItem & {
+      warningReasons: string[];
+      totalForStokKodu: number;
+      miadDays: number;
+      miadSeverity: MiadSeverity;
+      minStock: number | null;
+      maxStock: number | null;
+    }> = [];
+
+    summaryList.forEach(row => {
+      const miadInfo = getMiadInfoFromString(row.miad);
+      const rule = minMaxRules[row.stokKodu];
+      const minStock = rule?.min ?? null;
+      const maxStock = rule?.max ?? null;
+      const totalForStokKodu = totalByStokKodu[row.stokKodu] ?? 0;
+
+      const reasons: string[] = [];
+
+      // Expiring soon or expired (lot-level)
+      if (miadInfo.severity === 'expired') {
+        reasons.push(`Miadı geçti (${Math.abs(miadInfo.days)} gün önce)`);
+      } else if (
+        miadInfo.severity === 'critical' ||
+        miadInfo.severity === 'warning' ||
+        miadInfo.severity === 'caution' ||
+        miadInfo.severity === 'notice'
+      ) {
+        reasons.push(`Miadı yaklaşıyor (${miadInfo.days} gün kaldı)`);
+      }
+
+      // Min stock reached (this lot's quantity at or below min)
+      if (minStock != null && minStock > 0 && row.quantity <= minStock) {
+        reasons.push(`Minimum stok seviyesinde (Min: ${minStock}, Bu lotta: ${row.quantity})`);
+      }
+
+      // Min stock reached lot-independent (product total at or below min).
+      // Only add the "toplam" reason when it conveys new info (multi-lot case).
+      if (
+        minStock != null && minStock > 0 &&
+        totalForStokKodu <= minStock &&
+        totalForStokKodu !== row.quantity
+      ) {
+        reasons.push(`Toplam stok min seviyesinde (Min: ${minStock}, Toplam: ${totalForStokKodu})`);
+      }
+
+      // Only 1 remaining in this lot — warn when max >= 2 (suppress only when max == 1)
+      if (row.quantity === 1 && (maxStock == null || maxStock >= 2)) {
+        reasons.push('Bu lottan yalnızca 1 adet kaldı');
+      }
+
+      // Only 1 remaining across all lots of this product — warn when max >= 2.
+      // This also triggers when the single remaining item lives in a lot with
+      // quantity > 1 is impossible, but we surface it on every lot of the
+      // product so the user is alerted when viewing any of its rows.
+      if (totalForStokKodu === 1 && (maxStock == null || maxStock >= 2) && row.quantity !== 1) {
+        reasons.push('Lottan bağımsız üründen yalnızca 1 adet kaldı');
+      }
+
+      if (reasons.length > 0) {
+        result.push({
+          ...row,
+          warningReasons: reasons,
+          totalForStokKodu,
+          miadDays: miadInfo.days,
+          miadSeverity: miadInfo.severity,
+          minStock,
+          maxStock,
+        });
+      }
+    });
+
+    // Sort: most urgent first (expired, then critical miad, then by reason count)
+    const severityOrder: Record<MiadSeverity, number> = {
+      expired: 0,
+      critical: 1,
+      warning: 2,
+      caution: 3,
+      notice: 4,
+      normal: 5,
+    };
+    result.sort((a, b) => {
+      const sa = severityOrder[a.miadSeverity] ?? 10;
+      const sb = severityOrder[b.miadSeverity] ?? 10;
+      if (sa !== sb) return sa - sb;
+      return a.miadDays - b.miadDays;
+    });
+
+    return result;
+  }, [summaryList, minMaxRules]);
+
   const filtered = useMemo(() => {
     if (!searchQuery) return summaryList;
     const q = searchQuery.toLowerCase();
@@ -785,6 +898,60 @@ export default function LaboratuvarYonetimiPanel() {
           <CardDescription>Laboratuvarlardaki mevcut stokları özet halinde görüntüleyebilirsiniz.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* ── STOCK WARNINGS SECTION (top, blinking red borders) ──
+              Shows rows for: expiring soon, min-stock reached, and qty=1 (only if max>2) */}
+          {selectedLabId && stockWarningRows.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-red-500 animate-pulse" />
+                <h3 className="text-base font-semibold text-red-500">
+                  Stok Uyarıları ({stockWarningRows.length})
+                </h3>
+                <span className="text-xs text-muted-foreground">
+                  · Miadı yaklaşan, min stoğa düşen, 1 adet kalan ürünler
+                </span>
+              </div>
+              <div className="space-y-2">
+                {stockWarningRows.map((row) => (
+                  <div
+                    key={`warn-${row.groupKey}`}
+                    className="stock-warning-blink bg-red-500/5 px-3 py-2"
+                  >
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                      <div className="flex-1 min-w-[200px]">
+                        <p className="font-semibold">{row.stokAdi}</p>
+                        <p className="text-[11px] text-muted-foreground font-mono">
+                          {row.stokKodu}
+                          {row.lot ? ` · Lot: ${row.lot}` : ''}
+                          {row.miad ? ` · Miad: ${row.miad}` : ''}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3 text-[11px]">
+                        <span className="inline-flex items-center gap-1 rounded bg-red-500/10 px-2 py-0.5 text-red-600 dark:text-red-400 font-semibold">
+                          Bu lot: {row.quantity}
+                        </span>
+                        <span className="inline-flex items-center gap-1 rounded bg-red-500/10 px-2 py-0.5 text-red-600 dark:text-red-400 font-semibold">
+                          Toplam: {row.totalForStokKodu}
+                        </span>
+                        {row.minStock != null && (
+                          <span className="text-muted-foreground">Min: {row.minStock}</span>
+                        )}
+                        {row.maxStock != null && (
+                          <span className="text-muted-foreground">Max: {row.maxStock}</span>
+                        )}
+                      </div>
+                    </div>
+                    <ul className="mt-1 text-[11px] text-red-600 dark:text-red-400 list-disc list-inside">
+                      {row.warningReasons.map((r, i) => (
+                        <li key={i}>{r}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="flex-grow">
               <label className="block text-sm font-medium mb-1">Laboratuvar Seçin</label>

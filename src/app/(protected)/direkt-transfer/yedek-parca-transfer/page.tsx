@@ -55,6 +55,8 @@ import {
   Upload,
   FileText,
   Database,
+  SlidersHorizontal,
+  ShoppingCart,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { format } from 'date-fns';
@@ -66,7 +68,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import SparePartTransferTutanakPDFButton from '@/components/exports/SparePartTransferTutanakPDFButton';
 import TeknikServisTutanakPDFButton from '@/components/exports/TeknikServisTutanakPDFButton';
 import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
-import { emitSparePartTransfer } from '@/lib/notifications';
+import { emitSparePartTransfer, emitExternalStockUsage } from '@/lib/notifications';
+import MinMaxSettingsPanel from '@/components/MinMaxSettingsPanel';
 
 // Menu selection types
 type MenuSection = 'transfer' | 'depo-stok' | 'toplam-stok' | 'personnel' | 'pool-stok';
@@ -219,6 +222,7 @@ export default function YedekParcaTransferPage() {
   const [depoStokLoading, setDepoStokLoading] = useState(false);
   const [expandedStokKodu, setExpandedStokKodu] = useState<string | null>(null);
   const [depoStokSearchQuery, setDepoStokSearchQuery] = useState('');
+  const [minMaxPanelOpen, setMinMaxPanelOpen] = useState(false);
   const [depoStokPage, setDepoStokPage] = useState(0);
   const [editingDepoGroup, setEditingDepoGroup] = useState<GroupedDepoStokItem | null>(null);
   const [editingQuantity, setEditingQuantity] = useState<number>(1);
@@ -238,6 +242,7 @@ export default function YedekParcaTransferPage() {
 
   // All personnel stock for toplam stok view
   const [allPersonnelStock, setAllPersonnelStock] = useState<PersonalStockItem[]>([]);
+  const [allPoolStockAggregate, setAllPoolStockAggregate] = useState<PoolWarehouseStockItem[]>([]);
   const [allStockLoading, setAllStockLoading] = useState(false);
   const [takingOverStockId, setTakingOverStockId] = useState<string | null>(null);
   const [historyActionFilter, setHistoryActionFilter] = useState<string>('all');
@@ -266,6 +271,20 @@ export default function YedekParcaTransferPage() {
   const [returnCondition, setReturnCondition] = useState<'iyi' | 'miad_gecmis' | 'arizali'>('iyi');
   const [returnNote, setReturnNote] = useState('');
   const [isReturning, setIsReturning] = useState(false);
+
+  // Observation (transfer history for a single item) modal state
+  const [observationOpen, setObservationOpen] = useState(false);
+  const [observationItem, setObservationItem] = useState<{
+    id: string;
+    scope: 'personal' | 'pool';
+    stokKodu: string;
+    stokAdi: string;
+    serialNumber?: string;
+    ownerName?: string;
+    poolWarehouseName?: string;
+  } | null>(null);
+  const [observationLogs, setObservationLogs] = useState<any[]>([]);
+  const [observationLoading, setObservationLoading] = useState(false);
 
   // Personnel-to-personnel transfer modal state
   const [pTransferModalOpen, setPTransferModalOpen] = useState(false);
@@ -630,7 +649,7 @@ export default function YedekParcaTransferPage() {
         });
 
         const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
-        batch.set(depoLogRef, {
+        batch.set(depoLogRef, withCompanyScope({
           action: 'stok_duzeltme',
           productCodeId: existing.productCodeId,
           stokKodu: existing.stokKodu,
@@ -639,12 +658,14 @@ export default function YedekParcaTransferPage() {
           address: nextAddress,
           cihazGrubu: existing.cihazGrubu || '',
           serialNumber: existing.serialNumber || '',
+          depoStokDocId: existing.id,
           quantity: Math.abs(nextQuantity - existing.quantity),
-          notes: `Excel stok güncelleme: adet ${existing.quantity} -> ${nextQuantity}, adres "${existing.address || '-'}" -> "${nextAddress || '-'}"`,
+          entrySource: 'excel',
+          notes: `[Excel] Stok güncelleme: adet ${existing.quantity} -> ${nextQuantity}, adres "${existing.address || '-'}" -> "${nextAddress || '-'}" (DocID: ${existing.id})`,
           createdAt: Timestamp.fromDate(now),
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || '',
-        });
+        }, currentCompanyId));
 
         const transferLogRef = doc(collection(db, 'sparePartTransferLogs'));
         batch.set(transferLogRef, withCompanyScope({
@@ -744,12 +765,26 @@ export default function YedekParcaTransferPage() {
   const fetchAllPersonnelStock = useCallback(async () => {
     setAllStockLoading(true);
     try {
-      const stockQuery = query(
+      // Personnel stock (status = in_stock). Not dahil: pending_approval, çünkü onay
+      // beklemeyen ürünler stoğa sayılmamalı (personel onaylamadığı ürünleri kendisine
+      // ait saymıyor).
+      const personalQuery = query(
         collection(db, 'personalStock'),
         where('status', '==', 'in_stock')
       );
-      const stockSnap = await getDocs(stockQuery);
-      const stockItems = filterByCompanyScope(stockSnap.docs.map(d => {
+      // Havuz depo stoğu - bu sayede ilgili ürünü depoya / havuza transfer eden
+      // lojistik personeli de görebiliyor.
+      const poolQuery = query(
+        collection(db, 'poolWarehouseStock'),
+        where('status', '==', 'in_stock')
+      );
+
+      const [personalSnap, poolSnap] = await Promise.all([
+        getDocs(personalQuery),
+        getDocs(poolQuery),
+      ]);
+
+      const stockItems = filterByCompanyScope(personalSnap.docs.map(d => {
         const data = d.data();
         return {
           id: d.id,
@@ -759,13 +794,24 @@ export default function YedekParcaTransferPage() {
       }), currentCompanyId, isSuperAdmin);
       stockItems.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       setAllPersonnelStock(stockItems);
+
+      const poolItems = filterByCompanyScope(poolSnap.docs.map(d => {
+        const data = d.data();
+        return {
+          id: d.id,
+          ...data,
+          createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+        } as PoolWarehouseStockItem;
+      }), currentCompanyId, isSuperAdmin);
+      poolItems.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      setAllPoolStockAggregate(poolItems);
     } catch (err) {
       console.error('Error fetching all personnel stock:', err);
       toast({ title: 'Hata', description: 'Toplam stok verileri yüklenemedi.', variant: 'destructive' });
     } finally {
       setAllStockLoading(false);
     }
-  }, [toast]);
+  }, [currentCompanyId, isSuperAdmin, toast]);
 
   // Fetch pool warehouse stock
   const fetchPoolStock = useCallback(async (poolWarehouseId: string) => {
@@ -890,8 +936,8 @@ export default function YedekParcaTransferPage() {
     if (personnelStockFilter === 'pending_approval') {
       return personnelStock.filter(s => s.status === 'pending_approval');
     }
-    // 'all' filter: exclude pending_approval items (shown in separate tab)
-    return personnelStock.filter(s => s.status !== 'pending_approval');
+    // 'all' filter: show everything including pending_approval
+    return personnelStock;
   }, [personnelStock, personnelStockFilter]);
 
   // Paginated personnel stock
@@ -1064,8 +1110,38 @@ export default function YedekParcaTransferPage() {
     setIsTransferring(true);
 
     try {
-      const batch = writeBatch(db);
       const now = new Date();
+
+      // Read fresh depot stock from Firestore to avoid stale state issues
+      const freshStokSnap = await getDocs(collection(db, 'yedekParcaDepoStok'));
+      const freshDepoStok = filterByCompanyScope(freshStokSnap.docs.map(d => {
+        const data = d.data();
+        return { id: d.id, ...data, createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date() } as YedekParcaDepoStokItem;
+      }), currentCompanyId, isSuperAdmin);
+
+      // Verify all transfer items still exist in depot before proceeding
+      for (const row of transferRows) {
+        if (row.serialNumber || row.hucreNumarasi) {
+          const exists = freshDepoStok.some(d => d.stokKodu === row.stokKodu && (
+            (row.serialNumber && d.serialNumber === row.serialNumber) ||
+            (row.hucreNumarasi && d.hucreNumarasi === row.hucreNumarasi)
+          ));
+          if (!exists && row.serialNumber) {
+            throw new Error(`Depoda bulunamadı: ${row.stokKodu} (SN: ${row.serialNumber}). Stok başka biri tarafından transfer edilmiş olabilir.`);
+          }
+        } else {
+          const available = freshDepoStok
+            .filter(d => d.stokKodu === row.stokKodu && !d.serialNumber && !d.hucreNumarasi)
+            .reduce((sum, d) => sum + d.quantity, 0);
+          if (available < row.quantity) {
+            throw new Error(`Yetersiz stok: ${row.stokKodu} için depoda ${available} adet var, ${row.quantity} adet isteniyor.`);
+          }
+        }
+      }
+
+      // Collect all batch operations, then split into chunks of max 400 to stay under Firestore 500-op limit
+      type BatchOp = { type: 'set'; ref: ReturnType<typeof doc>; data: any } | { type: 'delete'; ref: ReturnType<typeof doc> } | { type: 'update'; ref: ReturnType<typeof doc>; data: any };
+      const ops: BatchOp[] = [];
 
       for (const row of transferRows) {
         const isPoolTarget = row.targetUid.startsWith('pool_');
@@ -1073,39 +1149,36 @@ export default function YedekParcaTransferPage() {
 
         if (row.serialNumber || row.hucreNumarasi) {
           // Tekil takipli: depodan ilgili seri/hücre kaydını bul ve sil
-          const depoItem = depoStok.find(
+          const depoItem = freshDepoStok.find(
             d => d.stokKodu === row.stokKodu && (
               (row.serialNumber && d.serialNumber === row.serialNumber) ||
               (row.hucreNumarasi && d.hucreNumarasi === row.hucreNumarasi)
             )
           );
           if (depoItem) {
-            batch.delete(doc(db, 'yedekParcaDepoStok', depoItem.id));
+            ops.push({ type: 'delete', ref: doc(db, 'yedekParcaDepoStok', depoItem.id) });
           } else if (row.hucreNumarasi && !row.serialNumber) {
-            // Depoya hücre ile giriş yapılmamış olsa bile manuel hücre transferinde depodan 1 adet düş
-            const fallbackEntry = depoStok
+            const fallbackEntry = freshDepoStok
               .filter(d => d.stokKodu === row.stokKodu && !d.serialNumber && !d.hucreNumarasi)
               .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())[0];
 
             if (!fallbackEntry) {
-              throw new Error(`Manual hucre transfer fallback stock not found for ${row.stokKodu}`);
+              throw new Error(`Depoda stok bulunamadı: ${row.stokKodu} (Hücre: ${row.hucreNumarasi})`);
             }
 
             if (fallbackEntry.quantity <= 1) {
-              batch.delete(doc(db, 'yedekParcaDepoStok', fallbackEntry.id));
+              ops.push({ type: 'delete', ref: doc(db, 'yedekParcaDepoStok', fallbackEntry.id) });
             } else {
-              batch.update(doc(db, 'yedekParcaDepoStok', fallbackEntry.id), {
-                quantity: fallbackEntry.quantity - 1,
-              });
+              ops.push({ type: 'update', ref: doc(db, 'yedekParcaDepoStok', fallbackEntry.id), data: { quantity: fallbackEntry.quantity - 1 } });
             }
           }
 
           const hucreData = row.hucreNumarasi ? { hucreNumarasi: row.hucreNumarasi } : {};
 
           if (isPoolTarget) {
-            // Havuz deposuna ekle
             const poolStockRef = doc(collection(db, 'poolWarehouseStock'));
-            batch.set(poolStockRef, withCompanyScope({
+            ops.push({ type: 'set', ref: poolStockRef, data: withCompanyScope({
+              traceId: poolStockRef.id,
               poolWarehouseId,
               poolWarehouseName: row.targetName,
               productCodeId: row.productCodeId,
@@ -1120,13 +1193,12 @@ export default function YedekParcaTransferPage() {
               createdAt: Timestamp.fromDate(now),
               transferredByUid: currentUserProfile?.uid || '',
               transferredByName: currentUserProfile?.name || '',
-            }, currentCompanyId));
+            }, currentCompanyId) });
 
-            // Transfer log
-            const logRef = doc(collection(db, 'sparePartTransferLogs'));
-            batch.set(logRef, withCompanyScope({
+            ops.push({ type: 'set', ref: doc(collection(db, 'sparePartTransferLogs')), data: withCompanyScope({
               action: 'transfer_to_pool',
               poolStockId: poolStockRef.id,
+              traceId: poolStockRef.id,
               poolWarehouseId,
               poolWarehouseName: row.targetName,
               productCodeId: row.productCodeId,
@@ -1137,14 +1209,15 @@ export default function YedekParcaTransferPage() {
               ...hucreData,
               toName: row.targetName,
               quantity: 1,
+              notes: `Tekil transfer: ${row.serialNumber || row.hucreNumarasi} -> Havuz: ${row.targetName}`,
               createdAt: Timestamp.fromDate(now),
               createdByUid: currentUserProfile?.uid || '',
               createdByName: currentUserProfile?.name || '',
-            }, currentCompanyId));
+            }, currentCompanyId) });
           } else {
-            // Personel stokuna ekle (onay bekliyor olarak)
             const stockRef = doc(collection(db, 'personalStock'));
-            batch.set(stockRef, withCompanyScope({
+            ops.push({ type: 'set', ref: stockRef, data: withCompanyScope({
+              traceId: stockRef.id,
               ownerUid: row.targetUid,
               ownerName: row.targetName,
               productCodeId: row.productCodeId,
@@ -1158,13 +1231,12 @@ export default function YedekParcaTransferPage() {
               createdAt: Timestamp.fromDate(now),
               transferredByUid: currentUserProfile?.uid || '',
               transferredByName: currentUserProfile?.name || '',
-            }, currentCompanyId));
+            }, currentCompanyId) });
 
-            // Transfer log
-            const logRef = doc(collection(db, 'sparePartTransferLogs'));
-            batch.set(logRef, withCompanyScope({
+            ops.push({ type: 'set', ref: doc(collection(db, 'sparePartTransferLogs')), data: withCompanyScope({
               action: 'transfer_to_personnel',
               personalStockId: stockRef.id,
+              traceId: stockRef.id,
               productCodeId: row.productCodeId,
               stokKodu: row.stokKodu,
               stokAdi: row.stokAdi,
@@ -1174,20 +1246,20 @@ export default function YedekParcaTransferPage() {
               toUid: row.targetUid,
               toName: row.targetName,
               quantity: 1,
+              notes: `Tekil transfer: ${row.serialNumber || row.hucreNumarasi} -> ${row.targetName}`,
               createdAt: Timestamp.fromDate(now),
               createdByUid: currentUserProfile?.uid || '',
               createdByName: currentUserProfile?.name || '',
-            }, currentCompanyId));
+            }, currentCompanyId) });
           }
 
-          // Depo log
-          const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
-          batch.set(depoLogRef, {
+          // Depo log with companyScope
+          ops.push({ type: 'set', ref: doc(collection(db, 'yedekParcaDepoLog')), data: withCompanyScope({
             action: 'transfer_cikis',
             productCodeId: row.productCodeId,
             stokKodu: row.stokKodu,
             stokAdi: row.stokAdi,
-              anaBirim: row.anaBirim || 'Adet',
+            anaBirim: row.anaBirim || 'Adet',
             cihazGrubu: row.cihazGrubu || '',
             serialNumber: row.serialNumber,
             ...hucreData,
@@ -1200,11 +1272,11 @@ export default function YedekParcaTransferPage() {
             createdAt: Timestamp.fromDate(now),
             createdByUid: currentUserProfile?.uid || '',
             createdByName: currentUserProfile?.name || '',
-          });
+          }, currentCompanyId) });
         } else {
-          // Seri numarasız: adetli transfer
+          // Seri numarasız: adetli transfer - use fresh data
           let remainingQty = row.quantity;
-          const nonSerialEntries = depoStok
+          const nonSerialEntries = freshDepoStok
             .filter(d => d.stokKodu === row.stokKodu && !d.serialNumber && !d.hucreNumarasi)
             .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()); // FIFO
 
@@ -1212,27 +1284,31 @@ export default function YedekParcaTransferPage() {
             if (remainingQty <= 0) break;
 
             if (entry.quantity <= remainingQty) {
-              batch.delete(doc(db, 'yedekParcaDepoStok', entry.id));
+              ops.push({ type: 'delete', ref: doc(db, 'yedekParcaDepoStok', entry.id) });
               remainingQty -= entry.quantity;
             } else {
-              batch.update(doc(db, 'yedekParcaDepoStok', entry.id), {
-                quantity: entry.quantity - remainingQty,
-              });
+              ops.push({ type: 'update', ref: doc(db, 'yedekParcaDepoStok', entry.id), data: { quantity: entry.quantity - remainingQty } });
               remainingQty = 0;
             }
           }
 
+          if (remainingQty > 0) {
+            throw new Error(`Yetersiz stok: ${row.stokKodu} için ${remainingQty} adet eksik. Stok başka biri tarafından değiştirilmiş olabilir.`);
+          }
+
           if (isPoolTarget) {
-            // Havuz deposuna ekle (her adet için ayrı kayıt)
+            // Her stok dokümanı için ayrı log üret - Gözlem modalı
+            // her parçayı poolStockId ile eşleştirebilsin.
             for (let i = 0; i < row.quantity; i++) {
               const poolStockRef = doc(collection(db, 'poolWarehouseStock'));
-              batch.set(poolStockRef, withCompanyScope({
+              ops.push({ type: 'set', ref: poolStockRef, data: withCompanyScope({
+                traceId: poolStockRef.id,
                 poolWarehouseId,
                 poolWarehouseName: row.targetName,
                 productCodeId: row.productCodeId,
                 stokKodu: row.stokKodu,
                 stokAdi: row.stokAdi,
-              anaBirim: row.anaBirim || 'Adet',
+                anaBirim: row.anaBirim || 'Adet',
                 serialNumber: '',
                 source: 'depot',
                 status: 'in_stock',
@@ -1240,72 +1316,73 @@ export default function YedekParcaTransferPage() {
                 createdAt: Timestamp.fromDate(now),
                 transferredByUid: currentUserProfile?.uid || '',
                 transferredByName: currentUserProfile?.name || '',
-              }, currentCompanyId));
-            }
+              }, currentCompanyId) });
 
-            // Transfer log
-            const logRef = doc(collection(db, 'sparePartTransferLogs'));
-            batch.set(logRef, withCompanyScope({
-              action: 'transfer_to_pool',
-              poolWarehouseId,
-              poolWarehouseName: row.targetName,
-              productCodeId: row.productCodeId,
-              stokKodu: row.stokKodu,
-              stokAdi: row.stokAdi,
-              anaBirim: row.anaBirim || 'Adet',
-              serialNumber: '',
-              toName: row.targetName,
-              quantity: row.quantity,
-              createdAt: Timestamp.fromDate(now),
-              createdByUid: currentUserProfile?.uid || '',
-              createdByName: currentUserProfile?.name || '',
-            }, currentCompanyId));
+              ops.push({ type: 'set', ref: doc(collection(db, 'sparePartTransferLogs')), data: withCompanyScope({
+                action: 'transfer_to_pool',
+                poolStockId: poolStockRef.id,
+                traceId: poolStockRef.id,
+                poolWarehouseId,
+                poolWarehouseName: row.targetName,
+                productCodeId: row.productCodeId,
+                stokKodu: row.stokKodu,
+                stokAdi: row.stokAdi,
+                anaBirim: row.anaBirim || 'Adet',
+                serialNumber: '',
+                toName: row.targetName,
+                quantity: 1,
+                notes: `Transfer (${i + 1}/${row.quantity}) -> Havuz: ${row.targetName}`,
+                createdAt: Timestamp.fromDate(now),
+                createdByUid: currentUserProfile?.uid || '',
+                createdByName: currentUserProfile?.name || '',
+              }, currentCompanyId) });
+            }
           } else {
-            // Personel stokuna ekle (onay bekliyor olarak)
             for (let i = 0; i < row.quantity; i++) {
-              const stockRef = doc(collection(db, 'personalStock'));
-              batch.set(stockRef, withCompanyScope({
+              const personalStockRef = doc(collection(db, 'personalStock'));
+              ops.push({ type: 'set', ref: personalStockRef, data: withCompanyScope({
+                traceId: personalStockRef.id,
                 ownerUid: row.targetUid,
                 ownerName: row.targetName,
                 productCodeId: row.productCodeId,
                 stokKodu: row.stokKodu,
                 stokAdi: row.stokAdi,
-              anaBirim: row.anaBirim || 'Adet',
+                anaBirim: row.anaBirim || 'Adet',
                 serialNumber: '',
                 source: 'depot',
                 status: 'pending_approval',
                 createdAt: Timestamp.fromDate(now),
                 transferredByUid: currentUserProfile?.uid || '',
                 transferredByName: currentUserProfile?.name || '',
-              }, currentCompanyId));
-            }
+              }, currentCompanyId) });
 
-            // Transfer log
-            const logRef = doc(collection(db, 'sparePartTransferLogs'));
-            batch.set(logRef, withCompanyScope({
-              action: 'transfer_to_personnel',
-              productCodeId: row.productCodeId,
-              stokKodu: row.stokKodu,
-              stokAdi: row.stokAdi,
-              anaBirim: row.anaBirim || 'Adet',
-              serialNumber: '',
-              toUid: row.targetUid,
-              toName: row.targetName,
-              quantity: row.quantity,
-              createdAt: Timestamp.fromDate(now),
-              createdByUid: currentUserProfile?.uid || '',
-              createdByName: currentUserProfile?.name || '',
-            }, currentCompanyId));
+              ops.push({ type: 'set', ref: doc(collection(db, 'sparePartTransferLogs')), data: withCompanyScope({
+                action: 'transfer_to_personnel',
+                personalStockId: personalStockRef.id,
+                traceId: personalStockRef.id,
+                productCodeId: row.productCodeId,
+                stokKodu: row.stokKodu,
+                stokAdi: row.stokAdi,
+                anaBirim: row.anaBirim || 'Adet',
+                serialNumber: '',
+                toUid: row.targetUid,
+                toName: row.targetName,
+                quantity: 1,
+                notes: `Transfer (${i + 1}/${row.quantity}) -> ${row.targetName}`,
+                createdAt: Timestamp.fromDate(now),
+                createdByUid: currentUserProfile?.uid || '',
+                createdByName: currentUserProfile?.name || '',
+              }, currentCompanyId) });
+            }
           }
 
-          // Depo log
-          const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
-          batch.set(depoLogRef, {
+          // Depo log with companyScope
+          ops.push({ type: 'set', ref: doc(collection(db, 'yedekParcaDepoLog')), data: withCompanyScope({
             action: 'transfer_cikis',
             productCodeId: row.productCodeId,
             stokKodu: row.stokKodu,
             stokAdi: row.stokAdi,
-              anaBirim: row.anaBirim || 'Adet',
+            anaBirim: row.anaBirim || 'Adet',
             cihazGrubu: row.cihazGrubu || '',
             serialNumber: '',
             quantity: row.quantity,
@@ -1317,11 +1394,22 @@ export default function YedekParcaTransferPage() {
             createdAt: Timestamp.fromDate(now),
             createdByUid: currentUserProfile?.uid || '',
             createdByName: currentUserProfile?.name || '',
-          });
+          }, currentCompanyId) });
         }
       }
 
-      await batch.commit();
+      // Execute in chunked batches (max 400 ops per batch to stay under Firestore 500 limit)
+      const BATCH_LIMIT = 400;
+      for (let i = 0; i < ops.length; i += BATCH_LIMIT) {
+        const chunk = ops.slice(i, i + BATCH_LIMIT);
+        const batch = writeBatch(db);
+        for (const op of chunk) {
+          if (op.type === 'set') batch.set(op.ref, op.data);
+          else if (op.type === 'delete') batch.delete(op.ref);
+          else if (op.type === 'update') batch.update(op.ref, op.data);
+        }
+        await batch.commit();
+      }
 
       // Send notifications to each recipient user (not pool warehouses)
       const personnelRows = transferRows.filter(r => !r.targetUid.startsWith('pool_'));
@@ -1341,6 +1429,24 @@ export default function YedekParcaTransferPage() {
         }).catch(e => console.error('Spare part transfer notification error:', e));
       }
 
+      // Emit external stock usage notification (Depot usage)
+      for (const row of transferRows) {
+        emitExternalStockUsage({
+          actor: {
+            uid: currentUserProfile?.uid || '',
+            name: currentUserProfile?.name || currentUserProfile?.email || 'Bilinmeyen Kullanıcı',
+          },
+          sourceType: 'depot',
+          sourceName: 'Merkez Depo',
+          stokKodu: row.stokKodu,
+          stokAdi: row.stokAdi,
+          serialNumber: row.serialNumber,
+          quantity: row.quantity,
+          deviceName: '—',
+          hospitalName: row.targetName,
+        }).catch(err => console.error('External stock usage notification error:', err));
+      }
+
       const totalItems = transferRows.reduce((s, r) => s + r.quantity, 0);
       const hasPersonnelTargets = transferRows.some(r => !r.targetUid.startsWith('pool_'));
       toast({
@@ -1352,7 +1458,7 @@ export default function YedekParcaTransferPage() {
 
       setTransferRows([]);
 
-      // Refresh data
+      // Refresh depot stock
       const stokSnap = await getDocs(collection(db, 'yedekParcaDepoStok'));
       const stokItems = filterByCompanyScope(stokSnap.docs.map(d => {
         const data = d.data();
@@ -1360,11 +1466,23 @@ export default function YedekParcaTransferPage() {
       }), currentCompanyId, isSuperAdmin);
       setDepoStok(stokItems);
 
+      // Refresh personnel stock if viewing a specific person
+      if (menuSelection.personnelUid) {
+        fetchPersonnelStock(menuSelection.personnelUid);
+      }
+      // Refresh all personnel stock view
+      fetchAllPersonnelStock();
+
       // Refresh logs
       await loadRecentTransferLogs();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error executing transfer:', err);
-      toast({ title: 'Hata', description: 'Transfer sırasında hata oluştu.', variant: 'destructive' });
+      const errorMessage = err?.message?.includes('Yetersiz stok') || err?.message?.includes('Depoda bulunamadı')
+        ? err.message
+        : 'Transfer sırasında hata oluştu. Lütfen sayfayı yenileyip tekrar deneyin.';
+      toast({ title: 'Transfer Hatası', description: errorMessage, variant: 'destructive' });
+      // Refresh depot stock to get latest state after error
+      fetchDepoStok();
     } finally {
       setIsTransferring(false);
     }
@@ -1443,18 +1561,23 @@ export default function YedekParcaTransferPage() {
 
       cleanedRows.forEach((row) => {
         const quantityToCreate = row.serialNumber ? 1 : row.quantity;
+        const stockRefIds: string[] = [];
         for (let i = 0; i < quantityToCreate; i++) {
           const stockRef = doc(collection(db, 'personalStock'));
+          stockRefIds.push(stockRef.id);
           batch.set(stockRef, withCompanyScope({
+            traceId: stockRef.id,
             ownerUid: menuSelection.personnelUid,
             ownerName: menuSelection.personnelName,
             productCodeId: '',
             stokKodu: row.stokKodu,
             stokAdi: row.stokAdi,
-              anaBirim: row.anaBirim || 'Adet',
+            anaBirim: row.anaBirim || 'Adet',
             serialNumber: row.serialNumber,
-            source: 'depot',
-            status: 'in_stock',
+            source: 'manual',
+            // Manuel eklemelerde de personelin onayı aranır; onaylanmayan ürün
+            // doğrudan kullanıcının stoğuna dahil edilmez.
+            status: 'pending_approval',
             createdAt: now,
             transferredByUid: currentUserProfile?.uid || '',
             transferredByName: currentUserProfile?.name || '',
@@ -1462,22 +1585,28 @@ export default function YedekParcaTransferPage() {
           }, currentCompanyId));
         }
 
+        const logNotes = row.serialNumber
+          ? `[Manuel] Personele doğrudan eklendi: ${row.stokKodu} (SN: ${row.serialNumber}) -> ${menuSelection.personnelName}`
+          : `[Manuel] Personele doğrudan eklendi: ${row.stokKodu} x${quantityToCreate} -> ${menuSelection.personnelName}`;
+
         const logRef = doc(collection(db, 'sparePartTransferLogs'));
         batch.set(logRef, withCompanyScope({
           action: 'transfer_to_personnel',
           productCodeId: '',
           stokKodu: row.stokKodu,
           stokAdi: row.stokAdi,
-              anaBirim: row.anaBirim || 'Adet',
+          anaBirim: row.anaBirim || 'Adet',
           serialNumber: row.serialNumber,
           toUid: menuSelection.personnelUid,
           toName: menuSelection.personnelName,
           quantity: quantityToCreate,
+          personalStockDocIds: stockRefIds,
           createdAt: now,
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || '',
-          notes: 'Manuel stok girişi',
+          notes: logNotes,
           manualEntry: true,
+          entrySource: 'manual',
         }, currentCompanyId));
       });
 
@@ -1488,8 +1617,8 @@ export default function YedekParcaTransferPage() {
 
       const totalQuantity = cleanedRows.reduce((sum, row) => sum + (row.serialNumber ? 1 : row.quantity), 0);
       toast({
-        title: 'Başarılı',
-        description: `${totalQuantity} adet stok ${menuSelection.personnelName} personeline manuel olarak eklendi.`,
+        title: 'Onaya Gönderildi',
+        description: `${totalQuantity} adet stok ${menuSelection.personnelName} personeline manuel olarak gönderildi. Personel onaylayana kadar stokuna eklenmez.`,
       });
 
       setManualStockModalOpen(false);
@@ -1559,12 +1688,12 @@ export default function YedekParcaTransferPage() {
       const delta = nextTotal - oldTotal;
 
       const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
-      batch.set(depoLogRef, {
+      batch.set(depoLogRef, withCompanyScope({
         action: 'stok_duzeltme',
         productCodeId: editingDepoGroup.productCodeId,
         stokKodu: editingDepoGroup.stokKodu,
         stokAdi: editingDepoGroup.stokAdi,
-          anaBirim: editingDepoGroup.anaBirim || 'Adet',
+        anaBirim: editingDepoGroup.anaBirim || 'Adet',
         cihazGrubu: editingDepoGroup.cihazGrubu || '',
         serialNumber: '',
         address: editingDepoGroup.entries.find(e => (e.address || '').trim())?.address || '',
@@ -1573,7 +1702,7 @@ export default function YedekParcaTransferPage() {
         createdAt: Timestamp.fromDate(now),
         createdByUid: currentUserProfile?.uid || '',
         createdByName: currentUserProfile?.name || '',
-      });
+      }, currentCompanyId));
 
       const transferLogRef = doc(collection(db, 'sparePartTransferLogs'));
       batch.set(transferLogRef, withCompanyScope({
@@ -1621,7 +1750,7 @@ export default function YedekParcaTransferPage() {
       batch.delete(doc(db, 'yedekParcaDepoStok', serialEntry.id));
 
       const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
-      batch.set(depoLogRef, {
+      batch.set(depoLogRef, withCompanyScope({
         action: 'stok_duzeltme',
         productCodeId: group.productCodeId,
         stokKodu: group.stokKodu,
@@ -1629,12 +1758,13 @@ export default function YedekParcaTransferPage() {
         anaBirim: group.anaBirim || 'Adet',
         cihazGrubu: group.cihazGrubu || '',
         serialNumber: serialEntry.serialNumber,
+        depoStokDocId: serialEntry.id,
         quantity: 1,
-        notes: `Seri numaralı stok kaydı silindi: ${serialEntry.serialNumber}`,
+        notes: `Seri numaralı stok kaydı silindi: ${serialEntry.serialNumber} (DocID: ${serialEntry.id})`,
         createdAt: Timestamp.fromDate(now),
         createdByUid: currentUserProfile?.uid || '',
         createdByName: currentUserProfile?.name || '',
-      });
+      }, currentCompanyId));
 
       const transferLogRef = doc(collection(db, 'sparePartTransferLogs'));
       batch.set(transferLogRef, withCompanyScope({
@@ -1644,7 +1774,9 @@ export default function YedekParcaTransferPage() {
         stokAdi: group.stokAdi,
         anaBirim: group.anaBirim || 'Adet',
         serialNumber: serialEntry.serialNumber,
+        depoStokDocId: serialEntry.id,
         quantity: 1,
+        notes: `Seri numaralı stok kaydı silindi: ${serialEntry.serialNumber} (DocID: ${serialEntry.id})`,
         createdAt: Timestamp.fromDate(now),
         createdByUid: currentUserProfile?.uid || '',
         createdByName: currentUserProfile?.name || '',
@@ -1681,8 +1813,9 @@ export default function YedekParcaTransferPage() {
         batch.delete(doc(db, 'yedekParcaDepoStok', entry.id));
       });
 
+      const deletedDocIds = group.entries.map(e => e.id);
       const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
-      batch.set(depoLogRef, {
+      batch.set(depoLogRef, withCompanyScope({
         action: 'stok_silme_admin',
         productCodeId: group.productCodeId,
         stokKodu: group.stokKodu,
@@ -1692,11 +1825,12 @@ export default function YedekParcaTransferPage() {
         serialNumber: '',
         address: group.entries.find(e => (e.address || '').trim())?.address || '',
         quantity: group.totalQuantity,
-        notes: `Admin stok satırı silme: ${group.totalQuantity} adet kayıt kaldırıldı.`,
+        deletedDocIds,
+        notes: `Admin stok satırı silme: ${group.totalQuantity} adet kayıt kaldırıldı. Silinen DocIDs: ${deletedDocIds.join(', ')}`,
         createdAt: Timestamp.fromDate(now),
         createdByUid: currentUserProfile?.uid || '',
         createdByName: currentUserProfile?.name || '',
-      });
+      }, currentCompanyId));
 
       const transferLogRef = doc(collection(db, 'sparePartTransferLogs'));
       batch.set(transferLogRef, withCompanyScope({
@@ -1707,7 +1841,8 @@ export default function YedekParcaTransferPage() {
         anaBirim: group.anaBirim || 'Adet',
         serialNumber: '',
         quantity: group.totalQuantity,
-        notes: 'Admin depo stok satırı silme işlemi',
+        deletedDocIds,
+        notes: `Admin stok satırı silme: ${group.totalQuantity} adet kayıt kaldırıldı`,
         createdAt: Timestamp.fromDate(now),
         createdByUid: currentUserProfile?.uid || '',
         createdByName: currentUserProfile?.name || '',
@@ -1764,7 +1899,7 @@ export default function YedekParcaTransferPage() {
         }, currentCompanyId));
 
         const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
-        batch.set(depoLogRef, {
+        batch.set(depoLogRef, withCompanyScope({
           action: 'iade_giris',
           productCodeId: item.productCodeId,
           stokKodu: item.stokKodu,
@@ -1772,13 +1907,14 @@ export default function YedekParcaTransferPage() {
           anaBirim: item.anaBirim || 'Adet',
           serialNumber: item.serialNumber || '',
           quantity: 1,
+          personalStockDocId: item.id,
           relatedPersonnelUid: item.ownerUid,
           relatedPersonnelName: item.ownerName,
-          notes: `Personel stok silme ile depoya iade: ${item.ownerName} -> Depo`,
+          notes: `Personel stok silme ile depoya iade: ${item.ownerName} -> Depo (PersonalStockID: ${item.id})`,
           createdAt: Timestamp.fromDate(now),
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || '',
-        });
+        }, currentCompanyId));
       }
 
       const logRef = doc(collection(db, 'sparePartTransferLogs'));
@@ -1795,8 +1931,8 @@ export default function YedekParcaTransferPage() {
         quantity: item.quantity || 1,
         returnedToDepot: isActiveStock,
         notes: isActiveStock
-          ? `${isAdmin ? 'Admin' : 'Teknik Lojistik'} personel stok silme - ürün depoya iade edildi`
-          : `${isAdmin ? 'Admin' : 'Teknik Lojistik'} personel stok satırı silme işlemi`,
+          ? `${isAdmin ? 'Admin' : 'Teknik Lojistik'} personel stok silme - ürün depoya iade edildi (PersonalStockID: ${item.id})`
+          : `${isAdmin ? 'Admin' : 'Teknik Lojistik'} personel stok satırı silme işlemi (PersonalStockID: ${item.id})`,
         createdAt: Timestamp.fromDate(now),
         createdByUid: currentUserProfile?.uid || '',
         createdByName: currentUserProfile?.name || '',
@@ -2209,25 +2345,29 @@ export default function YedekParcaTransferPage() {
           });
         }
 
-        // Transfer log
-        const logRef = doc(collection(db, 'sparePartTransferLogs'));
-        transaction.set(logRef, withCompanyScope({
-          action: 'transfer_between_personnel',
-          productCodeId: pTransferItem.productCodeId,
-          stokKodu: pTransferItem.stokKodu,
-          stokAdi: pTransferItem.stokAdi,
-          anaBirim: pTransferItem.anaBirim || 'Adet',
-          serialNumber: pTransferItem.serialNumber || '',
-          quantity: qty,
-          fromUid: pTransferItem.ownerUid,
-          fromName: pTransferItem.ownerName,
-          toUid: pTransferTargetUid,
-          toName: pTransferTargetName,
-          status: 'pending_approval',
-          createdAt: Timestamp.fromDate(now),
-          createdByUid: currentUserProfile?.uid || '',
-          createdByName: currentUserProfile?.name || '',
-        }, currentCompanyId));
+        // Transfer log (her stok kaydı için ayrı log)
+        for (const si of itemsToTransfer) {
+          const logRef = doc(collection(db, 'sparePartTransferLogs'));
+          transaction.set(logRef, withCompanyScope({
+            action: 'transfer_between_personnel',
+            personalStockId: si.id,
+            traceId: (si as any).traceId || si.id,
+            productCodeId: si.productCodeId,
+            stokKodu: si.stokKodu,
+            stokAdi: si.stokAdi,
+            anaBirim: si.anaBirim || 'Adet',
+            serialNumber: si.serialNumber || '',
+            quantity: 1,
+            fromUid: si.ownerUid,
+            fromName: si.ownerName,
+            toUid: pTransferTargetUid,
+            toName: pTransferTargetName,
+            status: 'pending_approval',
+            createdAt: Timestamp.fromDate(now),
+            createdByUid: currentUserProfile?.uid || '',
+            createdByName: currentUserProfile?.name || '',
+          }, currentCompanyId));
+        }
       });
 
       // Notifications
@@ -2268,70 +2408,135 @@ export default function YedekParcaTransferPage() {
     }
   };
 
-  const takeOverPersonnelStock = async (item: PersonalStockItem) => {
-    if (!currentUserProfile?.uid || !currentUserProfile?.name) {
-      toast({ title: 'Hata', description: 'Kullanıcı bilgisi bulunamadı.', variant: 'destructive' });
-      return;
-    }
 
-    if (item.ownerUid === currentUserProfile.uid) {
-      toast({ title: 'Bilgi', description: 'Bu ürün zaten sizin üzerinizde.', variant: 'default' });
-      return;
-    }
 
-    if (item.status !== 'in_stock') {
-      toast({ title: 'Uyarı', description: 'Sadece aktif stok devralınabilir.', variant: 'default' });
-      return;
-    }
+  // Open observation modal for a single stock item (personal or pool).
+  // Loads all transfer log entries related to this exact item so the user can
+  // see exactly when / by whom the product arrived and every subsequent move.
+  const openObservation = useCallback(async (params: {
+    id: string;
+    scope: 'personal' | 'pool';
+    stokKodu: string;
+    stokAdi: string;
+    serialNumber?: string;
+    hucreNumarasi?: string;
+    ownerName?: string;
+    poolWarehouseName?: string;
+  }) => {
+    setObservationItem({
+      id: params.id,
+      scope: params.scope,
+      stokKodu: params.stokKodu,
+      stokAdi: params.stokAdi,
+      serialNumber: params.serialNumber,
+      ownerName: params.ownerName,
+      poolWarehouseName: params.poolWarehouseName,
+    });
+    setObservationOpen(true);
+    setObservationLoading(true);
+    setObservationLogs([]);
 
-    setTakingOverStockId(item.id);
     try {
-      const now = new Date();
-      await updateDoc(doc(db, 'personalStock', item.id), {
-        ownerUid: currentUserProfile.uid,
-        ownerName: currentUserProfile.name,
-        createdAt: Timestamp.fromDate(now),
-        transferredByUid: currentUserProfile.uid,
-        transferredByName: currentUserProfile.name,
-        previousOwnerUid: item.ownerUid,
-        previousOwnerName: item.ownerName,
-      });
+      const normalize = (v?: string) => String(v || '').trim();
+      const serialNumber = normalize(params.serialNumber);
+      const hucreNumarasi = normalize(params.hucreNumarasi);
+      const idField = params.scope === 'personal' ? 'personalStockId' : 'poolStockId';
+      const stockCollection = params.scope === 'personal' ? 'personalStock' : 'poolWarehouseStock';
+      const stockSnap = await getDoc(doc(db, stockCollection, params.id));
+      const traceId = stockSnap.exists()
+        ? normalize((stockSnap.data() as any)?.traceId || params.id)
+        : normalize(params.id);
 
-      await addDoc(collection(db, 'sparePartTransferLogs'), withCompanyScope({
-        action: 'transfer_between_personnel',
-        personalStockId: item.id,
-        productCodeId: item.productCodeId,
-        stokKodu: item.stokKodu,
-        stokAdi: item.stokAdi,
-        anaBirim: item.anaBirim || 'Adet',
-        serialNumber: item.serialNumber || '',
-        quantity: 1,
-        fromUid: item.ownerUid,
-        fromName: item.ownerName,
-        toUid: currentUserProfile.uid,
-        toName: currentUserProfile.name,
-        createdAt: Timestamp.fromDate(now),
-        createdByUid: currentUserProfile.uid,
-        createdByName: currentUserProfile.name,
-      }, currentCompanyId));
+      const toLog = (d: any, source: 'transfer' | 'depo' | 'snapshot') => {
+        const data: any = d.data ? d.data() : d;
+        const ts = data.createdAt?.toDate ? data.createdAt.toDate()
+          : data.timestamp?.toDate ? data.timestamp.toDate()
+          : data.usedAt?.toDate ? data.usedAt.toDate()
+          : data.approvedAt?.toDate ? data.approvedAt.toDate()
+          : data.requestedAt?.toDate ? data.requestedAt.toDate()
+          : new Date();
+        return { id: d.id || `snapshot-${params.id}`, ...data, _timestamp: ts, _source: source };
+      };
 
-      toast({
-        title: 'Üzerinize Alındı',
-        description: `${item.stokAdi} (${item.serialNumber || 'Seri No Yok'}) stoğunuza eklendi.`,
-      });
+      const logMap = new Map<string, any>();
+      const pushLogs = (rows: any[]) => {
+        rows.forEach((row) => {
+          const key = `${row._source}:${row.id}`;
+          if (!logMap.has(key)) logMap.set(key, row);
+        });
+      };
 
-      if (menuSelection.personnelUid) {
-        await fetchPersonnelStock(menuSelection.personnelUid);
+      const transferQueries = [
+        query(collection(db, 'sparePartTransferLogs'), where(idField, '==', params.id)),
+      ];
+      if (params.scope === 'personal') {
+        transferQueries.push(query(collection(db, 'sparePartTransferLogs'), where('personalStockDocIds', 'array-contains', params.id)));
       }
-      await fetchAllPersonnelStock();
-      await loadRecentTransferLogs();
+      if (traceId) transferQueries.push(query(collection(db, 'sparePartTransferLogs'), where('traceId', '==', traceId)));
+      if (serialNumber) transferQueries.push(query(collection(db, 'sparePartTransferLogs'), where('serialNumber', '==', serialNumber)));
+      if (hucreNumarasi) transferQueries.push(query(collection(db, 'sparePartTransferLogs'), where('hucreNumarasi', '==', hucreNumarasi)));
+
+      const depoQueries = [
+        query(collection(db, 'yedekParcaDepoLog'), where('traceId', '==', traceId)),
+      ];
+      if (serialNumber) depoQueries.push(query(collection(db, 'yedekParcaDepoLog'), where('serialNumber', '==', serialNumber)));
+      if (hucreNumarasi) depoQueries.push(query(collection(db, 'yedekParcaDepoLog'), where('hucreNumarasi', '==', hucreNumarasi)));
+
+      for (const qRef of transferQueries) {
+        const snap = await getDocs(qRef);
+        pushLogs(snap.docs.map((d) => toLog(d, 'transfer')));
+      }
+      for (const qRef of depoQueries) {
+        const snap = await getDocs(qRef);
+        pushLogs(snap.docs.map((d) => toLog(d, 'depo')));
+      }
+
+      if (stockSnap.exists()) {
+        const stockData: any = stockSnap.data();
+        pushLogs([toLog({
+          ...stockData,
+          id: `snapshot-${params.id}`,
+          action: 'stock_snapshot',
+          notes: stockData.source === 'manual'
+            ? `Stok kaydı manuel açıldı${stockData.createdByName ? ` (${stockData.createdByName})` : ''}.`
+            : `Stok kaydı oluşturuldu${stockData.transferredByName ? ` (${stockData.transferredByName})` : ''}.`,
+          quantity: stockData.quantity || 1,
+          createdAt: stockData.createdAt || Timestamp.now(),
+        }, 'snapshot')]);
+      }
+
+      let logs = Array.from(logMap.values());
+      logs = filterByCompanyScope(logs, currentCompanyId, isSuperAdmin);
+
+      const strictLogs = logs.filter((log: any) => {
+        const sameStockDoc = log[idField] === params.id;
+        if (sameStockDoc) return true;
+        if (Array.isArray(log.personalStockDocIds) && log.personalStockDocIds.includes(params.id)) return true;
+        const sameTrace = traceId && normalize(log.traceId) === traceId;
+        if (sameTrace) return true;
+        return false;
+      });
+      if (strictLogs.length > 0) {
+        logs = strictLogs;
+      } else if (serialNumber || hucreNumarasi) {
+        logs = logs.filter((log: any) => {
+          if (serialNumber) return normalize(log.serialNumber) === serialNumber;
+          if (hucreNumarasi) return normalize(log.hucreNumarasi) === hucreNumarasi;
+          return false;
+        });
+      } else {
+        logs = [];
+      }
+
+      logs.sort((a: any, b: any) => new Date(a._timestamp).getTime() - new Date(b._timestamp).getTime());
+      setObservationLogs(logs);
     } catch (err) {
-      console.error('Error taking over personal stock:', err);
-      toast({ title: 'Hata', description: 'Ürünü üzerinize alma işlemi başarısız oldu.', variant: 'destructive' });
+      console.error('Error loading observation logs:', err);
+      toast({ title: 'Hata', description: 'Ürün geçmişi yüklenirken hata oluştu.', variant: 'destructive' });
     } finally {
-      setTakingOverStockId(null);
+      setObservationLoading(false);
     }
-  };
+  }, [currentCompanyId, isSuperAdmin, toast]);
 
   // Approve pending transfer (with status verification via transaction)
   const approveTransfer = async (item: PersonnelStockViewItem) => {
@@ -2358,6 +2563,7 @@ export default function YedekParcaTransferPage() {
         transaction.set(logRef, withCompanyScope({
           action: 'transfer_approved',
           personalStockId: item.id,
+          traceId: (item as any).traceId || item.id,
           productCodeId: item.productCodeId,
           stokKodu: item.stokKodu,
           stokAdi: item.stokAdi,
@@ -2432,6 +2638,7 @@ export default function YedekParcaTransferPage() {
           transaction.set(logRef, withCompanyScope({
             action: 'transfer_rejected',
             personalStockId: item.id,
+            traceId: (item as any).traceId || item.id,
             productCodeId: item.productCodeId,
             stokKodu: item.stokKodu,
             stokAdi: item.stokAdi,
@@ -3123,6 +3330,16 @@ export default function YedekParcaTransferPage() {
           <button onClick={handleOpenStockCardSync} className="cihaz-tool-item inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium" style={{ color: 'var(--dashboard-text)' }}>
             <CheckCircle className="w-3.5 h-3.5" /> Stok Kart Kontrol
           </button>
+          {(isAdmin || isTeknikLojistik) && (
+            <button onClick={() => setMinMaxPanelOpen(true)} className="cihaz-tool-item inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium" style={{ color: 'var(--dashboard-text)' }}>
+              <SlidersHorizontal className="w-3.5 h-3.5" /> Min-Max Ayarları
+            </button>
+          )}
+          {(isAdmin || isTeknikLojistik) && (
+            <button onClick={() => router.push('/direkt-transfer/yedek-parca-transfer/siparis')} className="cihaz-tool-item inline-flex items-center gap-1.5 px-4 py-2 text-xs font-medium" style={{ color: 'var(--dashboard-text)' }}>
+              <ShoppingCart className="w-3.5 h-3.5" /> Sipariş Paneli
+            </button>
+          )}
           <button onClick={() => router.push('/direkt-transfer/yedek-parca-transfer/stok-giris')} className="cihaz-action-tile inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white" style={{ background: 'var(--dashboard-accent)' }}>
             <Plus className="w-3.5 h-3.5" /> Stok Girişi
           </button>
@@ -3225,8 +3442,6 @@ export default function YedekParcaTransferPage() {
 
   // ========== RENDER: Personnel Stock View ==========
   const renderPersonnelStock = () => {
-    const activeCount = personnelStock.filter(s => s.status === 'in_stock').length;
-    const usedCount = personnelStock.filter(s => s.status === 'used' || s.status === 'pending_return').length;
     const pendingApprovalCount = personnelStock.filter(s => s.status === 'pending_approval').length;
 
     return (
@@ -3239,28 +3454,12 @@ export default function YedekParcaTransferPage() {
                 <UserIcon className="h-5 w-5" />
                 {menuSelection.personnelName} - Yedek Parça Stoku
               </h2>
-              <div className="flex items-center gap-3 mt-1.5">
-                <span className="text-sm" style={{ color: 'var(--dashboard-muted)' }}>
-                  {menuSelection.personnelRole === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'} personeli
-                </span>
-                <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
-                  {activeCount} Aktif
-                </span>
-                <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-muted)' }}>
-                  {usedCount} Kullanıldı
-                </span>
-                {pendingApprovalCount > 0 && (
-                  <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">
-                    {pendingApprovalCount} Onay Bekliyor
-                  </span>
-                )}
-              </div>
-              <div className="mt-2 inline-flex gap-1 p-1 cihaz-pressed" style={{ borderRadius: 12 }}>
+              <div className="mt-2 grid grid-cols-2 gap-1 p-1 cihaz-pressed sm:inline-flex sm:flex-wrap sm:gap-1" style={{ borderRadius: 12 }}>
                 {([
-                  { key: 'all', label: 'Tamamını Göster' },
-                  { key: 'pending_approval', label: `Onayda Bekleyenler (${pendingApprovalCount})` },
-                  { key: 'used', label: 'Kullanılanları Göster' },
-                  { key: 'unused', label: 'Kullanılmayanları Göster' },
+                  { key: 'all', label: 'Tümü' },
+                  { key: 'pending_approval', label: `Onay (${pendingApprovalCount})` },
+                  { key: 'used', label: 'Kullanılan' },
+                  { key: 'unused', label: 'Kullanılmayan' },
                 ] as const).map(option => {
                   const active = personnelStockFilter === option.key;
                   return (
@@ -3314,6 +3513,7 @@ export default function YedekParcaTransferPage() {
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Durum</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Transfer</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Kullanım</th>
+                    <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Gözlem</th>
                     <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>İşlem</th>
                     <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Form</th>
                   </tr>
@@ -3366,6 +3566,25 @@ export default function YedekParcaTransferPage() {
                             ? format(item.usedAt, 'dd.MM.yyyy HH:mm', { locale: tr })
                             : '—'
                           }
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <button
+                            onClick={() => openObservation({
+                              id: item.id,
+                              scope: 'personal',
+                              stokKodu: item.stokKodu,
+                              stokAdi: item.stokAdi,
+                              serialNumber: item.serialNumber,
+                              hucreNumarasi: (item as any).hucreNumarasi,
+                              ownerName: item.ownerName,
+                            })}
+                            title="Gözlem: Bu ürüne ait transfer geçmişini göster"
+                            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-lg transition-all active:scale-95"
+                            style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
+                          >
+                            <History className="h-3 w-3" />
+                            Gözlem
+                          </button>
                         </td>
                         <td className="px-4 py-3 text-right">
                           {item.status === 'pending_approval' ? (
@@ -3477,10 +3696,29 @@ export default function YedekParcaTransferPage() {
                       )}
                     </div>
                     <div className="flex items-center justify-between mt-2 pt-2" style={{ borderTop: '1px solid var(--dashboard-stroke)' }}>
-                      <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>
-                        {format(item.createdAt, 'dd.MM.yyyy', { locale: tr })}
-                        {item.usedAt && ` → ${format(item.usedAt, 'dd.MM.yyyy', { locale: tr })}`}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>
+                          {format(item.createdAt, 'dd.MM.yyyy', { locale: tr })}
+                          {item.usedAt && ` → ${format(item.usedAt, 'dd.MM.yyyy', { locale: tr })}`}
+                        </span>
+                        <button
+                          onClick={() => openObservation({
+                            id: item.id,
+                            scope: 'personal',
+                            stokKodu: item.stokKodu,
+                            stokAdi: item.stokAdi,
+                            serialNumber: item.serialNumber,
+                            hucreNumarasi: (item as any).hucreNumarasi,
+                            ownerName: item.ownerName,
+                          })}
+                          title="Gözlem"
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded-md transition-all active:scale-95"
+                          style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
+                        >
+                          <History className="h-2.5 w-2.5" />
+                          Gözlem
+                        </button>
+                      </div>
                       {item.status === 'pending_approval' ? (
                         <div className="flex items-center gap-1">
                           <button
@@ -3584,9 +3822,6 @@ export default function YedekParcaTransferPage() {
 
   // ========== RENDER: Pool Stock View ==========
   const renderPoolStock = () => {
-    const activeCount = poolStock.filter(s => s.status === 'in_stock').length;
-    const usedCount = poolStock.filter(s => s.status === 'used').length;
-
     return (
       <div className="space-y-4">
         {/* Header card */}
@@ -3597,19 +3832,11 @@ export default function YedekParcaTransferPage() {
                 <Database className="h-5 w-5 text-purple-600" />
                 {menuSelection.poolWarehouseName} - Havuz Stok
               </h2>
-              <div className="flex items-center gap-3 mt-1.5">
-                <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
-                  {activeCount} Aktif
-                </span>
-                <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-muted)' }}>
-                  {usedCount} Kullanıldı
-                </span>
-              </div>
-              <div className="mt-2 inline-flex gap-1 p-1 cihaz-pressed" style={{ borderRadius: 12 }}>
+              <div className="mt-2 grid grid-cols-3 gap-1 p-1 cihaz-pressed sm:inline-flex sm:flex-wrap sm:gap-1" style={{ borderRadius: 12 }}>
                 {([
-                  { key: 'all', label: 'Tamamını Göster' },
-                  { key: 'used', label: 'Kullanılanları Göster' },
-                  { key: 'unused', label: 'Kullanılmayanları Göster' },
+                  { key: 'all', label: 'Tümü' },
+                  { key: 'used', label: 'Kullanılan' },
+                  { key: 'unused', label: 'Kullanılmayan' },
                 ] as const).map(option => {
                   const active = poolStockFilter === option.key;
                   return (
@@ -3668,6 +3895,7 @@ export default function YedekParcaTransferPage() {
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Transfer</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Kullanım</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Kullanan</th>
+                    <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Gözlem</th>
                     <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>İşlem</th>
                     <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Form</th>
                   </tr>
@@ -3712,6 +3940,25 @@ export default function YedekParcaTransferPage() {
                         </td>
                         <td className="px-4 py-3 text-xs" style={{ color: 'var(--dashboard-muted)' }}>
                           {item.usedByName || '—'}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <button
+                            onClick={() => openObservation({
+                              id: item.id,
+                              scope: 'pool',
+                              stokKodu: item.stokKodu,
+                              stokAdi: item.stokAdi,
+                              serialNumber: item.serialNumber,
+                              hucreNumarasi: (item as any).hucreNumarasi,
+                              poolWarehouseName: item.poolWarehouseName,
+                            })}
+                            title="Gözlem: Bu ürüne ait transfer geçmişini göster"
+                            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-lg transition-all active:scale-95"
+                            style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
+                          >
+                            <History className="h-3 w-3" />
+                            Gözlem
+                          </button>
                         </td>
                         <td className="px-4 py-3 text-right">
                           {(isAdmin || isTeknikLojistik) ? (
@@ -3768,10 +4015,29 @@ export default function YedekParcaTransferPage() {
                       )}
                     </div>
                     <div className="flex items-center justify-between mt-2 pt-2" style={{ borderTop: '1px solid var(--dashboard-stroke)' }}>
-                      <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>
-                        {format(item.createdAt, 'dd.MM.yyyy', { locale: tr })}
-                        {item.usedAt && ` → ${format(item.usedAt, 'dd.MM.yyyy', { locale: tr })}`}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>
+                          {format(item.createdAt, 'dd.MM.yyyy', { locale: tr })}
+                          {item.usedAt && ` → ${format(item.usedAt, 'dd.MM.yyyy', { locale: tr })}`}
+                        </span>
+                        <button
+                          onClick={() => openObservation({
+                            id: item.id,
+                            scope: 'pool',
+                            stokKodu: item.stokKodu,
+                            stokAdi: item.stokAdi,
+                            serialNumber: item.serialNumber,
+                            hucreNumarasi: (item as any).hucreNumarasi,
+                            poolWarehouseName: item.poolWarehouseName,
+                          })}
+                          title="Gözlem"
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded-md transition-all active:scale-95"
+                          style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
+                        >
+                          <History className="h-2.5 w-2.5" />
+                          Gözlem
+                        </button>
+                      </div>
                       {(isAdmin || isTeknikLojistik) ? (
                         <button
                           onClick={() => deletePoolStockItem(item)}
@@ -3852,17 +4118,39 @@ export default function YedekParcaTransferPage() {
     const personnelList = Object.values(groupedByPersonnel);
     personnelList.sort((a, b) => b.items.length - a.items.length);
 
+    // Havuz depo stoklarını da bu görüntülemede göster; teknik_lojistik'in
+    // havuza transfer ettiği ürünler böylece burada da görünür.
+    const groupedByPool = allPoolStockAggregate.reduce((acc, item) => {
+      const key = item.poolWarehouseId || 'unknown_pool';
+      if (!acc[key]) {
+        acc[key] = {
+          poolWarehouseId: item.poolWarehouseId,
+          poolWarehouseName: item.poolWarehouseName || 'Havuz Depo',
+          items: [],
+        };
+      }
+      acc[key].items.push(item);
+      return acc;
+    }, {} as Record<string, { poolWarehouseId: string; poolWarehouseName: string; items: PoolWarehouseStockItem[] }>);
+
+    const poolList = Object.values(groupedByPool);
+    poolList.sort((a, b) => b.items.length - a.items.length);
+
+    const totalEverywhere = allPersonnelStock.length + allPoolStockAggregate.length;
+
     return (
       <div className="space-y-4">
         {/* Header card */}
         <div className="cihaz-card-strong p-4">
           <h2 className="text-base font-semibold flex items-center gap-2" style={{ color: 'var(--dashboard-text)' }}>
             <PackageOpen className="h-5 w-5" />
-            Personeldeki Toplam Stok
+            Toplam Stok (Personel + Havuz)
           </h2>
           <p className="text-sm mt-1" style={{ color: 'var(--dashboard-muted)' }}>
-            Tüm personellerde bulunan henüz kullanılmamış yedek parçalar.
-            Toplam: <strong style={{ color: 'var(--dashboard-text)' }}>{allPersonnelStock.length}</strong> adet aktif stok.
+            Tüm personel ve havuz depolarındaki henüz kullanılmamış yedek parçalar.
+            Toplam: <strong style={{ color: 'var(--dashboard-text)' }}>{totalEverywhere}</strong> adet
+            (Personel: <strong style={{ color: 'var(--dashboard-text)' }}>{allPersonnelStock.length}</strong>,
+            Havuz: <strong style={{ color: 'var(--dashboard-text)' }}>{allPoolStockAggregate.length}</strong>).
           </p>
         </div>
 
@@ -3872,13 +4160,61 @@ export default function YedekParcaTransferPage() {
             <Loader2 className="h-6 w-6 animate-spin" style={{ color: 'var(--dashboard-accent)' }} />
             <span className="ml-2 text-sm" style={{ color: 'var(--dashboard-muted)' }}>Yükleniyor...</span>
           </div>
-        ) : allPersonnelStock.length === 0 ? (
+        ) : totalEverywhere === 0 ? (
           <div className="text-center py-12">
             <PackageOpen className="h-12 w-12 mx-auto mb-4 opacity-20" />
-            <p className="text-sm" style={{ color: 'var(--dashboard-muted)' }}>Personellerde aktif yedek parça stoku bulunmuyor.</p>
+            <p className="text-sm" style={{ color: 'var(--dashboard-muted)' }}>Personel veya havuz depolarında aktif yedek parça stoku bulunmuyor.</p>
           </div>
         ) : (
           <div className="space-y-3">
+            {/* Pool warehouse groups */}
+            {poolList.map((pool) => (
+              <div key={pool.poolWarehouseId} className="cihaz-card rounded-xl overflow-hidden">
+                <button
+                  className="w-full p-3 flex items-center justify-between transition-colors hover:opacity-80"
+                  onClick={() => handleMenuSelect({
+                    section: 'pool-stok',
+                    poolWarehouseId: pool.poolWarehouseId,
+                    poolWarehouseName: pool.poolWarehouseName,
+                  })}
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="h-8 w-8 rounded-full flex items-center justify-center shrink-0" style={{ background: 'rgba(147, 51, 234, .12)' }}>
+                      <Database className="h-4 w-4" style={{ color: 'rgb(147 51 234)' }} />
+                    </div>
+                    <div className="text-left min-w-0">
+                      <p className="text-sm font-medium truncate" style={{ color: 'var(--dashboard-text)' }}>{pool.poolWarehouseName}</p>
+                      <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>Havuz Depo</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="inline-flex items-center text-xs font-semibold px-2.5 py-0.5 rounded-full" style={{ background: 'rgba(147, 51, 234, .12)', color: 'rgb(147 51 234)' }}>
+                      {pool.items.length}
+                    </span>
+                    <ChevronRight className="h-4 w-4" style={{ color: 'var(--dashboard-muted)' }} />
+                  </div>
+                </button>
+                <div style={{ borderTop: '1px solid var(--dashboard-stroke)' }}>
+                  {pool.items.slice(0, 5).map((item) => (
+                    <div key={item.id} className="px-3 py-2 flex items-center gap-3 text-xs" style={{ borderBottom: '1px solid var(--dashboard-stroke)' }}>
+                      <span className="font-mono shrink-0 w-24 truncate" style={{ color: 'var(--dashboard-muted)' }}>{item.stokKodu}</span>
+                      <span className="flex-1 truncate" style={{ color: 'var(--dashboard-text)' }}>{item.stokAdi}</span>
+                      <span className="font-mono shrink-0" style={{ color: 'var(--dashboard-muted)' }}>{item.serialNumber || '—'}</span>
+                      <span className="shrink-0" style={{ color: 'var(--dashboard-muted)' }}>
+                        {format(item.createdAt, 'dd.MM.yyyy', { locale: tr })}
+                      </span>
+                    </div>
+                  ))}
+                  {pool.items.length > 5 && (
+                    <div className="px-3 py-2 text-center text-xs" style={{ color: 'var(--dashboard-muted)' }}>
+                      … ve {pool.items.length - 5} ürün daha
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            {/* Personnel groups */}
             {personnelList.map((personnel) => {
               const role = users.find(u => u.uid === personnel.ownerUid)?.role;
               return (
@@ -4200,23 +4536,18 @@ export default function YedekParcaTransferPage() {
   }
 
   return (
-    <div className="cihaz-shell px-2 py-3 sm:px-4 sm:py-5 space-y-3 sm:space-y-4" style={{ minHeight: '100dvh' }}>
+    <div className="cihaz-shell px-2 pt-1 pb-3 sm:px-4 sm:py-5 space-y-3 sm:space-y-4" style={{ minHeight: '100dvh' }}>
 
       {/* Header bar */}
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={() => router.push('/direkt-transfer')}
-            className="cihaz-tool-item p-1.5"
-            style={{ borderRadius: 10 }}
-          >
-            <ChevronLeft className="w-4 h-4" style={{ color: 'var(--dashboard-muted)' }} />
-          </button>
-          <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'rgba(245,158,11,.12)' }}>
-            <Package className="w-4 h-4" style={{ color: 'var(--dashboard-accent)' }} />
-          </div>
-          <h1 className="text-base sm:text-lg font-bold" style={{ color: 'var(--dashboard-text)' }}>Yedek Parça Yönetimi</h1>
-        </div>
+        <button
+          onClick={() => router.push('/direkt-transfer')}
+          className="cihaz-tool-item p-1.5"
+          style={{ borderRadius: 10 }}
+          aria-label="Geri"
+        >
+          <ChevronLeft className="w-4 h-4" style={{ color: 'var(--dashboard-muted)' }} />
+        </button>
         <button
           className="md:hidden cihaz-tool-item inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium"
           onClick={() => setMobileMenuOpen(true)}
@@ -4293,6 +4624,18 @@ export default function YedekParcaTransferPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Min-Max Settings Panel for Spare Parts Depot */}
+      {currentCompanyId && (
+        <MinMaxSettingsPanel
+          isOpen={minMaxPanelOpen}
+          onClose={() => setMinMaxPanelOpen(false)}
+          target={{ id: currentCompanyId, name: 'Yedek Parça Deposu' } as any}
+          targetType="spare_parts_depot"
+          productCodes={productCodes}
+          toast={toast}
+        />
+      )}
 
       {/* Image Preview Modal */}
       <Dialog open={!!previewImage} onOpenChange={() => setPreviewImage(null)}>
@@ -4576,6 +4919,157 @@ export default function YedekParcaTransferPage() {
               {isSavingManualStock && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Kaydet
             </button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Observation Modal — shows full transfer history of a single stock item */}
+      <Dialog open={observationOpen} onOpenChange={(open) => {
+        if (!open) {
+          setObservationOpen(false);
+          setObservationItem(null);
+          setObservationLogs([]);
+        }
+      }}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <History className="h-5 w-5" />
+              Ürün Gözlem Geçmişi
+            </DialogTitle>
+          </DialogHeader>
+
+          {observationItem && (
+            <div className="cihaz-pressed rounded-xl p-3 text-xs space-y-1" style={{ color: 'var(--dashboard-text)' }}>
+              <div className="flex items-center gap-2">
+                <span className="font-semibold">Ürün:</span>
+                <span>{observationItem.stokAdi}</span>
+                <span className="font-mono text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>({observationItem.stokKodu})</span>
+              </div>
+              {observationItem.serialNumber && (
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold">Seri No:</span>
+                  <span className="font-mono">{observationItem.serialNumber}</span>
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                <span className="font-semibold">Konum:</span>
+                {observationItem.scope === 'personal' ? (
+                  <span>Personel Stoğu · {observationItem.ownerName || '—'}</span>
+                ) : (
+                  <span>Havuz Depo · {observationItem.poolWarehouseName || '—'}</span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {observationLoading ? (
+            <div className="flex items-center justify-center py-10">
+              <Loader2 className="h-5 w-5 animate-spin" style={{ color: 'var(--dashboard-accent)' }} />
+              <span className="ml-2 text-sm" style={{ color: 'var(--dashboard-muted)' }}>Geçmiş yükleniyor...</span>
+            </div>
+          ) : observationLogs.length === 0 ? (
+            <div className="text-center py-8 text-sm" style={{ color: 'var(--dashboard-muted)' }}>
+              Bu ürüne ait log kaydı bulunamadı.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {observationLogs.map((log: any) => {
+                const ts: Date = log._timestamp instanceof Date ? log._timestamp : new Date(log._timestamp);
+                const action = String(log.action || '');
+                const actionLabelMap: Record<string, string> = {
+                  transfer_to_personnel: 'Personele Transfer',
+                  transfer_to_pool: 'Havuz Depoya Transfer',
+                  transfer_between_personnel: 'Personelden Personele Transfer',
+                  transfer_approved: 'Transfer Onaylandı',
+                  transfer_rejected: 'Transfer Reddedildi',
+                  use_on_device: 'Cihazda Kullanıldı',
+                  use_from_pool: 'Havuzdan Kullanıldı',
+                  return_to_depot: 'Depoya İade',
+                  submit_to_depot: 'Depoya Teslim',
+                  return_confirmed: 'İade Onaylandı',
+                  submit_confirmed: 'Teslim Onaylandı',
+                  cancel_usage: 'Kullanım İptali',
+                  borrowed_rejected: 'Borç Reddedildi',
+                  borrowed_approved: 'Borç Onaylandı',
+                  transfer_cikis: 'Depodan Çıkış',
+                  iade_giris: 'Depoya Giriş',
+                  stok_duzeltme: 'Depo Stok Düzeltme',
+                  depo_stock_adjusted: 'Depo Stok Ayarlandı',
+                  depo_serial_deleted: 'Depo Seri Kaydı Silindi',
+                  depo_stock_deleted_admin: 'Depo Stok Kaydı Silindi',
+                  personnel_stock_deleted_admin: 'Personel Stok Kaydı Silindi',
+                  pool_stock_deleted_admin: 'Havuz Stok Kaydı Silindi',
+                  stock_snapshot: 'Stok Kaydı Oluşturuldu',
+                };
+                const actionLabel = actionLabelMap[action] || action || 'İşlem';
+
+                const whoFrom = log.fromName || log.createdByName || '';
+                const whoTo = log.toName || log.poolWarehouseName || log.ownerName || '';
+                const qty = Number(log.quantity) || 1;
+                const notes = String(log.notes || '');
+                const detailRows = [
+                  { label: 'Kaynak', value: log._source === 'depo' ? 'Depo Log' : log._source === 'snapshot' ? 'Stok Kaydı' : 'Transfer Log' },
+                  { label: 'Kimden', value: whoFrom },
+                  { label: 'Hedef', value: whoTo },
+                  { label: 'Transfer Eden', value: log.transferredByName },
+                  { label: 'Onaylayan', value: log.approvedByName },
+                  { label: 'Kullanan', value: log.usedByName || log.borrowedByName },
+                  { label: 'Lab', value: log.labName || log.usedOnLabName },
+                  { label: 'Cihaz', value: log.deviceName || log.usedOnDeviceName },
+                  { label: 'Form', value: log.formId || log.usedOnFormId },
+                  { label: 'Durum', value: log.status || log.approvalStatus },
+                  { label: 'İşlem No', value: log.id },
+                ].filter((row) => row.value);
+
+                return (
+                  <div key={`${log._source || 'log'}-${log.id}`} className="cihaz-card p-3 rounded-xl space-y-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold" style={{ color: 'var(--dashboard-text)' }}>
+                        {actionLabel}
+                      </span>
+                      <span className="text-[10px] font-mono" style={{ color: 'var(--dashboard-muted)' }}>
+                        {format(ts, 'dd.MM.yyyy HH:mm', { locale: tr })}
+                      </span>
+                    </div>
+                    <div className="text-[11px]" style={{ color: 'var(--dashboard-muted)' }}>
+                      {whoFrom && (<span>Kimden: <strong style={{ color: 'var(--dashboard-text)' }}>{whoFrom}</strong> · </span>)}
+                      {whoTo && (<span>Hedef: <strong style={{ color: 'var(--dashboard-text)' }}>{whoTo}</strong> · </span>)}
+                      <span>Adet: <strong style={{ color: 'var(--dashboard-text)' }}>{qty}</strong></span>
+                    </div>
+                    {detailRows.length > 0 && (
+                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>
+                        {detailRows.map((row) => (
+                          <span key={`${log._source || 'log'}-${log.id}-${row.label}`}>
+                            {row.label}: <strong style={{ color: 'var(--dashboard-text)' }}>{String(row.value)}</strong>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {notes && (
+                      <p className="text-[11px] italic" style={{ color: 'var(--dashboard-muted)' }}>
+                        {notes}
+                      </p>
+                    )}
+                    {log.createdByName && log.createdByName !== whoFrom && (
+                      <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>
+                        Kaydeden: {log.createdByName}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <DialogFooter>
+            <button
+              onClick={() => { setObservationOpen(false); setObservationItem(null); setObservationLogs([]); }}
+              className="cihaz-tool-item px-4 py-2 text-xs font-medium"
+              style={{ color: 'var(--dashboard-muted)' }}
+            >
+              Kapat
+            </button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

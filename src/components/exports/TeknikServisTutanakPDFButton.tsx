@@ -101,6 +101,10 @@ type ActionFormRecord = {
     personnelSignature?: string;
     technicianSignature?: string;
     technicianName?: string;
+    baslangicTarihi?: string;
+    baslangicSaati?: string;
+    bitisTarihi?: string;
+    bitisSaati?: string;
 };
 
 // Turkish labels - will use Turkish font if available
@@ -314,13 +318,16 @@ export default function TeknikServisTutanakPDFButton({ device, hospital, actionR
       }
 
       const info = [
-          ['Form No:', actionRecord.id],
+          ['Form No:', actionRecord.formNo || actionRecord.id],
           ['Laboratuvar:', txt(labDisplayName, useTurkish)],
           ['Cihaz:', txt(`${device.cihazAdi} (SN: ${device.seriNumarasi})`, useTurkish)],
           [txt('İşlemi Yapan:', useTurkish), personnelStr],
-          ['Tarih / Saat:', actionRecord.baslangicTarihi && actionRecord.baslangicSaati
+          [txt('Başlangıç:', useTurkish), actionRecord.baslangicTarihi && actionRecord.baslangicSaati
             ? `${actionRecord.baslangicTarihi.split('-').reverse().join('.')} ${actionRecord.baslangicSaati}`
-            : format(actionRecord.createdAt.toDate(), 'dd.MM.yyyy HH:mm')]
+            : format(actionRecord.createdAt.toDate(), 'dd.MM.yyyy HH:mm')],
+          [txt('Bitiş:', useTurkish), actionRecord.bitisTarihi && actionRecord.bitisSaati
+            ? `${actionRecord.bitisTarihi.split('-').reverse().join('.')} ${actionRecord.bitisSaati}`
+            : '-']
       ];
 
       autoTable(doc, {
@@ -569,7 +576,8 @@ export default function TeknikServisTutanakPDFButton({ device, hospital, actionR
         doc.addImage(actionRecord.technicianSignature, 'PNG', pageW / 2 + 20, sigY + 37, 150, 40, undefined, 'FAST');
       }
 
-      doc.save(`IslemFormu_${device.seriNumarasi}_${actionRecord.id.substring(0,6)}.pdf`);
+      const safeFormNo = String(actionRecord.formNo || actionRecord.id || '').replace(/[^A-Za-z0-9-_]/g, '');
+      doc.save(`IslemFormu_${device.seriNumarasi}_${safeFormNo || actionRecord.id.substring(0,6)}.pdf`);
     } catch (e) {
       console.error('PDF export error:', e);
     } finally {

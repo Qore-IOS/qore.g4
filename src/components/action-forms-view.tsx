@@ -25,6 +25,7 @@ import { useToast } from '@/hooks/use-toast';
 import { nanoid } from 'nanoid';
 import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { emitExternalStockUsage } from '@/lib/notifications';
 
 type ModuleType = 'teknik-servis' | 'aplikasyon-paneli';
 
@@ -71,6 +72,7 @@ type ActionRecord = {
   }>;
   selectedMaintenanceTasks?: Array<{ id?: string; taskName?: string }>;
   moduleType?: ModuleType;
+  isLabDeviceChild?: boolean;
 };
 
 const ISLEM_TURU_LABELS: Record<string, string> = {
@@ -144,6 +146,7 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
 
   const filteredForms = useMemo(() => {
     return forms
+      .filter((form) => !form.isLabDeviceChild)
       .filter((form) => filterModuleType === 'all' || form.moduleType === filterModuleType)
       .filter((form) => filterLab === 'all' || (form.labName || '-') === filterLab)
       .filter((form) => filterPersonnel === 'all' || (form.createdByName || '-') === filterPersonnel)
@@ -1073,6 +1076,24 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
       }
 
       await batch.commit();
+
+      // Emit external stock usage notification
+      if (appendedAction.poolStockId || appendedAction.isDepotSelection) {
+        emitExternalStockUsage({
+          actor: {
+            uid: currentUserProfile?.uid || '',
+            name: currentUserProfile?.name || currentUserProfile?.email || 'Bilinmeyen Kullanıcı',
+          },
+          sourceType: appendedAction.poolStockId ? 'pool' : 'depot',
+          sourceName: appendedAction.poolWarehouseName || appendedAction.depotAddress || 'Merkez Depo',
+          stokKodu: appendedAction.stokKodu,
+          stokAdi: appendedAction.stokAdi,
+          serialNumber: appendedAction.serialNumber,
+          quantity: appendedAction.quantity,
+          deviceName: form.cihazAdi || '',
+          hospitalName: form.labName || '',
+        }).catch(err => console.error('Notification error:', err));
+      }
 
       setForm((prev) => (prev ? { ...prev, actions: updatedActions as any } : prev));
       if (appendedAction.personalStockId) {

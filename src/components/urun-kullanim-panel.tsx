@@ -283,6 +283,17 @@ export default function UrunKullanimPanel() {
 
   const [lastScannedProduct, setLastScannedProduct] = useState<ConsumptionRecord | null>(null);
   const [lastScannedDeviceGroupImage, setLastScannedDeviceGroupImage] = useState<string | null>(null);
+  const [lastScannedLotRemaining, setLastScannedLotRemaining] = useState<number | null>(null);
+  const [lastScannedTotalRemaining, setLastScannedTotalRemaining] = useState<number | null>(null);
+  const [stockWarnings, setStockWarnings] = useState<Array<{
+    stokKodu: string;
+    stokAdi: string;
+    lotNumarasi?: string;
+    totalRemaining: number;
+    minStock: number | null;
+    maxStock: number | null;
+    reasons: string[];
+  }>>([]);
   const [sessionHistory, setSessionHistory] = useState<ConsumptionRecord[]>([]);
   const [scanStatus, setScanStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [isCameraScannerOpen, setIsCameraScannerOpen] = useState(false);
@@ -294,6 +305,7 @@ export default function UrunKullanimPanel() {
   
   const [faultModalOpen, setFaultModalOpen] = useState(false);
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null);
+  const [faultTargetMode, setFaultTargetMode] = useState<'single' | 'global'>('single');
   const [faultDescription, setFaultDescription] = useState('');
   const [isSavingFault, setIsSavingFault] = useState(false);
   const [faultDefinitions, setFaultDefinitions] = useState<FaultDefinition[]>([]);
@@ -330,6 +342,7 @@ export default function UrunKullanimPanel() {
 
   useEffect(() => {
     const handleOpenFaultModal = (event: CustomEvent<Device>) => {
+      setFaultTargetMode('single');
       setSelectedDevice(event.detail);
       setFaultDescription((event.detail as any).arizaAciklamasi || '');
       setFaultModalOpen(true);
@@ -568,6 +581,57 @@ export default function UrunKullanimPanel() {
       setLastScannedProduct(finalRecord as any);
       setSessionHistory(prev => [finalRecord, ...prev].slice(0, 10)); // Update local history
 
+      // Compute remaining lot and total counts for the consumed product.
+      // labStock may not have refreshed yet, so exclude the item we just consumed.
+      try {
+        const consumedId = itemToConsume.id;
+        const consumedStokKodu = itemToConsume.stokKodu;
+        const consumedLot = itemToConsume.lotNumarasi || '';
+        const lotRemaining = labStock.filter(i =>
+          i.stokKodu === consumedStokKodu &&
+          (i.lotNumarasi || '') === consumedLot &&
+          i.id !== consumedId
+        ).length;
+        const totalRemaining = labStock.filter(i =>
+          i.stokKodu === consumedStokKodu &&
+          i.id !== consumedId
+        ).length;
+        setLastScannedLotRemaining(lotRemaining);
+        setLastScannedTotalRemaining(totalRemaining);
+
+        // Check for stock warnings: min stock reached, and qty=1 when max>2.
+        const rule = minMaxRules.find(r => r.stokKodu === consumedStokKodu);
+        const minStock = rule?.min ?? null;
+        const maxStock = rule?.max ?? null;
+        const reasons: string[] = [];
+        if (minStock != null && minStock > 0 && totalRemaining <= minStock) {
+          reasons.push(`Minimum stok seviyesine ulaşıldı (Min: ${minStock}, Kalan: ${totalRemaining})`);
+        }
+        // Only warn for qty=1 when max stock is 2 or greater
+        if (totalRemaining === 1 && (maxStock == null || maxStock >= 2)) {
+          reasons.push('Laboratuvar stoğunda yalnızca 1 adet kaldı');
+        }
+        if (reasons.length > 0) {
+          setStockWarnings(prev => {
+            const filtered = prev.filter(w => w.stokKodu !== consumedStokKodu);
+            return [
+              ...filtered,
+              {
+                stokKodu: consumedStokKodu,
+                stokAdi: itemToConsume.stokAdi || '',
+                lotNumarasi: itemToConsume.lotNumarasi,
+                totalRemaining,
+                minStock,
+                maxStock,
+                reasons,
+              },
+            ];
+          });
+        }
+      } catch (computeErr: any) {
+        urunKullanimLogger.warn('Kalan stok hesaplanamadı', { error: computeErr?.message });
+      }
+
       setLastScannedDeviceGroupImage(null);
       setTimeout(() => {
         const productInfo = products.find(p => p.stokKodu === itemToConsume.stokKodu);
@@ -618,7 +682,7 @@ export default function UrunKullanimPanel() {
       // Propagate error for retry mechanism
       throw err;
     }
-  }, [currentUserProfile, selectedLab, laboratories, toast, selectedSubPoint, products, deviceGroups, invalidateDepoStok, invalidateConsumption]);
+  }, [currentUserProfile, selectedLab, laboratories, toast, selectedSubPoint, products, deviceGroups, invalidateDepoStok, invalidateConsumption, labStock, minMaxRules]);
   
   const pickEarliest = (items: DepoStokItem[]) => {
     return items
@@ -985,6 +1049,13 @@ export default function UrunKullanimPanel() {
     [faultDefinitions]
   );
 
+  const handleOpenGlobalStopModal = useCallback(() => {
+    setFaultTargetMode('global');
+    setSelectedDevice(null);
+    setFaultDescription('');
+    setFaultModalOpen(true);
+  }, []);
+
   const handleFaultReport = useCallback(async (faultDefinition: FaultDefinition) => {
     if (!selectedDevice) return;
     setIsSavingFault(true);
@@ -1080,6 +1151,58 @@ export default function UrunKullanimPanel() {
       setIsSavingFault(false);
     }
   }, [selectedDevice, customFaultType, customFaultTitle, customFaultDescription, currentUser, currentUserProfile, selectedLabId, selectedLabName, toast]);
+
+  const handleStopFaultReport = useCallback(async (stopLevel: 'E STOP' | 'S STOP' | 'NORMAL STOP') => {
+    if (!selectedLabId || !selectedLabName) return;
+
+    const isGlobalStop = faultTargetMode === 'global';
+    const targetDeviceIds = isGlobalStop
+      ? devicesToDisplay.map((d) => d.id).filter(Boolean)
+      : (selectedDevice?.id ? [selectedDevice.id] : []);
+
+    if (targetDeviceIds.length === 0) {
+      toast({ title: 'Cihaz Bulunamadı', description: 'Arıza kaydı açmak için en az bir cihaz gerekli.', variant: 'destructive' });
+      return;
+    }
+
+    setIsSavingFault(true);
+    try {
+      await openDeviceFaultReport({
+        hospitalId: selectedLabId,
+        labName: selectedLabName,
+        deviceId: isGlobalStop ? targetDeviceIds[0] : (selectedDevice?.id || ''),
+        model: isGlobalStop ? 'KOMPLE STOP' : (selectedDevice?.cihazAdi || selectedDevice?.name || 'Cihaz'),
+        serial: isGlobalStop ? '-' : (selectedDevice?.seriNumarasi || ''),
+        faultType: 'teknik_servis',
+        openedByUid: currentUser?.uid || '',
+        openedByName: currentUserProfile?.name || '',
+        openDescription: `${stopLevel} - ${isGlobalStop ? 'KOMPLE STOP' : 'Cihaz STOP'} (Tüm personel bilgilendirildi)`,
+        title: `${stopLevel} • ${isGlobalStop ? 'KOMPLE STOP' : (selectedDevice?.cihazAdi || 'Cihaz')}`,
+        faultName: stopLevel,
+        deviceImageUrl: selectedDevice?.imageUrl || undefined,
+        companyId: currentUserProfile?.companyId ?? null,
+        affectsAllDevices: isGlobalStop,
+        affectedDeviceIds: targetDeviceIds,
+        stopLevel,
+        notifyAllPersonnel: true,
+      });
+
+      toast({
+        title: 'Arıza Kaydı Oluşturuldu',
+        description: isGlobalStop
+          ? `${stopLevel} arızası KOMPLE STOP olarak açıldı. Tüm cihazlar etkilendi.`
+          : `${selectedDevice?.cihazAdi || 'Cihaz'} için ${stopLevel} arızası açıldı.`,
+      });
+      setFaultModalOpen(false);
+      setSelectedDevice(null);
+      setFaultTargetMode('single');
+    } catch (err) {
+      urunKullanimLogger.error('STOP arıza kaydı oluşturulamadı', err, { stopLevel, mode: faultTargetMode });
+      toast({ title: 'Hata', description: 'STOP arıza kaydı oluşturulamadı.', variant: 'destructive' });
+    } finally {
+      setIsSavingFault(false);
+    }
+  }, [selectedLabId, selectedLabName, faultTargetMode, devicesToDisplay, selectedDevice, currentUser, currentUserProfile, toast]);
 
   const manualDeductionAvailableProducts = useMemo(() => {
     return Array.from(new Set(labStock.map(item => item.stokKodu)))
@@ -1548,6 +1671,26 @@ export default function UrunKullanimPanel() {
                     {lastScannedProduct.subPointName && (
                       <p className="text-xs text-foreground/70 dark:text-foreground/60">Nokta: {lastScannedProduct.subPointName}</p>
                     )}
+                    {(lastScannedLotRemaining !== null || lastScannedTotalRemaining !== null) && (
+                      <div className="mt-2 grid grid-cols-2 gap-2">
+                        <div className="rounded-md border border-foreground/10 bg-foreground/5 px-3 py-2 text-center">
+                          <p className="text-[10px] uppercase tracking-wider text-foreground/60">Bu Lottan Kalan</p>
+                          <p className="text-4xl font-black leading-none mt-1 tabular-nums">
+                            {lastScannedLotRemaining ?? '-'}
+                          </p>
+                          {lastScannedProduct.lotNumarasi && (
+                            <p className="text-[10px] text-foreground/60 mt-1 truncate">Lot: {lastScannedProduct.lotNumarasi}</p>
+                          )}
+                        </div>
+                        <div className="rounded-md border border-foreground/10 bg-foreground/5 px-3 py-2 text-center">
+                          <p className="text-[10px] uppercase tracking-wider text-foreground/60">Toplam Kalan</p>
+                          <p className="text-4xl font-black leading-none mt-1 tabular-nums">
+                            {lastScannedTotalRemaining ?? '-'}
+                          </p>
+                          <p className="text-[10px] text-foreground/60 mt-1">(tüm lotlar)</p>
+                        </div>
+                      </div>
+                    )}
                     {scanStatus === 'success' && <p className="text-green-500 text-xs font-medium mt-1">Stoktan Düşüldü!</p>}
                   </div>
                   {/* Device group image - larger */}
@@ -1599,11 +1742,21 @@ export default function UrunKullanimPanel() {
           {/* Card 4: Cihazlar */}
           {selectedLabId && (
             <div className="frosted-glass-card flex-1" role="region" aria-label="Laboratuvar cihazları">
-              <div className="frosted-header flex items-center gap-2">
-                <Wrench className="w-4 h-4 text-foreground/70 dark:text-foreground/60"/>
-                <span className="font-semibold text-sm">Cihazlar</span>
+              <div className="frosted-header grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Wrench className="w-4 h-4 text-foreground/70 dark:text-foreground/60"/>
+                  <span className="font-semibold text-sm">Cihazlar</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleOpenGlobalStopModal}
+                  disabled={devicesToDisplay.length === 0}
+                  className="text-[11px] px-3 py-1 rounded-md border border-destructive/40 text-destructive hover:bg-destructive/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  KOMPLE STOP
+                </button>
                 {devicesToDisplay.length > 0 && (
-                  <span className="text-xs text-foreground/70 dark:text-foreground/60 ml-auto">{devicesToDisplay.length} cihaz</span>
+                  <span className="text-xs text-foreground/70 dark:text-foreground/60 justify-self-end">{devicesToDisplay.length} cihaz</span>
                 )}
               </div>
               <div className="frosted-content">
@@ -1697,8 +1850,14 @@ export default function UrunKullanimPanel() {
       <Dialog open={faultModalOpen} onOpenChange={setFaultModalOpen}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col" aria-describedby="fault-dialog-description">
           <DialogHeader className="flex-shrink-0">
-            <DialogTitle>Arıza Kaydı: {selectedDevice?.cihazAdi}</DialogTitle>
-            <DialogDescription id="fault-dialog-description">SN: {selectedDevice?.seriNumarasi} • Arıza tipini seçin</DialogDescription>
+            <DialogTitle>
+              {faultTargetMode === 'global' ? 'Arıza Kaydı: KOMPLE STOP' : `Arıza Kaydı: ${selectedDevice?.cihazAdi}`}
+            </DialogTitle>
+            <DialogDescription id="fault-dialog-description">
+              {faultTargetMode === 'global'
+                ? `${devicesToDisplay.length} cihaz • Arıza tipini seçin`
+                : `SN: ${selectedDevice?.seriNumarasi} • Arıza tipini seçin`}
+            </DialogDescription>
           </DialogHeader>
           <div className="flex-1 overflow-auto py-4">
             {faultDefinitions.length === 0 ? (
@@ -1836,6 +1995,35 @@ export default function UrunKullanimPanel() {
                 </div>
               </div>
             )}
+          </div>
+          <div className="grid grid-cols-3 gap-2 border-t pt-4">
+            <Button
+              type="button"
+              variant="destructive"
+              className="w-full"
+              disabled={isSavingFault}
+              onClick={() => handleStopFaultReport('E STOP')}
+            >
+              E STOP
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              className="w-full"
+              disabled={isSavingFault}
+              onClick={() => handleStopFaultReport('S STOP')}
+            >
+              S STOP
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              className="w-full"
+              disabled={isSavingFault}
+              onClick={() => handleStopFaultReport('NORMAL STOP')}
+            >
+              NORMAL STOP
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -2218,6 +2406,72 @@ export default function UrunKullanimPanel() {
           </div>
           <DialogFooter>
             <Button onClick={handleManualDeduction} aria-label="Manuel düşüm işlemini başlat">Düşüm Yap</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Centered stock warning modal: stays on screen until user confirms.
+          Shown when a consumed product hits min stock OR has 1 remaining (max>2). */}
+      <Dialog
+        open={stockWarnings.length > 0}
+        onOpenChange={(open) => {
+          if (!open) setStockWarnings([]);
+        }}
+      >
+        <DialogContent
+          className="max-w-lg border-4 border-red-500 stock-warning-blink bg-background"
+          onInteractOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => e.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-red-500 text-xl">
+              <AlertTriangle className="h-6 w-6 animate-pulse" />
+              Stok Uyarısı
+            </DialogTitle>
+            <DialogDescription>
+              Aşağıdaki ürün(ler) için laboratuvar stoğunda kritik seviyeye ulaşıldı.
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="max-h-[50vh] pr-3">
+            <div className="space-y-3 py-2">
+              {stockWarnings.map((w) => (
+                <div
+                  key={w.stokKodu}
+                  className="rounded-md border-2 border-red-500/70 bg-red-500/10 p-3 space-y-1"
+                >
+                  <p className="font-semibold text-base">
+                    {w.stokAdi || w.stokKodu}{' '}
+                    <span className="text-xs text-foreground/60 font-mono">({w.stokKodu})</span>
+                  </p>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                    <span>
+                      Kalan: <span className="text-2xl font-black text-red-500 tabular-nums">{w.totalRemaining}</span>
+                    </span>
+                    {w.minStock != null && (
+                      <span className="text-foreground/70">Min: <span className="font-semibold">{w.minStock}</span></span>
+                    )}
+                    {w.maxStock != null && (
+                      <span className="text-foreground/70">Max: <span className="font-semibold">{w.maxStock}</span></span>
+                    )}
+                  </div>
+                  <ul className="list-disc list-inside text-sm text-red-600 dark:text-red-400">
+                    {w.reasons.map((r, i) => (
+                      <li key={i}>{r}</li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </ScrollArea>
+          <DialogFooter>
+            <Button
+              variant="destructive"
+              className="w-full"
+              onClick={() => setStockWarnings([])}
+              aria-label="Uyarıyı onayla"
+            >
+              Tamam
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

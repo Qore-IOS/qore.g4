@@ -3,14 +3,13 @@ import React from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Warehouse, Building, Pill, MapPin, Users, Barcode, Moon, Sun, LogOut, Beaker, QrCode, History, Palette } from 'lucide-react';
-import { useTheme } from 'next-themes';
+import { Warehouse, Building, Pill, MapPin, Users, Barcode, LogOut, Beaker, QrCode, History, Palette } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import AdminBackfillHedefKurumId from '@/components/AdminBackfillHedefKurumId';
 
 export default function YonetimPanel() {
   const router = useRouter();
-  const { setTheme } = useTheme();
+
   const { logout, isAdmin } = useAuth();
 
   if (!isAdmin) {
@@ -51,14 +50,7 @@ export default function YonetimPanel() {
               <LogOut className="mr-2 h-4 w-4"/>
               Çıkış Yap
             </Button>
-            <Button onClick={() => setTheme('light')} variant="outline">
-              <Sun className="mr-2 h-4 w-4"/>
-              Aydınlık Tema
-            </Button>
-            <Button onClick={() => setTheme('dark')} variant="outline">
-              <Moon className="mr-2 h-4 w-4"/>
-              Karanlık Tema
-            </Button>
+
             <Button variant="outline" onClick={() => router.push('/yonetim/personel-hareket-ekstresi')}>
                 <History className="h-4 w-4 mr-2" />
                 Personel Hareket Ekstresi

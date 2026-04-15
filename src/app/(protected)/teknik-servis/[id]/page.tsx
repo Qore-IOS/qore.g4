@@ -1,4 +1,3 @@
-
 'use client';
 
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
@@ -6,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import BackButton from '@/components/BackButton';
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
-import { AlertTriangle, CheckCircle, Loader2, Wrench, FilePenLine, FlaskConical, Building2, ChevronDown, ChevronUp, History, CalendarClock, RotateCcw, FileEdit, FilePlus } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Loader2, Wrench, FilePenLine, FlaskConical, Building2, ChevronDown, ChevronUp, History, CalendarClock, RotateCcw, FileEdit, FilePlus, ClipboardList } from 'lucide-react';
 import {
   collection,
   onSnapshot,
@@ -30,6 +29,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
 import { withCompanyScope } from '@/lib/company-scope';
+import { classifyStopFault } from '@/lib/stop-fault';
 import {
   Dialog,
   DialogContent,
@@ -85,6 +85,7 @@ export default function TeknikServisDetayPage() {
   // Device fault history state
   const [deviceFaultHistory, setDeviceFaultHistory] = useState<Record<string, { description: string; closedAt: Date }[]>>({});
   const [expandedDevices, setExpandedDevices] = useState<Set<string>>(new Set());
+  const [stopFaultCountsByDevice, setStopFaultCountsByDevice] = useState<Record<string, { e: number; s: number; n: number }>>({});
 
   // Maintenance flip state
   const [showMaintenance, setShowMaintenance] = useState(false);
@@ -206,6 +207,27 @@ export default function TeknikServisDetayPage() {
 
     fetchFaultHistory();
   }, [devicesByHospital]);
+
+  useEffect(() => {
+    if (!hospitalId) return;
+    const q = query(collection(db, 'deviceFaultReports'), where('hospitalId', '==', hospitalId));
+    const unsub = onSnapshot(q, (snap) => {
+      const counts: Record<string, { e: number; s: number; n: number }> = {};
+      snap.docs.forEach((d) => {
+        const data = d.data() as Record<string, unknown>;
+        const deviceId = String(data.deviceId || '');
+        if (!deviceId) return;
+        const stopType = classifyStopFault(data);
+        if (!stopType) return;
+        if (!counts[deviceId]) counts[deviceId] = { e: 0, s: 0, n: 0 };
+        if (stopType === 'e_stop') counts[deviceId].e += 1;
+        if (stopType === 's_stop') counts[deviceId].s += 1;
+        if (stopType === 'normal_stop') counts[deviceId].n += 1;
+      });
+      setStopFaultCountsByDevice(counts);
+    });
+    return () => unsub();
+  }, [hospitalId]);
 
   // Fetch maintenance data for all devices
   const fetchMaintenanceData = useCallback(async () => {
@@ -642,7 +664,14 @@ export default function TeknikServisDetayPage() {
                 <p className="text-sm text-[var(--dashboard-muted)]">Cihaz Durumları</p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => router.push(`/teknik-servis/islem-formu/lab-${hospitalId}`)}
+                className="cihaz-tool-item flex items-center gap-2 px-3 py-2 text-sm font-medium bg-[var(--dashboard-accent)] text-white hover:bg-[var(--dashboard-accent)]/90 shadow-sm"
+              >
+                <ClipboardList className="h-4 w-4" />
+                <span className="hidden sm:inline">Laboratuvar Formu</span>
+              </button>
               <button
                 onClick={() => setShowMaintenance(prev => !prev)}
                 className={cn(
@@ -688,6 +717,7 @@ export default function TeknikServisDetayPage() {
                 const isAplikasyonFaulty = effectiveFaultType === 'aplikasyon';
                 const isFaulty = isTeknikServisFaulty || isAplikasyonFaulty;
                 const deviceMaintenanceItems = maintenanceData[device.id] || [];
+                const stopCounts = stopFaultCountsByDevice[device.id] || { e: 0, s: 0, n: 0 };
 
                 return (
                   <div key={device.id} className="device-flip-container">
@@ -761,6 +791,11 @@ export default function TeknikServisDetayPage() {
                                   Sağlıklı
                                 </p>
                               )}
+                            </div>
+                            <div className="mt-1 flex items-center justify-center gap-1.5 text-[10px] w-full">
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-red-100 text-red-700 font-semibold">E <span className="font-normal">{stopCounts.e}</span></span>
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-red-100 text-red-700 font-semibold">S <span className="font-normal">{stopCounts.s}</span></span>
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-red-100 text-red-700 font-semibold">N <span className="font-normal">{stopCounts.n}</span></span>
                             </div>
 
                             {/* Mini Fault History */}
