@@ -27,6 +27,7 @@ import { formatDateKey } from '@/lib/dailyConsumptionStats';
 import { collection, onSnapshot, query, where, getDocs, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { VIEWS } from '@/lib/constants';
+import { getExchangeRates } from '@/lib/exchange-rates';
 
 const motionProps = {
   initial: { scale: 1, y: 0 },
@@ -41,6 +42,7 @@ interface DashboardPanelProps {
 }
 
 type TrendPeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
+type CostCurrency = 'EUR' | 'USD' | 'TRY';
 
 export default function DashboardPanel({
     hospitals,
@@ -123,6 +125,7 @@ export default function DashboardPanel({
   useEffect(() => {
     (async () => {
       try {
+        const exchangeRates = await getExchangeRates();
         let productDocs: any[] = [];
         let stockDocs: any[] = [];
         let depotDocs: any[] = [];
@@ -131,14 +134,24 @@ export default function DashboardPanel({
         try { const s = await getDocs(collection(db, 'depoStok')); stockDocs = s.docs; } catch (e) { console.warn('[Dashboard] depoStok fetch failed:', e); }
         try { const s = await getDocs(collection(db, 'depots')); depotDocs = s.docs; } catch (e) { console.warn('[Dashboard] depots fetch failed:', e); }
 
-        // Build cost map: stokKodu -> birim maliyet
-        const costMap = new Map<string, number>();
+        // Build cost map: stokKodu -> birim maliyet + para birimi
+        const costMap = new Map<string, { cost: number; currency: CostCurrency }>();
         productDocs.forEach((d) => {
           const data = d.data();
           const rawCost = data.cost ?? data.birimFiyat ?? data.unitPrice ?? data.price;
           const numCost = typeof rawCost === 'number' ? rawCost : parseFloat(rawCost);
-          if (numCost && !isNaN(numCost) && data.stokKodu) costMap.set(data.stokKodu, numCost);
+          const currency = (typeof data.currency === 'string' ? data.currency.toUpperCase() : 'TRY') as CostCurrency;
+          const normalizedCurrency: CostCurrency = currency === 'EUR' || currency === 'USD' ? currency : 'TRY';
+          if (numCost && !isNaN(numCost) && data.stokKodu) {
+            costMap.set(data.stokKodu, { cost: numCost, currency: normalizedCurrency });
+          }
         });
+
+        const toTry = (amount: number, currency: CostCurrency): number => {
+          if (currency === 'TRY') return amount;
+          if (currency === 'EUR') return amount * exchangeRates.TRY;
+          return amount * (exchangeRates.TRY / exchangeRates.USD);
+        };
 
         // Toplam maliyet hesapla
         let total = 0;
@@ -147,20 +160,20 @@ export default function DashboardPanel({
 
         stockDocs.forEach((d) => {
           const data = d.data();
-          if (data.isShipped === true) return;
-          const cost = costMap.get(data.stokKodu);
-          if (cost) total += cost;
+          const productCost = costMap.get(data.stokKodu);
+          const qty = Number(data.quantity ?? 1) || 1;
+          if (productCost) total += toTry(productCost.cost * qty, productCost.currency);
           // Riskli hesabı için stok bilgisi topla
           activeStockItems.push({
             stokKodu: data.stokKodu,
             lotNumarasi: data.lotNumarasi || '',
             miad: typeof data.miad === 'string' ? data.miad : '',
             depotId: data.depotId || '',
-            quantity: 1,
+            quantity: qty,
           });
           // Depo+stokKodu bazında toplam adet
           const gKey = `${data.depotId || ''}__${data.stokKodu}`;
-          groupedByDepotAndProduct.set(gKey, (groupedByDepotAndProduct.get(gKey) || 0) + 1);
+          groupedByDepotAndProduct.set(gKey, (groupedByDepotAndProduct.get(gKey) || 0) + qty);
         });
 
         setTotalStockCost(total);
@@ -187,9 +200,9 @@ export default function DashboardPanel({
           const key = `${item.depotId}__${item.stokKodu}__${item.lotNumarasi}__${item.miad}`;
           const existing = lotGroups.get(key);
           if (existing) {
-            existing.quantity += 1;
+            existing.quantity += item.quantity;
           } else {
-            lotGroups.set(key, { ...item, quantity: 1 });
+            lotGroups.set(key, { ...item, quantity: item.quantity });
           }
         });
 
@@ -220,8 +233,9 @@ export default function DashboardPanel({
 
           const riskyDays = coverageDays - miadDays;
           const riskyBoxes = Math.min(Math.max(0, Math.ceil(riskyDays * dailyNeed)), group.quantity);
-          const unitCost = costMap.get(group.stokKodu) || 0;
-          totalRiskyCost += riskyBoxes * unitCost;
+          const productCost = costMap.get(group.stokKodu);
+          if (!productCost) return;
+          totalRiskyCost += toTry(riskyBoxes * productCost.cost, productCost.currency);
         });
 
         setRiskyCost(totalRiskyCost);
