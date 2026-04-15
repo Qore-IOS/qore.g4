@@ -222,6 +222,12 @@ export default function ArizaIstatistikleriPage() {
 
   // Main statistics
   const stats = useMemo(() => {
+    // NOTE: fault *record* counts (totalFaults, openFaults, closedFaults,
+    // teknik/aplikasyon/kurum/telefon, faultsExceedingTarget) treat each
+    // fault report as a single occurrence — matching the Arıza Yönetimi
+    // page. The per-device impact multiplier is reserved for device-level
+    // analytics (topDevices below) where attributing group faults to each
+    // affected device is meaningful.
     const getImpactCount = (report: any) => {
       if (report?.affectsAllDevices && Array.isArray(report?.affectedDeviceIds)) {
         return Math.max(1, report.affectedDeviceIds.filter(Boolean).length);
@@ -270,44 +276,34 @@ export default function ArizaIstatistikleriPage() {
 
     const closedReports = filteredReports.filter(r => (r.status === 'closed' || r.status === 'cozuldu') && r.openedAt && r.closedAt);
     const totalResolutionTime = closedReports.reduce((sum, r) => {
-        return sum + (differenceInMinutes(r.closedAt!, r.openedAt!) * getImpactCount(r));
+        return sum + differenceInMinutes(r.closedAt!, r.openedAt!);
     }, 0);
-    const totalImpactedClosed = closedReports.reduce((sum, r) => sum + getImpactCount(r), 0);
-    const avgResolutionTime = totalImpactedClosed > 0 ? totalResolutionTime / totalImpactedClosed : 0;
+    const avgResolutionTime = closedReports.length > 0 ? totalResolutionTime / closedReports.length : 0;
 
     const openFaults = filteredReports
-      .filter(r => r.status !== 'closed' && r.status !== 'cozuldu')
-      .reduce((sum, r) => sum + getImpactCount(r), 0);
-    const closedFaults = totalImpactedClosed;
+      .filter(r => r.status !== 'closed' && r.status !== 'cozuldu').length;
+    const closedFaults = closedReports.length;
 
     // Count faults exceeding target time
-    const faultsExceedingTarget = closedReports.reduce((sum, r) => {
+    const faultsExceedingTarget = closedReports.filter(r => {
       const resolutionTime = differenceInMinutes(r.closedAt!, r.openedAt!);
-      return sum + (resolutionTime > TARGET_RESOLUTION_TIME ? getImpactCount(r) : 0);
-    }, 0);
+      return resolutionTime > TARGET_RESOLUTION_TIME;
+    }).length;
 
     // Count by fault type
-    const teknikCount = filteredReports
-      .filter(r => r.faultType === 'teknik_servis')
-      .reduce((sum, r) => sum + getImpactCount(r), 0);
-    const aplikasyonCount = filteredReports
-      .filter(r => r.faultType === 'aplikasyon')
-      .reduce((sum, r) => sum + getImpactCount(r), 0);
+    const teknikCount = filteredReports.filter(r => r.faultType === 'teknik_servis').length;
+    const aplikasyonCount = filteredReports.filter(r => r.faultType === 'aplikasyon').length;
 
     // Count by intervention type
-    const kurumCount = filteredReports
-      .filter(r => r.interventionType === 'kurum_ziyaret')
-      .reduce((sum, r) => sum + getImpactCount(r), 0);
-    const telefonCount = filteredReports
-      .filter(r => r.interventionType === 'telefon')
-      .reduce((sum, r) => sum + getImpactCount(r), 0);
+    const kurumCount = filteredReports.filter(r => r.interventionType === 'kurum_ziyaret').length;
+    const telefonCount = filteredReports.filter(r => r.interventionType === 'telefon').length;
 
     return {
       topDevices,
       avgResolutionTime,
       openFaults,
       closedFaults,
-      totalFaults: filteredReports.reduce((sum, r) => sum + getImpactCount(r), 0),
+      totalFaults: filteredReports.length,
       faultsExceedingTarget,
       teknikCount,
       aplikasyonCount,
