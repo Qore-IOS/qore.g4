@@ -17,6 +17,7 @@ type NotificationType =
   | 'user_request_created'
   | 'user_request_completed'
   | 'fault_reminder'
+  | 'maintenance_reminder'
   | 'external_stock_usage'
   | 'custom';
 
