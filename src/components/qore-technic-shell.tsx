@@ -138,6 +138,7 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
         href: '/teknik-servis',
         match: (p) => p.startsWith('/teknik-servis'),
       };
+  const actionFormsHref = isAplikasyon ? '/aplikasyon-paneli/tum-formlar' : '/teknik-servis/tum-formlar';
 
   const navItems: NavItem[] = [
     { key: 'home', label: 'Ana Panel', icon: Home, href: '/cihaz-yonetimi-ana',
@@ -188,7 +189,7 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
     {
       ...primaryPanel,
       subItems: [
-        { label: 'İşlem Formları', icon: ClipboardList, href: '/islem-formu' },
+        { label: 'İşlem Formları', icon: ClipboardList, href: actionFormsHref },
         { label: 'Form Oluşturma', icon: primaryPanel.icon, href: primaryPanel.href },
         { label: 'Yedek Parça', icon: Package, href: '/direkt-transfer/yedek-parca-transfer' },
       ],
