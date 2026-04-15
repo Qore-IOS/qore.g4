@@ -1,12 +1,12 @@
 
 'use client';
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useTheme } from 'next-themes';
 import type { Hospital, ConsumptionRecord, ProductCode, DailyConsumptionStats, DeviceFaultReport, PurchasingTask } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { TrendingUp, ChevronLeft, ChevronRight, UserPlus2, TimerReset, ActivitySquare, AlertTriangle, CalendarCheck, Banknote } from 'lucide-react';
+import { TrendingUp, ChevronLeft, ChevronRight, UserPlus2, TimerReset, ActivitySquare, AlertTriangle, CalendarCheck, Banknote, RefreshCw } from 'lucide-react';
 import {
   format, startOfWeek, endOfWeek, eachDayOfInterval,
   subDays, addDays, subWeeks, addWeeks, subMonths, addMonths, subYears, addYears,
@@ -71,6 +71,9 @@ type StockBrandBreakdown = {
   tryTotal: number;
   locations: StockLocationBreakdown[];
 };
+
+const STOCK_COST_SNAPSHOT_KEY = 'dashboard_stock_cost_snapshot_v1';
+const STOCK_COST_SNAPSHOT_TTL = 1000 * 60 * 60 * 24; // 24 saat
 
 export default function DashboardPanel({
     hospitals,
@@ -152,8 +155,33 @@ export default function DashboardPanel({
   const [riskyCost, setRiskyCost] = useState<number | null>(null);
   const [isStockCostDetailOpen, setIsStockCostDetailOpen] = useState(false);
   const [stockCostBreakdown, setStockCostBreakdown] = useState<StockBrandBreakdown[]>([]);
-  useEffect(() => {
-    (async () => {
+  const [isRefreshingStockCost, setIsRefreshingStockCost] = useState(false);
+
+  const loadStockCostSnapshot = useCallback(async (forceRefresh = false) => {
+    if (!forceRefresh) {
+      try {
+        const cached = localStorage.getItem(STOCK_COST_SNAPSHOT_KEY);
+        if (cached) {
+          const parsed = JSON.parse(cached) as {
+            timestamp: number;
+            totalStockCost: number;
+            riskyCost: number;
+            stockCostBreakdown: StockBrandBreakdown[];
+          };
+          if (Date.now() - parsed.timestamp < STOCK_COST_SNAPSHOT_TTL) {
+            setTotalStockCost(parsed.totalStockCost);
+            setRiskyCost(parsed.riskyCost);
+            setStockCostBreakdown(parsed.stockCostBreakdown || []);
+            return;
+          }
+        }
+      } catch (error) {
+        console.warn('[Dashboard] stock cost snapshot cache parse error:', error);
+      }
+    }
+
+    try {
+      setIsRefreshingStockCost(true);
       try {
         const exchangeRates = await getExchangeRates();
         let productDocs: any[] = [];
@@ -284,7 +312,8 @@ export default function DashboardPanel({
           groupedByDepotAndProduct.set(gKey, (groupedByDepotAndProduct.get(gKey) || 0) + qty);
         });
 
-        setTotalStockCost(sumPoolsToTry(totalPools));
+        const computedTotalStockCost = sumPoolsToTry(totalPools);
+        setTotalStockCost(computedTotalStockCost);
         const breakdown: StockBrandBreakdown[] = Array.from(breakdownMap.entries()).map(([brand, brandEntry]) => {
           const locations: StockLocationBreakdown[] = Array.from(brandEntry.locations.values()).map((loc) => {
             const products = Array.from(loc.products.values()).map((p) => ({
@@ -371,14 +400,32 @@ export default function DashboardPanel({
           riskyPools[productCost.currency] += riskyBoxes * productCost.cost;
         });
 
-        setRiskyCost(sumPoolsToTry(riskyPools));
+        const computedRiskyCost = sumPoolsToTry(riskyPools);
+        setRiskyCost(computedRiskyCost);
+
+        try {
+          localStorage.setItem(STOCK_COST_SNAPSHOT_KEY, JSON.stringify({
+            timestamp: Date.now(),
+            totalStockCost: computedTotalStockCost,
+            riskyCost: computedRiskyCost,
+            stockCostBreakdown: breakdown,
+          }));
+        } catch (error) {
+          console.warn('[Dashboard] stock cost snapshot cache save error:', error);
+        }
       } catch (err) {
         console.error('[Dashboard] getTotalStockCost error:', err);
         setTotalStockCost(0);
         setRiskyCost(0);
       }
-    })();
-  }, []);
+    } finally {
+      setIsRefreshingStockCost(false);
+    }
+  }, [hospitals]);
+
+  useEffect(() => {
+    loadStockCostSnapshot(false);
+  }, [loadStockCostSnapshot]);
 
   // Yesterday's consumption cost – fetch by date range, then join client-side
   const [yesterdayConsumptionCost, setYesterdayConsumptionCost] = useState(0);
@@ -840,8 +887,32 @@ export default function DashboardPanel({
                 </Card>
               </Link>
               {/* Anlık Maliyet - %70 toplam, %30 riskli */}
-              <button type="button" className="block h-full w-full text-left bg-transparent p-0 m-0 border-0" onClick={() => setIsStockCostDetailOpen(true)}>
-                <Card className="glass-card cursor-pointer h-full flex flex-col overflow-hidden w-full">
+              <div
+                className="block h-full w-full text-left bg-transparent p-0 m-0 border-0 cursor-pointer"
+                onClick={() => setIsStockCostDetailOpen(true)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setIsStockCostDetailOpen(true);
+                  }
+                }}
+              >
+                <Card className="glass-card cursor-pointer h-full flex flex-col overflow-hidden w-full relative">
+                  <button
+                    type="button"
+                    className="absolute right-2 top-2 z-10 h-6 w-6 rounded-full border bg-white/90 text-slate-600 hover:text-slate-900 flex items-center justify-center"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      loadStockCostSnapshot(true);
+                    }}
+                    title="Anlık maliyeti yenile"
+                    aria-label="Anlık maliyeti yenile"
+                  >
+                    <RefreshCw className={cn('h-3.5 w-3.5', isRefreshingStockCost && 'animate-spin')} />
+                  </button>
                   <CardContent className="pt-0 pb-0 px-0 flex-1 flex flex-col">
                     {/* %70 - Toplam Maliyet */}
                     <div className="flex-[7] flex flex-col items-center justify-center text-center px-3 pt-3 pb-2">
@@ -869,7 +940,7 @@ export default function DashboardPanel({
                     </div>
                   </CardContent>
                 </Card>
-              </button>
+              </div>
             </div>
           </motion.div>
 
