@@ -25,6 +25,7 @@ import { useToast } from '@/hooks/use-toast';
 import { nanoid } from 'nanoid';
 import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { emitExternalStockUsage } from '@/lib/notifications';
 
 type ModuleType = 'teknik-servis' | 'aplikasyon-paneli';
 
@@ -1075,6 +1076,24 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
       }
 
       await batch.commit();
+
+      // Emit external stock usage notification
+      if (appendedAction.poolStockId || appendedAction.isDepotSelection) {
+        emitExternalStockUsage({
+          actor: {
+            uid: currentUserProfile?.uid || '',
+            name: currentUserProfile?.name || currentUserProfile?.email || 'Bilinmeyen Kullanıcı',
+          },
+          sourceType: appendedAction.poolStockId ? 'pool' : 'depot',
+          sourceName: appendedAction.poolWarehouseName || appendedAction.depotAddress || 'Merkez Depo',
+          stokKodu: appendedAction.stokKodu,
+          stokAdi: appendedAction.stokAdi,
+          serialNumber: appendedAction.serialNumber,
+          quantity: appendedAction.quantity,
+          deviceName: form.cihazAdi || '',
+          hospitalName: form.labName || '',
+        }).catch(err => console.error('Notification error:', err));
+      }
 
       setForm((prev) => (prev ? { ...prev, actions: updatedActions as any } : prev));
       if (appendedAction.personalStockId) {

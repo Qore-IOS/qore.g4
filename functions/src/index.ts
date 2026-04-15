@@ -318,6 +318,13 @@ export const onNotificationCreated = functions
           link: data.href ? `${baseUrl}${data.href}` : baseUrl,
           ...(faultReportId ? { faultReportId } : {}),
           ...(data.meta?.faultType ? { faultType: data.meta.faultType } : {}),
+          ...(data.type === 'external_stock_usage' ? {
+            sourceType: data.meta?.sourceType || '',
+            sourceName: data.meta?.sourceName || '',
+            stokKodu: data.meta?.stokKodu || '',
+            stokAdi: data.meta?.stokAdi || '',
+            quantity: String(data.meta?.quantity || ''),
+          } : {}),
         },
         webpush: {
           notification: webpushNotification,

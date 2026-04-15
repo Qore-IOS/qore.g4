@@ -2,7 +2,7 @@
 'use client';
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { collection, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, addDoc, serverTimestamp, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Hospital, Depot, ProductCode, MinMaxRule } from '@/lib/types';
 import { Input } from '@/components/ui/input';
@@ -150,12 +150,13 @@ function expiryColor(days: number | null): string {
 
 /** Calculate total cost for a single product based on count data */
 function calcProductCost(product: ProductCode, entry?: ProductCountEntry): { amount: number; currency: string } {
-  if (!entry || !product.cost || !product.ambalajDegeri) return { amount: 0, currency: product.currency || 'TRY' };
+  if (!entry || !product.cost) return { amount: 0, currency: product.currency || 'TRY' };
+  const ambalaj = product.ambalajDegeri || 1;
   const stokNum = parseInt(entry.stokAdedi, 10) || 0;
   const cihazNum = parseInt(entry.cihazUstuAdedi, 10) || 0;
-  const toplamTest = (stokNum * product.ambalajDegeri) + cihazNum;
+  const toplamTest = (stokNum * ambalaj) + cihazNum;
   if (toplamTest <= 0) return { amount: 0, currency: product.currency || 'TRY' };
-  return { amount: (product.cost / product.ambalajDegeri) * toplamTest, currency: product.currency || 'TRY' };
+  return { amount: (product.cost / ambalaj) * toplamTest, currency: product.currency || 'TRY' };
 }
 
 /** Format CostByCurrency as display string */
@@ -295,6 +296,8 @@ function ProductCountCard({
   showCost,
   countedByName,
   activeUsers,
+  currentStock,
+  onApplyStock,
 }: {
   product: ProductCode;
   entry: ProductCountEntry;
@@ -306,19 +309,21 @@ function ProductCountCard({
   showCost: boolean;
   countedByName?: string;
   activeUsers?: { name: string; color: string }[];
+  currentStock?: number;
+  onApplyStock?: () => void;
 }) {
   const [accordionOpen, setAccordionOpen] = useState(false);
 
-  const ambalajDegeri = product.ambalajDegeri || 0;
+  const ambalajDegeri = product.ambalajDegeri || 1;
   const anaBirim = product.anaBirim || 'Adet';
   const stokNum = parseInt(entry.stokAdedi, 10) || 0;
   const cihazNum = parseInt(entry.cihazUstuAdedi, 10) || 0;
-  const toplamTest = ambalajDegeri > 0 ? (stokNum * ambalajDegeri) + cihazNum : 0;
+  const toplamTest = (stokNum * ambalajDegeri) + cihazNum;
 
   const productCost = product.cost || 0;
   const currency = product.currency || 'TRY';
   const currencySymbol = currency === 'EUR' ? '€' : currency === 'USD' ? '$' : '₺';
-  const testBasinaMaliyet = ambalajDegeri > 0 && productCost > 0 ? productCost / ambalajDegeri : 0;
+  const testBasinaMaliyet = productCost > 0 ? productCost / ambalajDegeri : 0;
   const toplamMaliyet = testBasinaMaliyet * toplamTest;
 
   const hasTrackingData = entry.lots.length > 0 || entry.serials.length > 0;
@@ -414,9 +419,27 @@ function ProductCountCard({
         {/* Left 60%: Inputs */}
         <div className="flex gap-3" style={{ flex: '0 0 60%' }}>
           <div className="flex-1">
-            <label className="text-[11px] font-medium text-[var(--dashboard-muted)] uppercase tracking-wider mb-1 block">
-              Stok Adedi
-            </label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-[11px] font-medium text-[var(--dashboard-muted)] uppercase tracking-wider">
+                Stok Adedi
+              </label>
+              {currentStock !== undefined && (
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] font-semibold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-md" title="Anlık stok">
+                    📦 {currentStock}
+                  </span>
+                  {onApplyStock && (
+                    <button
+                      onClick={onApplyStock}
+                      className="w-5 h-5 rounded-md flex items-center justify-center bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors" 
+                      title="Stok adedini otomatik doldur"
+                    >
+                      <Check className="w-3 h-3" />
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
             <Input
               type="number"
               min="0"
@@ -581,6 +604,9 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
   const [locationMinMaxRules, setLocationMinMaxRules] = useState<MinMaxRule[]>([]);
   const [isLoadingRules, setIsLoadingRules] = useState(false);
 
+  // Current stock at the selected location (stokKodu -> quantity)
+  const [locationStock, setLocationStock] = useState<Record<string, number>>({});
+
   // Brand & product state
   const [activeBrand, setActiveBrand] = useState<string | null>(null);
   const [countData, setCountData] = useState<Record<string, ProductCountEntry>>({});
@@ -725,6 +751,57 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
       })
       .finally(() => setIsLoadingRules(false));
   }, [selectedLocationId, locationType]);
+
+  // Fetch current stock at selected location
+  useEffect(() => {
+    if (!selectedLocationId || !locationType) {
+      setLocationStock({});
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        let stockItems: { stokKodu: string }[] = [];
+        if (locationType === 'depot') {
+          // Depot: unshipped items in this depot
+          const snap = await getDocs(
+            query(
+              collection(db, 'depoStok'),
+              where('depotId', '==', selectedLocationId),
+              where('isShipped', '==', false)
+            )
+          );
+          stockItems = snap.docs.map(d => d.data() as { stokKodu: string });
+        } else {
+          // Lab: shipped items targeted to this lab
+          const labName = hospitals.find(h => h.id === selectedLocationId)?.name;
+          const snap = await getDocs(
+            query(
+              collection(db, 'depoStok'),
+              where('isShipped', '==', true)
+            )
+          );
+          stockItems = snap.docs
+            .map(d => ({ ...d.data() } as any))
+            .filter((item: any) =>
+              item.hedefKurumId === selectedLocationId ||
+              (labName && item.hedefKurum === labName)
+            );
+        }
+        if (cancelled) return;
+        // Group by stokKodu
+        const grouped: Record<string, number> = {};
+        stockItems.forEach(item => {
+          grouped[item.stokKodu] = (grouped[item.stokKodu] || 0) + 1;
+        });
+        setLocationStock(grouped);
+      } catch (err) {
+        console.error('Error fetching location stock:', err);
+        if (!cancelled) setLocationStock({});
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedLocationId, locationType, hospitals]);
 
   // ---- Derived data ----
 
@@ -2170,6 +2247,8 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
                               .map(p => ({ name: p.name, color: p.color }))
                           : undefined
                         }
+                        currentStock={locationStock[product.stokKodu]}
+                        onApplyStock={() => handleStokChange(product.stokKodu, String(locationStock[product.stokKodu] ?? 0))}
                       />
                     ))
                   ) : (

@@ -13,6 +13,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Plus, Search, Package, Loader2, Camera, ImageIcon, X } from 'lucide-react';
 import type { PersonalStockItem, PoolWarehouseStockItem, DeviceLabPool, Depot } from '@/lib/types';
+import { emitExternalStockUsage } from '@/lib/notifications';
 
 type PostClosurePartChangeButtonProps = {
   formId: string;
@@ -418,6 +419,23 @@ export default function PostClosurePartChangeButton({
       });
 
       await batch.commit();
+
+      if (selectedPoolStockItem) {
+        emitExternalStockUsage({
+          actor: {
+            uid: currentUser.uid,
+            name: currentUserProfile?.name || currentUserProfile?.email || 'Bilinmeyen Kullanıcı',
+          },
+          sourceType: 'pool',
+          sourceName: selectedPoolStockItem.poolWarehouseName || 'Havuz Depo',
+          stokKodu: resolvedStokKodu,
+          stokAdi: resolvedStokAdi,
+          serialNumber: resolvedSerialNumber,
+          quantity: 1,
+          deviceName: deviceName || '',
+          hospitalName: labName || '',
+        }).catch(err => console.error('Notification error:', err));
+      }
 
       toast({ title: 'Başarılı', description: 'Değişen parça sonradan eklendi ve loglandı.' });
       resetState();

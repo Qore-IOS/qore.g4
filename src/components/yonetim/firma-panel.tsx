@@ -1,24 +1,29 @@
 
 'use client';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { PlusCircle, Edit3, Trash2, Loader2, Building2 } from 'lucide-react';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { PlusCircle, Edit3, Trash2, Loader2, Building2, UserCog } from 'lucide-react';
 import { collection, getDocs, setDoc, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
-import type { Company } from '@/lib/types';
+import type { Company, User } from '@/lib/types';
 import BackButton from '@/components/BackButton';
+
+const NO_RESPONSIBLE_VALUE = '__none__';
 
 export default function FirmaPanel() {
   const { toast } = useToast();
   const { isSuperAdmin, currentUserProfile } = useAuth();
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [adminUsers, setAdminUsers] = useState<User[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentCompany, setCurrentCompany] = useState<Partial<Company>>({});
@@ -26,8 +31,17 @@ export default function FirmaPanel() {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const snap = await getDocs(collection(db, 'companies'));
-      setCompanies(snap.docs.map(d => ({ id: d.id, ...d.data() } as Company)));
+      const [companySnap, userSnap] = await Promise.all([
+        getDocs(collection(db, 'companies')),
+        getDocs(collection(db, 'users')),
+      ]);
+      setCompanies(companySnap.docs.map(d => ({ id: d.id, ...d.data() } as Company)));
+      const users = userSnap.docs.map(d => ({ uid: d.id, ...d.data() } as User));
+      // Sadece admin / super_admin / admin_developer rollerindeki kullanıcılar sorumlu olarak atanabilir
+      const admins = users.filter(u =>
+        u.role === 'admin' || u.role === 'super_admin' || u.role === 'admin_developer'
+      );
+      setAdminUsers(admins);
     } catch (e) {
       toast({ title: 'Hata', description: 'Firmalar yüklenemedi.', variant: 'destructive' });
     } finally {
@@ -38,6 +52,12 @@ export default function FirmaPanel() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  const adminById = useMemo(() => {
+    const map = new Map<string, User>();
+    adminUsers.forEach(u => map.set(u.uid, u));
+    return map;
+  }, [adminUsers]);
 
   if (!isSuperAdmin) {
     return (
@@ -68,11 +88,18 @@ export default function FirmaPanel() {
 
     setIsLoading(true);
     try {
+      const responsibleUid = currentCompany.responsibleUid || '';
+      const responsibleName = responsibleUid
+        ? (adminById.get(responsibleUid)?.name || adminById.get(responsibleUid)?.email || '')
+        : '';
+
       if (currentCompany.id) {
         // Editing existing
         await setDoc(doc(db, 'companies', currentCompany.id), {
           name: currentCompany.name.trim(),
           description: currentCompany.description?.trim() || '',
+          responsibleUid: responsibleUid || null,
+          responsibleName: responsibleName || null,
         }, { merge: true });
         toast({ title: 'Başarılı', description: 'Firma güncellendi.' });
       } else {
@@ -81,6 +108,8 @@ export default function FirmaPanel() {
         await setDoc(newRef, {
           name: currentCompany.name.trim(),
           description: currentCompany.description?.trim() || '',
+          responsibleUid: responsibleUid || null,
+          responsibleName: responsibleName || null,
           createdAt: new Date(),
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || '',
@@ -145,6 +174,7 @@ export default function FirmaPanel() {
                     <TableRow>
                       <TableHead>Firma Adı</TableHead>
                       <TableHead>Açıklama</TableHead>
+                      <TableHead>Sorumlu</TableHead>
                       <TableHead>Oluşturan</TableHead>
                       <TableHead className="text-right">İşlemler</TableHead>
                     </TableRow>
@@ -152,7 +182,7 @@ export default function FirmaPanel() {
                   <TableBody>
                     {companies.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={4} className="text-center text-muted-foreground">
+                        <TableCell colSpan={5} className="text-center text-muted-foreground">
                           Henüz firma tanımlanmamış. Tüm veriler legacy firmaya aittir.
                         </TableCell>
                       </TableRow>
@@ -161,6 +191,16 @@ export default function FirmaPanel() {
                         <TableRow key={c.id}>
                           <TableCell className="font-medium">{c.name}</TableCell>
                           <TableCell className="text-muted-foreground">{c.description || '-'}</TableCell>
+                          <TableCell>
+                            {c.responsibleName ? (
+                              <span className="inline-flex items-center gap-1 text-sm">
+                                <UserCog className="h-3.5 w-3.5 text-indigo-500" />
+                                {c.responsibleName}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground text-xs">Atanmadı</span>
+                            )}
+                          </TableCell>
                           <TableCell>{c.createdByName || '-'}</TableCell>
                           <TableCell className="text-right space-x-1">
                             <Button variant="ghost" size="icon" onClick={() => openModal(c)}>
@@ -187,16 +227,55 @@ export default function FirmaPanel() {
             <DialogTitle>{currentCompany.id ? 'Firma Düzenle' : 'Yeni Firma'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
-            <Input
-              placeholder="Firma Adı"
-              value={currentCompany.name || ''}
-              onChange={(e) => setCurrentCompany({ ...currentCompany, name: e.target.value })}
-            />
-            <Input
-              placeholder="Açıklama (opsiyonel)"
-              value={currentCompany.description || ''}
-              onChange={(e) => setCurrentCompany({ ...currentCompany, description: e.target.value })}
-            />
+            <div className="space-y-1.5">
+              <Label>Firma Adı</Label>
+              <Input
+                placeholder="Firma Adı"
+                value={currentCompany.name || ''}
+                onChange={(e) => setCurrentCompany({ ...currentCompany, name: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Açıklama</Label>
+              <Input
+                placeholder="Açıklama (opsiyonel)"
+                value={currentCompany.description || ''}
+                onChange={(e) => setCurrentCompany({ ...currentCompany, description: e.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="flex items-center gap-1.5">
+                <UserCog className="h-3.5 w-3.5 text-indigo-500" />
+                Firma Sorumlusu
+              </Label>
+              <Select
+                value={currentCompany.responsibleUid || NO_RESPONSIBLE_VALUE}
+                onValueChange={(v) => setCurrentCompany({
+                  ...currentCompany,
+                  responsibleUid: v === NO_RESPONSIBLE_VALUE ? '' : v,
+                })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Adminler arasından seçin" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_RESPONSIBLE_VALUE}>Sorumlu atanmadı</SelectItem>
+                  {adminUsers.length === 0 ? (
+                    <SelectItem value="__empty__" disabled>Admin bulunamadı</SelectItem>
+                  ) : (
+                    adminUsers.map((u) => (
+                      <SelectItem key={u.uid} value={u.uid}>
+                        {u.name || u.email || u.uid}
+                        {u.role === 'super_admin' ? ' · Süper Admin' : u.role === 'admin_developer' ? ' · Admin Geliştirici' : ' · Admin'}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground">
+                Haftalık plan oluşturulduğunda onay isteği bu kişiye iletilir.
+              </p>
+            </div>
           </div>
           <DialogFooter>
             <DialogClose asChild><Button variant="outline">İptal</Button></DialogClose>

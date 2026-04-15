@@ -87,8 +87,6 @@ export default function YedekParcaStokGirisPage() {
 
   // New row state
   const [selectedProductId, setSelectedProductId] = useState<string>('');
-  const [manualStokKodu, setManualStokKodu] = useState('');
-  const [manualStokAdi, setManualStokAdi] = useState('');
   const [serialNumber, setSerialNumber] = useState('');
   const [hucreNumarasi, setHucreNumarasi] = useState('');
   const [quantity, setQuantity] = useState<number>(1);
@@ -248,11 +246,8 @@ export default function YedekParcaStokGirisPage() {
   };
 
   const addRow = useCallback(() => {
-    const manualCode = manualStokKodu.trim();
-    const manualName = manualStokAdi.trim();
-
-    if (!selectedProduct && (!manualCode || !manualName)) {
-      toast({ title: 'Eksik Bilgi', description: 'Lütfen ürün seçin veya stok kodu ve stok adı girin.', variant: 'destructive' });
+    if (!selectedProduct) {
+      toast({ title: 'Eksik Bilgi', description: 'Lütfen ürün seçin.', variant: 'destructive' });
       return;
     }
 
@@ -278,8 +273,8 @@ export default function YedekParcaStokGirisPage() {
       return;
     }
 
-    const rowStokKodu = selectedProduct?.stokKodu || manualCode;
-    const rowStokAdi = selectedProduct?.stokAdi || manualName;
+    const rowStokKodu = selectedProduct.stokKodu;
+    const rowStokAdi = selectedProduct.stokAdi;
 
     const newRow: StokGirisRow = {
       id: `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -299,8 +294,6 @@ export default function YedekParcaStokGirisPage() {
     setSerialNumber('');
     setHucreNumarasi('');
     setQuantity(1);
-    setManualStokKodu('');
-    setManualStokAdi('');
     setSelectedProductId('');
     setAddress('');
 
@@ -309,7 +302,7 @@ export default function YedekParcaStokGirisPage() {
       title: 'Eklendi',
       description: `${rowStokAdi} (${label}) listeye eklendi.`,
     });
-  }, [selectedProduct, serialNumber, hucreNumarasi, quantity, rows, toast, manualStokKodu, manualStokAdi, address]);
+  }, [selectedProduct, serialNumber, hucreNumarasi, quantity, rows, toast, address]);
 
   const findMissingCardsFromRows = useCallback((targetRows: StokGirisRow[]) => {
     const existingCodes = new Set(allProductCodes.map(p => (p.stokKodu || '').trim().toUpperCase()).filter(Boolean));
@@ -660,7 +653,7 @@ export default function YedekParcaStokGirisPage() {
           status: hasMismatch ? 'open' : 'completed',
           completedAt: hasMismatch ? null : Timestamp.fromDate(now),
           lastStockEntryAt: Timestamp.fromDate(now),
-          relatedStockEntryIds: createdStockEntryIds,
+          relatedStockEntryIds: stockRefIds,
           stockEntrySummary: {
             isExact: selectedOrderComparison.isExact,
             detail: selectedOrderComparison.detail.map(item => ({
@@ -769,8 +762,7 @@ export default function YedekParcaStokGirisPage() {
     );
   }
 
-  const canAddManualProduct = manualStokKodu.trim().length > 0 && manualStokAdi.trim().length > 0;
-  const canAddRow = !!selectedProductId || canAddManualProduct;
+  const canAddRow = !!selectedProductId;
 
   if (!isAuthorized) {
     return (
@@ -872,10 +864,10 @@ export default function YedekParcaStokGirisPage() {
       {activeTab === 'manual' && (
         <section className="cihaz-card p-4 sm:p-5 space-y-4">
           <p className="cihaz-section-label">Yeni Ürün Ekle</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-8 gap-3">
-            {/* Product selector */}
-            <div className="space-y-1.5">
+            {/* Product selection is mandatory */}
+            <div className="sm:col-span-2 lg:col-span-3 lg:col-start-1">
               <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Yedek Parça *</label>
               <Popover open={productSearchOpen} onOpenChange={setProductSearchOpen}>
                 <PopoverTrigger asChild>
@@ -922,29 +914,6 @@ export default function YedekParcaStokGirisPage() {
               )}
             </div>
 
-            {/* Manuel Stok Kodu */}
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Manuel Stok Kodu</label>
-              <Input
-                placeholder="Ürün kodu"
-                value={manualStokKodu}
-                onChange={(e) => { setManualStokKodu(e.target.value.toUpperCase()); if (selectedProductId) setSelectedProductId(''); }}
-                className="cihaz-pressed !border-0 !ring-0 h-10"
-                style={{ borderRadius: 12 }}
-              />
-            </div>
-
-            {/* Manuel Stok Adı */}
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Manuel Stok Adı</label>
-              <Input
-                placeholder="Ürün adı"
-                value={manualStokAdi}
-                onChange={(e) => { setManualStokAdi(e.target.value); if (selectedProductId) setSelectedProductId(''); }}
-                className="cihaz-pressed !border-0 !ring-0 h-10"
-                style={{ borderRadius: 12 }}
-              />
-            </div>
 
             {/* Serial number */}
             <div className="space-y-1.5">

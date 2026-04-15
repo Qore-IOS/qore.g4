@@ -7,8 +7,6 @@ import { cn } from '@/lib/utils';
 import {
   Home,
   ShieldAlert,
-  CalendarClock,
-  Map as MapIcon,
   BarChart3,
   Settings,
   Wrench,
@@ -82,6 +80,8 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
   const role = currentUserProfile?.role;
   const isAplikasyon = role === 'aplikasyon';
 
+  const [expandedMenu, setExpandedMenu] = useState<string | null>(null);
+
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     try { return window.localStorage.getItem('qt:sidebar:collapsed') === '1'; } catch { return false; }
@@ -142,11 +142,12 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
     primaryPanel,
     { key: 'arizalar', label: 'Tüm Arızalar', icon: ShieldAlert, href: '/ariza-yonetimi',
       match: (p) => p.startsWith('/ariza-yonetimi') && !p.startsWith('/ariza-yonetimi/istatistikler') },
-    { key: 'nobet', label: 'Nöbet', icon: CalendarClock, href: '/nobet-yonetimi',
-      match: (p) => p.startsWith('/nobet-yonetimi') },
-    { key: 'harita', label: 'Harita', icon: MapIcon,
-      href: isAplikasyon ? '/aplikasyon-harita' : '/teknik-harita',
-      match: (p) => p.startsWith('/teknik-harita') || p.startsWith('/aplikasyon-harita') },
+    { key: 'islem-formu', label: 'İşlem Formları', icon: ClipboardList,
+      href: isAplikasyon ? '/aplikasyon-paneli' : '/teknik-servis',
+      match: (p) => p.includes('/islem-formu') },
+    { key: 'yedek-parca', label: 'Yedek Parça', icon: Package,
+      href: '/direkt-transfer/yedek-parca-transfer',
+      match: (p) => p.startsWith('/direkt-transfer/yedek-parca-transfer') },
     { key: 'istatistik', label: 'İstatistikler', icon: BarChart3, href: '/ariza-yonetimi/istatistikler',
       match: (p) =>
         p.startsWith('/ariza-yonetimi/istatistikler') ||
@@ -289,9 +290,41 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
 
       {/* Mobile bottom nav */}
       <nav className="qore-technic-bottom-nav md:hidden" aria-label="QOREtechnic menü">
-        <div className="qore-technic-bottom-nav__scroll">
-          {navItems.map((item) => {
-            const active = isActive(item);
+        {/* Backdrop for closing popovers */}
+        <div 
+          className={cn('qt-popover-overlay', expandedMenu && 'qt-popover-overlay--open')}
+          onClick={() => setExpandedMenu(null)}
+          aria-hidden="true"
+        />
+
+        {/* Popover Container */}
+        <div className={cn('qt-mobile-popover', expandedMenu && 'qt-mobile-popover--open')} aria-hidden={!expandedMenu}>
+          {expandedMenu && 
+            mobileNavItems.find(g => g.key === expandedMenu)?.subItems?.map((sub, idx) => {
+              const SubIcon = sub.icon;
+              return (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => {
+                    setExpandedMenu(null);
+                    router.push(sub.href);
+                  }}
+                  className="qt-popover-item"
+                >
+                  <span className="qt-popover-item-icon">
+                    <SubIcon className="w-5 h-5" />
+                  </span>
+                  <span>{sub.label}</span>
+                </button>
+              );
+            })
+          }
+        </div>
+
+        <div className="qore-technic-bottom-nav__scroll" style={{ justifyContent: 'space-around', gap: 0, overflowX: 'visible', paddingInline: '4px' }}>
+          {mobileNavItems.map((item) => {
+            const active = item.match ? item.match(pathname) : false;
             const Icon = item.icon;
             const onTap = () => {
               if (item.submenu) {
@@ -306,9 +339,10 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
                 type="button"
                 onClick={onTap}
                 className={cn('qore-technic-bottom-item', active && 'qore-technic-bottom-item--active')}
+                style={{ minWidth: 0, padding: '6px 2px', fontSize: '9px', position: 'relative', zIndex: 40 }}
               >
-                <Icon className="h-5 w-5" />
-                <span>{item.label}</span>
+                <Icon className="h-4 w-4" />
+                <span style={{ lineHeight: 1.1 }}>{item.label}</span>
               </button>
             );
           })}

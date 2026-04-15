@@ -347,9 +347,9 @@ export default function ArizaYonetimiPage() {
   return (
     <PageShell>
       <div className="device-module-page space-y-4">
-        <BackButton fallback="/cihaz-yonetimi-ana" />
 
-        <Card>
+
+        <Card className="bg-white/40 backdrop-blur-md border border-white/50 shadow-sm">
           <CardHeader>
             <div className="flex flex-col sm:flex-row justify-between items-start gap-4">
               <div>
