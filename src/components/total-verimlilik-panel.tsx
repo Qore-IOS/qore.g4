@@ -83,6 +83,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { totalVerimlilikLogger } from '@/lib/logger';
 import BackButton from '@/components/BackButton';
 import { exportDataToExcel } from '@/lib/utils';
+import { getExchangeRates } from '@/lib/exchange-rates';
 import Link from 'next/link';
 
 interface TotalVerimlilikPanelProps {
@@ -330,66 +331,16 @@ export default function TotalVerimlilikPanel({
 
   // Sütun 23 için döviz kurlarını çek
   useEffect(() => {
-    const PRIMARY_API_KEY = 'e69314b14644080788775553';
-    const CACHE_KEY = 'exchange_rates_cache';
-    const CACHE_TTL = 1000 * 60 * 60; // 1 saat
-
-    const fetchExchangeRates = async () => {
-      // Önce cache kontrol et
-      const cached = localStorage.getItem(CACHE_KEY);
-      if (cached) {
-        try {
-          const { rates, timestamp } = JSON.parse(cached);
-          if (Date.now() - timestamp < CACHE_TTL) {
-            setExchangeRates(rates);
-            return;
-          }
-        } catch (e) {
-          // Cache bozuksa devam et
-        }
-      }
-
-      // Primary API (ExchangeRate-API)
+    const fetchRates = async () => {
       try {
-        const res = await fetch(`https://v6.exchangerate-api.com/v6/${PRIMARY_API_KEY}/latest/EUR`);
-        if (res.ok) {
-          const data = await res.json();
-          const rates = {
-            EUR: 1,
-            USD: data.conversion_rates.USD,
-            TRY: data.conversion_rates.TRY,
-          };
-          setExchangeRates(rates);
-          localStorage.setItem(CACHE_KEY, JSON.stringify({ rates, timestamp: Date.now() }));
-          return;
-        }
-      } catch (e) {
-        totalVerimlilikLogger.warn('Birincil döviz kuru API başarısız oldu, yedek API deneniyor', { error: e });
+        setExchangeRates(await getExchangeRates());
+      } catch (error) {
+        totalVerimlilikLogger.warn('Döviz kuru API başarısız oldu, fallback değerler kullanılıyor', { error });
+        setExchangeRates({ EUR: 1, USD: 1.08, TRY: 38.5 });
       }
-
-      // Backup API (Frankfurter)
-      try {
-        const res = await fetch('https://api.frankfurter.app/latest?from=EUR&to=USD,TRY');
-        if (res.ok) {
-          const data = await res.json();
-          const rates = {
-            EUR: 1,
-            USD: data.rates.USD,
-            TRY: data.rates.TRY,
-          };
-          setExchangeRates(rates);
-          localStorage.setItem(CACHE_KEY, JSON.stringify({ rates, timestamp: Date.now() }));
-          return;
-        }
-      } catch (e) {
-        totalVerimlilikLogger.warn('Yedek döviz kuru API başarısız oldu, fallback değerler kullanılıyor', { error: e });
-      }
-
-      // Fallback değerler
-      setExchangeRates({ EUR: 1, USD: 1.08, TRY: 38.5 });
     };
 
-    fetchExchangeRates();
+    fetchRates();
   }, []);
 
   // Maliyet checkpoint'lerini çek
