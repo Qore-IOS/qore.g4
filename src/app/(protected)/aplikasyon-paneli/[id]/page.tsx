@@ -26,6 +26,7 @@ import type { Hospital, Device, PersonalStockItem, MaintenancePlan, MaintenanceL
 import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
 import { withCompanyScope } from '@/lib/company-scope';
+import { classifyStopFault } from '@/lib/stop-fault';
 import { useAuth } from '@/contexts/auth-context';
 import {
   Dialog,
@@ -85,6 +86,7 @@ export default function AplikasyonPaneliDetayPage() {
   // Device fault history state
   const [deviceFaultHistory, setDeviceFaultHistory] = useState<Record<string, { description: string; closedAt: Date }[]>>({});
   const [expandedDevices, setExpandedDevices] = useState<Set<string>>(new Set());
+  const [stopFaultCountsByDevice, setStopFaultCountsByDevice] = useState<Record<string, { e: number; s: number; n: number }>>({});
 
   // Maintenance flip state
   const [showMaintenance, setShowMaintenance] = useState(false);
@@ -206,6 +208,27 @@ export default function AplikasyonPaneliDetayPage() {
 
     fetchFaultHistory();
   }, [devicesByHospital]);
+
+  useEffect(() => {
+    if (!hospitalId) return;
+    const q = query(collection(db, 'deviceFaultReports'), where('hospitalId', '==', hospitalId));
+    const unsub = onSnapshot(q, (snap) => {
+      const counts: Record<string, { e: number; s: number; n: number }> = {};
+      snap.docs.forEach((d) => {
+        const data = d.data() as Record<string, unknown>;
+        const deviceId = String(data.deviceId || '');
+        if (!deviceId) return;
+        const stopType = classifyStopFault(data);
+        if (!stopType) return;
+        if (!counts[deviceId]) counts[deviceId] = { e: 0, s: 0, n: 0 };
+        if (stopType === 'e_stop') counts[deviceId].e += 1;
+        if (stopType === 's_stop') counts[deviceId].s += 1;
+        if (stopType === 'normal_stop') counts[deviceId].n += 1;
+      });
+      setStopFaultCountsByDevice(counts);
+    });
+    return () => unsub();
+  }, [hospitalId]);
 
   // Fetch maintenance data for all devices
   const fetchMaintenanceData = useCallback(async () => {
@@ -687,6 +710,7 @@ export default function AplikasyonPaneliDetayPage() {
                 const isTeknikServisFaulty = effectiveFaultType === 'teknik_servis';
                 const isFaulty = isAplikasyonFaulty || isTeknikServisFaulty;
                 const deviceMaintenanceItems = maintenanceData[device.id] || [];
+                const stopCounts = stopFaultCountsByDevice[device.id] || { e: 0, s: 0, n: 0 };
 
                 return (
                   <div key={device.id} className="device-flip-container">
@@ -760,6 +784,11 @@ export default function AplikasyonPaneliDetayPage() {
                                 Sağlıklı
                               </p>
                             )}
+                          </div>
+                          <div className="mt-1 flex items-center justify-center gap-1.5 text-[10px] w-full">
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-red-100 text-red-700 font-semibold">E <span className="font-normal">{stopCounts.e}</span></span>
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-red-100 text-red-700 font-semibold">S <span className="font-normal">{stopCounts.s}</span></span>
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-red-100 text-red-700 font-semibold">N <span className="font-normal">{stopCounts.n}</span></span>
                           </div>
 
                           {/* Mini Fault History */}
