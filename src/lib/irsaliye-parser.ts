@@ -10,6 +10,67 @@ export interface IrsaliyeParseResult {
   rawLine: string;
 }
 
+type TableHeaderInfo = {
+  hasLotColumn: boolean;
+};
+
+function looksLikeUtsCode(value?: string): boolean {
+  if (!value) return false;
+  const compact = value.replace(/\s+/g, '');
+  return /^\d{11,16}$/.test(compact);
+}
+
+function sanitizeLotValue(value?: string): string | undefined {
+  if (!value) return undefined;
+  const token = value
+    .replace(/[|;]/g, ' ')
+    .match(/\b([A-Za-z0-9-]{3,})\b/)?.[1]
+    ?.trim();
+  if (!token) return undefined;
+  if (looksLikeUtsCode(token)) return undefined;
+  return token.toUpperCase();
+}
+
+function detectTableHeaderInfo(headerLine: string): TableHeaderInfo {
+  return {
+    hasLotColumn: /\blot\b/i.test(headerLine),
+  };
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function extractLotByRowContext(line: string, stokKodu: string, productName?: string): string | undefined {
+  const miadMatch = line.match(/\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b/);
+  if (!miadMatch || miadMatch.index == null) return undefined;
+
+  let beforeMiad = line.slice(0, miadMatch.index).trim();
+  beforeMiad = beforeMiad.replace(/^\s*\d{1,3}\s+/, ''); // sıra no
+
+  const stokIdx = beforeMiad.indexOf(stokKodu);
+  if (stokIdx >= 0) {
+    beforeMiad = beforeMiad.slice(stokIdx + stokKodu.length).trim();
+  }
+
+  const firstToken = beforeMiad.split(/\s+/)[0];
+  if (looksLikeUtsCode(firstToken)) {
+    beforeMiad = beforeMiad.slice(firstToken.length).trim();
+  }
+
+  if (productName) {
+    const productRegex = new RegExp(escapeRegExp(productName), 'i');
+    beforeMiad = beforeMiad.replace(productRegex, ' ').trim();
+  }
+
+  const tokens = beforeMiad.match(/[A-Za-z0-9-]{3,}/g) || [];
+  if (tokens.length === 0) return undefined;
+  const candidate = tokens[tokens.length - 1];
+  if (looksLikeUtsCode(candidate)) return undefined;
+  if (productName && productName.toUpperCase().includes(candidate.toUpperCase()) && candidate.length <= 4) return undefined;
+  return candidate.toUpperCase();
+}
+
 /**
  * Parses invoice text extracted from PDF or OCR.
  *
@@ -66,6 +127,8 @@ function parseAsTable(lines: string[], productCodes: ProductCode[]): IrsaliyePar
     return [];
   }
 
+  const headerInfo = detectTableHeaderInfo(lines[headerIdx]);
+
   // Parse data rows after header
   for (let i = headerIdx + 1; i < lines.length; i++) {
     const line = lines[i];
@@ -84,7 +147,7 @@ function parseAsTable(lines: string[], productCodes: ProductCode[]): IrsaliyePar
     }
 
     // Try to find a product code in this line
-    const rowResult = parseTableRow(line, productCodes);
+    const rowResult = parseTableRow(line, productCodes, headerInfo);
     if (rowResult) {
       console.log('[İrsaliye Parser] Parsed row:', JSON.stringify(rowResult));
       results.push(rowResult);
@@ -98,7 +161,7 @@ function parseAsTable(lines: string[], productCodes: ProductCode[]): IrsaliyePar
  * Parse a single table data row.
  * Expected row pattern: [sıra_no] [stok_kodu] [uts_kodu?] [stok_adı] [lot] [miat] [ana_birim?] [miktar] [birim]
  */
-function parseTableRow(line: string, productCodes: ProductCode[]): IrsaliyeParseResult | null {
+function parseTableRow(line: string, productCodes: ProductCode[], headerInfo: TableHeaderInfo): IrsaliyeParseResult | null {
   let stokKodu: string | undefined;
   let matchedProduct: ProductCode | undefined;
 
@@ -180,7 +243,7 @@ function parseTableRow(line: string, productCodes: ProductCode[]): IrsaliyeParse
     }
   }
 
-  // Extract lot: after removing dates and quantity, remaining numbers/alphanumeric codes
+  // Extract lot: ONLY from LOT column when available
   // In table rows, lot typically appears as a number like 2509431
   let lot: string | undefined;
   let miad: string | undefined;
@@ -190,37 +253,12 @@ function parseTableRow(line: string, productCodes: ProductCode[]): IrsaliyeParse
     miad = normalizeMiad(dates[0]);
   }
 
-  // For lot extraction: find number sequences that aren't the quantity, date, or stok kodu
-  // Remove dates, quantity, and stok code from remaining, then look for lot-like values
-  let lotSearchText = remaining;
-
-  // Remove dates
-  for (const d of dates) {
-    lotSearchText = lotSearchText.replace(d, ' ');
+  if (headerInfo.hasLotColumn) {
+    lot = sanitizeLotValue(extractLotByRowContext(line, stokKodu, matchedProduct?.stokAdi));
   }
 
-  // Remove quantity match
-  if (qtyMatch) {
-    lotSearchText = lotSearchText.replace(qtyMatch[0], ' ');
-  }
-
-  // Remove common unit/label words
-  lotSearchText = lotSearchText.replace(/\b(adet|kutu|paket|ad|box|pcs|ea|koli|ana\s*birim)\b/gi, ' ');
-
-  // Find lot-like values: alphanumeric strings that are 4+ characters, typically 7-digit numbers
-  const lotCandidates = lotSearchText.match(/\b([A-Za-z0-9]{4,})\b/g);
-  if (lotCandidates) {
-    for (const candidate of lotCandidates) {
-      // Skip if it looks like a UTS code (very long) or just a small number
-      const num = parseInt(candidate, 10);
-      if (candidate.length >= 4 && candidate.length <= 20) {
-        // Skip if it's the same as quantity
-        if (num === quantity) continue;
-        lot = candidate;
-        break;
-      }
-    }
-  }
+  // Never allow UTS code to be used as lot
+  if (looksLikeUtsCode(lot)) lot = undefined;
 
   console.log(`[İrsaliye Parser] Extracted -> qty: ${quantity}, lot: ${lot}, miad: ${miad}`);
 
@@ -289,12 +327,8 @@ function parseLineByLine(lines: string[], productCodes: ProductCode[]): Irsaliye
       }
     }
 
-    // Lot: look for "lot" keyword or standalone lot-like numbers
+    // LOT başlığı zorunlu olduğundan line-by-line fallback'te lot üretme.
     let lot: string | undefined;
-    const lotKeywordMatch = contextLines.match(/(?:lot|parti|batch)\s*[:.]?\s*([A-Za-z0-9-]+)/i);
-    if (lotKeywordMatch) {
-      lot = lotKeywordMatch[1].toUpperCase();
-    }
 
     if (stokKodu && quantity > 0) {
       results.push({ stokKodu, quantity, lot, miad, rawLine: line.trim() });
