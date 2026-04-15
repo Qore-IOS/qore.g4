@@ -34,6 +34,8 @@ interface NavItem {
    *  with these sub-choices instead of navigating directly. On desktop
    *  the sub-items are rendered as separate nav buttons. */
   submenu?: { key: string; label: string; icon: React.ElementType; href: string }[];
+  /** Optional mobile-only popover list for grouped shortcuts. */
+  subItems?: { label: string; icon: React.ElementType; href?: string; action?: 'openStatsSheet' }[];
 }
 
 function QoreTechnicBrand({
@@ -136,6 +138,7 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
         href: '/teknik-servis',
         match: (p) => p.startsWith('/teknik-servis'),
       };
+  const actionFormsHref = isAplikasyon ? '/aplikasyon-paneli/tum-formlar' : '/teknik-servis/tum-formlar';
 
   const navItems: NavItem[] = [
     { key: 'home', label: 'Ana Panel', icon: Home, href: '/cihaz-yonetimi-ana',
@@ -144,8 +147,8 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
     { key: 'arizalar', label: 'Tüm Arızalar', icon: ShieldAlert, href: '/ariza-yonetimi',
       match: (p) => p.startsWith('/ariza-yonetimi') && !p.startsWith('/ariza-yonetimi/istatistikler') },
     { key: 'islem-formu', label: 'İşlem Formları', icon: ClipboardList,
-      href: isAplikasyon ? '/aplikasyon-paneli' : '/teknik-servis',
-      match: (p) => p.includes('/islem-formu') },
+      href: actionFormsHref,
+      match: (p) => p.includes('/islem-formu') || p.endsWith('/tum-formlar') || p.includes('/tum-formlar/') },
     { key: 'yedek-parca', label: 'Yedek Parça', icon: Package,
       href: '/direkt-transfer/yedek-parca-transfer',
       match: (p) => p.startsWith('/direkt-transfer/yedek-parca-transfer') },
@@ -178,10 +181,37 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
     }));
   });
 
-  // Mobile bottom nav uses the same item list as navItems. Items with a
-  // `submenu` open the selection sheet; items with `subItems` open the
-  // mobile popover (currently none, but kept for future grouping).
-  const mobileNavItems = navItems as (NavItem & { subItems?: { label: string; icon: React.ElementType; href: string }[] })[];
+  // Mobile bottom nav is grouped for compact access. Items with `subItems`
+  // open the popover; statistics details are still shown in the existing
+  // selection sheet.
+  const mobileNavItems: NavItem[] = [
+    navItems[0], // Ana Panel
+    {
+      ...primaryPanel,
+      subItems: [
+        { label: 'İşlem Formları', icon: ClipboardList, href: actionFormsHref },
+        { label: 'Form Oluşturma', icon: primaryPanel.icon, href: primaryPanel.href },
+        { label: 'Yedek Parça', icon: Package, href: '/direkt-transfer/yedek-parca-transfer' },
+      ],
+    },
+    navItems[2], // Tüm Arızalar
+    {
+      key: 'gozlem',
+      label: 'Gözlem',
+      icon: BarChart3,
+      href: '/cihaz-tanimlamalari',
+      match: (p) =>
+        p.startsWith('/cihaz-tanimlamalari') ||
+        p.startsWith('/ariza-tanimlamalari') ||
+        p.startsWith('/ariza-yonetimi/istatistikler') ||
+        p.startsWith('/yedek-parca-analizi') ||
+        p.startsWith('/kurum-ziyaret-analizi'),
+      subItems: [
+        { label: 'Tanımlamalar', icon: Settings, href: '/cihaz-tanimlamalari' },
+        { label: 'İstatistikler', icon: BarChart3, action: 'openStatsSheet' },
+      ],
+    },
+  ];
 
   const isActive = (item: NavItem) => (item.match ? item.match(pathname) : pathname === item.href);
 
@@ -314,7 +344,11 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
                   type="button"
                   onClick={() => {
                     setExpandedMenu(null);
-                    router.push(sub.href);
+                    if (sub.action === 'openStatsSheet') {
+                      setStatsSheetOpen(true);
+                      return;
+                    }
+                    if (sub.href) router.push(sub.href);
                   }}
                   className="qt-popover-item"
                 >
@@ -333,7 +367,9 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
             const active = item.match ? item.match(pathname) : false;
             const Icon = item.icon;
             const onTap = () => {
-              if (item.submenu) {
+              if (item.subItems?.length) {
+                setExpandedMenu((prev) => (prev === item.key ? null : item.key));
+              } else if (item.submenu) {
                 setStatsSheetOpen(true);
               } else {
                 router.push(item.href);
