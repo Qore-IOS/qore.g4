@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { cn } from '@/lib/utils';
@@ -16,6 +16,11 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
+  Package,
+  Building2,
+  UserCircle,
+  Gauge,
+  X,
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
@@ -26,6 +31,10 @@ interface NavItem {
   icon: React.ElementType;
   href: string;
   match?: (pathname: string) => boolean;
+  /** When set, tapping the item on mobile opens a selection sheet
+   *  with these sub-choices instead of navigating directly. On desktop
+   *  the sub-items are rendered as separate nav buttons. */
+  submenu?: { key: string; label: string; icon: React.ElementType; href: string }[];
 }
 
 function QoreTechnicBrand({
@@ -78,6 +87,22 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
     try { return window.localStorage.getItem('qt:sidebar:collapsed') === '1'; } catch { return false; }
   });
 
+  // Mobile "İstatistikler" selection sheet
+  const [statsSheetOpen, setStatsSheetOpen] = useState(false);
+  // Profil popover (desktop) / sheet (mobile)
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const profileMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!profileMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (!profileMenuRef.current) return;
+      if (!profileMenuRef.current.contains(e.target as Node)) setProfileMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [profileMenuOpen]);
+
   // Persist body/html background override so scrolling never reveals
   // the default app background behind the hub.
   useEffect(() => {
@@ -123,10 +148,33 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
       href: isAplikasyon ? '/aplikasyon-harita' : '/teknik-harita',
       match: (p) => p.startsWith('/teknik-harita') || p.startsWith('/aplikasyon-harita') },
     { key: 'istatistik', label: 'İstatistikler', icon: BarChart3, href: '/ariza-yonetimi/istatistikler',
-      match: (p) => p.startsWith('/ariza-yonetimi/istatistikler') },
+      match: (p) =>
+        p.startsWith('/ariza-yonetimi/istatistikler') ||
+        p.startsWith('/yedek-parca-analizi') ||
+        p.startsWith('/kurum-ziyaret-analizi'),
+      submenu: [
+        { key: 'arizaIst', label: 'Arıza İstatistikleri', icon: BarChart3, href: '/ariza-yonetimi/istatistikler' },
+        { key: 'parcaAnaliz', label: 'Yedek Parça Analizi', icon: Package, href: '/yedek-parca-analizi' },
+        { key: 'ziyaretAnaliz', label: 'Kurum Ziyaret Analizi', icon: Building2, href: '/kurum-ziyaret-analizi' },
+      ],
+    },
     { key: 'tanim', label: 'Tanımlamalar', icon: Settings, href: '/cihaz-tanimlamalari',
       match: (p) => p.startsWith('/cihaz-tanimlamalari') || p.startsWith('/ariza-tanimlamalari') },
   ];
+
+  // Desktop sidebar shows each submenu child as its own nav button, so the
+  // sidebar exposes all stats panels directly. Mobile keeps the single
+  // "İstatistikler" entry and opens a selection sheet on tap.
+  const desktopNavItems: NavItem[] = navItems.flatMap((item) => {
+    if (!item.submenu) return [item];
+    return item.submenu.map((sub) => ({
+      key: sub.key,
+      label: sub.label,
+      icon: sub.icon,
+      href: sub.href,
+      match: (p: string) => p.startsWith(sub.href),
+    }));
+  });
 
   const isActive = (item: NavItem) => (item.match ? item.match(pathname) : pathname === item.href);
 
@@ -161,7 +209,7 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
         </div>
 
         <nav className="qore-technic-sidebar__nav" aria-label="QOREtechnic navigasyon">
-          {navItems.map((item) => {
+          {desktopNavItems.map((item) => {
             const active = isActive(item);
             const Icon = item.icon;
             return (
@@ -181,17 +229,50 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
           })}
         </nav>
 
-        <div className="qore-technic-sidebar__footer">
+        <div className="qore-technic-sidebar__footer" ref={profileMenuRef}>
+          {profileMenuOpen && (
+            <div className="qt-profile-popover" role="menu" aria-label="Profil menüsü">
+              <button
+                type="button"
+                className="qt-profile-popover__item"
+                role="menuitem"
+                onClick={() => {
+                  setProfileMenuOpen(false);
+                  router.push('/personel-izlem?mine=1');
+                }}
+              >
+                <Gauge className="h-4 w-4" />
+                <span>Performansım</span>
+              </button>
+              <button
+                type="button"
+                className="qt-profile-popover__item qt-profile-popover__item--danger"
+                role="menuitem"
+                onClick={() => {
+                  setProfileMenuOpen(false);
+                  handleLogout();
+                }}
+              >
+                <LogOut className="h-4 w-4" />
+                <span>Çıkış Yap</span>
+              </button>
+            </div>
+          )}
           <button
             type="button"
-            onClick={handleLogout}
-            className="qore-technic-navitem qore-technic-navitem--logout"
-            title={collapsed ? 'Çıkış Yap' : undefined}
+            onClick={() => setProfileMenuOpen((o) => !o)}
+            className={cn(
+              'qore-technic-navitem qore-technic-navitem--profile',
+              profileMenuOpen && 'qore-technic-navitem--active',
+            )}
+            title={collapsed ? 'Profil' : undefined}
+            aria-expanded={profileMenuOpen}
+            aria-haspopup="menu"
           >
             <span className="qore-technic-navitem__icon">
-              <LogOut className="h-[18px] w-[18px]" />
+              <UserCircle className="h-[18px] w-[18px]" />
             </span>
-            <span className="qore-technic-navitem__label">Çıkış Yap</span>
+            <span className="qore-technic-navitem__label">Profil</span>
           </button>
         </div>
       </aside>
@@ -212,11 +293,18 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
           {navItems.map((item) => {
             const active = isActive(item);
             const Icon = item.icon;
+            const onTap = () => {
+              if (item.submenu) {
+                setStatsSheetOpen(true);
+              } else {
+                router.push(item.href);
+              }
+            };
             return (
               <button
                 key={item.key}
                 type="button"
-                onClick={() => router.push(item.href)}
+                onClick={onTap}
                 className={cn('qore-technic-bottom-item', active && 'qore-technic-bottom-item--active')}
               >
                 <Icon className="h-5 w-5" />
@@ -226,6 +314,137 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
           })}
         </div>
       </nav>
+
+      {/* Mobile İstatistikler selection sheet */}
+      {statsSheetOpen && (
+        <div className="qt-sheet-overlay md:hidden" onClick={() => setStatsSheetOpen(false)}>
+          <div
+            className="qt-sheet"
+            role="dialog"
+            aria-label="İstatistik paneli seç"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="qt-sheet__handle" aria-hidden="true" />
+            <div className="qt-sheet__header">
+              <h2 className="qt-sheet__title">İstatistikler</h2>
+              <button
+                type="button"
+                className="qt-sheet__close"
+                aria-label="Kapat"
+                onClick={() => setStatsSheetOpen(false)}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="qt-sheet__list">
+              {navItems.find((i) => i.key === 'istatistik')?.submenu?.map((sub) => {
+                const SubIcon = sub.icon;
+                return (
+                  <button
+                    key={sub.key}
+                    type="button"
+                    className="qt-sheet__item"
+                    onClick={() => {
+                      setStatsSheetOpen(false);
+                      router.push(sub.href);
+                    }}
+                  >
+                    <span className="qt-sheet__item-icon">
+                      <SubIcon className="h-5 w-5" />
+                    </span>
+                    <span className="qt-sheet__item-label">{sub.label}</span>
+                    <ChevronRight className="h-4 w-4 opacity-60" />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+/**
+ * Profil button for the QOREtechnic hub — used in the ana-panel status row
+ * on mobile (replaces the Qore AI button for teknik_servis / aplikasyon
+ * personnel). Opens a sheet with "Performansım" and "Çıkış Yap" options.
+ */
+export function QoreTechnicProfileButton({
+  className,
+}: {
+  className?: string;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      router.replace('/login');
+    } catch (err) {
+      console.error('Logout failed', err);
+    }
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        className={cn('qt-status-btn qt-status-btn--profile', className)}
+        onClick={() => setOpen(true)}
+      >
+        <UserCircle className="h-4 w-4" />
+        Profil
+      </button>
+      {open && (
+        <div className="qt-sheet-overlay" onClick={() => setOpen(false)}>
+          <div className="qt-sheet" role="dialog" aria-label="Profil" onClick={(e) => e.stopPropagation()}>
+            <div className="qt-sheet__handle" aria-hidden="true" />
+            <div className="qt-sheet__header">
+              <h2 className="qt-sheet__title">Profil</h2>
+              <button
+                type="button"
+                className="qt-sheet__close"
+                aria-label="Kapat"
+                onClick={() => setOpen(false)}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="qt-sheet__list">
+              <button
+                type="button"
+                className="qt-sheet__item"
+                onClick={() => {
+                  setOpen(false);
+                  router.push('/personel-izlem?mine=1');
+                }}
+              >
+                <span className="qt-sheet__item-icon">
+                  <Gauge className="h-5 w-5" />
+                </span>
+                <span className="qt-sheet__item-label">Performansım</span>
+                <ChevronRight className="h-4 w-4 opacity-60" />
+              </button>
+              <button
+                type="button"
+                className="qt-sheet__item qt-sheet__item--danger"
+                onClick={() => {
+                  setOpen(false);
+                  handleLogout();
+                }}
+              >
+                <span className="qt-sheet__item-icon">
+                  <LogOut className="h-5 w-5" />
+                </span>
+                <span className="qt-sheet__item-label">Çıkış Yap</span>
+                <ChevronRight className="h-4 w-4 opacity-60" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
