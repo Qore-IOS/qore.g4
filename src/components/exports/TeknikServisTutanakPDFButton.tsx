@@ -318,7 +318,7 @@ export default function TeknikServisTutanakPDFButton({ device, hospital, actionR
       }
 
       const info = [
-          ['Form No:', actionRecord.id],
+          ['Form No:', actionRecord.formNo || actionRecord.id],
           ['Laboratuvar:', txt(labDisplayName, useTurkish)],
           ['Cihaz:', txt(`${device.cihazAdi} (SN: ${device.seriNumarasi})`, useTurkish)],
           [txt('İşlemi Yapan:', useTurkish), personnelStr],
@@ -576,7 +576,8 @@ export default function TeknikServisTutanakPDFButton({ device, hospital, actionR
         doc.addImage(actionRecord.technicianSignature, 'PNG', pageW / 2 + 20, sigY + 37, 150, 40, undefined, 'FAST');
       }
 
-      doc.save(`IslemFormu_${device.seriNumarasi}_${actionRecord.id.substring(0,6)}.pdf`);
+      const safeFormNo = String(actionRecord.formNo || actionRecord.id || '').replace(/[^A-Za-z0-9-_]/g, '');
+      doc.save(`IslemFormu_${device.seriNumarasi}_${safeFormNo || actionRecord.id.substring(0,6)}.pdf`);
     } catch (e) {
       console.error('PDF export error:', e);
     } finally {

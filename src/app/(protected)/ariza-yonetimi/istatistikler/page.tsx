@@ -25,8 +25,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Loader2, AlertTriangle, CheckCircle, Server, Clock, ShieldCheck, RotateCcw, Building, ChevronsUpDown, Check as CheckIcon, Calendar, Package, ChevronDown, ChevronUp, Wrench, FlaskConical, Phone, MapPin, Timer, TrendingUp, Layers } from 'lucide-react';
-import BackButton from '@/components/BackButton';
-import { differenceInMinutes, startOfDay, endOfDay, subMonths, format } from 'date-fns';
+import { differenceInMinutes, subMonths, format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { useAuth } from '@/contexts/auth-context';
 import { Button } from '@/components/ui/button';
@@ -35,8 +34,6 @@ import { filterByCompanyScope } from '@/lib/company-scope';
 import { classifyStopFault, type StopFaultType } from '@/lib/stop-fault';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
-import { DatePickerWithRange } from '@/components/ui/date-range-picker';
-import { DateRange } from 'react-day-picker';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Collapsible,
@@ -86,7 +83,6 @@ export default function ArizaIstatistikleriPage() {
 
   const [selectedLabId, setSelectedLabId] = useState<string>('all');
   const [isLabPopoverOpen, setIsLabPopoverOpen] = useState(false);
-  const [dateRange, setDateRange] = useState<DateRange | undefined>(undefined);
 
   // Global fault type filter
   const [selectedFaultType, setSelectedFaultType] = useState<'all' | 'teknik_servis' | 'aplikasyon'>('all');
@@ -209,19 +205,11 @@ export default function ArizaIstatistikleriPage() {
       if (selectedLabId !== 'all') {
           filtered = filtered.filter(report => report.hospitalId === selectedLabId);
       }
-      if (dateRange?.from) {
-          const from = startOfDay(dateRange.from);
-          filtered = filtered.filter(report => report.openedAt && report.openedAt >= from);
-      }
-      if (dateRange?.to) {
-          const to = endOfDay(dateRange.to);
-          filtered = filtered.filter(report => report.openedAt && report.openedAt <= to);
-      }
       if (selectedFaultType !== 'all') {
           filtered = filtered.filter(report => report.faultType === selectedFaultType);
       }
       return filtered;
-  }, [reports, selectedLabId, dateRange, selectedFaultType]);
+  }, [reports, selectedLabId, selectedFaultType]);
 
   // Main statistics
   const stats = useMemo(() => {
@@ -665,8 +653,7 @@ export default function ArizaIstatistikleriPage() {
   return (
     <div className="device-module-page p-4 space-y-6">
       {/* Header with filters */}
-      <div className="flex justify-between items-center flex-wrap gap-4">
-        <BackButton fallback="/cihaz-yonetimi-ana" />
+      <div className="flex justify-end items-center flex-wrap gap-4">
         <div className="flex items-center gap-2 flex-wrap">
           <Popover open={isLabPopoverOpen} onOpenChange={setIsLabPopoverOpen}>
             <PopoverTrigger asChild>
@@ -718,7 +705,6 @@ export default function ArizaIstatistikleriPage() {
               </Command>
             </PopoverContent>
           </Popover>
-          <DatePickerWithRange date={dateRange} setDate={setDateRange} />
         </div>
       </div>
 
