@@ -116,6 +116,8 @@ export async function POST(req: NextRequest) {
         'Use table headers to map correct columns.',
         'IMPORTANT: LOT must be read only from the LOT/Parti/Batch column header.',
         'IMPORTANT: never confuse UTS Kodu with LOT.',
+        'IMPORTANT: Use table row/column boundaries (cell alignment) even when column widths vary.',
+        'IMPORTANT: Never extract LOT from Stok Adı text fragments.',
         'If LOT column is missing or unreadable, return lot as empty/undefined.',
       ].join(' '),
       messages: [
@@ -126,6 +128,8 @@ export async function POST(req: NextRequest) {
             'Sadece verilen ürün kodlarıyla eşleşen satırları döndür.',
             'Kolon başlıklarını dikkate al. LOT değeri sadece LOT sütunundan alınmalı.',
             'UTS Kodu sütunu varsa asla LOT olarak alma.',
+            'Sütun genişlikleri markaya göre değişebilir; satır/sütun hizasına göre LOT hücresini bul.',
+            'Stok adı içindeki parça metinleri LOT olarak alma.',
             'Miad/SKT tarihini dd.MM.yyyy formatında döndür.',
             'quantity satırdaki miktar olsun.',
             'JSON şema: [{ "stokKodu": "...", "quantity": 0, "lot": "...", "miad": "...", "rawLine": "..." }]',
