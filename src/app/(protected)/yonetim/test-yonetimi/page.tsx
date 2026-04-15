@@ -20,6 +20,7 @@ import * as XLSX from 'xlsx';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { getExchangeRates } from '@/lib/exchange-rates';
 
 interface HakEdisDefinition {
   id: string;
@@ -117,28 +118,8 @@ export default function HakEdisPage() {
   // Fetch exchange rates
   useEffect(() => {
     const fetchRates = async () => {
-      const CACHE_KEY = 'exchange_rates_cache';
-      const CACHE_TTL = 1000 * 60 * 60; // 1 saat
-
-      const cached = localStorage.getItem(CACHE_KEY);
-      if (cached) {
-        try {
-          const { rates, timestamp } = JSON.parse(cached);
-          if (Date.now() - timestamp < CACHE_TTL) {
-            setExchangeRates(rates);
-            return;
-          }
-        } catch (e) {}
-      }
-
       try {
-        const res = await fetch('https://api.frankfurter.app/latest?from=EUR&to=USD,TRY');
-        if (res.ok) {
-          const data = await res.json();
-          const rates = { EUR: 1, USD: data.rates.USD, TRY: data.rates.TRY };
-          setExchangeRates(rates);
-          localStorage.setItem(CACHE_KEY, JSON.stringify({ rates, timestamp: Date.now() }));
-        }
+        setExchangeRates(await getExchangeRates());
       } catch (e) {
         setExchangeRates({ EUR: 1, USD: 1.08, TRY: 38.5 });
       }
