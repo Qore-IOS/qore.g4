@@ -15,6 +15,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Package,
+  ClipboardList,
   Building2,
   UserCircle,
   Gauge,
