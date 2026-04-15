@@ -1178,6 +1178,7 @@ export default function YedekParcaTransferPage() {
           if (isPoolTarget) {
             const poolStockRef = doc(collection(db, 'poolWarehouseStock'));
             ops.push({ type: 'set', ref: poolStockRef, data: withCompanyScope({
+              traceId: poolStockRef.id,
               poolWarehouseId,
               poolWarehouseName: row.targetName,
               productCodeId: row.productCodeId,
@@ -1197,6 +1198,7 @@ export default function YedekParcaTransferPage() {
             ops.push({ type: 'set', ref: doc(collection(db, 'sparePartTransferLogs')), data: withCompanyScope({
               action: 'transfer_to_pool',
               poolStockId: poolStockRef.id,
+              traceId: poolStockRef.id,
               poolWarehouseId,
               poolWarehouseName: row.targetName,
               productCodeId: row.productCodeId,
@@ -1215,6 +1217,7 @@ export default function YedekParcaTransferPage() {
           } else {
             const stockRef = doc(collection(db, 'personalStock'));
             ops.push({ type: 'set', ref: stockRef, data: withCompanyScope({
+              traceId: stockRef.id,
               ownerUid: row.targetUid,
               ownerName: row.targetName,
               productCodeId: row.productCodeId,
@@ -1233,6 +1236,7 @@ export default function YedekParcaTransferPage() {
             ops.push({ type: 'set', ref: doc(collection(db, 'sparePartTransferLogs')), data: withCompanyScope({
               action: 'transfer_to_personnel',
               personalStockId: stockRef.id,
+              traceId: stockRef.id,
               productCodeId: row.productCodeId,
               stokKodu: row.stokKodu,
               stokAdi: row.stokAdi,
@@ -1298,6 +1302,7 @@ export default function YedekParcaTransferPage() {
             for (let i = 0; i < row.quantity; i++) {
               const poolStockRef = doc(collection(db, 'poolWarehouseStock'));
               ops.push({ type: 'set', ref: poolStockRef, data: withCompanyScope({
+                traceId: poolStockRef.id,
                 poolWarehouseId,
                 poolWarehouseName: row.targetName,
                 productCodeId: row.productCodeId,
@@ -1316,6 +1321,7 @@ export default function YedekParcaTransferPage() {
               ops.push({ type: 'set', ref: doc(collection(db, 'sparePartTransferLogs')), data: withCompanyScope({
                 action: 'transfer_to_pool',
                 poolStockId: poolStockRef.id,
+                traceId: poolStockRef.id,
                 poolWarehouseId,
                 poolWarehouseName: row.targetName,
                 productCodeId: row.productCodeId,
@@ -1335,6 +1341,7 @@ export default function YedekParcaTransferPage() {
             for (let i = 0; i < row.quantity; i++) {
               const personalStockRef = doc(collection(db, 'personalStock'));
               ops.push({ type: 'set', ref: personalStockRef, data: withCompanyScope({
+                traceId: personalStockRef.id,
                 ownerUid: row.targetUid,
                 ownerName: row.targetName,
                 productCodeId: row.productCodeId,
@@ -1352,6 +1359,7 @@ export default function YedekParcaTransferPage() {
               ops.push({ type: 'set', ref: doc(collection(db, 'sparePartTransferLogs')), data: withCompanyScope({
                 action: 'transfer_to_personnel',
                 personalStockId: personalStockRef.id,
+                traceId: personalStockRef.id,
                 productCodeId: row.productCodeId,
                 stokKodu: row.stokKodu,
                 stokAdi: row.stokAdi,
@@ -1558,6 +1566,7 @@ export default function YedekParcaTransferPage() {
           const stockRef = doc(collection(db, 'personalStock'));
           stockRefIds.push(stockRef.id);
           batch.set(stockRef, withCompanyScope({
+            traceId: stockRef.id,
             ownerUid: menuSelection.personnelUid,
             ownerName: menuSelection.personnelName,
             productCodeId: '',
@@ -2336,25 +2345,29 @@ export default function YedekParcaTransferPage() {
           });
         }
 
-        // Transfer log
-        const logRef = doc(collection(db, 'sparePartTransferLogs'));
-        transaction.set(logRef, withCompanyScope({
-          action: 'transfer_between_personnel',
-          productCodeId: pTransferItem.productCodeId,
-          stokKodu: pTransferItem.stokKodu,
-          stokAdi: pTransferItem.stokAdi,
-          anaBirim: pTransferItem.anaBirim || 'Adet',
-          serialNumber: pTransferItem.serialNumber || '',
-          quantity: qty,
-          fromUid: pTransferItem.ownerUid,
-          fromName: pTransferItem.ownerName,
-          toUid: pTransferTargetUid,
-          toName: pTransferTargetName,
-          status: 'pending_approval',
-          createdAt: Timestamp.fromDate(now),
-          createdByUid: currentUserProfile?.uid || '',
-          createdByName: currentUserProfile?.name || '',
-        }, currentCompanyId));
+        // Transfer log (her stok kaydı için ayrı log)
+        for (const si of itemsToTransfer) {
+          const logRef = doc(collection(db, 'sparePartTransferLogs'));
+          transaction.set(logRef, withCompanyScope({
+            action: 'transfer_between_personnel',
+            personalStockId: si.id,
+            traceId: (si as any).traceId || si.id,
+            productCodeId: si.productCodeId,
+            stokKodu: si.stokKodu,
+            stokAdi: si.stokAdi,
+            anaBirim: si.anaBirim || 'Adet',
+            serialNumber: si.serialNumber || '',
+            quantity: 1,
+            fromUid: si.ownerUid,
+            fromName: si.ownerName,
+            toUid: pTransferTargetUid,
+            toName: pTransferTargetName,
+            status: 'pending_approval',
+            createdAt: Timestamp.fromDate(now),
+            createdByUid: currentUserProfile?.uid || '',
+            createdByName: currentUserProfile?.name || '',
+          }, currentCompanyId));
+        }
       });
 
       // Notifications
@@ -2425,10 +2438,14 @@ export default function YedekParcaTransferPage() {
 
     try {
       const normalize = (v?: string) => String(v || '').trim();
-      const stokKodu = normalize(params.stokKodu);
       const serialNumber = normalize(params.serialNumber);
       const hucreNumarasi = normalize(params.hucreNumarasi);
       const idField = params.scope === 'personal' ? 'personalStockId' : 'poolStockId';
+      const stockCollection = params.scope === 'personal' ? 'personalStock' : 'poolWarehouseStock';
+      const stockSnap = await getDoc(doc(db, stockCollection, params.id));
+      const traceId = stockSnap.exists()
+        ? normalize((stockSnap.data() as any)?.traceId || params.id)
+        : normalize(params.id);
 
       const toLog = (d: any, source: 'transfer' | 'depo' | 'snapshot') => {
         const data: any = d.data ? d.data() : d;
@@ -2451,13 +2468,16 @@ export default function YedekParcaTransferPage() {
 
       const transferQueries = [
         query(collection(db, 'sparePartTransferLogs'), where(idField, '==', params.id)),
-        query(collection(db, 'sparePartTransferLogs'), where('stokKodu', '==', params.stokKodu)),
       ];
+      if (params.scope === 'personal') {
+        transferQueries.push(query(collection(db, 'sparePartTransferLogs'), where('personalStockDocIds', 'array-contains', params.id)));
+      }
+      if (traceId) transferQueries.push(query(collection(db, 'sparePartTransferLogs'), where('traceId', '==', traceId)));
       if (serialNumber) transferQueries.push(query(collection(db, 'sparePartTransferLogs'), where('serialNumber', '==', serialNumber)));
       if (hucreNumarasi) transferQueries.push(query(collection(db, 'sparePartTransferLogs'), where('hucreNumarasi', '==', hucreNumarasi)));
 
       const depoQueries = [
-        query(collection(db, 'yedekParcaDepoLog'), where('stokKodu', '==', params.stokKodu)),
+        query(collection(db, 'yedekParcaDepoLog'), where('traceId', '==', traceId)),
       ];
       if (serialNumber) depoQueries.push(query(collection(db, 'yedekParcaDepoLog'), where('serialNumber', '==', serialNumber)));
       if (hucreNumarasi) depoQueries.push(query(collection(db, 'yedekParcaDepoLog'), where('hucreNumarasi', '==', hucreNumarasi)));
@@ -2471,8 +2491,6 @@ export default function YedekParcaTransferPage() {
         pushLogs(snap.docs.map((d) => toLog(d, 'depo')));
       }
 
-      const stockCollection = params.scope === 'personal' ? 'personalStock' : 'poolWarehouseStock';
-      const stockSnap = await getDoc(doc(db, stockCollection, params.id));
       if (stockSnap.exists()) {
         const stockData: any = stockSnap.data();
         pushLogs([toLog({
@@ -2490,15 +2508,25 @@ export default function YedekParcaTransferPage() {
       let logs = Array.from(logMap.values());
       logs = filterByCompanyScope(logs, currentCompanyId, isSuperAdmin);
 
-      logs = logs.filter((log: any) => {
+      const strictLogs = logs.filter((log: any) => {
         const sameStockDoc = log[idField] === params.id;
         if (sameStockDoc) return true;
-        const sameCode = normalize(log.stokKodu) === stokKodu;
-        if (!sameCode) return false;
-        if (serialNumber) return normalize(log.serialNumber) === serialNumber;
-        if (hucreNumarasi) return normalize(log.hucreNumarasi) === hucreNumarasi;
-        return true;
+        if (Array.isArray(log.personalStockDocIds) && log.personalStockDocIds.includes(params.id)) return true;
+        const sameTrace = traceId && normalize(log.traceId) === traceId;
+        if (sameTrace) return true;
+        return false;
       });
+      if (strictLogs.length > 0) {
+        logs = strictLogs;
+      } else if (serialNumber || hucreNumarasi) {
+        logs = logs.filter((log: any) => {
+          if (serialNumber) return normalize(log.serialNumber) === serialNumber;
+          if (hucreNumarasi) return normalize(log.hucreNumarasi) === hucreNumarasi;
+          return false;
+        });
+      } else {
+        logs = [];
+      }
 
       logs.sort((a: any, b: any) => new Date(a._timestamp).getTime() - new Date(b._timestamp).getTime());
       setObservationLogs(logs);
@@ -2535,6 +2563,7 @@ export default function YedekParcaTransferPage() {
         transaction.set(logRef, withCompanyScope({
           action: 'transfer_approved',
           personalStockId: item.id,
+          traceId: (item as any).traceId || item.id,
           productCodeId: item.productCodeId,
           stokKodu: item.stokKodu,
           stokAdi: item.stokAdi,
@@ -2609,6 +2638,7 @@ export default function YedekParcaTransferPage() {
           transaction.set(logRef, withCompanyScope({
             action: 'transfer_rejected',
             personalStockId: item.id,
+            traceId: (item as any).traceId || item.id,
             productCodeId: item.productCodeId,
             stokKodu: item.stokKodu,
             stokAdi: item.stokAdi,
