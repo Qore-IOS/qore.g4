@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useTheme } from 'next-themes';
 import type { Hospital, ConsumptionRecord, ProductCode, DailyConsumptionStats, DeviceFaultReport, PurchasingTask } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { TrendingUp, ChevronLeft, ChevronRight, UserPlus2, TimerReset, ActivitySquare, AlertTriangle, CalendarCheck, Banknote } from 'lucide-react';
 import {
   format, startOfWeek, endOfWeek, eachDayOfInterval,
@@ -43,6 +44,33 @@ interface DashboardPanelProps {
 
 type TrendPeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
 type CostCurrency = 'EUR' | 'USD' | 'TRY';
+type CurrencyPools = Record<CostCurrency, number>;
+
+type StockProductBreakdown = {
+  stokKodu: string;
+  stokAdi: string;
+  quantity: number;
+  nativeTotals: CurrencyPools;
+  tryTotal: number;
+};
+
+type StockLocationBreakdown = {
+  id: string;
+  name: string;
+  type: 'depo' | 'lab';
+  quantity: number;
+  nativeTotals: CurrencyPools;
+  tryTotal: number;
+  products: StockProductBreakdown[];
+};
+
+type StockBrandBreakdown = {
+  brand: string;
+  quantity: number;
+  nativeTotals: CurrencyPools;
+  tryTotal: number;
+  locations: StockLocationBreakdown[];
+};
 
 export default function DashboardPanel({
     hospitals,
@@ -122,6 +150,8 @@ export default function DashboardPanel({
   // Total stock cost + risky cost – client-side calculation
   const [totalStockCost, setTotalStockCost] = useState<number | null>(null);
   const [riskyCost, setRiskyCost] = useState<number | null>(null);
+  const [isStockCostDetailOpen, setIsStockCostDetailOpen] = useState(false);
+  const [stockCostBreakdown, setStockCostBreakdown] = useState<StockBrandBreakdown[]>([]);
   useEffect(() => {
     (async () => {
       try {
@@ -134,8 +164,15 @@ export default function DashboardPanel({
         try { const s = await getDocs(collection(db, 'depoStok')); stockDocs = s.docs; } catch (e) { console.warn('[Dashboard] depoStok fetch failed:', e); }
         try { const s = await getDocs(collection(db, 'depots')); depotDocs = s.docs; } catch (e) { console.warn('[Dashboard] depots fetch failed:', e); }
 
-        // Build cost map: stokKodu -> birim maliyet + para birimi
-        const costMap = new Map<string, { cost: number; currency: CostCurrency }>();
+        const depotNameMap = new Map<string, string>();
+        depotDocs.forEach((d) => {
+          const data = d.data();
+          depotNameMap.set(d.id, String(data?.name || d.id));
+        });
+        const hospitalById = new Map(hospitals.map((h) => [h.id, h.name]));
+
+        // Build cost map: stokKodu -> birim maliyet + para birimi + metadata
+        const costMap = new Map<string, { cost: number; currency: CostCurrency; brand: string; stokAdi: string }>();
         productDocs.forEach((d) => {
           const data = d.data();
           const rawCost = data.cost ?? data.birimFiyat ?? data.unitPrice ?? data.price;
@@ -143,7 +180,12 @@ export default function DashboardPanel({
           const currency = (typeof data.currency === 'string' ? data.currency.toUpperCase() : 'TRY') as CostCurrency;
           const normalizedCurrency: CostCurrency = currency === 'EUR' || currency === 'USD' ? currency : 'TRY';
           if (numCost && !isNaN(numCost) && data.stokKodu) {
-            costMap.set(data.stokKodu, { cost: numCost, currency: normalizedCurrency });
+            costMap.set(data.stokKodu, {
+              cost: numCost,
+              currency: normalizedCurrency,
+              brand: String(data.marka || 'Markasız'),
+              stokAdi: String(data.stokAdi || data.stokKodu),
+            });
           }
         });
 
@@ -155,6 +197,18 @@ export default function DashboardPanel({
 
         // Toplam maliyet hesapla
         const totalPools: Record<CostCurrency, number> = { TRY: 0, USD: 0, EUR: 0 };
+        const breakdownMap = new Map<string, {
+          quantity: number;
+          nativeTotals: CurrencyPools;
+          locations: Map<string, {
+            id: string;
+            name: string;
+            type: 'depo' | 'lab';
+            quantity: number;
+            nativeTotals: CurrencyPools;
+            products: Map<string, StockProductBreakdown>;
+          }>;
+        }>();
         const activeStockItems: Array<{ stokKodu: string; lotNumarasi: string; miad: string; depotId: string; quantity: number }> = [];
         const groupedByDepotAndProduct = new Map<string, number>();
 
@@ -162,7 +216,61 @@ export default function DashboardPanel({
           const data = d.data();
           const productCost = costMap.get(data.stokKodu);
           const qty = Number(data.quantity ?? 1) || 1;
-          if (productCost) totalPools[productCost.currency] += (productCost.cost * qty);
+          if (productCost) {
+            totalPools[productCost.currency] += (productCost.cost * qty);
+
+            const brandKey = productCost.brand || 'Markasız';
+            let brandEntry = breakdownMap.get(brandKey);
+            if (!brandEntry) {
+              brandEntry = {
+                quantity: 0,
+                nativeTotals: { TRY: 0, USD: 0, EUR: 0 },
+                locations: new Map(),
+              };
+              breakdownMap.set(brandKey, brandEntry);
+            }
+            brandEntry.quantity += qty;
+            brandEntry.nativeTotals[productCost.currency] += productCost.cost * qty;
+
+            const isLab = data.isShipped === true;
+            const locationType: 'depo' | 'lab' = isLab ? 'lab' : 'depo';
+            const locationId = isLab
+              ? String(data.hedefKurumId || data.labId || data.hedefKurum || 'bilinmeyen-lab')
+              : String(data.depotId || 'bilinmeyen-depo');
+            const locationName = isLab
+              ? (hospitalById.get(locationId) || String(data.hedefKurum || data.labName || 'Bilinmeyen Lab'))
+              : (depotNameMap.get(locationId) || String(data.depotName || 'Bilinmeyen Depo'));
+            const locationKey = `${locationType}:${locationId}`;
+            let locationEntry = brandEntry.locations.get(locationKey);
+            if (!locationEntry) {
+              locationEntry = {
+                id: locationId,
+                name: locationName,
+                type: locationType,
+                quantity: 0,
+                nativeTotals: { TRY: 0, USD: 0, EUR: 0 },
+                products: new Map(),
+              };
+              brandEntry.locations.set(locationKey, locationEntry);
+            }
+            locationEntry.quantity += qty;
+            locationEntry.nativeTotals[productCost.currency] += productCost.cost * qty;
+
+            const productKey = data.stokKodu;
+            let productEntry = locationEntry.products.get(productKey);
+            if (!productEntry) {
+              productEntry = {
+                stokKodu: data.stokKodu,
+                stokAdi: productCost.stokAdi,
+                quantity: 0,
+                nativeTotals: { TRY: 0, USD: 0, EUR: 0 },
+                tryTotal: 0,
+              };
+              locationEntry.products.set(productKey, productEntry);
+            }
+            productEntry.quantity += qty;
+            productEntry.nativeTotals[productCost.currency] += productCost.cost * qty;
+          }
           // Riskli hesabı için stok bilgisi topla
           activeStockItems.push({
             stokKodu: data.stokKodu,
@@ -177,6 +285,31 @@ export default function DashboardPanel({
         });
 
         setTotalStockCost(sumPoolsToTry(totalPools));
+        const breakdown: StockBrandBreakdown[] = Array.from(breakdownMap.entries()).map(([brand, brandEntry]) => {
+          const locations: StockLocationBreakdown[] = Array.from(brandEntry.locations.values()).map((loc) => {
+            const products = Array.from(loc.products.values()).map((p) => ({
+              ...p,
+              tryTotal: sumPoolsToTry(p.nativeTotals),
+            })).sort((a, b) => b.tryTotal - a.tryTotal);
+            return {
+              id: loc.id,
+              name: loc.name,
+              type: loc.type,
+              quantity: loc.quantity,
+              nativeTotals: loc.nativeTotals,
+              tryTotal: sumPoolsToTry(loc.nativeTotals),
+              products,
+            };
+          }).sort((a, b) => b.tryTotal - a.tryTotal);
+          return {
+            brand,
+            quantity: brandEntry.quantity,
+            nativeTotals: brandEntry.nativeTotals,
+            tryTotal: sumPoolsToTry(brandEntry.nativeTotals),
+            locations,
+          };
+        }).sort((a, b) => b.tryTotal - a.tryTotal);
+        setStockCostBreakdown(breakdown);
 
         // Riskli maliyet: tüm depolardan minMaxRules çek
         const depotIds = depotDocs.map((d) => d.id);
@@ -707,8 +840,8 @@ export default function DashboardPanel({
                 </Card>
               </Link>
               {/* Anlık Maliyet - %70 toplam, %30 riskli */}
-              <Link href="/stok-yonetimi" className="block h-full">
-                <Card className="glass-card cursor-pointer h-full flex flex-col overflow-hidden">
+              <button type="button" className="block h-full w-full text-left bg-transparent p-0 m-0 border-0" onClick={() => setIsStockCostDetailOpen(true)}>
+                <Card className="glass-card cursor-pointer h-full flex flex-col overflow-hidden w-full">
                   <CardContent className="pt-0 pb-0 px-0 flex-1 flex flex-col">
                     {/* %70 - Toplam Maliyet */}
                     <div className="flex-[7] flex flex-col items-center justify-center text-center px-3 pt-3 pb-2">
@@ -736,7 +869,7 @@ export default function DashboardPanel({
                     </div>
                   </CardContent>
                 </Card>
-              </Link>
+              </button>
             </div>
           </motion.div>
 
@@ -831,6 +964,67 @@ export default function DashboardPanel({
           trendTitle={trendTitle}
         />
       )}
+
+      <Dialog open={isStockCostDetailOpen} onOpenChange={setIsStockCostDetailOpen}>
+        <DialogContent className="max-w-5xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Anlık Maliyet Detayı</DialogTitle>
+            <DialogDescription>
+              Kırılım sırası: Marka → Kurum (Depo/Lab) → Ürün.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            {stockCostBreakdown.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Detay verisi bulunamadı.</p>
+            ) : stockCostBreakdown.map((brand) => (
+              <details key={brand.brand} className="rounded-lg border p-3" open>
+                <summary className="cursor-pointer font-semibold text-sm flex items-center justify-between gap-2">
+                  <span>{brand.brand}</span>
+                  <span className="text-emerald-700">
+                    {new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(brand.tryTotal)}
+                  </span>
+                </summary>
+                <div className="mt-2 space-y-2">
+                  {brand.locations.map((location) => (
+                    <details key={`${location.type}-${location.id}`} className="rounded-md border p-2">
+                      <summary className="cursor-pointer text-sm flex items-center justify-between gap-2">
+                        <span>{location.type === 'depo' ? 'Depo' : 'Lab'}: {location.name}</span>
+                        <span className="font-medium text-slate-700">
+                          {new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(location.tryTotal)}
+                        </span>
+                      </summary>
+                      <div className="mt-2 overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-left text-muted-foreground border-b">
+                              <th className="py-1 pr-2">Stok Kodu</th>
+                              <th className="py-1 pr-2">Ürün</th>
+                              <th className="py-1 pr-2">Adet</th>
+                              <th className="py-1 pr-2 text-right">Toplam (TRY)</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {location.products.map((product) => (
+                              <tr key={product.stokKodu} className="border-b last:border-0">
+                                <td className="py-1 pr-2 font-mono">{product.stokKodu}</td>
+                                <td className="py-1 pr-2">{product.stokAdi}</td>
+                                <td className="py-1 pr-2">{product.quantity}</td>
+                                <td className="py-1 pr-2 text-right font-medium">
+                                  {new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(product.tryTotal)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </details>
+                  ))}
+                </div>
+              </details>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
