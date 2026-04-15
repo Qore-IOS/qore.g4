@@ -42,32 +42,12 @@ import {
   type SayimSession,
   type TimeRange,
 } from '@/lib/cost-analytics';
+import { getExchangeRates } from '@/lib/exchange-rates';
 
 const CURRENCY_SYMBOLS: Record<Currency, string> = { EUR: '€', USD: '$', TRY: '₺' };
 const PIE_COLORS = ['#2563eb', '#7c3aed', '#db2777', '#ea580c', '#0891b2', '#16a34a', '#ca8a04', '#dc2626'];
-const PRIMARY_API_KEY = 'e69314b14644080788775553';
-const CACHE_TTL = 1000 * 60 * 60;
-
 async function fetchExchangeRates(): Promise<Record<Currency, number>> {
-  const cacheKey = 'exchange_rates_cache';
-  try {
-    const cached = localStorage.getItem(cacheKey);
-    if (cached) {
-      const { data, timestamp } = JSON.parse(cached);
-      if (Date.now() - timestamp < CACHE_TTL) return data;
-    }
-  } catch {}
-
-  try {
-    const res = await fetch(`https://v6.exchangerate-api.com/v6/${PRIMARY_API_KEY}/latest/EUR`);
-    if (!res.ok) throw new Error('Primary failed');
-    const data = await res.json();
-    const rates = { EUR: 1, USD: data.conversion_rates.USD, TRY: data.conversion_rates.TRY };
-    localStorage.setItem(cacheKey, JSON.stringify({ data: rates, timestamp: Date.now() }));
-    return rates;
-  } catch {
-    return { EUR: 1, USD: 1.08, TRY: 38.5 };
-  }
+  return getExchangeRates();
 }
 
 // ============================================================================
