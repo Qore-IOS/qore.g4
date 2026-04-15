@@ -810,18 +810,31 @@ export default function ArizaIstatistikleriPage() {
               { key: 's_stop' as StopFaultType, label: 'S Stop' },
               { key: 'normal_stop' as StopFaultType, label: 'Normal Stop' },
             ]).map((item) => (
-              <Button
+              <button
                 key={item.key}
-                variant={selectedStopType === item.key ? 'default' : 'outline'}
+                type="button"
                 onClick={() => {
                   setSelectedStopType(item.key);
                   setSelectedStopLabId(null);
                 }}
-                className="justify-between"
+                className="cihaz-tool-item w-full flex items-center justify-between px-4 py-2.5 text-sm font-semibold rounded-xl transition-all active:scale-[0.99]"
+                style={{
+                  color: selectedStopType === item.key ? 'var(--dashboard-accent)' : 'var(--dashboard-text)',
+                  background: selectedStopType === item.key ? 'color-mix(in srgb, var(--dashboard-accent) 14%, white)' : undefined,
+                  border: selectedStopType === item.key ? '1px solid color-mix(in srgb, var(--dashboard-accent) 30%, transparent)' : undefined,
+                }}
               >
                 <span>{item.label}</span>
-                <Badge variant="secondary">{stopStats.counts[item.key]}</Badge>
-              </Button>
+                <span
+                  className="inline-flex items-center justify-center min-w-7 h-7 px-2 rounded-full text-xs font-bold"
+                  style={{
+                    background: selectedStopType === item.key ? 'color-mix(in srgb, var(--dashboard-accent) 18%, white)' : 'var(--dashboard-pressed)',
+                    color: selectedStopType === item.key ? 'var(--dashboard-accent)' : 'var(--dashboard-muted)',
+                  }}
+                >
+                  {stopStats.counts[item.key]}
+                </span>
+              </button>
             ))}
           </div>
 
