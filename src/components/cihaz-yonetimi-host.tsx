@@ -501,15 +501,10 @@ export default function CihazYonetimiHost() {
             const role = currentUserProfile?.role;
             const isFieldUser = role === 'teknik_servis' || role === 'aplikasyon';
             if (isFieldUser) {
-              return (
-                <>
-                  <button type="button" className="qt-status-btn qt-status-btn--ai hidden md:inline-flex" onClick={() => setIsQoreAIPanelOpen(true)}>
-                    <Sparkles className="h-4 w-4" />
-                    Qore AI
-                  </button>
-                  <QoreTechnicProfileButton className="md:hidden" />
-                </>
-              );
+              // Field users (teknik_servis / aplikasyon) don't get Qore AI access
+              // on any surface — only a Profil button (shown on mobile; desktop
+              // has the sidebar profile entry).
+              return <QoreTechnicProfileButton className="md:hidden" />;
             }
             return (
               <button type="button" className="qt-status-btn qt-status-btn--ai" onClick={() => setIsQoreAIPanelOpen(true)}>
