@@ -1178,6 +1178,7 @@ export default function YedekParcaTransferPage() {
           if (isPoolTarget) {
             const poolStockRef = doc(collection(db, 'poolWarehouseStock'));
             ops.push({ type: 'set', ref: poolStockRef, data: withCompanyScope({
+              traceId: poolStockRef.id,
               poolWarehouseId,
               poolWarehouseName: row.targetName,
               productCodeId: row.productCodeId,
@@ -1197,6 +1198,7 @@ export default function YedekParcaTransferPage() {
             ops.push({ type: 'set', ref: doc(collection(db, 'sparePartTransferLogs')), data: withCompanyScope({
               action: 'transfer_to_pool',
               poolStockId: poolStockRef.id,
+              traceId: poolStockRef.id,
               poolWarehouseId,
               poolWarehouseName: row.targetName,
               productCodeId: row.productCodeId,
@@ -1215,6 +1217,7 @@ export default function YedekParcaTransferPage() {
           } else {
             const stockRef = doc(collection(db, 'personalStock'));
             ops.push({ type: 'set', ref: stockRef, data: withCompanyScope({
+              traceId: stockRef.id,
               ownerUid: row.targetUid,
               ownerName: row.targetName,
               productCodeId: row.productCodeId,
@@ -1233,6 +1236,7 @@ export default function YedekParcaTransferPage() {
             ops.push({ type: 'set', ref: doc(collection(db, 'sparePartTransferLogs')), data: withCompanyScope({
               action: 'transfer_to_personnel',
               personalStockId: stockRef.id,
+              traceId: stockRef.id,
               productCodeId: row.productCodeId,
               stokKodu: row.stokKodu,
               stokAdi: row.stokAdi,
@@ -1298,6 +1302,7 @@ export default function YedekParcaTransferPage() {
             for (let i = 0; i < row.quantity; i++) {
               const poolStockRef = doc(collection(db, 'poolWarehouseStock'));
               ops.push({ type: 'set', ref: poolStockRef, data: withCompanyScope({
+                traceId: poolStockRef.id,
                 poolWarehouseId,
                 poolWarehouseName: row.targetName,
                 productCodeId: row.productCodeId,
@@ -1316,6 +1321,7 @@ export default function YedekParcaTransferPage() {
               ops.push({ type: 'set', ref: doc(collection(db, 'sparePartTransferLogs')), data: withCompanyScope({
                 action: 'transfer_to_pool',
                 poolStockId: poolStockRef.id,
+                traceId: poolStockRef.id,
                 poolWarehouseId,
                 poolWarehouseName: row.targetName,
                 productCodeId: row.productCodeId,
@@ -1335,6 +1341,7 @@ export default function YedekParcaTransferPage() {
             for (let i = 0; i < row.quantity; i++) {
               const personalStockRef = doc(collection(db, 'personalStock'));
               ops.push({ type: 'set', ref: personalStockRef, data: withCompanyScope({
+                traceId: personalStockRef.id,
                 ownerUid: row.targetUid,
                 ownerName: row.targetName,
                 productCodeId: row.productCodeId,
@@ -1352,6 +1359,7 @@ export default function YedekParcaTransferPage() {
               ops.push({ type: 'set', ref: doc(collection(db, 'sparePartTransferLogs')), data: withCompanyScope({
                 action: 'transfer_to_personnel',
                 personalStockId: personalStockRef.id,
+                traceId: personalStockRef.id,
                 productCodeId: row.productCodeId,
                 stokKodu: row.stokKodu,
                 stokAdi: row.stokAdi,
@@ -1558,6 +1566,7 @@ export default function YedekParcaTransferPage() {
           const stockRef = doc(collection(db, 'personalStock'));
           stockRefIds.push(stockRef.id);
           batch.set(stockRef, withCompanyScope({
+            traceId: stockRef.id,
             ownerUid: menuSelection.personnelUid,
             ownerName: menuSelection.personnelName,
             productCodeId: '',
@@ -2336,25 +2345,29 @@ export default function YedekParcaTransferPage() {
           });
         }
 
-        // Transfer log
-        const logRef = doc(collection(db, 'sparePartTransferLogs'));
-        transaction.set(logRef, withCompanyScope({
-          action: 'transfer_between_personnel',
-          productCodeId: pTransferItem.productCodeId,
-          stokKodu: pTransferItem.stokKodu,
-          stokAdi: pTransferItem.stokAdi,
-          anaBirim: pTransferItem.anaBirim || 'Adet',
-          serialNumber: pTransferItem.serialNumber || '',
-          quantity: qty,
-          fromUid: pTransferItem.ownerUid,
-          fromName: pTransferItem.ownerName,
-          toUid: pTransferTargetUid,
-          toName: pTransferTargetName,
-          status: 'pending_approval',
-          createdAt: Timestamp.fromDate(now),
-          createdByUid: currentUserProfile?.uid || '',
-          createdByName: currentUserProfile?.name || '',
-        }, currentCompanyId));
+        // Transfer log (her stok kaydı için ayrı log)
+        for (const si of itemsToTransfer) {
+          const logRef = doc(collection(db, 'sparePartTransferLogs'));
+          transaction.set(logRef, withCompanyScope({
+            action: 'transfer_between_personnel',
+            personalStockId: si.id,
+            traceId: (si as any).traceId || si.id,
+            productCodeId: si.productCodeId,
+            stokKodu: si.stokKodu,
+            stokAdi: si.stokAdi,
+            anaBirim: si.anaBirim || 'Adet',
+            serialNumber: si.serialNumber || '',
+            quantity: 1,
+            fromUid: si.ownerUid,
+            fromName: si.ownerName,
+            toUid: pTransferTargetUid,
+            toName: pTransferTargetName,
+            status: 'pending_approval',
+            createdAt: Timestamp.fromDate(now),
+            createdByUid: currentUserProfile?.uid || '',
+            createdByName: currentUserProfile?.name || '',
+          }, currentCompanyId));
+        }
       });
 
       // Notifications
@@ -2424,45 +2437,97 @@ export default function YedekParcaTransferPage() {
     setObservationLogs([]);
 
     try {
+      const normalize = (v?: string) => String(v || '').trim();
+      const serialNumber = normalize(params.serialNumber);
+      const hucreNumarasi = normalize(params.hucreNumarasi);
       const idField = params.scope === 'personal' ? 'personalStockId' : 'poolStockId';
-      const snap = await getDocs(query(
-        collection(db, 'sparePartTransferLogs'),
-        where(idField, '==', params.id),
-      ));
+      const stockCollection = params.scope === 'personal' ? 'personalStock' : 'poolWarehouseStock';
+      const stockSnap = await getDoc(doc(db, stockCollection, params.id));
+      const traceId = stockSnap.exists()
+        ? normalize((stockSnap.data() as any)?.traceId || params.id)
+        : normalize(params.id);
 
-      let logs = snap.docs.map(d => {
-        const data: any = d.data();
+      const toLog = (d: any, source: 'transfer' | 'depo' | 'snapshot') => {
+        const data: any = d.data ? d.data() : d;
         const ts = data.createdAt?.toDate ? data.createdAt.toDate()
           : data.timestamp?.toDate ? data.timestamp.toDate()
+          : data.usedAt?.toDate ? data.usedAt.toDate()
+          : data.approvedAt?.toDate ? data.approvedAt.toDate()
+          : data.requestedAt?.toDate ? data.requestedAt.toDate()
           : new Date();
-        return { id: d.id, ...data, _timestamp: ts };
-      });
+        return { id: d.id || `snapshot-${params.id}`, ...data, _timestamp: ts, _source: source };
+      };
 
-      // Seri/hücre numarası tekil ise bununla da eşleşen kayıtları getir
-      // (bazı eski kayıtlarda personalStockId/poolStockId alanı boş olabilir).
-      if (params.serialNumber || params.hucreNumarasi) {
-        const fallbackField = params.serialNumber ? 'serialNumber' : 'hucreNumarasi';
-        const fallbackValue = params.serialNumber || params.hucreNumarasi || '';
-        if (fallbackValue) {
-          const fallbackSnap = await getDocs(query(
-            collection(db, 'sparePartTransferLogs'),
-            where(fallbackField, '==', fallbackValue),
-          ));
-          const existing = new Set(logs.map(l => l.id));
-          fallbackSnap.docs.forEach(d => {
-            if (existing.has(d.id)) return;
-            const data: any = d.data();
-            // Aynı stok koduna ait olduğundan emin olalım
-            if (params.stokKodu && data.stokKodu && data.stokKodu !== params.stokKodu) return;
-            const ts = data.createdAt?.toDate ? data.createdAt.toDate()
-              : data.timestamp?.toDate ? data.timestamp.toDate()
-              : new Date();
-            logs.push({ id: d.id, ...data, _timestamp: ts });
-          });
-        }
+      const logMap = new Map<string, any>();
+      const pushLogs = (rows: any[]) => {
+        rows.forEach((row) => {
+          const key = `${row._source}:${row.id}`;
+          if (!logMap.has(key)) logMap.set(key, row);
+        });
+      };
+
+      const transferQueries = [
+        query(collection(db, 'sparePartTransferLogs'), where(idField, '==', params.id)),
+      ];
+      if (params.scope === 'personal') {
+        transferQueries.push(query(collection(db, 'sparePartTransferLogs'), where('personalStockDocIds', 'array-contains', params.id)));
+      }
+      if (traceId) transferQueries.push(query(collection(db, 'sparePartTransferLogs'), where('traceId', '==', traceId)));
+      if (serialNumber) transferQueries.push(query(collection(db, 'sparePartTransferLogs'), where('serialNumber', '==', serialNumber)));
+      if (hucreNumarasi) transferQueries.push(query(collection(db, 'sparePartTransferLogs'), where('hucreNumarasi', '==', hucreNumarasi)));
+
+      const depoQueries = [
+        query(collection(db, 'yedekParcaDepoLog'), where('traceId', '==', traceId)),
+      ];
+      if (serialNumber) depoQueries.push(query(collection(db, 'yedekParcaDepoLog'), where('serialNumber', '==', serialNumber)));
+      if (hucreNumarasi) depoQueries.push(query(collection(db, 'yedekParcaDepoLog'), where('hucreNumarasi', '==', hucreNumarasi)));
+
+      for (const qRef of transferQueries) {
+        const snap = await getDocs(qRef);
+        pushLogs(snap.docs.map((d) => toLog(d, 'transfer')));
+      }
+      for (const qRef of depoQueries) {
+        const snap = await getDocs(qRef);
+        pushLogs(snap.docs.map((d) => toLog(d, 'depo')));
       }
 
+      if (stockSnap.exists()) {
+        const stockData: any = stockSnap.data();
+        pushLogs([toLog({
+          ...stockData,
+          id: `snapshot-${params.id}`,
+          action: 'stock_snapshot',
+          notes: stockData.source === 'manual'
+            ? `Stok kaydı manuel açıldı${stockData.createdByName ? ` (${stockData.createdByName})` : ''}.`
+            : `Stok kaydı oluşturuldu${stockData.transferredByName ? ` (${stockData.transferredByName})` : ''}.`,
+          quantity: stockData.quantity || 1,
+          createdAt: stockData.createdAt || Timestamp.now(),
+        }, 'snapshot')]);
+      }
+
+      let logs = Array.from(logMap.values());
       logs = filterByCompanyScope(logs, currentCompanyId, isSuperAdmin);
+
+      const strictLogs = logs.filter((log: any) => {
+        const sameStockDoc = log[idField] === params.id;
+        if (sameStockDoc) return true;
+        if (Array.isArray(log.personalStockDocIds) && log.personalStockDocIds.includes(params.id)) return true;
+        const sameTrace = traceId && normalize(log.traceId) === traceId;
+        if (sameTrace) return true;
+        return false;
+      });
+      if (strictLogs.length > 0) {
+        logs = strictLogs;
+      } else if (serialNumber || hucreNumarasi) {
+        logs = logs.filter((log: any) => {
+          if (serialNumber) return normalize(log.serialNumber) === serialNumber;
+          if (hucreNumarasi) return normalize(log.hucreNumarasi) === hucreNumarasi;
+          return false;
+        });
+      } else {
+        logs = [];
+      }
+
       logs.sort((a: any, b: any) => new Date(a._timestamp).getTime() - new Date(b._timestamp).getTime());
       setObservationLogs(logs);
     } catch (err) {
@@ -2498,6 +2563,7 @@ export default function YedekParcaTransferPage() {
         transaction.set(logRef, withCompanyScope({
           action: 'transfer_approved',
           personalStockId: item.id,
+          traceId: (item as any).traceId || item.id,
           productCodeId: item.productCodeId,
           stokKodu: item.stokKodu,
           stokAdi: item.stokAdi,
@@ -2572,6 +2638,7 @@ export default function YedekParcaTransferPage() {
           transaction.set(logRef, withCompanyScope({
             action: 'transfer_rejected',
             personalStockId: item.id,
+            traceId: (item as any).traceId || item.id,
             productCodeId: item.productCodeId,
             stokKodu: item.stokKodu,
             stokAdi: item.stokAdi,
@@ -3375,8 +3442,6 @@ export default function YedekParcaTransferPage() {
 
   // ========== RENDER: Personnel Stock View ==========
   const renderPersonnelStock = () => {
-    const activeCount = personnelStock.filter(s => s.status === 'in_stock').length;
-    const usedCount = personnelStock.filter(s => s.status === 'used' || s.status === 'pending_return').length;
     const pendingApprovalCount = personnelStock.filter(s => s.status === 'pending_approval').length;
 
     return (
@@ -3389,28 +3454,12 @@ export default function YedekParcaTransferPage() {
                 <UserIcon className="h-5 w-5" />
                 {menuSelection.personnelName} - Yedek Parça Stoku
               </h2>
-              <div className="flex items-center gap-3 mt-1.5">
-                <span className="text-sm" style={{ color: 'var(--dashboard-muted)' }}>
-                  {menuSelection.personnelRole === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'} personeli
-                </span>
-                <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
-                  {activeCount} Aktif
-                </span>
-                <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-muted)' }}>
-                  {usedCount} Kullanıldı
-                </span>
-                {pendingApprovalCount > 0 && (
-                  <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">
-                    {pendingApprovalCount} Onay Bekliyor
-                  </span>
-                )}
-              </div>
-              <div className="mt-2 inline-flex gap-1 p-1 cihaz-pressed" style={{ borderRadius: 12 }}>
+              <div className="mt-2 grid grid-cols-2 gap-1 p-1 cihaz-pressed sm:inline-flex sm:flex-wrap sm:gap-1" style={{ borderRadius: 12 }}>
                 {([
-                  { key: 'all', label: 'Tamamını Göster' },
-                  { key: 'pending_approval', label: `Onayda Bekleyenler (${pendingApprovalCount})` },
-                  { key: 'used', label: 'Kullanılanları Göster' },
-                  { key: 'unused', label: 'Kullanılmayanları Göster' },
+                  { key: 'all', label: 'Tümü' },
+                  { key: 'pending_approval', label: `Onay (${pendingApprovalCount})` },
+                  { key: 'used', label: 'Kullanılan' },
+                  { key: 'unused', label: 'Kullanılmayan' },
                 ] as const).map(option => {
                   const active = personnelStockFilter === option.key;
                   return (
@@ -3773,9 +3822,6 @@ export default function YedekParcaTransferPage() {
 
   // ========== RENDER: Pool Stock View ==========
   const renderPoolStock = () => {
-    const activeCount = poolStock.filter(s => s.status === 'in_stock').length;
-    const usedCount = poolStock.filter(s => s.status === 'used').length;
-
     return (
       <div className="space-y-4">
         {/* Header card */}
@@ -3786,19 +3832,11 @@ export default function YedekParcaTransferPage() {
                 <Database className="h-5 w-5 text-purple-600" />
                 {menuSelection.poolWarehouseName} - Havuz Stok
               </h2>
-              <div className="flex items-center gap-3 mt-1.5">
-                <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
-                  {activeCount} Aktif
-                </span>
-                <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-muted)' }}>
-                  {usedCount} Kullanıldı
-                </span>
-              </div>
-              <div className="mt-2 inline-flex gap-1 p-1 cihaz-pressed" style={{ borderRadius: 12 }}>
+              <div className="mt-2 grid grid-cols-3 gap-1 p-1 cihaz-pressed sm:inline-flex sm:flex-wrap sm:gap-1" style={{ borderRadius: 12 }}>
                 {([
-                  { key: 'all', label: 'Tamamını Göster' },
-                  { key: 'used', label: 'Kullanılanları Göster' },
-                  { key: 'unused', label: 'Kullanılmayanları Göster' },
+                  { key: 'all', label: 'Tümü' },
+                  { key: 'used', label: 'Kullanılan' },
+                  { key: 'unused', label: 'Kullanılmayan' },
                 ] as const).map(option => {
                   const active = poolStockFilter === option.key;
                   return (
@@ -4498,23 +4536,18 @@ export default function YedekParcaTransferPage() {
   }
 
   return (
-    <div className="cihaz-shell px-2 py-3 sm:px-4 sm:py-5 space-y-3 sm:space-y-4" style={{ minHeight: '100dvh' }}>
+    <div className="cihaz-shell px-2 pt-1 pb-3 sm:px-4 sm:py-5 space-y-3 sm:space-y-4" style={{ minHeight: '100dvh' }}>
 
       {/* Header bar */}
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={() => router.push('/direkt-transfer')}
-            className="cihaz-tool-item p-1.5"
-            style={{ borderRadius: 10 }}
-          >
-            <ChevronLeft className="w-4 h-4" style={{ color: 'var(--dashboard-muted)' }} />
-          </button>
-          <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'rgba(245,158,11,.12)' }}>
-            <Package className="w-4 h-4" style={{ color: 'var(--dashboard-accent)' }} />
-          </div>
-          <h1 className="text-base sm:text-lg font-bold" style={{ color: 'var(--dashboard-text)' }}>Yedek Parça Yönetimi</h1>
-        </div>
+        <button
+          onClick={() => router.push('/direkt-transfer')}
+          className="cihaz-tool-item p-1.5"
+          style={{ borderRadius: 10 }}
+          aria-label="Geri"
+        >
+          <ChevronLeft className="w-4 h-4" style={{ color: 'var(--dashboard-muted)' }} />
+        </button>
         <button
           className="md:hidden cihaz-tool-item inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium"
           onClick={() => setMobileMenuOpen(true)}
@@ -4936,7 +4969,7 @@ export default function YedekParcaTransferPage() {
             </div>
           ) : observationLogs.length === 0 ? (
             <div className="text-center py-8 text-sm" style={{ color: 'var(--dashboard-muted)' }}>
-              Bu ürüne ait transfer kaydı bulunamadı.
+              Bu ürüne ait log kaydı bulunamadı.
             </div>
           ) : (
             <div className="space-y-2">
@@ -4957,6 +4990,16 @@ export default function YedekParcaTransferPage() {
                   submit_confirmed: 'Teslim Onaylandı',
                   cancel_usage: 'Kullanım İptali',
                   borrowed_rejected: 'Borç Reddedildi',
+                  borrowed_approved: 'Borç Onaylandı',
+                  transfer_cikis: 'Depodan Çıkış',
+                  iade_giris: 'Depoya Giriş',
+                  stok_duzeltme: 'Depo Stok Düzeltme',
+                  depo_stock_adjusted: 'Depo Stok Ayarlandı',
+                  depo_serial_deleted: 'Depo Seri Kaydı Silindi',
+                  depo_stock_deleted_admin: 'Depo Stok Kaydı Silindi',
+                  personnel_stock_deleted_admin: 'Personel Stok Kaydı Silindi',
+                  pool_stock_deleted_admin: 'Havuz Stok Kaydı Silindi',
+                  stock_snapshot: 'Stok Kaydı Oluşturuldu',
                 };
                 const actionLabel = actionLabelMap[action] || action || 'İşlem';
 
@@ -4964,9 +5007,22 @@ export default function YedekParcaTransferPage() {
                 const whoTo = log.toName || log.poolWarehouseName || log.ownerName || '';
                 const qty = Number(log.quantity) || 1;
                 const notes = String(log.notes || '');
+                const detailRows = [
+                  { label: 'Kaynak', value: log._source === 'depo' ? 'Depo Log' : log._source === 'snapshot' ? 'Stok Kaydı' : 'Transfer Log' },
+                  { label: 'Kimden', value: whoFrom },
+                  { label: 'Hedef', value: whoTo },
+                  { label: 'Transfer Eden', value: log.transferredByName },
+                  { label: 'Onaylayan', value: log.approvedByName },
+                  { label: 'Kullanan', value: log.usedByName || log.borrowedByName },
+                  { label: 'Lab', value: log.labName || log.usedOnLabName },
+                  { label: 'Cihaz', value: log.deviceName || log.usedOnDeviceName },
+                  { label: 'Form', value: log.formId || log.usedOnFormId },
+                  { label: 'Durum', value: log.status || log.approvalStatus },
+                  { label: 'İşlem No', value: log.id },
+                ].filter((row) => row.value);
 
                 return (
-                  <div key={log.id} className="cihaz-card p-3 rounded-xl space-y-1">
+                  <div key={`${log._source || 'log'}-${log.id}`} className="cihaz-card p-3 rounded-xl space-y-1">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-xs font-semibold" style={{ color: 'var(--dashboard-text)' }}>
                         {actionLabel}
@@ -4980,6 +5036,15 @@ export default function YedekParcaTransferPage() {
                       {whoTo && (<span>Hedef: <strong style={{ color: 'var(--dashboard-text)' }}>{whoTo}</strong> · </span>)}
                       <span>Adet: <strong style={{ color: 'var(--dashboard-text)' }}>{qty}</strong></span>
                     </div>
+                    {detailRows.length > 0 && (
+                      <div className="flex flex-wrap gap-x-3 gap-y-1 text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>
+                        {detailRows.map((row) => (
+                          <span key={`${log._source || 'log'}-${log.id}-${row.label}`}>
+                            {row.label}: <strong style={{ color: 'var(--dashboard-text)' }}>{String(row.value)}</strong>
+                          </span>
+                        ))}
+                      </div>
+                    )}
                     {notes && (
                       <p className="text-[11px] italic" style={{ color: 'var(--dashboard-muted)' }}>
                         {notes}
