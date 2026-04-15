@@ -29,6 +29,7 @@ import type { SignaturePadRef } from '@/components/SignaturePad';
 import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
 import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { reserveActionFormNumber } from '@/lib/form-number';
 
 // Operation types (Yapılan İşlem)
 type OperationType =
@@ -1773,6 +1774,13 @@ export default function AplikasyonIslemFormuPage() {
             const formRef = isLabMode
               ? doc(collection(db, 'deviceActionForms'))
               : doc(collection(db, 'aplikasyonActionForms'));
+            const formNo = await reserveActionFormNumber({
+              db,
+              companyId: currentCompanyId,
+              userUid: currentUserProfile?.uid || 'unknown',
+              userName: currentUserProfile?.name || currentUserProfile?.displayName || '',
+              formTypeLetter: 'A',
+            });
             const formData = {
                 deviceId: currentDevice.id,
                 cihazAdi: currentDevice.cihazAdi || currentDevice.model,
@@ -1793,6 +1801,7 @@ export default function AplikasyonIslemFormuPage() {
                 technicianSignature: finalSignatures.technician || null,
                 technicianName: finalTechnicianName || null,
                 createdAt: Timestamp.fromDate(now),
+                formNo,
                 createdByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
                 createdByUid: currentUserProfile?.uid,
                 companyId: currentCompanyId || null,
@@ -2007,6 +2016,13 @@ export default function AplikasyonIslemFormuPage() {
         }
 
         if (isLabMode && labMasterFormRef) {
+            const labMasterFormNo = await reserveActionFormNumber({
+                db,
+                companyId: currentCompanyId,
+                userUid: currentUserProfile?.uid || 'unknown',
+                userName: currentUserProfile?.name || currentUserProfile?.displayName || '',
+                formTypeLetter: 'A',
+            });
             batch.set(labMasterFormRef, {
                 deviceId: `lab-${hospital?.id || hospitalIdFromLab || 'GENEL'}`,
                 cihazAdi: `${hospital?.name || 'Laboratuvar'} (Lab Geneli)`,
@@ -2027,6 +2043,7 @@ export default function AplikasyonIslemFormuPage() {
                 technicianSignature: finalSignatures.technician || null,
                 technicianName: finalTechnicianName || null,
                 createdAt: Timestamp.fromDate(now),
+                formNo: labMasterFormNo,
                 createdByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
                 createdByUid: currentUserProfile?.uid,
                 companyId: currentCompanyId || null,

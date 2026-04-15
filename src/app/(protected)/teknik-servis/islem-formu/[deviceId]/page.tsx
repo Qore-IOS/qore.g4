@@ -29,6 +29,7 @@ import WizardFormShell, { haptic } from '@/components/islem-formu/WizardFormShel
 import type { WizardHeading } from '@/components/islem-formu/WizardFormShell';
 import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { reserveActionFormNumber } from '@/lib/form-number';
 
 // Operation types (Yapılan İşlem)
 type OperationType =
@@ -1820,6 +1821,13 @@ export default function IslemFormuPage() {
           const formRef = isLabMode
             ? doc(collection(db, 'deviceActionForms'))
             : doc(collection(db, 'teknikServisActionForms'));
+          const formNo = await reserveActionFormNumber({
+            db,
+            companyId: currentCompanyId,
+            userUid: currentUserProfile?.uid || 'unknown',
+            userName: currentUserProfile?.name || currentUserProfile?.displayName || '',
+            formTypeLetter: 'T',
+          });
           if (!isLabMode) createdFormIds.push(formRef.id);
 
           const formEntries = {
@@ -1843,6 +1851,7 @@ export default function IslemFormuPage() {
               technicianSignature: finalSignatures.technician || null,
               technicianName: finalTechnicianName || null,
               createdAt: Timestamp.fromDate(now),
+              formNo,
               createdByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
               createdByUid: currentUserProfile?.uid,
               companyId: currentCompanyId || null,
@@ -2063,6 +2072,13 @@ export default function IslemFormuPage() {
         }
 
         if (isLabMode && labMasterFormRef) {
+          const labMasterFormNo = await reserveActionFormNumber({
+            db,
+            companyId: currentCompanyId,
+            userUid: currentUserProfile?.uid || 'unknown',
+            userName: currentUserProfile?.name || currentUserProfile?.displayName || '',
+            formTypeLetter: 'T',
+          });
           batch.set(labMasterFormRef, {
             deviceId: `lab-${hospital?.id || labHospitalId}`,
             cihazAdi: `${hospital?.name || 'Laboratuvar'} (Lab Geneli)`,
@@ -2084,6 +2100,7 @@ export default function IslemFormuPage() {
             technicianSignature: finalSignatures.technician || null,
             technicianName: finalTechnicianName || null,
             createdAt: Timestamp.fromDate(now),
+            formNo: labMasterFormNo,
             createdByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
             createdByUid: currentUserProfile?.uid,
             companyId: currentCompanyId || null,

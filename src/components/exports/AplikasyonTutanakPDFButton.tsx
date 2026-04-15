@@ -312,7 +312,7 @@ export default function AplikasyonTutanakPDFButton({ device, hospital, actionRec
       }
 
       const info = [
-          ['Form No:', actionRecord.id],
+          ['Form No:', actionRecord.formNo || actionRecord.id],
           ['Laboratuvar:', txt(labDisplayName, useTurkish)],
           ['Cihaz:', txt(`${device.cihazAdi} (SN: ${device.seriNumarasi})`, useTurkish)],
           [txt('İşlemi Yapan:', useTurkish), personnelStr],
