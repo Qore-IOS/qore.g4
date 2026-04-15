@@ -674,7 +674,8 @@ export default function ArizaIstatistikleriPage() {
                 variant="outline"
                 role="combobox"
                 aria-expanded={isLabPopoverOpen}
-                className="w-[250px] justify-between"
+                className="w-[250px] justify-between cihaz-tool-item border-0 shadow-none"
+                style={{ color: 'var(--dashboard-text)' }}
               >
                 {selectedLabId === 'all'
                   ? 'Tüm Laboratuvarlar'
@@ -885,34 +886,43 @@ export default function ArizaIstatistikleriPage() {
 
       {/* Fault Type Toggle */}
       <div className="flex justify-center">
-        <div className="inline-flex rounded-lg p-1 bg-muted">
-          <Button
-            variant={selectedFaultType === 'all' ? 'default' : 'ghost'}
-            size="sm"
+        <div className="inline-flex rounded-xl p-1.5 cihaz-pressed">
+          <button
+            type="button"
             onClick={() => setSelectedFaultType('all')}
-            className="gap-2"
+            className="cihaz-tool-item inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-lg transition-all"
+            style={{
+              color: selectedFaultType === 'all' ? 'var(--dashboard-accent)' : 'var(--dashboard-text)',
+              background: selectedFaultType === 'all' ? 'color-mix(in srgb, var(--dashboard-accent) 14%, white)' : undefined,
+            }}
           >
             <Layers className="h-4 w-4" />
             Tümü
-          </Button>
-          <Button
-            variant={selectedFaultType === 'teknik_servis' ? 'default' : 'ghost'}
-            size="sm"
+          </button>
+          <button
+            type="button"
             onClick={() => setSelectedFaultType('teknik_servis')}
-            className="gap-2"
+            className="cihaz-tool-item inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-lg transition-all"
+            style={{
+              color: selectedFaultType === 'teknik_servis' ? 'var(--dashboard-accent)' : 'var(--dashboard-text)',
+              background: selectedFaultType === 'teknik_servis' ? 'color-mix(in srgb, var(--dashboard-accent) 14%, white)' : undefined,
+            }}
           >
             <Wrench className="h-4 w-4" />
             Teknik Servis
-          </Button>
-          <Button
-            variant={selectedFaultType === 'aplikasyon' ? 'default' : 'ghost'}
-            size="sm"
+          </button>
+          <button
+            type="button"
             onClick={() => setSelectedFaultType('aplikasyon')}
-            className="gap-2"
+            className="cihaz-tool-item inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-lg transition-all"
+            style={{
+              color: selectedFaultType === 'aplikasyon' ? 'var(--dashboard-accent)' : 'var(--dashboard-text)',
+              background: selectedFaultType === 'aplikasyon' ? 'color-mix(in srgb, var(--dashboard-accent) 14%, white)' : undefined,
+            }}
           >
             <FlaskConical className="h-4 w-4" />
             Aplikasyon
-          </Button>
+          </button>
         </div>
       </div>
 
@@ -1185,8 +1195,9 @@ export default function ArizaIstatistikleriPage() {
                   <Button
                     variant="outline"
                     role="combobox"
-                    className="w-full justify-between"
+                    className="w-full justify-between cihaz-tool-item border-0 shadow-none"
                     disabled={filteredProducts.length === 0}
+                    style={{ color: 'var(--dashboard-text)' }}
                   >
                     {selectedProduct
                       ? `${selectedProduct.stokKodu} - ${selectedProduct.stokAdi?.substring(0, 30)}...`
@@ -1292,17 +1303,17 @@ export default function ArizaIstatistikleriPage() {
                               </TableCell>
                               <TableCell>
                                 <CollapsibleTrigger asChild>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
+                                  <button
+                                    type="button"
                                     onClick={() => toggleLabExpand(lab.hospitalId)}
+                                    className="cihaz-tool-item inline-flex items-center justify-center h-8 w-8 rounded-lg"
                                   >
                                     {expandedLabs.has(lab.hospitalId) ? (
                                       <ChevronUp className="h-4 w-4" />
                                     ) : (
                                       <ChevronDown className="h-4 w-4" />
                                     )}
-                                  </Button>
+                                  </button>
                                 </CollapsibleTrigger>
                               </TableCell>
                             </TableRow>
