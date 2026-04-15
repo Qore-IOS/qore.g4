@@ -9,6 +9,14 @@ export const EXCHANGE_RATES_CACHE_KEY = 'exchange_rates_cache';
 export const EXCHANGE_RATES_CACHE_TTL = 1000 * 60 * 60; // 1 saat
 export const EXCHANGE_RATES_FALLBACK: ExchangeRates = { EUR: 1, USD: 1.08, TRY: 38.5 };
 
+function getTodayKey(): string {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
 async function fetchFromFreeCurrencyApi(): Promise<ExchangeRates> {
   const params = new URLSearchParams({
     base_currency: 'EUR',
@@ -39,22 +47,37 @@ export async function getExchangeRates(options?: {
   cacheKey?: string;
   ttl?: number;
   useFallback?: boolean;
+  forceRefresh?: boolean;
+  cacheStrategy?: 'ttl' | 'daily';
+  scopeKey?: string;
 }): Promise<ExchangeRates> {
-  const cacheKey = options?.cacheKey || EXCHANGE_RATES_CACHE_KEY;
+  const baseKey = options?.cacheKey || EXCHANGE_RATES_CACHE_KEY;
+  const cacheStrategy = options?.cacheStrategy || 'daily';
+  const scopeKey = options?.scopeKey ? `:${options.scopeKey}` : '';
+  const cacheKey = cacheStrategy === 'daily'
+    ? `${baseKey}:${getTodayKey()}${scopeKey}`
+    : `${baseKey}${scopeKey}`;
   const ttl = options?.ttl ?? EXCHANGE_RATES_CACHE_TTL;
   const useFallback = options?.useFallback ?? true;
+  const forceRefresh = options?.forceRefresh ?? false;
 
-  try {
-    const cached = localStorage.getItem(cacheKey);
-    if (cached) {
-      const { rates, data, timestamp } = JSON.parse(cached);
-      const parsed = rates || data;
-      if (parsed && Date.now() - timestamp < ttl) {
-        return parsed as ExchangeRates;
+  if (!forceRefresh) {
+    try {
+      const cached = localStorage.getItem(cacheKey);
+      if (cached) {
+        const { rates, data, timestamp } = JSON.parse(cached);
+        const parsed = rates || data;
+        if (!parsed) {
+          // ignore
+        } else if (cacheStrategy === 'daily') {
+          return parsed as ExchangeRates;
+        } else if (Date.now() - timestamp < ttl) {
+          return parsed as ExchangeRates;
+        }
       }
+    } catch {
+      // Cache parse hatasında canlı çağrıya düş
     }
-  } catch {
-    // Cache parse hatasında canlı çağrıya düş
   }
 
   try {
@@ -78,10 +101,17 @@ export async function getExchangeRates(options?: {
   }
 }
 
-export async function getTryRateForCurrency(currency: Currency): Promise<number> {
+export async function getTryRateForCurrency(
+  currency: Currency,
+  options?: { forceRefresh?: boolean; scopeKey?: string }
+): Promise<number> {
   if (currency === 'TRY') return 1;
 
-  const rates = await getExchangeRates();
+  const rates = await getExchangeRates({
+    cacheStrategy: 'daily',
+    forceRefresh: options?.forceRefresh,
+    scopeKey: options?.scopeKey,
+  });
   if (currency === 'EUR') return rates.TRY;
   if (currency === 'USD') return rates.TRY / rates.USD;
 

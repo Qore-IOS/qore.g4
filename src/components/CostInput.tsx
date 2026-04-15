@@ -50,7 +50,10 @@ export const CostInput: React.FC<CostInputProps> = ({
           }
         }
       }
-      const r = await getTryRateForCurrency(currency);
+      const r = await getTryRateForCurrency(currency, {
+        forceRefresh,
+        scopeKey: 'cost-input',
+      });
       localStorage.setItem(cacheKey, JSON.stringify({ rate: r, ts: Date.now() }));
       setRate(r);
       toast({ title: "Başarılı", description: "Döviz kuru güncellendi." });

@@ -147,14 +147,14 @@ export default function DashboardPanel({
           }
         });
 
-        const toTry = (amount: number, currency: CostCurrency): number => {
-          if (currency === 'TRY') return amount;
-          if (currency === 'EUR') return amount * exchangeRates.TRY;
-          return amount * (exchangeRates.TRY / exchangeRates.USD);
+        const sumPoolsToTry = (pools: Record<CostCurrency, number>): number => {
+          const eurToTry = exchangeRates.TRY;
+          const usdToTry = exchangeRates.TRY / exchangeRates.USD;
+          return pools.TRY + (pools.EUR * eurToTry) + (pools.USD * usdToTry);
         };
 
         // Toplam maliyet hesapla
-        let total = 0;
+        const totalPools: Record<CostCurrency, number> = { TRY: 0, USD: 0, EUR: 0 };
         const activeStockItems: Array<{ stokKodu: string; lotNumarasi: string; miad: string; depotId: string; quantity: number }> = [];
         const groupedByDepotAndProduct = new Map<string, number>();
 
@@ -162,7 +162,7 @@ export default function DashboardPanel({
           const data = d.data();
           const productCost = costMap.get(data.stokKodu);
           const qty = Number(data.quantity ?? 1) || 1;
-          if (productCost) total += toTry(productCost.cost * qty, productCost.currency);
+          if (productCost) totalPools[productCost.currency] += (productCost.cost * qty);
           // Riskli hesabı için stok bilgisi topla
           activeStockItems.push({
             stokKodu: data.stokKodu,
@@ -176,7 +176,7 @@ export default function DashboardPanel({
           groupedByDepotAndProduct.set(gKey, (groupedByDepotAndProduct.get(gKey) || 0) + qty);
         });
 
-        setTotalStockCost(total);
+        setTotalStockCost(sumPoolsToTry(totalPools));
 
         // Riskli maliyet: tüm depolardan minMaxRules çek
         const depotIds = depotDocs.map((d) => d.id);
@@ -207,7 +207,7 @@ export default function DashboardPanel({
         });
 
         // Her lot grubu için riskli kutu hesabı
-        let totalRiskyCost = 0;
+        const riskyPools: Record<CostCurrency, number> = { TRY: 0, USD: 0, EUR: 0 };
         lotGroups.forEach((group) => {
           const ruleKey = `${group.depotId}__${group.stokKodu}`;
           const rule = allMinMaxRules.get(ruleKey);
@@ -235,10 +235,10 @@ export default function DashboardPanel({
           const riskyBoxes = Math.min(Math.max(0, Math.ceil(riskyDays * dailyNeed)), group.quantity);
           const productCost = costMap.get(group.stokKodu);
           if (!productCost) return;
-          totalRiskyCost += toTry(riskyBoxes * productCost.cost, productCost.currency);
+          riskyPools[productCost.currency] += riskyBoxes * productCost.cost;
         });
 
-        setRiskyCost(totalRiskyCost);
+        setRiskyCost(sumPoolsToTry(riskyPools));
       } catch (err) {
         console.error('[Dashboard] getTotalStockCost error:', err);
         setTotalStockCost(0);
