@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -863,7 +863,10 @@ function ComparisonView({
 
 export default function PersonelIzlemPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const isMineMode = searchParams?.get('mine') === '1';
   const { currentUserProfile, isAdmin } = useAuth();
+  const myUid = currentUserProfile?.uid;
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [performances, setPerformances] = useState<PersonnelPerformance[]>([]);
@@ -925,13 +928,22 @@ export default function PersonelIzlemPage() {
   };
 
   useEffect(() => {
-    if (!isAdmin) {
+    if (!isAdmin && !(isMineMode && myUid)) {
       setLoading(false);
       return;
     }
 
     loadPerformanceData();
-  }, [isAdmin]);
+  }, [isAdmin, isMineMode, myUid]);
+
+  // In self-view mode, pin the selected personnel to the current user
+  useEffect(() => {
+    if (isMineMode && myUid) {
+      setSelectedPersonnelId(myUid);
+      setIsCompareMode(false);
+      setComparePersonnelId('');
+    }
+  }, [isMineMode, myUid, performances]);
 
   const handleApplyFilters = async () => {
     setIsFiltering(true);
@@ -1071,13 +1083,48 @@ export default function PersonelIzlemPage() {
     );
   }
 
-  if (!isAdmin) {
+  if (!isAdmin && !(isMineMode && myUid)) {
     return (
       <div className="p-6 text-center">
         <h2 className="text-xl font-bold text-destructive">Yetkisiz Erişim</h2>
         <p className="text-muted-foreground mt-2">
           Bu sayfaya sadece yöneticiler erişebilir.
         </p>
+      </div>
+    );
+  }
+
+  // Self-view: own performance only, no filters / personnel picker / compare
+  if (isMineMode && myUid) {
+    const mine = performances.find((p) => p.user.uid === myUid) || null;
+    return (
+      <div className="device-module-page p-4 space-y-6">
+        <BackButton fallback="/cihaz-yonetimi-ana" />
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <UserCircle className="h-6 w-6" />
+              Performansım
+            </CardTitle>
+            <CardDescription>
+              Kendi performans metrikleriniz ve puanınız.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {mine ? (
+              <DetailedKPICard
+                performance={mine}
+                onCompare={() => { /* no compare in self view */ }}
+                showCompareButton={false}
+              />
+            ) : (
+              <div className="text-center py-12 text-muted-foreground">
+                <Users className="h-12 w-12 mx-auto mb-4 opacity-20" />
+                <p>Henüz sizin için hesaplanmış performans verisi bulunmuyor.</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     );
   }

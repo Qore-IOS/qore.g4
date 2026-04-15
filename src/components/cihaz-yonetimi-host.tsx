@@ -22,7 +22,7 @@ import { db } from '@/lib/firebase';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import QoreAIPanel from '@/components/QoreAIPanel';
-import { QoreTechnicBrandMark } from '@/components/qore-technic-shell';
+import { QoreTechnicBrandMark, QoreTechnicProfileButton } from '@/components/qore-technic-shell';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -497,10 +497,27 @@ export default function CihazYonetimiHost() {
             <School className="h-4 w-4" />
             Eğitimdeyim
           </button>
-          <button type="button" className="qt-status-btn qt-status-btn--ai" onClick={() => setIsQoreAIPanelOpen(true)}>
-            <Sparkles className="h-4 w-4" />
-            Qore AI
-          </button>
+          {(() => {
+            const role = currentUserProfile?.role;
+            const isFieldUser = role === 'teknik_servis' || role === 'aplikasyon';
+            if (isFieldUser) {
+              return (
+                <>
+                  <button type="button" className="qt-status-btn qt-status-btn--ai hidden md:inline-flex" onClick={() => setIsQoreAIPanelOpen(true)}>
+                    <Sparkles className="h-4 w-4" />
+                    Qore AI
+                  </button>
+                  <QoreTechnicProfileButton className="md:hidden" />
+                </>
+              );
+            }
+            return (
+              <button type="button" className="qt-status-btn qt-status-btn--ai" onClick={() => setIsQoreAIPanelOpen(true)}>
+                <Sparkles className="h-4 w-4" />
+                Qore AI
+              </button>
+            );
+          })()}
         </div>
       </div>
 
