@@ -3375,8 +3375,6 @@ export default function YedekParcaTransferPage() {
 
   // ========== RENDER: Personnel Stock View ==========
   const renderPersonnelStock = () => {
-    const activeCount = personnelStock.filter(s => s.status === 'in_stock').length;
-    const usedCount = personnelStock.filter(s => s.status === 'used' || s.status === 'pending_return').length;
     const pendingApprovalCount = personnelStock.filter(s => s.status === 'pending_approval').length;
 
     return (
@@ -3389,28 +3387,12 @@ export default function YedekParcaTransferPage() {
                 <UserIcon className="h-5 w-5" />
                 {menuSelection.personnelName} - Yedek Parça Stoku
               </h2>
-              <div className="flex items-center gap-3 mt-1.5">
-                <span className="text-sm" style={{ color: 'var(--dashboard-muted)' }}>
-                  {menuSelection.personnelRole === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'} personeli
-                </span>
-                <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
-                  {activeCount} Aktif
-                </span>
-                <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-muted)' }}>
-                  {usedCount} Kullanıldı
-                </span>
-                {pendingApprovalCount > 0 && (
-                  <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">
-                    {pendingApprovalCount} Onay Bekliyor
-                  </span>
-                )}
-              </div>
-              <div className="mt-2 inline-flex gap-1 p-1 cihaz-pressed" style={{ borderRadius: 12 }}>
+              <div className="mt-2 grid grid-cols-2 gap-1 p-1 cihaz-pressed sm:inline-flex sm:flex-wrap sm:gap-1" style={{ borderRadius: 12 }}>
                 {([
-                  { key: 'all', label: 'Tamamını Göster' },
-                  { key: 'pending_approval', label: `Onayda Bekleyenler (${pendingApprovalCount})` },
-                  { key: 'used', label: 'Kullanılanları Göster' },
-                  { key: 'unused', label: 'Kullanılmayanları Göster' },
+                  { key: 'all', label: 'Tümü' },
+                  { key: 'pending_approval', label: `Onay (${pendingApprovalCount})` },
+                  { key: 'used', label: 'Kullanılan' },
+                  { key: 'unused', label: 'Kullanılmayan' },
                 ] as const).map(option => {
                   const active = personnelStockFilter === option.key;
                   return (
@@ -3773,9 +3755,6 @@ export default function YedekParcaTransferPage() {
 
   // ========== RENDER: Pool Stock View ==========
   const renderPoolStock = () => {
-    const activeCount = poolStock.filter(s => s.status === 'in_stock').length;
-    const usedCount = poolStock.filter(s => s.status === 'used').length;
-
     return (
       <div className="space-y-4">
         {/* Header card */}
@@ -3786,19 +3765,11 @@ export default function YedekParcaTransferPage() {
                 <Database className="h-5 w-5 text-purple-600" />
                 {menuSelection.poolWarehouseName} - Havuz Stok
               </h2>
-              <div className="flex items-center gap-3 mt-1.5">
-                <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
-                  {activeCount} Aktif
-                </span>
-                <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full" style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-muted)' }}>
-                  {usedCount} Kullanıldı
-                </span>
-              </div>
-              <div className="mt-2 inline-flex gap-1 p-1 cihaz-pressed" style={{ borderRadius: 12 }}>
+              <div className="mt-2 grid grid-cols-3 gap-1 p-1 cihaz-pressed sm:inline-flex sm:flex-wrap sm:gap-1" style={{ borderRadius: 12 }}>
                 {([
-                  { key: 'all', label: 'Tamamını Göster' },
-                  { key: 'used', label: 'Kullanılanları Göster' },
-                  { key: 'unused', label: 'Kullanılmayanları Göster' },
+                  { key: 'all', label: 'Tümü' },
+                  { key: 'used', label: 'Kullanılan' },
+                  { key: 'unused', label: 'Kullanılmayan' },
                 ] as const).map(option => {
                   const active = poolStockFilter === option.key;
                   return (
@@ -4498,23 +4469,18 @@ export default function YedekParcaTransferPage() {
   }
 
   return (
-    <div className="cihaz-shell px-2 py-3 sm:px-4 sm:py-5 space-y-3 sm:space-y-4" style={{ minHeight: '100dvh' }}>
+    <div className="cihaz-shell px-2 pt-1 pb-3 sm:px-4 sm:py-5 space-y-3 sm:space-y-4" style={{ minHeight: '100dvh' }}>
 
       {/* Header bar */}
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={() => router.push('/direkt-transfer')}
-            className="cihaz-tool-item p-1.5"
-            style={{ borderRadius: 10 }}
-          >
-            <ChevronLeft className="w-4 h-4" style={{ color: 'var(--dashboard-muted)' }} />
-          </button>
-          <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'rgba(245,158,11,.12)' }}>
-            <Package className="w-4 h-4" style={{ color: 'var(--dashboard-accent)' }} />
-          </div>
-          <h1 className="text-base sm:text-lg font-bold" style={{ color: 'var(--dashboard-text)' }}>Yedek Parça Yönetimi</h1>
-        </div>
+        <button
+          onClick={() => router.push('/direkt-transfer')}
+          className="cihaz-tool-item p-1.5"
+          style={{ borderRadius: 10 }}
+          aria-label="Geri"
+        >
+          <ChevronLeft className="w-4 h-4" style={{ color: 'var(--dashboard-muted)' }} />
+        </button>
         <button
           className="md:hidden cihaz-tool-item inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium"
           onClick={() => setMobileMenuOpen(true)}
