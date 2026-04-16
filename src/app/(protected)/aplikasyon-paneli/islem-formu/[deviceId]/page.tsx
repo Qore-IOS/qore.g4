@@ -14,7 +14,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, FileText, Cog, Camera, ImageIcon, X, Package, AlertTriangle, Clock, PauseCircle, ChevronLeft, Building2 } from 'lucide-react';
+import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, FileText, Cog, Camera, ImageIcon, X, Package, AlertTriangle, Clock, PauseCircle, ChevronLeft, Building2, Download, Upload } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
 import WizardFormShell, { haptic } from '@/components/islem-formu/WizardFormShell';
 import type { WizardHeading } from '@/components/islem-formu/WizardFormShell';
@@ -147,6 +147,26 @@ const ALL_OPERATIONS: OperationType[] = [
   'cv_calismasi',
   'diger',
 ];
+
+type ExcelImportRow = {
+  baslangicTarihi: string;
+  baslangicSaati: string;
+  bitisTarihi: string;
+  bitisSaati: string;
+  islemTuru: IslemTuru;
+  aciklama: string;
+  cihazDurumu: CihazDurumu;
+  cihazDurumuAciklama: string;
+  yapilanIslemler: string[];
+  selectedFaultName: string;
+  yedekParcaKodu: string;
+  yedekParcaAdi: string;
+  yedekParcaSeriNo: string;
+  yedekParcaAdet: number;
+  cikanParcaKodu: string;
+  cikanParcaAdi: string;
+  cikanParcaSeriNo: string;
+};
 
 export default function AplikasyonIslemFormuPage() {
   const params = useParams();
@@ -2088,6 +2108,138 @@ export default function AplikasyonIslemFormuPage() {
     return OPERATION_LABELS[item.action as OperationType] || item.action;
   };
 
+  const downloadExcelTemplate = async () => {
+    try {
+      const XLSX = await import('xlsx');
+      const today = new Date();
+      const rows = [[
+        'Başlangıç Tarihi', 'Başlangıç Saati', 'Bitiş Tarihi', 'Bitiş Saati',
+        'İşlem Türü', 'Yapılan İşlemler (virgülle)', 'Açıklama',
+        'Cihaz Durumu', 'Cihaz Durumu Açıklama', 'Arıza Adı (opsiyonel)',
+        'Yedek Parça Kodu', 'Yedek Parça Adı', 'Yedek Parça Seri No (opsiyonel)', 'Yedek Parça Adet',
+        'Çıkan Parça Kodu', 'Çıkan Parça Adı', 'Çıkan Parça Seri No',
+      ], [
+        today, '09:00', today, '10:00',
+        'rutin_kurum_ziyareti', 'aplikasyon_kontrol', 'Excel ile geçmiş aplikasyon form girişi',
+        'calisiyor', '', '',
+        'SERBEST-KOD', 'Serbest Yedek Parça', '', 1, '', '', '',
+      ]];
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      ws['A2'].z = 'yyyy-mm-dd';
+      ws['C2'].z = 'yyyy-mm-dd';
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'AplikasyonForm');
+      const optionsRows = [
+        ['Alan', 'Kod', 'Görünen Ad'],
+        ...(['rutin_kurum_ziyareti', 'periyodik_bakim', 'ariza', 'alis', 'roche_bilgisayar_arizasi', 'diger'] as IslemTuru[]).map((v) => ['İşlem Türü', v, ISLEM_TURU_LABELS[v]]),
+        ...ALL_OPERATIONS.map((v) => ['Yapılan İşlem', v, OPERATION_LABELS[v]]),
+        ...(['calisiyor', 'arizali', 'denemede', 'diger'] as CihazDurumu[]).map((v) => ['Cihaz Durumu', v, CIHAZ_DURUMU_LABELS[v]]),
+      ];
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(optionsRows), 'Secenekler');
+      XLSX.writeFile(wb, `aplikasyon_form_sablon_${format(new Date(), 'yyyyMMdd_HHmm')}.xlsx`);
+      toast({ title: 'Şablon indirildi', description: 'Aplikasyon Excel şablonu indirildi.' });
+    } catch (err) {
+      console.error('Error creating excel template:', err);
+      toast({ title: 'Hata', description: 'Excel şablonu oluşturulamadı.', variant: 'destructive' });
+    }
+  };
+
+  const handleExcelUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    try {
+      const XLSX = await import('xlsx');
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+      const ws = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json<Record<string, any>>(ws, { defval: '', raw: false });
+      if (rows.length === 0) {
+        toast({ title: 'Uyarı', description: 'Excel dosyasında satır bulunamadı.', variant: 'default' });
+        return;
+      }
+      const batch = writeBatch(db);
+      let successCount = 0;
+      let failCount = 0;
+      for (const row of rows) {
+        const islemTur = String(row['İşlem Türü'] ?? '').trim() as IslemTuru;
+        const cihazDur = String(row['Cihaz Durumu'] ?? '').trim() as CihazDurumu;
+        if (!islemTur || !cihazDur || !String(row['Başlangıç Tarihi'] ?? '').trim() || !String(row['Bitiş Tarihi'] ?? '').trim()) {
+          failCount += 1;
+          continue;
+        }
+        const formRef = doc(collection(db, 'aplikasyonActionForms'));
+        const formNo = await reserveActionFormNumber({
+          db,
+          companyId: currentCompanyId,
+          userUid: currentUserProfile?.uid || 'unknown',
+          userName: currentUserProfile?.name || currentUserProfile?.displayName || '',
+          formTypeLetter: 'A',
+        });
+        const actionsFromExcel: ActionItem[] = String(row['Yapılan İşlemler (virgülle)'] ?? '')
+          .split(',')
+          .map((v) => v.trim())
+          .filter(Boolean)
+          .map((operation) => ({
+            id: `excel_op_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            type: 'operation',
+            action: operation,
+            quantity: 1,
+            isManualEntry: true,
+          }));
+        if (String(row['Yedek Parça Kodu'] ?? '').trim() || String(row['Yedek Parça Adı'] ?? '').trim()) {
+          actionsFromExcel.push({
+            id: `excel_part_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+            type: 'part_change',
+            action: 'parca_degisimi',
+            stokKodu: String(row['Yedek Parça Kodu'] ?? '').trim(),
+            stokAdi: String(row['Yedek Parça Adı'] ?? '').trim(),
+            serialNumber: String(row['Yedek Parça Seri No (opsiyonel)'] ?? '').trim() || undefined,
+            quantity: Math.max(1, Number(row['Yedek Parça Adet'] ?? 1) || 1),
+            isManualEntry: true,
+            removedPartStokKodu: String(row['Çıkan Parça Kodu'] ?? '').trim() || undefined,
+            removedPartStokAdi: String(row['Çıkan Parça Adı'] ?? '').trim() || undefined,
+            removedPartSerialNumber: String(row['Çıkan Parça Seri No'] ?? '').trim() || undefined,
+          });
+        }
+        const payload = {
+          deviceId: device?.id || actualDeviceId,
+          cihazAdi: device?.cihazAdi || device?.model,
+          seriNumarasi: device?.seriNumarasi,
+          hospitalId: device?.hospitalId,
+          labName: hospital?.name,
+          actions: actionsFromExcel,
+          islemTuru: islemTur,
+          aciklama: String(row['Açıklama'] ?? '').trim(),
+          baslangicSaati: String(row['Başlangıç Saati'] ?? '').trim(),
+          bitisSaati: String(row['Bitiş Saati'] ?? '').trim(),
+          baslangicTarihi: String(row['Başlangıç Tarihi'] ?? '').trim(),
+          bitisTarihi: String(row['Bitiş Tarihi'] ?? '').trim(),
+          cihazDurumu: cihazDur,
+          cihazDurumuAciklama: cihazDur === 'diger' ? String(row['Cihaz Durumu Açıklama'] ?? '').trim() : null,
+          selectedFaultName: String(row['Arıza Adı (opsiyonel)'] ?? '').trim() || null,
+          selectedFaultId: null,
+          isCustomFault: !!String(row['Arıza Adı (opsiyonel)'] ?? '').trim(),
+          createdAt: serverTimestamp(),
+          formNo,
+          createdByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+          createdByUid: currentUserProfile?.uid || null,
+          companyId: currentCompanyId || null,
+          formType: 'aplikasyon',
+          importedFromExcel: true,
+        };
+        batch.set(formRef, payload);
+        batch.set(doc(collection(db, 'deviceActionForms'), formRef.id), payload);
+        successCount += 1;
+      }
+      if (successCount > 0) await batch.commit();
+      toast({ title: 'Excel içe aktarma tamamlandı', description: `Başarılı satır: ${successCount} • Başarısız satır: ${failCount}` });
+    } catch (err) {
+      console.error('Error importing excel forms:', err);
+      toast({ title: 'Hata', description: 'Excel yüklenirken hata oluştu.', variant: 'destructive' });
+    }
+  };
+
   const updateActionQuantity = (id: string, quantity: number) => {
     setActions(prev => prev.map(a => a.id === id ? { ...a, quantity } : a));
   };
@@ -3096,6 +3248,21 @@ export default function AplikasyonIslemFormuPage() {
             <History size={16} />
           </button>
         </header>
+        <div className="px-3 pt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="wizard-btn wizard-btn-secondary !py-2 !px-3 !text-xs"
+            onClick={downloadExcelTemplate}
+          >
+            <Download className="h-3.5 w-3.5 mr-1" />
+            Aplikasyon Excel Şablonu
+          </button>
+          <label className="wizard-btn wizard-btn-secondary !py-2 !px-3 !text-xs cursor-pointer">
+            <Upload className="h-3.5 w-3.5 mr-1" />
+            Excel'den Form Yükle
+            <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleExcelUpload} />
+          </label>
+        </div>
 
         {/* Wizard Form Body */}
         <WizardFormShell
