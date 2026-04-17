@@ -39,7 +39,7 @@ type OperationType =
   | 'pipetleme_transfer_ayarlari';
 
 // İşlem Tipi
-type IslemTipi = 'cihaz' | 'ups' | 'su_sistemi' | '';
+type IslemTipi = 'cihaz' | 'ups' | 'su_sistemi' | 'egitim' | '';
 
 // İşlem Türü
 type IslemTuru = 'rutin_kurum_ziyareti' | 'periyodik_bakim' | 'cihaz_kurulumu' | 'ariza' | 'sw_update' | 'alis' | 'roche_bilgisayar_arizasi' | '';
@@ -127,6 +127,7 @@ const ISLEM_TIPI_LABELS: Record<IslemTipi, string> = {
   cihaz: 'Cihaz',
   ups: 'UPS',
   su_sistemi: 'Su Sistemi',
+  egitim: 'Eğitim',
 };
 
 const ISLEM_TURU_LABELS: Record<IslemTuru, string> = {
@@ -275,6 +276,11 @@ export default function IslemFormuPage() {
   const [availableTests, setAvailableTests] = useState<string[]>([]);
   const [selectedTests, setSelectedTests] = useState<string[]>([]);
   const [isTestModalOpen, setIsTestModalOpen] = useState(false);
+
+  // Eğitim fields (optional; shown when islemTipi === 'egitim')
+  const [egitimIcerigi, setEgitimIcerigi] = useState<string>('');
+  const [egitimKatilanlar, setEgitimKatilanlar] = useState<{ uid: string; name: string; role: string }[]>([]);
+  const [egitimKatilanSearch, setEgitimKatilanSearch] = useState<string>('');
 
   // Fetch device and hospital
   useEffect(() => {
@@ -1555,12 +1561,12 @@ export default function IslemFormuPage() {
       return;
     }
 
-    // Validate işlem tipi and türü
+    // Validate işlem tipi and türü (işlem türü not required for eğitim)
     if (!islemTipi) {
       toast({ title: 'Eksik Bilgi', description: 'Lütfen işlem tipini seçin.', variant: 'destructive' });
       return;
     }
-    if (!islemTuru) {
+    if (islemTipi !== 'egitim' && !islemTuru) {
       toast({ title: 'Eksik Bilgi', description: 'Lütfen işlem türünü seçin.', variant: 'destructive' });
       return;
     }
@@ -1852,6 +1858,8 @@ export default function IslemFormuPage() {
               selectedFaultName: resolvedFaultName,
               isCustomFault: isCustomFault || false,
               selectedTests: islemTuru === 'ariza' && selectedTests.length > 0 ? selectedTests : null,
+              egitimIcerigi: islemTipi === 'egitim' && egitimIcerigi.trim() ? egitimIcerigi.trim() : null,
+              egitimKatilanlar: islemTipi === 'egitim' && egitimKatilanlar.length > 0 ? egitimKatilanlar : null,
               draftActionLogs: draftActionLogs.length > 0 ? draftActionLogs.map(log => ({
                 ...log,
                 timestamp: log.timestamp instanceof Date ? Timestamp.fromDate(log.timestamp) : log.timestamp,
@@ -2093,6 +2101,8 @@ export default function IslemFormuPage() {
             selectedFaultName: null,
             isCustomFault: false,
             selectedTests: islemTuru === 'ariza' && selectedTests.length > 0 ? selectedTests : null,
+            egitimIcerigi: islemTipi === 'egitim' && egitimIcerigi.trim() ? egitimIcerigi.trim() : null,
+            egitimKatilanlar: islemTipi === 'egitim' && egitimKatilanlar.length > 0 ? egitimKatilanlar : null,
             isBulkLabForm: true,
             isLabDeviceChild: false,
             labDeviceActionSummaries,
@@ -2151,8 +2161,9 @@ export default function IslemFormuPage() {
       id: 'islem_turu',
       label: 'İŞLEM TÜRÜ',
       inline: true,
-      isComplete: !!islemTuru,
-      completedSublabel: islemTuru ? ISLEM_TURU_LABELS[islemTuru] : undefined,
+      // İşlem Türü eğitim için geçerli değil; o durumda otomatik tamamlanmış kabul edilir
+      isComplete: islemTipi === 'egitim' ? true : !!islemTuru,
+      completedSublabel: islemTipi === 'egitim' ? 'Geçerli değil' : (islemTuru ? ISLEM_TURU_LABELS[islemTuru] : undefined),
     },
     {
       id: 'tarih_saat',
@@ -2208,15 +2219,97 @@ export default function IslemFormuPage() {
       case 'islem_tipi':
         return (
           <div className="wizard-option-list">
-            {(['cihaz', 'ups', 'su_sistemi'] as IslemTipi[]).map(tip => (
-              <button
-                key={tip}
-                className={`wizard-option-item ${islemTipi === tip ? 'selected' : ''}`}
-                onClick={() => { setIslemTipi(tip); goBack(); }}
-              >
-                {ISLEM_TIPI_LABELS[tip]}
-              </button>
-            ))}
+            {(['cihaz', 'ups', 'su_sistemi', 'egitim'] as IslemTipi[]).map(tip => {
+              const hasSubFields = tip === 'egitim';
+              return (
+                <React.Fragment key={tip}>
+                  <button
+                    className={`wizard-option-item ${islemTipi === tip ? 'selected' : ''}`}
+                    onClick={() => {
+                      setIslemTipi(tip);
+                      if (!hasSubFields) goBack();
+                    }}
+                  >
+                    {ISLEM_TIPI_LABELS[tip]}
+                  </button>
+
+                  {/* Eğitim sub-fields shown inline below the eğitim option */}
+                  {tip === 'egitim' && islemTipi === 'egitim' && (
+                    <div style={{ margin: '8px 24px 16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+                      <div>
+                        <label style={{ color: 'rgba(255,255,255,0.8)', fontSize: '14px', fontWeight: 500, display: 'block', marginBottom: '8px' }}>
+                          Eğitim İçeriği (Opsiyonel)
+                        </label>
+                        <Textarea
+                          placeholder="Verilen eğitimin konusu, kapsamı ve notları..."
+                          value={egitimIcerigi}
+                          onChange={(e) => setEgitimIcerigi(e.target.value)}
+                          className="wizard-dark-select bg-white/10 border-white/20 text-white min-h-[96px]"
+                        />
+                      </div>
+                      <div>
+                        <label style={{ color: 'rgba(255,255,255,0.8)', fontSize: '14px', fontWeight: 500, display: 'block', marginBottom: '8px' }}>
+                          Eğitime Katılan Personeller (Opsiyonel)
+                        </label>
+                        <div style={{ position: 'relative', marginBottom: '8px' }}>
+                          <Search style={{ position: 'absolute', left: '12px', top: '10px', width: '16px', height: '16px', color: 'var(--wz-text-secondary)' }} />
+                          <input
+                            type="text"
+                            placeholder="Personel ara..."
+                            value={egitimKatilanSearch}
+                            onChange={(e) => setEgitimKatilanSearch(e.target.value)}
+                            style={{ paddingLeft: '36px', background: 'var(--wz-input-bg)', border: '1px solid var(--wz-input-border)', color: 'var(--wz-text)', borderRadius: '12px', padding: '8px 14px 8px 36px', fontSize: '14px', width: '100%', outline: 'none' }}
+                          />
+                        </div>
+                        <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid var(--wz-border)', borderRadius: '12px' }}>
+                          {allUsers
+                            .filter(u => u.uid !== currentUserProfile?.uid)
+                            .filter(u => {
+                              const q = egitimKatilanSearch.trim().toLowerCase();
+                              if (!q) return true;
+                              return (u.name || '').toLowerCase().includes(q) || (u.email || '').toLowerCase().includes(q);
+                            })
+                            .map(user => {
+                              const selected = egitimKatilanlar.some(p => p.uid === user.uid);
+                              return (
+                                <div
+                                  key={user.uid}
+                                  onClick={() => {
+                                    setEgitimKatilanlar(prev =>
+                                      prev.some(p => p.uid === user.uid)
+                                        ? prev.filter(p => p.uid !== user.uid)
+                                        : [...prev, { uid: user.uid, name: user.name || '', role: user.role || '' }]
+                                    );
+                                  }}
+                                  style={{
+                                    padding: '10px 12px', cursor: 'pointer',
+                                    borderBottom: '1px solid var(--wz-table-border)',
+                                    background: selected ? 'var(--wz-selected-bg)' : 'transparent',
+                                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                  }}
+                                >
+                                  <div>
+                                    <div style={{ fontSize: '14px', fontWeight: 500, color: 'var(--wz-text)' }}>{user.name}</div>
+                                    <div style={{ fontSize: '11px', color: 'var(--wz-text-secondary)' }}>{user.email} · {user.role}</div>
+                                  </div>
+                                  {selected && (
+                                    <span style={{ fontSize: '11px', color: 'var(--wz-accent)', fontWeight: 600 }}>Seçildi</span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                        </div>
+                        {egitimKatilanlar.length > 0 && (
+                          <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--wz-text-secondary)' }}>
+                            Seçilen: {egitimKatilanlar.map(p => p.name).join(', ')}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </React.Fragment>
+              );
+            })}
           </div>
         );
 
@@ -2763,6 +2856,17 @@ export default function IslemFormuPage() {
                 {isUploadingImage ? <><Loader2 className="h-4 w-4 animate-spin" />Yükleniyor...</> : 'EKLE'}
               </button>
             )}
+
+            {/* Confirm & return — available once at least one part has been added */}
+            {actions.some(a => a.type === 'part_change') && (
+              <button
+                className="wizard-btn wizard-btn-primary"
+                onClick={goBack}
+                style={{ width: '100%', marginTop: '10px' }}
+              >
+                Onayla
+              </button>
+            )}
           </div>
         );
 
@@ -2994,6 +3098,17 @@ export default function IslemFormuPage() {
               <button className="wizard-btn-main" onClick={addHucreRow} style={{ marginTop: 0 }}>+ Satır Ekle</button>
               <button className="wizard-btn-main" onClick={saveHucreDegisimiRows} style={{ marginTop: 0 }}>Hücre Değişim Bilgilerini Kaydet</button>
             </div>
+
+            {/* Confirm & return — available once at least one hücre change has been saved */}
+            {actions.some(a => a.type === 'hucre_degisimi') && (
+              <button
+                className="wizard-btn wizard-btn-primary"
+                onClick={goBack}
+                style={{ width: '100%', marginTop: '10px' }}
+              >
+                Onayla
+              </button>
+            )}
           </div>
         );
       }
@@ -3103,6 +3218,16 @@ export default function IslemFormuPage() {
           <span className="value">{actions.filter(a => a.type === 'hucre_degisimi').length} hücre</span>
         </div>
       )}
+      {islemTipi === 'egitim' && (egitimIcerigi.trim() || egitimKatilanlar.length > 0) && (
+        <div className="wizard-save-summary-item">
+          <span className="label">Eğitim</span>
+          <span className="value">
+            {egitimKatilanlar.length > 0 ? `${egitimKatilanlar.length} katılımcı` : ''}
+            {egitimKatilanlar.length > 0 && egitimIcerigi.trim() ? ' · ' : ''}
+            {egitimIcerigi.trim() ? (egitimIcerigi.trim().length > 40 ? egitimIcerigi.trim().substring(0, 40) + '…' : egitimIcerigi.trim()) : ''}
+          </span>
+        </div>
+      )}
       <div className="wizard-save-summary-item">
         <span className="label">Yapılan İşlem</span>
         <span className="value">{actions.filter(a => a.type === 'operation').length} işlem</span>
@@ -3116,7 +3241,7 @@ export default function IslemFormuPage() {
         <button
           className="wizard-btn wizard-btn-primary"
           onClick={startSaveProcess}
-          disabled={isSaving || actions.length === 0}
+          disabled={isSaving || (islemTipi !== 'egitim' && actions.length === 0)}
         >
           {isSaving ? 'Kaydediliyor...' : 'Onayla ve Kaydet'}
         </button>
@@ -3181,7 +3306,7 @@ export default function IslemFormuPage() {
           onSave={startSaveProcess}
           isSaving={isSaving}
           isSavingDraft={isSavingDraft}
-          saveDisabled={isSaving || actions.length === 0}
+          saveDisabled={isSaving || (islemTipi !== 'egitim' && actions.length === 0)}
           useGrid={true}
         />
       </div>
