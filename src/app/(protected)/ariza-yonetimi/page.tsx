@@ -484,9 +484,16 @@ export default function ArizaYonetimiPage() {
                               const normalized = normalizeStatus(report.status);
                               const config = STATUS_CONFIG[normalized];
                               return (
-                                <Badge variant={config.variant} className={`flex items-center gap-1 ${config.className}`}>
-                                  {config.icon} {config.label}
-                                </Badge>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant={config.variant} className={`flex items-center gap-1 ${config.className}`}>
+                                    {config.icon} {config.label}
+                                  </Badge>
+                                  {normalized === 'atama_bekliyor' && report.faultType && (
+                                    <Badge variant="outline" className={report.faultType === 'teknik_servis' ? 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/20 dark:text-blue-400 dark:border-blue-800' : 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-900/20 dark:text-purple-400 dark:border-purple-800'}>
+                                      {report.faultType === 'teknik_servis' ? 'Teknik Servis' : report.faultType === 'aplikasyon' ? 'Aplikasyon' : report.faultType}
+                                    </Badge>
+                                  )}
+                                </div>
                               );
                             })()}
                           </TableCell>
