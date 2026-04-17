@@ -21,8 +21,7 @@ import {
   Gauge,
   X,
 } from 'lucide-react';
-import { signOut } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
+
 
 interface NavItem {
   key: string;
@@ -79,7 +78,7 @@ export function QoreTechnicBrandMark(props: React.ComponentProps<typeof QoreTech
 export default function QoreTechnicShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || '';
   const router = useRouter();
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, logout } = useAuth();
   const role = currentUserProfile?.role;
   const isAplikasyon = role === 'aplikasyon';
 
@@ -217,8 +216,7 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
 
   const handleLogout = async () => {
     try {
-      await signOut(auth);
-      router.replace('/login');
+      await logout();
     } catch (err) {
       console.error('Logout failed', err);
     }
@@ -452,12 +450,12 @@ export function QoreTechnicProfileButton({
   className?: string;
 }) {
   const router = useRouter();
+  const { logout } = useAuth();
   const [open, setOpen] = useState(false);
 
   const handleLogout = async () => {
     try {
-      await signOut(auth);
-      router.replace('/login');
+      await logout();
     } catch (err) {
       console.error('Logout failed', err);
     }
