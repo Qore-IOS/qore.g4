@@ -12,12 +12,6 @@ export interface IrsaliyeParseResult {
 
 type TableHeaderInfo = {
   hasLotColumn: boolean;
-  columnStarts: {
-    lot: number;
-    miad: number;
-    miktar: number;
-    uts: number;
-  };
 };
 
 function looksLikeUtsCode(value?: string): boolean {
@@ -38,24 +32,43 @@ function sanitizeLotValue(value?: string): string | undefined {
 }
 
 function detectTableHeaderInfo(headerLine: string): TableHeaderInfo {
-  const lower = headerLine.toLowerCase();
-  const findIndex = (patterns: string[]): number => {
-    for (const p of patterns) {
-      const idx = lower.indexOf(p);
-      if (idx !== -1) return idx;
-    }
-    return -1;
-  };
-
   return {
     hasLotColumn: /\blot\b/i.test(headerLine),
-    columnStarts: {
-      lot: findIndex([' lot', 'lot ']),
-      miad: findIndex(['miat', 'miad', 'skt']),
-      miktar: findIndex(['miktar', 'adet']),
-      uts: findIndex(['uts kodu', 'uts kod']),
-    },
   };
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function extractLotByRowContext(line: string, stokKodu: string, productName?: string): string | undefined {
+  const miadMatch = line.match(/\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b/);
+  if (!miadMatch || miadMatch.index == null) return undefined;
+
+  let beforeMiad = line.slice(0, miadMatch.index).trim();
+  beforeMiad = beforeMiad.replace(/^\s*\d{1,3}\s+/, ''); // sıra no
+
+  const stokIdx = beforeMiad.indexOf(stokKodu);
+  if (stokIdx >= 0) {
+    beforeMiad = beforeMiad.slice(stokIdx + stokKodu.length).trim();
+  }
+
+  const firstToken = beforeMiad.split(/\s+/)[0];
+  if (looksLikeUtsCode(firstToken)) {
+    beforeMiad = beforeMiad.slice(firstToken.length).trim();
+  }
+
+  if (productName) {
+    const productRegex = new RegExp(escapeRegExp(productName), 'i');
+    beforeMiad = beforeMiad.replace(productRegex, ' ').trim();
+  }
+
+  const tokens = beforeMiad.match(/[A-Za-z0-9-]{3,}/g) || [];
+  if (tokens.length === 0) return undefined;
+  const candidate = tokens[tokens.length - 1];
+  if (looksLikeUtsCode(candidate)) return undefined;
+  if (productName && productName.toUpperCase().includes(candidate.toUpperCase()) && candidate.length <= 4) return undefined;
+  return candidate.toUpperCase();
 }
 
 /**
@@ -240,27 +253,12 @@ function parseTableRow(line: string, productCodes: ProductCode[], headerInfo: Ta
     miad = normalizeMiad(dates[0]);
   }
 
-  if (headerInfo.hasLotColumn && headerInfo.columnStarts.lot >= 0) {
-    const starts = Object.values(headerInfo.columnStarts).filter(v => v >= 0).sort((a, b) => a - b);
-    const nextStart = starts.find((s) => s > headerInfo.columnStarts.lot);
-    const lotSlice = line
-      .slice(headerInfo.columnStarts.lot, nextStart ?? undefined)
-      .replace(/^lot\s*/i, '')
-      .trim();
-    lot = sanitizeLotValue(lotSlice);
-
-    // Fallback: token right before MIAD date generally corresponds to LOT in e-irsaliye table.
-    if (!lot && headerInfo.columnStarts.miad >= 0) {
-      const miadSlice = line.slice(headerInfo.columnStarts.miad).trim();
-      const firstDate = miadSlice.match(/\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b/)?.[0];
-      if (firstDate) {
-        const beforeDate = line.slice(0, line.indexOf(firstDate));
-        const token = beforeDate.match(/([A-Za-z0-9-]{3,})\s*$/)?.[1];
-        const maybeLot = sanitizeLotValue(token);
-        if (maybeLot) lot = maybeLot;
-      }
-    }
+  if (headerInfo.hasLotColumn) {
+    lot = sanitizeLotValue(extractLotByRowContext(line, stokKodu, matchedProduct?.stokAdi));
   }
+
+  // Never allow UTS code to be used as lot
+  if (looksLikeUtsCode(lot)) lot = undefined;
 
   // Never allow UTS code to be used as lot
   if (looksLikeUtsCode(lot)) lot = undefined;

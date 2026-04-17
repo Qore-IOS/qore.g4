@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils';
 import { useFirebaseQueries } from '@/hooks/useFirebaseQueries';
 import { useAuth } from '@/contexts/auth-context';
 import { matchesCompanyScope } from '@/lib/company-scope';
+import { getExchangeRates } from '@/lib/exchange-rates';
 
 // ============================================================================
 // TYPES
@@ -78,40 +79,8 @@ const PARTICIPANT_COLORS = [
   '#EB5757', '#2F80ED', '#27AE60', '#9B51E0', '#2D9CDB',
 ];
 
-const CACHE_TTL = 1000 * 60 * 60;
-const PRIMARY_API_KEY = 'e69314b14644080788775553';
-
 async function fetchExchangeRates(): Promise<Record<Currency, number>> {
-  const cacheKey = 'exchange_rates_cache';
-  try {
-    const cached = localStorage.getItem(cacheKey);
-    if (cached) {
-      const { data, timestamp } = JSON.parse(cached);
-      if (Date.now() - timestamp < CACHE_TTL) return data;
-    }
-  } catch {}
-
-  try {
-    const res = await fetch(`https://v6.exchangerate-api.com/v6/${PRIMARY_API_KEY}/latest/EUR`);
-    if (!res.ok) throw new Error('Primary failed');
-    const data = await res.json();
-    const rates = { EUR: 1, USD: data.conversion_rates.USD, TRY: data.conversion_rates.TRY };
-    localStorage.setItem(cacheKey, JSON.stringify({ data: rates, timestamp: Date.now() }));
-    return rates;
-  } catch {
-    try {
-      const res = await fetch(`https://api.frankfurter.app/latest?from=EUR&to=USD,TRY`);
-      if (!res.ok) throw new Error('Backup failed');
-      const data = await res.json();
-      const rates = { EUR: 1, USD: data.rates.USD, TRY: data.rates.TRY };
-      localStorage.setItem(cacheKey, JSON.stringify({ data: rates, timestamp: Date.now() }));
-      return rates;
-    } catch {
-      const cached = localStorage.getItem(cacheKey);
-      if (cached) return JSON.parse(cached).data;
-      return { EUR: 1, USD: 1.08, TRY: 38.5 };
-    }
-  }
+  return getExchangeRates();
 }
 
 function getSessionDate(session: SayimSession): Date | null {

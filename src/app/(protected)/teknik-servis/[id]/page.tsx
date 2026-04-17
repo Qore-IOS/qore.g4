@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import BackButton from '@/components/BackButton';
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
-import { AlertTriangle, CheckCircle, Loader2, Wrench, FilePenLine, FlaskConical, Building2, ChevronDown, ChevronUp, History, CalendarClock, RotateCcw, FileEdit, FilePlus, ClipboardList } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Loader2, Wrench, FilePenLine, FlaskConical, Building2, ChevronDown, ChevronUp, History, CalendarClock, RotateCcw, FileEdit, FilePlus, ClipboardList, Download, Upload } from 'lucide-react';
 import {
   collection,
   onSnapshot,
@@ -18,6 +18,7 @@ import {
   addDoc,
   serverTimestamp,
   Timestamp,
+  setDoc,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Hospital, Device, DeviceFaultReport, PersonalStockItem, MaintenancePlan, MaintenanceLog, PeriodicPartChange, PeriodicPartChangeLog } from '@/lib/types';
@@ -29,6 +30,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
 import { withCompanyScope } from '@/lib/company-scope';
+import { classifyStopFault } from '@/lib/stop-fault';
 import {
   Dialog,
   DialogContent,
@@ -40,6 +42,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
+import { reserveActionFormNumber } from '@/lib/form-number';
 
 
 export default function TeknikServisDetayPage() {
@@ -84,6 +87,7 @@ export default function TeknikServisDetayPage() {
   // Device fault history state
   const [deviceFaultHistory, setDeviceFaultHistory] = useState<Record<string, { description: string; closedAt: Date }[]>>({});
   const [expandedDevices, setExpandedDevices] = useState<Set<string>>(new Set());
+  const [stopFaultCountsByDevice, setStopFaultCountsByDevice] = useState<Record<string, { e: number; s: number; n: number }>>({});
 
   // Maintenance flip state
   const [showMaintenance, setShowMaintenance] = useState(false);
@@ -205,6 +209,27 @@ export default function TeknikServisDetayPage() {
 
     fetchFaultHistory();
   }, [devicesByHospital]);
+
+  useEffect(() => {
+    if (!hospitalId) return;
+    const q = query(collection(db, 'deviceFaultReports'), where('hospitalId', '==', hospitalId));
+    const unsub = onSnapshot(q, (snap) => {
+      const counts: Record<string, { e: number; s: number; n: number }> = {};
+      snap.docs.forEach((d) => {
+        const data = d.data() as Record<string, unknown>;
+        const deviceId = String(data.deviceId || '');
+        if (!deviceId) return;
+        const stopType = classifyStopFault(data);
+        if (!stopType) return;
+        if (!counts[deviceId]) counts[deviceId] = { e: 0, s: 0, n: 0 };
+        if (stopType === 'e_stop') counts[deviceId].e += 1;
+        if (stopType === 's_stop') counts[deviceId].s += 1;
+        if (stopType === 'normal_stop') counts[deviceId].n += 1;
+      });
+      setStopFaultCountsByDevice(counts);
+    });
+    return () => unsub();
+  }, [hospitalId]);
 
   // Fetch maintenance data for all devices
   const fetchMaintenanceData = useCallback(async () => {
@@ -605,6 +630,243 @@ export default function TeknikServisDetayPage() {
     setIsDigerFirmaModalOpen(true);
   };
 
+  const teknikIslemTipleri = ['cihaz', 'ups', 'su_sistemi'] as const;
+  const teknikIslemTurleri = ['rutin_kurum_ziyareti', 'periyodik_bakim', 'cihaz_kurulumu', 'ariza', 'sw_update', 'alis', 'roche_bilgisayar_arizasi'] as const;
+  const teknikYapilanIslemler = ['genel_temizlik_yaglama', 'temel_fonksiyon_testleri', 'mekanik_ayarlar_kontrol', 'optik_ayarlar_kontrol', 'pipetleme_transfer_ayarlari'] as const;
+  const cihazDurumlari = ['calisiyor', 'arizali', 'denemede', 'diger'] as const;
+
+  const fetchTemplateOptions = async () => {
+    const [hospitalsSnap, devicesSnap] = await Promise.all([
+      getDocs(collection(db, 'hospitals')),
+      getDocs(collection(db, 'devices')),
+    ]);
+
+    const hospitals = hospitalsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Hospital[];
+    const devices = devicesSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Device[];
+
+    const hospitalMap = new Map(hospitals.map((h) => [h.id, h.name]));
+    const serialRows = devices
+      .filter((d) => d.seriNumarasi)
+      .map((d) => [hospitalMap.get(d.hospitalId) || '', d.cihazAdi || d.model || '', d.seriNumarasi || ''])
+      .sort((a, b) => `${a[0]}-${a[2]}`.localeCompare(`${b[0]}-${b[2]}`, 'tr'));
+
+    return {
+      labRows: hospitals.map((h) => [h.name]).sort((a, b) => a[0].localeCompare(b[0], 'tr')),
+      serialRows,
+    };
+  };
+
+  const downloadExcelTemplate = async () => {
+    try {
+      const XLSX = await import('xlsx');
+      const today = new Date();
+      const { labRows, serialRows } = await fetchTemplateOptions();
+
+      const formRows = [[
+        'Lab Adı',
+        'Cihaz Seri No',
+        'İşlem Tipi',
+        'İşlem Türü',
+        'Başlangıç Tarihi',
+        'Başlangıç Saati',
+        'Bitiş Tarihi',
+        'Bitiş Saati',
+        'Cihaz Durumu',
+        'Yapılan İşlemler (virgülle)',
+        'Açıklama',
+        'Arıza Adı (opsiyonel)',
+        'Yedek Parça Kodu',
+        'Yedek Parça Adı',
+        'Yedek Parça Seri No (opsiyonel)',
+        'Yedek Parça Adet',
+      ], [
+        hospital?.name || '',
+        devicesByHospital[0]?.seriNumarasi || '',
+        'cihaz',
+        'rutin_kurum_ziyareti',
+        today,
+        '09:00',
+        today,
+        '10:00',
+        'calisiyor',
+        'genel_temizlik_yaglama',
+        'Geriye dönük form girişi',
+        '',
+        'SERBEST-KOD',
+        'Serbest Yedek Parça',
+        '',
+        1,
+      ]];
+      const ws = XLSX.utils.aoa_to_sheet(formRows);
+      ws.E2 = ws.E2 || { t: 'd', v: today };
+      ws.G2 = ws.G2 || { t: 'd', v: today };
+      ws.E2.z = 'yyyy-mm-dd';
+      ws.G2.z = 'yyyy-mm-dd';
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'TeknikServisFormlar');
+
+      const optionRows = [
+        ['Alan', 'Değer 1', 'Değer 2', 'Değer 3'],
+        ...labRows.map((r) => ['Lab Adı', r[0], '', '']),
+        ...serialRows.map((r) => ['Cihaz Seri No', r[2], r[0], r[1]]),
+        ...teknikIslemTipleri.map((v) => ['İşlem Tipi', v, '', '']),
+        ...teknikIslemTurleri.map((v) => ['İşlem Türü', v, '', '']),
+        ...teknikYapilanIslemler.map((v) => ['Yapılan İşlem', v, '', '']),
+        ...cihazDurumlari.map((v) => ['Cihaz Durumu', v, '', '']),
+      ];
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(optionRows), 'Secenekler');
+
+      XLSX.writeFile(wb, `teknik_servis_toplu_form_${format(new Date(), 'yyyyMMdd_HHmm')}.xlsx`);
+      toast({ title: 'Şablon indirildi', description: 'Teknik servis toplu form şablonu hazır.' });
+    } catch (error) {
+      console.error('Error creating excel template:', error);
+      toast({ title: 'Hata', description: 'Excel şablonu oluşturulamadı.', variant: 'destructive' });
+    }
+  };
+
+  const handleExcelUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    try {
+      const XLSX = await import('xlsx');
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+      const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json<Record<string, any>>(worksheet, { defval: '', raw: false });
+
+      if (rows.length === 0) {
+        toast({ title: 'Uyarı', description: 'Excel dosyasında satır bulunamadı.', variant: 'default' });
+        return;
+      }
+
+      const [hospitalsSnap, devicesSnap] = await Promise.all([
+        getDocs(collection(db, 'hospitals')),
+        getDocs(collection(db, 'devices')),
+      ]);
+      const hospitals = hospitalsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Hospital[];
+      const devices = devicesSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Device[];
+      const hospitalMapByName = new Map(hospitals.map((h) => [String(h.name || '').trim().toLowerCase(), h]));
+
+      let successCount = 0;
+      let failCount = 0;
+
+      for (let i = 0; i < rows.length; i += 1) {
+        const row = rows[i];
+        try {
+          const labName = String(row['Lab Adı'] ?? '').trim();
+          const serial = String(row['Cihaz Seri No'] ?? '').trim();
+          const islemTipi = String(row['İşlem Tipi'] ?? '').trim();
+          const islemTuru = String(row['İşlem Türü'] ?? '').trim();
+          const baslangicTarihi = String(row['Başlangıç Tarihi'] ?? '').trim();
+          const bitisTarihi = String(row['Bitiş Tarihi'] ?? '').trim();
+          const baslangicSaati = String(row['Başlangıç Saati'] ?? '').trim();
+          const bitisSaati = String(row['Bitiş Saati'] ?? '').trim();
+          const cihazDurumu = String(row['Cihaz Durumu'] ?? '').trim();
+
+          if (!labName || !serial || !islemTipi || !islemTuru || !baslangicTarihi || !bitisTarihi || !baslangicSaati || !bitisSaati || !cihazDurumu) {
+            failCount += 1;
+            continue;
+          }
+
+          const hospitalMatch = hospitalMapByName.get(labName.toLowerCase());
+          if (!hospitalMatch) {
+            failCount += 1;
+            continue;
+          }
+
+          const deviceMatch = devices.find((d) => String(d.hospitalId) === hospitalMatch.id && String(d.seriNumarasi || '').trim() === serial);
+          if (!deviceMatch) {
+            failCount += 1;
+            continue;
+          }
+
+          const actions: Record<string, any>[] = String(row['Yapılan İşlemler (virgülle)'] ?? '')
+            .split(',')
+            .map((v) => v.trim())
+            .filter(Boolean)
+            .map((operation) => ({
+              id: `excel_op_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+              type: 'operation' as const,
+              action: operation,
+              quantity: 1,
+              isManualEntry: true,
+            }));
+
+          const yedekParcaKodu = String(row['Yedek Parça Kodu'] ?? '').trim();
+          const yedekParcaAdi = String(row['Yedek Parça Adı'] ?? '').trim();
+          if (yedekParcaKodu || yedekParcaAdi) {
+            actions.push({
+              id: `excel_part_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+              type: 'part_change' as const,
+              action: 'parca_degisimi',
+              stokKodu: yedekParcaKodu,
+              stokAdi: yedekParcaAdi,
+              serialNumber: String(row['Yedek Parça Seri No (opsiyonel)'] ?? '').trim() || undefined,
+              quantity: Math.max(1, Number(row['Yedek Parça Adet'] ?? 1) || 1),
+              isManualEntry: true,
+            });
+          }
+
+          const formRef = doc(collection(db, 'teknikServisActionForms'));
+          const formNo = await reserveActionFormNumber({
+            db,
+            companyId: currentCompanyId,
+            userUid: currentUserProfile?.uid || 'unknown',
+            userName: currentUserProfile?.name || currentUserProfile?.displayName || '',
+            formTypeLetter: 'T',
+          });
+
+          const payload = {
+            deviceId: deviceMatch.id,
+            cihazAdi: deviceMatch.cihazAdi || deviceMatch.model,
+            seriNumarasi: deviceMatch.seriNumarasi || '',
+            hospitalId: deviceMatch.hospitalId,
+            labName: hospitalMatch.name,
+            actions,
+            islemTipi,
+            islemTuru,
+            aciklama: String(row['Açıklama'] ?? '').trim(),
+            baslangicSaati,
+            bitisSaati,
+            baslangicTarihi,
+            bitisTarihi,
+            cihazDurumu,
+            cihazDurumuAciklama: cihazDurumu === 'diger' ? String(row['Cihaz Durumu Açıklama'] ?? '').trim() : null,
+            selectedFaultName: String(row['Arıza Adı (opsiyonel)'] ?? '').trim() || null,
+            selectedFaultId: null,
+            isCustomFault: !!String(row['Arıza Adı (opsiyonel)'] ?? '').trim(),
+            createdAt: serverTimestamp(),
+            formNo,
+            createdByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
+            createdByUid: currentUserProfile?.uid || null,
+            companyId: currentCompanyId || null,
+            formType: 'teknik_servis',
+            importedFromExcel: true,
+          };
+
+          await setDoc(formRef, payload);
+          await setDoc(doc(db, 'deviceActionForms', formRef.id), payload);
+          successCount += 1;
+        } catch (err) {
+          console.error(`Excel row import failed (row ${i + 2}):`, err);
+          failCount += 1;
+        }
+      }
+
+      toast({
+        title: 'Excel içe aktarma tamamlandı',
+        description: `Başarılı satır: ${successCount} • Başarısız satır: ${failCount}`,
+        variant: failCount > 0 ? 'default' : 'default',
+      });
+    } catch (error) {
+      console.error('Error importing excel forms:', error);
+      toast({ title: 'Hata', description: 'Excel yüklenirken hata oluştu.', variant: 'destructive' });
+    }
+  };
+
   if (loading) {
     return (
       <div className="cihaz-shell flex items-center justify-center min-h-screen">
@@ -650,6 +912,18 @@ export default function TeknikServisDetayPage() {
                 <span className="hidden sm:inline">Laboratuvar Formu</span>
               </button>
               <button
+                onClick={downloadExcelTemplate}
+                className="cihaz-tool-item flex items-center gap-2 px-3 py-2 text-sm font-medium"
+              >
+                <Download className="h-4 w-4" />
+                <span className="hidden sm:inline">Excel Şablonu</span>
+              </button>
+              <label className="cihaz-tool-item flex items-center gap-2 px-3 py-2 text-sm font-medium cursor-pointer">
+                <Upload className="h-4 w-4" />
+                <span className="hidden sm:inline">Excel Yükle</span>
+                <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleExcelUpload} />
+              </label>
+              <button
                 onClick={() => setShowMaintenance(prev => !prev)}
                 className={cn(
                   "cihaz-tool-item flex items-center gap-2 px-3 py-2 text-sm font-medium",
@@ -694,6 +968,7 @@ export default function TeknikServisDetayPage() {
                 const isAplikasyonFaulty = effectiveFaultType === 'aplikasyon';
                 const isFaulty = isTeknikServisFaulty || isAplikasyonFaulty;
                 const deviceMaintenanceItems = maintenanceData[device.id] || [];
+                const stopCounts = stopFaultCountsByDevice[device.id] || { e: 0, s: 0, n: 0 };
 
                 return (
                   <div key={device.id} className="device-flip-container">
@@ -767,6 +1042,11 @@ export default function TeknikServisDetayPage() {
                                   Sağlıklı
                                 </p>
                               )}
+                            </div>
+                            <div className="mt-1 flex items-center justify-center gap-1.5 text-[10px] w-full">
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-red-100 text-red-700 font-semibold">E <span className="font-normal">{stopCounts.e}</span></span>
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-red-100 text-red-700 font-semibold">S <span className="font-normal">{stopCounts.s}</span></span>
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-red-100 text-red-700 font-semibold">N <span className="font-normal">{stopCounts.n}</span></span>
                             </div>
 
                             {/* Mini Fault History */}

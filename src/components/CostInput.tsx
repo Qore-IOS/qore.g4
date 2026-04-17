@@ -8,6 +8,7 @@ import { Loader2, RefreshCw } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import debounce from 'lodash.debounce';
+import { EXCHANGE_RATES_CACHE_TTL, getTryRateForCurrency } from '@/lib/exchange-rates';
 
 type Currency = 'EUR' | 'USD' | 'TRY';
 
@@ -17,27 +18,7 @@ type CostInputProps = {
   onCostChange: (cost: number, currency: Currency) => void;
 };
 
-const PRIMARY_API_KEY = 'e69314b14644080788775553';
-const CACHE_TTL = 1000 * 60 * 60; // 1 hour
-
-async function fetchPrimaryRate(currency: Currency): Promise<number> {
-  const res = await fetch(`https://v6.exchangerate-api.com/v6/${PRIMARY_API_KEY}/latest/${currency}`);
-  if (!res.ok) throw new Error(`Primary API HTTP ${res.status}`);
-  const data = await res.json();
-  const rate = data.conversion_rates?.TRY;
-  if (typeof rate !== 'number') throw new Error('Primary API missing TRY rate');
-  return rate;
-}
-
-// Using another free, keyless API as a backup
-async function fetchBackupRate(currency: Currency): Promise<number> {
-    const res = await fetch(`https://api.frankfurter.app/latest?from=${currency}&to=TRY`);
-    if(!res.ok) throw new Error(`Backup API HTTP ${res.status}`);
-    const data = await res.json();
-    const rate = data.rates?.TRY;
-    if (typeof rate !== 'number') throw new Error('Backup API missing TRY rate');
-    return rate;
-}
+const CACHE_TTL = EXCHANGE_RATES_CACHE_TTL;
 
 
 export const CostInput: React.FC<CostInputProps> = ({
@@ -69,23 +50,16 @@ export const CostInput: React.FC<CostInputProps> = ({
           }
         }
       }
-      
-      try {
-        const r = await fetchPrimaryRate(currency);
-        localStorage.setItem(cacheKey, JSON.stringify({ rate: r, ts: Date.now() }));
-        setRate(r);
-        toast({ title: "Başarılı", description: "Döviz kuru güncellendi (Birincil API)." });
-      } catch (primaryErr) {
-        console.warn('Primary rate API failed, trying backup:', primaryErr);
-        toast({ title: "Bilgi", description: "Birincil kur servisi yanıt vermedi, yedek servis deneniyor.", variant: 'default' });
-        const r = await fetchBackupRate(currency);
-        localStorage.setItem(cacheKey, JSON.stringify({ rate: r, ts: Date.now() }));
-        setRate(r);
-        toast({ title: "Başarılı", description: "Döviz kuru güncellendi (Yedek API)." });
-      }
+      const r = await getTryRateForCurrency(currency, {
+        forceRefresh,
+        scopeKey: 'cost-input',
+      });
+      localStorage.setItem(cacheKey, JSON.stringify({ rate: r, ts: Date.now() }));
+      setRate(r);
+      toast({ title: "Başarılı", description: "Döviz kuru güncellendi." });
 
     } catch (err: any) {
-      console.error('Rate fetch failed for both providers:', err);
+      console.error('Rate fetch failed:', err);
       setError('Döviz kuru alınamadı');
       setRate(null);
       toast({ title: 'Döviz Kuru Hatası', description: 'Tüm servisler yanıt vermedi. Lütfen daha sonra tekrar deneyin.', variant: 'destructive' });
