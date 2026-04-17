@@ -243,7 +243,7 @@ const resolveStockRowUnit = (item: DepoStokItem): number => {
   const raw = Number((item as any).quantity ?? (item as any).adet ?? 1);
   if (!Number.isFinite(raw)) return 1;
   // 0/negatif yazılmış legacy kayıtları listede sıfıra düşürmesin
-  return raw > 0 ? Math.floor(raw) : 1;
+  return raw > 0 ? Math.max(1, Math.ceil(raw)) : 1;
 };
 
 export default function UrunKullanimPanel() {
