@@ -1438,6 +1438,51 @@ export default function UrunKullanimPanel() {
         }
         return next;
       });
+
+      // "Son Okutulan Ürün" ve "Son 10 Tüketim" kartlarını manuel/listeli düşümde de güncelle
+      const remainingInSameLot = Math.max(0, currentlyAvailable - quantityToDeduct);
+      const totalForCode = labStock.filter((i) => i.stokKodu === stokKodu).length;
+      const estimatedTotalRemaining = Math.max(0, totalForCode - quantityToDeduct);
+      const manualRecordBase: ConsumptionRecord = {
+        id: `manual-${Date.now()}`,
+        stokKodu,
+        stokAdi: templateItem.stokAdi || stokKodu,
+        lotNumarasi: templateItem.lotNumarasi || '',
+        miad: templateItem.miad ?? '',
+        seriNumarasi: '',
+        laboratoryId: selectedLab.id,
+        laboratoryName: selectedLab.name || '',
+        consumptionTimestamp: new Date(),
+        userId: currentUserProfile?.uid || '',
+        userName: currentUserProfile?.name || currentUserProfile?.email || '—',
+        consumptionType: 'normal_kullanim',
+        subPointId: selectedSubPoint?.id || '',
+        subPointName: selectedSubPoint?.name || '',
+      };
+
+      setLastScannedProduct(manualRecordBase as any);
+      setLastScannedLotRemaining(remainingInSameLot);
+      setLastScannedTotalRemaining(estimatedTotalRemaining);
+      setSessionHistory((prev) => {
+        const now = Date.now();
+        const added = Array.from({ length: quantityToDeduct }, (_, idx) => ({
+          ...manualRecordBase,
+          id: `manual-${now}-${idx}`,
+          consumptionTimestamp: new Date(now + idx),
+        }));
+        return [...added, ...prev].slice(0, 10);
+      });
+
+      setLastScannedDeviceGroupImage(null);
+      setTimeout(() => {
+        const productInfo = products.find(p => p.stokKodu === stokKodu);
+        const imageUrl = productInfo?.cihazGrubu ? deviceGroups.find(dg => dg.name === productInfo.cihazGrubu)?.imageUrl || null : null;
+        setLastScannedDeviceGroupImage(imageUrl);
+      }, 50);
+
+      setScanStatus('success');
+      playFeedback();
+      setTimeout(() => setScanStatus('idle'), 3000);
       invalidateDepoStok();
       invalidateConsumption();
       for (let i = 0; i < quantityToDeduct; i++) {
@@ -1450,7 +1495,7 @@ export default function UrunKullanimPanel() {
     } catch {
       toast({ title: 'Hata', description: 'Listeli düşüm sırasında bir hata oluştu.', variant: 'destructive' });
     }
-  }, [selectedLab, labStock, toast, manualDeductionByGroup, laboratories, currentUserProfile, selectedSubPoint, invalidateDepoStok, invalidateConsumption]);
+  }, [selectedLab, labStock, toast, manualDeductionByGroup, laboratories, currentUserProfile, selectedSubPoint, invalidateDepoStok, invalidateConsumption, products, deviceGroups]);
 
   const handleTrashBinSubmit = useCallback(async () => {
     if (!selectedTrashDevice || trashItems.length === 0 || !selectedLab) {
