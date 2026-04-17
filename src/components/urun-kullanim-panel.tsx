@@ -1285,6 +1285,16 @@ export default function UrunKullanimPanel() {
     });
 
     return Array.from(grouped.values())
+      .map((row) => {
+        if (Number.isFinite(row.count) && row.count > 0) return row;
+        // Güvenlik fallback'i: satırdaki belge adedine dön
+        const fallbackCount = labStock.filter((it) =>
+          it.stokKodu === row.stokKodu &&
+          (it.lotNumarasi || 'Lotsuz') === row.lotNumarasi &&
+          String(it.miad || '') === row.miadRaw
+        ).length;
+        return { ...row, count: Math.max(1, fallbackCount) };
+      })
       .sort((a, b) => (a.stokAdi || '').localeCompare(b.stokAdi || '', 'tr') || (a.lotNumarasi || '').localeCompare(b.lotNumarasi || '', 'tr'));
   }, [labStock, products, selectedLab?.visualDeductionEnabled, selectedLabId]);
 
