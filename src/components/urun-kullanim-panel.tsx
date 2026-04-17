@@ -20,7 +20,7 @@ import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
-import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, addDoc, updateDoc, orderBy, setDoc } from 'firebase/firestore';
+import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, addDoc, updateDoc, orderBy, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
 import { compareAsc, parse as parseDate, format as formatDate } from 'date-fns';
 import { formatMiad } from '@/lib/date';
@@ -236,6 +236,16 @@ const logSerialHistory = async (seriNo: string, type: string, details: Record<st
     });
 };
 
+const buildManualDeductionKey = (labId: string, stokKodu: string, lotNumarasi?: string, miadRaw?: string) =>
+  `${labId}__${stokKodu}__${lotNumarasi || ''}__${miadRaw || ''}`;
+
+const resolveStockRowUnit = (item: DepoStokItem): number => {
+  const raw = Number((item as any).quantity ?? (item as any).adet ?? 1);
+  if (!Number.isFinite(raw)) return 1;
+  // 0/negatif yazılmış legacy kayıtları listede sıfıra düşürmesin
+  return raw > 0 ? Math.max(1, Math.ceil(raw)) : 1;
+};
+
 export default function UrunKullanimPanel() {
   const { currentUser, currentUserProfile, logout, wallpaper } = useAuth();
   const { theme } = useTheme();
@@ -325,6 +335,7 @@ export default function UrunKullanimPanel() {
   const [mainUnitModels, setMainUnitModels] = useState<Record<string, string>>({});
   const [visualSearchQuery, setVisualSearchQuery] = useState('');
   const [selectedLabGroup, setSelectedLabGroup] = useState<string | null>(null);
+  const [visualDeductionQuantities, setVisualDeductionQuantities] = useState<Record<string, number>>({});
 
   // Trash bin modal states
   const [isTrashBinModalOpen, setIsTrashBinModalOpen] = useState(false);
@@ -487,7 +498,7 @@ export default function UrunKullanimPanel() {
 
   // Use TanStack Query for recent consumption (for duplicate check)
   const { data: tuketimKayitlari = [] } = useRecentConsumption(200);
-  
+
   const devicesToDisplay = useMemo(() => {
     if (!selectedLabId || !devices) return [];
     return devices
@@ -598,6 +609,13 @@ export default function UrunKullanimPanel() {
         ).length;
         setLastScannedLotRemaining(lotRemaining);
         setLastScannedTotalRemaining(totalRemaining);
+
+        // Eğer lot tükendiyse manuel seri snapshot'ını temizle
+        if (lotRemaining === 0) {
+          const miadRaw = String(itemToConsume.miad || '');
+          const snapshotKey = buildManualDeductionKey(selectedLab.id, consumedStokKodu, consumedLot, miadRaw);
+          deleteDoc(doc(db, 'labManualSerialSnapshots', snapshotKey)).catch(() => undefined);
+        }
 
         // Check for stock warnings: min stock reached, and qty=1 when max>2.
         const rule = minMaxRules.find(r => r.stokKodu === consumedStokKodu);
@@ -1232,9 +1250,11 @@ export default function UrunKullanimPanel() {
       stokAdi: string;
       lotNumarasi: string;
       miad: string;
+      miadRaw: string;
       count: number;
       anaBirim: string;
       laboratuvarGrubu: string;
+      groupKey: string;
     }>();
 
     labStock.forEach((item) => {
@@ -1242,24 +1262,39 @@ export default function UrunKullanimPanel() {
       const anaBirim = String(product?.anaBirim || 'Adet');
       const lotNumarasi = item.lotNumarasi || 'Lotsuz';
       const miadStr = formatMiad(item.miad);
+      const miadRaw = String(item.miad || '');
       const key = `${item.stokKodu}__${lotNumarasi}__${miadStr}`;
       const labGrubu = product?.laboratuvarGrubu || 'Diğer';
+      const groupKey = buildManualDeductionKey(selectedLabId, item.stokKodu, item.lotNumarasi || '', miadRaw);
 
       const existing = grouped.get(key) || {
         stokKodu: item.stokKodu,
         stokAdi: product?.stokAdi || item.stokAdi || item.stokKodu,
         lotNumarasi,
         miad: miadStr,
+        miadRaw,
         count: 0,
         anaBirim,
         laboratuvarGrubu: labGrubu,
+        groupKey,
       };
-      existing.count += 1;
+      existing.count += resolveStockRowUnit(item);
       grouped.set(key, existing);
     });
 
-    return Array.from(grouped.values()).sort((a, b) => (a.stokAdi || '').localeCompare(b.stokAdi || '', 'tr') || (a.lotNumarasi || '').localeCompare(b.lotNumarasi || '', 'tr'));
-  }, [labStock, products, selectedLab?.visualDeductionEnabled]);
+    return Array.from(grouped.values())
+      .map((row) => {
+        if (Number.isFinite(row.count) && row.count > 0) return row;
+        // Güvenlik fallback'i: satırdaki belge adedine dön
+        const fallbackCount = labStock.filter((it) =>
+          it.stokKodu === row.stokKodu &&
+          (it.lotNumarasi || 'Lotsuz') === row.lotNumarasi &&
+          String(it.miad || '') === row.miadRaw
+        ).length;
+        return { ...row, count: Math.max(1, fallbackCount) };
+      })
+      .sort((a, b) => (a.stokAdi || '').localeCompare(b.stokAdi || '', 'tr') || (a.lotNumarasi || '').localeCompare(b.lotNumarasi || '', 'tr'));
+  }, [labStock, products, selectedLab?.visualDeductionEnabled, selectedLabId]);
 
   const labGroupCategories = useMemo(() => {
     const cats = new Set(listDeductionItems.map(i => i.laboratuvarGrubu));
@@ -1284,23 +1319,162 @@ export default function UrunKullanimPanel() {
     return items;
   }, [listDeductionItems, selectedLabGroup, visualSearchQuery]);
 
-  const handleVisualDeduction = useCallback(async (stokKodu: string, lotNumarasi: string, miad?: string) => {
-    const item = labStock.find((stockItem) => {
+  const handleVisualDeduction = useCallback(async (
+    stokKodu: string,
+    lotNumarasi: string,
+    miad?: string,
+    miadRaw?: string,
+    requestedQuantity = 1
+  ) => {
+    if (!selectedLab) return;
+    const normalizedRequestedQty = Math.max(1, Math.floor(requestedQuantity || 1));
+    const matchingItems = labStock.filter((stockItem) => {
       const matchCode = stockItem.stokKodu === stokKodu;
       const matchLot = (stockItem.lotNumarasi || 'Lotsuz') === lotNumarasi;
       if (!miad) return matchCode && matchLot;
       return matchCode && matchLot && formatMiad(stockItem.miad) === miad;
     });
-    if (!item) {
+    if (!matchingItems.length) {
       toast({ title: 'Stok Bulunamadı', description: 'Bu lot için düşülecek stok kalmamış.', variant: 'destructive' });
       return;
     }
-    try {
-      await recordConsumption(item);
-    } catch {
-      // recordConsumption kendi toast/log yönetimini yapıyor
+
+    const groupKey = buildManualDeductionKey(selectedLab.id, stokKodu, lotNumarasi === 'Lotsuz' ? '' : lotNumarasi, miadRaw || '');
+    const currentlyAvailable = matchingItems.length;
+    if (currentlyAvailable <= 0) {
+      toast({ title: 'Stok Bulunamadı', description: 'Bu satırın kullanılabilir stoğu tükenmiş görünüyor.', variant: 'destructive' });
+      return;
     }
-  }, [labStock, recordConsumption, toast]);
+    const quantityToDeduct = Math.min(normalizedRequestedQty, currentlyAvailable);
+
+    const templateItem = matchingItems[0];
+    const ownerId = templateItem.hedefKurumId || laboratories.find(l => l.name === templateItem.hedefKurum)?.id || selectedLab.id;
+    const ownerName = laboratories.find(l => l.id === ownerId)?.name || templateItem.hedefKurum || selectedLab.name || '';
+    const itemsToConsume = matchingItems.slice(0, quantityToDeduct);
+    const shouldFullyConsumeLot = quantityToDeduct >= currentlyAvailable;
+
+    try {
+      const batch = writeBatch(db);
+      for (let i = 0; i < quantityToDeduct; i++) {
+        const newTuketimDocRef = doc(collection(db, 'tuketimKayitlari'));
+        const newRec = {
+          stokKodu,
+          stokAdi: templateItem.stokAdi,
+          lotNumarasi: templateItem.lotNumarasi || '',
+          miad: templateItem.miad ?? '',
+          seriNumarasi: '',
+          laboratoryId: selectedLab.id,
+          laboratoryName: selectedLab.name || '',
+          usageLabId: selectedLab.id,
+          usageLabName: selectedLab.name || '',
+          deductedFromLabId: ownerId,
+          deductedFromLabName: ownerName,
+          consumptionTimestamp: Timestamp.now(),
+          userId: currentUserProfile?.uid || '',
+          userName: currentUserProfile?.name || currentUserProfile?.email || '—',
+          consumptionType: 'normal_kullanim',
+          sourceType: 'manual_visual',
+          rafAdresi: (templateItem as any).rafAdresi || '',
+          irsaliyeNumarasi: (templateItem as any).irsaliyeNumarasi || '',
+          subPointId: selectedSubPoint?.id || '',
+          subPointName: selectedSubPoint?.name || '',
+          quantity: 1,
+        };
+        batch.set(newTuketimDocRef, newRec);
+      }
+
+      // Adet gerçekten düşsün: seçilen miktardaki gerçek depoStok satırlarını sil
+      itemsToConsume.forEach((stockItem) => {
+        const stokRef = doc(db, 'depoStok', stockItem.id);
+        batch.delete(stokRef);
+      });
+
+      // Seri takipli ürünlerde seri numaralarını arka planda sakla (stoktan sayılmasın)
+      const trackingMode = resolveEffectiveTrackingMode(stokKodu, productTracking);
+      if (trackingMode === 'serial') {
+        const snapshotRef = doc(db, 'labManualSerialSnapshots', groupKey);
+        const snapshotSnap = await getDoc(snapshotRef);
+        const existingSerials = snapshotSnap.exists() ? ((snapshotSnap.data().serials || []) as string[]) : [];
+        const allKnownSerials = Array.from(new Set([
+          ...existingSerials,
+          ...matchingItems.map(i => i.seriNumarasi).filter(Boolean) as string[],
+        ]));
+
+        if (shouldFullyConsumeLot) {
+          // Lot tamamen bittiyse snapshot da temizlenir
+          batch.delete(snapshotRef);
+        } else {
+          batch.set(snapshotRef, {
+            groupKey,
+            usageLabId: selectedLab.id,
+            stokKodu,
+            lotNumarasi: lotNumarasi === 'Lotsuz' ? '' : lotNumarasi,
+            miadRaw: miadRaw || '',
+            serials: allKnownSerials,
+            updatedAt: Timestamp.now(),
+          }, { merge: true });
+        }
+      }
+
+      await batch.commit();
+
+      // "Son Okutulan Ürün" ve "Son 10 Tüketim" kartlarını manuel/listeli düşümde de güncelle
+      const remainingInSameLot = Math.max(0, currentlyAvailable - quantityToDeduct);
+      const totalForCode = labStock.filter((i) => i.stokKodu === stokKodu).length;
+      const estimatedTotalRemaining = Math.max(0, totalForCode - quantityToDeduct);
+      const manualRecordBase: ConsumptionRecord = {
+        id: `manual-${Date.now()}`,
+        stokKodu,
+        stokAdi: templateItem.stokAdi || stokKodu,
+        lotNumarasi: templateItem.lotNumarasi || '',
+        miad: templateItem.miad ?? '',
+        seriNumarasi: '',
+        laboratoryId: selectedLab.id,
+        laboratoryName: selectedLab.name || '',
+        consumptionTimestamp: new Date(),
+        userId: currentUserProfile?.uid || '',
+        userName: currentUserProfile?.name || currentUserProfile?.email || '—',
+        consumptionType: 'normal_kullanim',
+        subPointId: selectedSubPoint?.id || '',
+        subPointName: selectedSubPoint?.name || '',
+      };
+
+      setLastScannedProduct(manualRecordBase as any);
+      setLastScannedLotRemaining(remainingInSameLot);
+      setLastScannedTotalRemaining(estimatedTotalRemaining);
+      setSessionHistory((prev) => {
+        const now = Date.now();
+        const added = Array.from({ length: quantityToDeduct }, (_, idx) => ({
+          ...manualRecordBase,
+          id: `manual-${now}-${idx}`,
+          consumptionTimestamp: new Date(now + idx),
+        }));
+        return [...added, ...prev].slice(0, 10);
+      });
+
+      setLastScannedDeviceGroupImage(null);
+      setTimeout(() => {
+        const productInfo = products.find(p => p.stokKodu === stokKodu);
+        const imageUrl = productInfo?.cihazGrubu ? deviceGroups.find(dg => dg.name === productInfo.cihazGrubu)?.imageUrl || null : null;
+        setLastScannedDeviceGroupImage(imageUrl);
+      }, 50);
+
+      setScanStatus('success');
+      playFeedback();
+      setTimeout(() => setScanStatus('idle'), 3000);
+      invalidateDepoStok();
+      invalidateConsumption();
+      for (let i = 0; i < quantityToDeduct; i++) {
+        incrementTodayStats(selectedLab.id).catch(() => undefined);
+      }
+      toast({
+        title: 'Başarılı',
+        description: `${quantityToDeduct} adet ürün stoktan düşüldü.`,
+      });
+    } catch {
+      toast({ title: 'Hata', description: 'Listeli düşüm sırasında bir hata oluştu.', variant: 'destructive' });
+    }
+  }, [selectedLab, labStock, toast, laboratories, currentUserProfile, selectedSubPoint, invalidateDepoStok, invalidateConsumption, products, deviceGroups, productTracking]);
 
   const handleTrashBinSubmit = useCallback(async () => {
     if (!selectedTrashDevice || trashItems.length === 0 || !selectedLab) {
@@ -1562,7 +1736,7 @@ export default function UrunKullanimPanel() {
                   <div className="space-y-1">
                     {filteredListDeductionItems.map((item) => (
                       <div
-                        key={`${item.stokKodu}-${item.lotNumarasi}`}
+                        key={`${item.stokKodu}-${item.lotNumarasi}-${item.miadRaw}`}
                         className="flex items-center gap-3 rounded-lg border border-white/15 bg-white/5 hover:bg-white/10 transition-all px-3 py-2"
                       >
                         <div className="flex-1 min-w-0">
@@ -1574,15 +1748,39 @@ export default function UrunKullanimPanel() {
                             <span className="font-bold text-foreground/90">{item.count} {item.anaBirim}</span>
                           </div>
                         </div>
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          className="shrink-0 h-8 px-3 text-xs font-semibold"
-                          onClick={() => handleVisualDeduction(item.stokKodu, item.lotNumarasi, item.miad)}
-                        >
-                          <PackageMinus className="h-3.5 w-3.5 mr-1.5" />
-                          Stoktan Düş
-                        </Button>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Input
+                            type="number"
+                            min={1}
+                            max={Math.max(1, item.count)}
+                            value={visualDeductionQuantities[item.groupKey] || 1}
+                            onChange={(e) => {
+                              const parsed = Number(e.target.value || 1);
+                              const safeValue = Number.isFinite(parsed)
+                                ? Math.max(1, Math.min(item.count || 1, Math.floor(parsed)))
+                                : 1;
+                              setVisualDeductionQuantities(prev => ({ ...prev, [item.groupKey]: safeValue }));
+                            }}
+                            className="w-20 h-8 text-xs"
+                            disabled={item.count <= 0}
+                          />
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            className="h-8 px-3 text-xs font-semibold"
+                            onClick={() => handleVisualDeduction(
+                              item.stokKodu,
+                              item.lotNumarasi,
+                              item.miad,
+                              item.miadRaw,
+                              visualDeductionQuantities[item.groupKey] || 1
+                            )}
+                            disabled={item.count <= 0}
+                          >
+                            <PackageMinus className="h-3.5 w-3.5 mr-1.5" />
+                            Stoktan Düş
+                          </Button>
+                        </div>
                       </div>
                     ))}
                     {filteredListDeductionItems.length === 0 && (
