@@ -1286,14 +1286,13 @@ export default function UrunKullanimPanel() {
 
     return Array.from(grouped.values())
       .map((row) => {
-        if (Number.isFinite(row.count) && row.count > 0) return row;
-        // Güvenlik fallback'i: satırdaki belge adedine dön
-        const fallbackCount = labStock.filter((it) =>
+        // Nihai adet her zaman canlı labStock belge sayısından türetilsin
+        const liveCount = labStock.filter((it) =>
           it.stokKodu === row.stokKodu &&
           (it.lotNumarasi || 'Lotsuz') === row.lotNumarasi &&
-          String(it.miad || '') === row.miadRaw
+          formatMiad(it.miad) === row.miad
         ).length;
-        return { ...row, count: Math.max(1, fallbackCount) };
+        return { ...row, count: liveCount };
       })
       .sort((a, b) => (a.stokAdi || '').localeCompare(b.stokAdi || '', 'tr') || (a.lotNumarasi || '').localeCompare(b.lotNumarasi || '', 'tr'));
   }, [labStock, products, selectedLab?.visualDeductionEnabled, selectedLabId]);
