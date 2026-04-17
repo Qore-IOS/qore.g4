@@ -512,13 +512,20 @@ export default function UrunKullanimPanel() {
           const deductedQty = Number(data?.deductedQty || 0);
           if (groupKey && deductedQty > 0) map[groupKey] = deductedQty;
         });
-        setManualDeductionByGroup(map);
+        setManualDeductionByGroup((prev) => {
+          const prevKeys = Object.keys(prev);
+          const nextKeys = Object.keys(map);
+          if (prevKeys.length === nextKeys.length && prevKeys.every((k) => prev[k] === map[k])) {
+            return prev;
+          }
+          return map;
+        });
       } catch (err: any) {
         urunKullanimLogger.warn('Manuel düşüm dengeleme kayıtları alınamadı', { error: err?.message });
       }
     };
     loadManualDeductions();
-  }, [selectedLabId, labStock]);
+  }, [selectedLabId]);
   
   const devicesToDisplay = useMemo(() => {
     if (!selectedLabId || !devices) return [];
@@ -1422,6 +1429,15 @@ export default function UrunKullanimPanel() {
       }
 
       await batch.commit();
+      setManualDeductionByGroup((prev) => {
+        const next = { ...prev };
+        if (shouldFullyConsumeLot) {
+          delete next[groupKey];
+        } else {
+          next[groupKey] = alreadyDeducted + quantityToDeduct;
+        }
+        return next;
+      });
       invalidateDepoStok();
       invalidateConsumption();
       for (let i = 0; i < quantityToDeduct; i++) {
