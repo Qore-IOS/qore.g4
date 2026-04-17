@@ -20,7 +20,7 @@ import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
-import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, addDoc, updateDoc, orderBy, setDoc } from 'firebase/firestore';
+import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, addDoc, updateDoc, orderBy, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
 import { compareAsc, parse as parseDate, format as formatDate } from 'date-fns';
 import { formatMiad } from '@/lib/date';
@@ -329,7 +329,6 @@ export default function UrunKullanimPanel() {
   const [visualSearchQuery, setVisualSearchQuery] = useState('');
   const [selectedLabGroup, setSelectedLabGroup] = useState<string | null>(null);
   const [visualDeductionQuantities, setVisualDeductionQuantities] = useState<Record<string, number>>({});
-  const [manualDeductionByGroup, setManualDeductionByGroup] = useState<Record<string, number>>({});
 
   // Trash bin modal states
   const [isTrashBinModalOpen, setIsTrashBinModalOpen] = useState(false);
@@ -493,40 +492,6 @@ export default function UrunKullanimPanel() {
   // Use TanStack Query for recent consumption (for duplicate check)
   const { data: tuketimKayitlari = [] } = useRecentConsumption(200);
 
-  useEffect(() => {
-    const loadManualDeductions = async () => {
-      if (!selectedLabId) {
-        setManualDeductionByGroup({});
-        return;
-      }
-      try {
-        const q = query(
-          collection(db, 'labStockManualDeductions'),
-          where('usageLabId', '==', selectedLabId)
-        );
-        const snap = await getDocs(q);
-        const map: Record<string, number> = {};
-        snap.docs.forEach((d) => {
-          const data = d.data() as any;
-          const groupKey = String(data?.groupKey || '');
-          const deductedQty = Number(data?.deductedQty || 0);
-          if (groupKey && deductedQty > 0) map[groupKey] = deductedQty;
-        });
-        setManualDeductionByGroup((prev) => {
-          const prevKeys = Object.keys(prev);
-          const nextKeys = Object.keys(map);
-          if (prevKeys.length === nextKeys.length && prevKeys.every((k) => prev[k] === map[k])) {
-            return prev;
-          }
-          return map;
-        });
-      } catch (err: any) {
-        urunKullanimLogger.warn('Manuel düşüm dengeleme kayıtları alınamadı', { error: err?.message });
-      }
-    };
-    loadManualDeductions();
-  }, [selectedLabId]);
-  
   const devicesToDisplay = useMemo(() => {
     if (!selectedLabId || !devices) return [];
     return devices
@@ -637,6 +602,13 @@ export default function UrunKullanimPanel() {
         ).length;
         setLastScannedLotRemaining(lotRemaining);
         setLastScannedTotalRemaining(totalRemaining);
+
+        // Eğer lot tükendiyse manuel seri snapshot'ını temizle
+        if (lotRemaining === 0) {
+          const miadRaw = String(itemToConsume.miad || '');
+          const snapshotKey = buildManualDeductionKey(selectedLab.id, consumedStokKodu, consumedLot, miadRaw);
+          deleteDoc(doc(db, 'labManualSerialSnapshots', snapshotKey)).catch(() => undefined);
+        }
 
         // Check for stock warnings: min stock reached, and qty=1 when max>2.
         const rule = minMaxRules.find(r => r.stokKodu === consumedStokKodu);
@@ -1306,12 +1278,8 @@ export default function UrunKullanimPanel() {
     });
 
     return Array.from(grouped.values())
-      .map((row) => {
-        const deducted = manualDeductionByGroup[row.groupKey] || 0;
-        return { ...row, availableCount: Math.max(0, row.count - deducted) };
-      })
       .sort((a, b) => (a.stokAdi || '').localeCompare(b.stokAdi || '', 'tr') || (a.lotNumarasi || '').localeCompare(b.lotNumarasi || '', 'tr'));
-  }, [labStock, products, selectedLab?.visualDeductionEnabled, selectedLabId, manualDeductionByGroup]);
+  }, [labStock, products, selectedLab?.visualDeductionEnabled, selectedLabId]);
 
   const labGroupCategories = useMemo(() => {
     const cats = new Set(listDeductionItems.map(i => i.laboratuvarGrubu));
@@ -1357,8 +1325,7 @@ export default function UrunKullanimPanel() {
     }
 
     const groupKey = buildManualDeductionKey(selectedLab.id, stokKodu, lotNumarasi === 'Lotsuz' ? '' : lotNumarasi, miadRaw || '');
-    const alreadyDeducted = manualDeductionByGroup[groupKey] || 0;
-    const currentlyAvailable = Math.max(0, matchingItems.length - alreadyDeducted);
+    const currentlyAvailable = matchingItems.length;
     if (currentlyAvailable <= 0) {
       toast({ title: 'Stok Bulunamadı', description: 'Bu satırın kullanılabilir stoğu tükenmiş görünüyor.', variant: 'destructive' });
       return;
@@ -1368,6 +1335,7 @@ export default function UrunKullanimPanel() {
     const templateItem = matchingItems[0];
     const ownerId = templateItem.hedefKurumId || laboratories.find(l => l.name === templateItem.hedefKurum)?.id || selectedLab.id;
     const ownerName = laboratories.find(l => l.id === ownerId)?.name || templateItem.hedefKurum || selectedLab.name || '';
+    const itemsToConsume = matchingItems.slice(0, quantityToDeduct);
     const shouldFullyConsumeLot = quantityToDeduct >= currentlyAvailable;
 
     try {
@@ -1400,44 +1368,40 @@ export default function UrunKullanimPanel() {
         batch.set(newTuketimDocRef, newRec);
       }
 
-      const adjustRef = doc(db, 'labStockManualDeductions', groupKey);
-      if (shouldFullyConsumeLot) {
-        matchingItems.forEach((stockItem) => {
-          const stokRef = doc(db, 'depoStok', stockItem.id);
-          batch.delete(stokRef);
-        });
-        batch.set(adjustRef, {
-          groupKey,
-          usageLabId: selectedLab.id,
-          stokKodu,
-          lotNumarasi: lotNumarasi === 'Lotsuz' ? '' : lotNumarasi,
-          miadRaw: miadRaw || '',
-          deductedQty: 0,
-          fullyConsumedAt: Timestamp.now(),
-          updatedAt: Timestamp.now(),
-        }, { merge: true });
-      } else {
-        batch.set(adjustRef, {
-          groupKey,
-          usageLabId: selectedLab.id,
-          stokKodu,
-          lotNumarasi: lotNumarasi === 'Lotsuz' ? '' : lotNumarasi,
-          miadRaw: miadRaw || '',
-          deductedQty: alreadyDeducted + quantityToDeduct,
-          updatedAt: Timestamp.now(),
-        }, { merge: true });
+      // Adet gerçekten düşsün: seçilen miktardaki gerçek depoStok satırlarını sil
+      itemsToConsume.forEach((stockItem) => {
+        const stokRef = doc(db, 'depoStok', stockItem.id);
+        batch.delete(stokRef);
+      });
+
+      // Seri takipli ürünlerde seri numaralarını arka planda sakla (stoktan sayılmasın)
+      const trackingMode = resolveEffectiveTrackingMode(stokKodu, productTracking);
+      if (trackingMode === 'serial') {
+        const snapshotRef = doc(db, 'labManualSerialSnapshots', groupKey);
+        const snapshotSnap = await getDoc(snapshotRef);
+        const existingSerials = snapshotSnap.exists() ? ((snapshotSnap.data().serials || []) as string[]) : [];
+        const allKnownSerials = Array.from(new Set([
+          ...existingSerials,
+          ...matchingItems.map(i => i.seriNumarasi).filter(Boolean) as string[],
+        ]));
+
+        if (shouldFullyConsumeLot) {
+          // Lot tamamen bittiyse snapshot da temizlenir
+          batch.delete(snapshotRef);
+        } else {
+          batch.set(snapshotRef, {
+            groupKey,
+            usageLabId: selectedLab.id,
+            stokKodu,
+            lotNumarasi: lotNumarasi === 'Lotsuz' ? '' : lotNumarasi,
+            miadRaw: miadRaw || '',
+            serials: allKnownSerials,
+            updatedAt: Timestamp.now(),
+          }, { merge: true });
+        }
       }
 
       await batch.commit();
-      setManualDeductionByGroup((prev) => {
-        const next = { ...prev };
-        if (shouldFullyConsumeLot) {
-          delete next[groupKey];
-        } else {
-          next[groupKey] = alreadyDeducted + quantityToDeduct;
-        }
-        return next;
-      });
 
       // "Son Okutulan Ürün" ve "Son 10 Tüketim" kartlarını manuel/listeli düşümde de güncelle
       const remainingInSameLot = Math.max(0, currentlyAvailable - quantityToDeduct);
@@ -1495,7 +1459,7 @@ export default function UrunKullanimPanel() {
     } catch {
       toast({ title: 'Hata', description: 'Listeli düşüm sırasında bir hata oluştu.', variant: 'destructive' });
     }
-  }, [selectedLab, labStock, toast, manualDeductionByGroup, laboratories, currentUserProfile, selectedSubPoint, invalidateDepoStok, invalidateConsumption, products, deviceGroups]);
+  }, [selectedLab, labStock, toast, laboratories, currentUserProfile, selectedSubPoint, invalidateDepoStok, invalidateConsumption, products, deviceGroups, productTracking]);
 
   const handleTrashBinSubmit = useCallback(async () => {
     if (!selectedTrashDevice || trashItems.length === 0 || !selectedLab) {
@@ -1773,17 +1737,17 @@ export default function UrunKullanimPanel() {
                           <Input
                             type="number"
                             min={1}
-                            max={Math.max(1, item.availableCount)}
+                            max={Math.max(1, item.count)}
                             value={visualDeductionQuantities[item.groupKey] || 1}
                             onChange={(e) => {
                               const parsed = Number(e.target.value || 1);
                               const safeValue = Number.isFinite(parsed)
-                                ? Math.max(1, Math.min(item.availableCount || 1, Math.floor(parsed)))
+                                ? Math.max(1, Math.min(item.count || 1, Math.floor(parsed)))
                                 : 1;
                               setVisualDeductionQuantities(prev => ({ ...prev, [item.groupKey]: safeValue }));
                             }}
                             className="w-20 h-8 text-xs"
-                            disabled={item.availableCount <= 0}
+                            disabled={item.count <= 0}
                           />
                           <Button
                             size="sm"
@@ -1796,7 +1760,7 @@ export default function UrunKullanimPanel() {
                               item.miadRaw,
                               visualDeductionQuantities[item.groupKey] || 1
                             )}
-                            disabled={item.availableCount <= 0}
+                            disabled={item.count <= 0}
                           >
                             <PackageMinus className="h-3.5 w-3.5 mr-1.5" />
                             Stoktan Düş
