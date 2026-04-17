@@ -239,6 +239,13 @@ const logSerialHistory = async (seriNo: string, type: string, details: Record<st
 const buildManualDeductionKey = (labId: string, stokKodu: string, lotNumarasi?: string, miadRaw?: string) =>
   `${labId}__${stokKodu}__${lotNumarasi || ''}__${miadRaw || ''}`;
 
+const resolveStockRowUnit = (item: DepoStokItem): number => {
+  const raw = Number((item as any).quantity ?? (item as any).adet ?? 1);
+  if (!Number.isFinite(raw)) return 1;
+  // 0/negatif yazılmış legacy kayıtları listede sıfıra düşürmesin
+  return raw > 0 ? Math.floor(raw) : 1;
+};
+
 export default function UrunKullanimPanel() {
   const { currentUser, currentUserProfile, logout, wallpaper } = useAuth();
   const { theme } = useTheme();
@@ -1273,7 +1280,7 @@ export default function UrunKullanimPanel() {
         laboratuvarGrubu: labGrubu,
         groupKey,
       };
-      existing.count += 1;
+      existing.count += resolveStockRowUnit(item);
       grouped.set(key, existing);
     });
 
