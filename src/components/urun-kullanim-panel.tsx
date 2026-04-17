@@ -1746,7 +1746,7 @@ export default function UrunKullanimPanel() {
                             <span>{item.stokKodu}</span>
                             <span>Lot: {item.lotNumarasi}</span>
                             {item.miad && item.miad !== '-' && <span>Miad: {item.miad}</span>}
-                            <span className="font-bold text-foreground/90">{item.availableCount} {item.anaBirim}</span>
+                            <span className="font-bold text-foreground/90">{item.count} {item.anaBirim}</span>
                           </div>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
