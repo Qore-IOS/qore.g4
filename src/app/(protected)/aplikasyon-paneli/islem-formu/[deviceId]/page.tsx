@@ -26,7 +26,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import SignaturePad from '@/components/SignaturePad';
 import type { SignaturePadRef } from '@/components/SignaturePad';
-import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
+import AplikasyonTutanakPDFButton, { generateAplikasyonTutanakPDF } from '@/components/exports/AplikasyonTutanakPDFButton';
 import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { reserveActionFormNumber } from '@/lib/form-number';
@@ -1758,6 +1758,7 @@ export default function AplikasyonIslemFormuPage() {
             partAndHucreActions: ActionItem[];
         }> = [];
         const labMasterFormRef = isLabMode ? doc(collection(db, 'aplikasyonActionForms')) : null;
+        const createdFormsData: any[] = [];
         
         // Multi-device loop
         for (const currentDevice of devicesToProcess) {
@@ -1790,7 +1791,6 @@ export default function AplikasyonIslemFormuPage() {
             const resolvedFaultName = isCustomFault ? customFaultName.trim() : (selectedFault?.name || null);
             const resolvedFaultId = isCustomFault ? null : (selectedFault?.id || null);
 
-            // Create form document
             const formRef = isLabMode
               ? doc(collection(db, 'deviceActionForms'))
               : doc(collection(db, 'aplikasyonActionForms'));
@@ -1836,6 +1836,13 @@ export default function AplikasyonIslemFormuPage() {
                 labMasterFormId: isLabMode ? labMasterFormRef?.id : undefined,
             };
             batch.set(formRef, formData);
+            
+            createdFormsData.push({
+                device: currentDevice,
+                hospital: hospital,
+                actionRecord: { id: formRef.id, ...formData }
+            });
+
             if (!isLabMode) createdFormIds.push(formRef.id);
 
             // Mirror form to deviceActionForms for device history page
@@ -2085,13 +2092,25 @@ export default function AplikasyonIslemFormuPage() {
         }
 
         await batch.commit();
+
+        for (const data of createdFormsData) {
+            await generateAplikasyonTutanakPDF(data.device, data.hospital, data.actionRecord as any, true);
+        }
+
         toast({
             title: 'Başarılı',
             description: isLabMode
               ? `Laboratuvar geneli için tek form oluşturuldu. (${labDeviceActionSummaries.length} cihaz işlendi)`
               : `İşlem formu #${createdFormIds[0]?.substring(0, 6)}... kaydedildi.`,
         });
-        router.back();
+        
+        // Form states sıfırlama (optional if we don't navigate back)
+        setActions([]);
+        setIslemTuru('');
+        setAciklama('');
+        setEslikEdenPersonel([]);
+        // router.back() kaldırıldı, form sayfasında kalıp pdf açılacak
+
     } catch(err) {
         console.error("Error saving action form:", err);
         toast({ title: 'Hata', description: 'Form kaydedilemedi.', variant: 'destructive'});
@@ -2330,7 +2349,6 @@ export default function AplikasyonIslemFormuPage() {
                     onClick={() => {
                       setIslemTuru(tur);
                       if (tur !== 'ariza') setSelectedFaultId('');
-                      if (!hasSubFields) goBack();
                     }}
                   >
                     {ISLEM_TURU_LABELS[tur]}
@@ -2502,6 +2520,9 @@ export default function AplikasyonIslemFormuPage() {
             >
               HÜCRE DEĞİŞİMİ
             </button>
+            <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'center' }}>
+              <button className="wizard-btn wizard-btn-primary" style={{ width: '100%', padding: '14px', fontSize: '16px' }} onClick={goBack}>Onayla ve Devam Et</button>
+            </div>
           </div>
         );
 
@@ -2529,6 +2550,9 @@ export default function AplikasyonIslemFormuPage() {
             <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', marginTop: '12px' }}>
               İşleme başladığınız ve bitirdiğiniz tarih ve saatleri giriniz.
             </p>
+            <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'center' }}>
+              <button className="wizard-btn wizard-btn-primary" style={{ width: '100%', padding: '14px', fontSize: '16px' }} onClick={goBack}>Tarihleri Onayla</button>
+            </div>
           </div>
         );
 
@@ -3144,6 +3168,9 @@ export default function AplikasyonIslemFormuPage() {
                 );
               })}
             </div>
+            <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'center' }}>
+              <button className="wizard-btn wizard-btn-primary" style={{ width: '100%', padding: '14px', fontSize: '16px' }} onClick={goBack}>İşlemleri Onayla</button>
+            </div>
           </div>
         );
 
@@ -3161,6 +3188,9 @@ export default function AplikasyonIslemFormuPage() {
             <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', marginTop: '8px' }}>
               Bu alan zorunludur. Yapılan işlemi detaylı şekilde açıklayınız.
             </p>
+            <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'center' }}>
+              <button className="wizard-btn wizard-btn-primary" style={{ width: '100%', padding: '14px', fontSize: '16px' }} onClick={goBack}>Açıklamayı Onayla</button>
+            </div>
           </div>
         );
 

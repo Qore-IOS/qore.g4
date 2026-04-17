@@ -20,7 +20,7 @@ import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import TeknikServisTutanakPDFButton from '@/components/exports/TeknikServisTutanakPDFButton';
+import TeknikServisTutanakPDFButton, { generateTeknikServisTutanakPDF } from '@/components/exports/TeknikServisTutanakPDFButton';
 import SignaturePad from '@/components/SignaturePad';
 import type { SignaturePadRef } from '@/components/SignaturePad';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
@@ -1794,6 +1794,7 @@ export default function IslemFormuPage() {
           partAndHucreActions: ActionItem[];
         }> = [];
         const labMasterFormRef = isLabMode ? doc(collection(db, 'teknikServisActionForms')) : null;
+        const createdFormsData: any[] = [];
 
         for (const currentDevice of targetDevices) {
           const currentDeviceId = currentDevice.id;
@@ -1894,6 +1895,12 @@ export default function IslemFormuPage() {
             ...formEntries,
             isLabDeviceChild: isLabMode ? true : undefined,
             labMasterFormId: isLabMode ? labMasterFormRef?.id : undefined,
+          });
+
+          createdFormsData.push({
+             device: currentDevice,
+             hospital: hospital,
+             actionRecord: { id: formRef.id, ...formEntries }
           });
 
           // Mirror to deviceActionForms for single-device flow
@@ -2144,6 +2151,10 @@ export default function IslemFormuPage() {
 
         await batch.commit();
 
+        for (const data of createdFormsData) {
+            await generateTeknikServisTutanakPDF(data.device, data.hospital, data.actionRecord as any, true);
+        }
+
         if (currentDraftId) await deleteDoc(doc(db, 'draftActionForms', currentDraftId));
 
         toast({
@@ -2158,7 +2169,7 @@ export default function IslemFormuPage() {
         setIslemTuru('');
         setAciklama('');
         setIsSignatureModalOpen(false);
-        router.back();
+        // router.back() removed string to stay on same page
 
     } catch(err) {
         console.error("Error saving action form:", err);
@@ -2465,11 +2476,14 @@ export default function IslemFormuPage() {
               <button
                 key={tip}
                 className={`wizard-option-item ${islemTipi === tip ? 'selected' : ''}`}
-                onClick={() => { setIslemTipi(tip); goBack(); }}
+                onClick={() => { setIslemTipi(tip); }}
               >
                 {ISLEM_TIPI_LABELS[tip]}
               </button>
             ))}
+            <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'center' }}>
+              <button className="wizard-btn wizard-btn-primary" style={{ width: '100%', padding: '14px', fontSize: '16px' }} onClick={goBack}>Onayla ve Devam Et</button>
+            </div>
           </div>
         );
 
@@ -2497,7 +2511,7 @@ export default function IslemFormuPage() {
                 <React.Fragment key={tur}>
                   <button
                     className={`wizard-option-item ${islemTuru === tur ? 'selected' : ''}`}
-                    onClick={() => { setIslemTuru(tur); if (!hasSubFields) goBack(); }}
+                    onClick={() => { setIslemTuru(tur); }}
                   >
                     {ISLEM_TURU_LABELS[tur]}
                   </button>
@@ -2653,6 +2667,9 @@ export default function IslemFormuPage() {
             >
               HÜCRE DEĞİŞİMİ
             </button>
+            <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'center' }}>
+              <button className="wizard-btn wizard-btn-primary" style={{ width: '100%', padding: '14px', fontSize: '16px' }} onClick={goBack}>Onayla ve Devam Et</button>
+            </div>
           </div>
         );
 
@@ -2680,6 +2697,9 @@ export default function IslemFormuPage() {
             <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', marginTop: '12px' }}>
               İşleme başladığınız ve bitirdiğiniz tarih ve saatleri giriniz.
             </p>
+            <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'center' }}>
+              <button className="wizard-btn wizard-btn-primary" style={{ width: '100%', padding: '14px', fontSize: '16px' }} onClick={goBack}>Tarihleri Onayla</button>
+            </div>
           </div>
         );
 
@@ -3305,6 +3325,9 @@ export default function IslemFormuPage() {
                 );
               })}
             </div>
+            <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'center' }}>
+              <button className="wizard-btn wizard-btn-primary" style={{ width: '100%', padding: '14px', fontSize: '16px' }} onClick={goBack}>İşlemleri Onayla</button>
+            </div>
           </div>
         );
 
@@ -3322,6 +3345,9 @@ export default function IslemFormuPage() {
             <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', marginTop: '8px' }}>
               Bu alan zorunludur. Yapılan işlemi detaylı şekilde açıklayınız.
             </p>
+            <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'center' }}>
+              <button className="wizard-btn wizard-btn-primary" style={{ width: '100%', padding: '14px', fontSize: '16px' }} onClick={goBack}>Açıklamayı Onayla</button>
+            </div>
           </div>
         );
 
