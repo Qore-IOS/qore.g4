@@ -13,6 +13,7 @@ import BackButton from '@/components/BackButton';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope, matchesCompanyScope } from '@/lib/company-scope';
 import { formatMiad } from "@/lib/date";
 import TimestampText from '@/components/TimestampText';
 import { AlertTriangle } from 'lucide-react';
@@ -22,7 +23,7 @@ export default function LabStockDetailPage() {
   const router = useRouter();
   const firstId = Array.isArray(params?.id) ? params.id[0] : params?.id;
   const { toast } = useToast();
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
 
   const [items, setItems] = useState<DepoStokItem[]>([]);
   const [parentItem, setParentItem] = useState<DepoStokItem | null>(null);
@@ -44,6 +45,11 @@ export default function LabStockDetailPage() {
             return;
         }
         const parent = { id: firstItemSnap.id, ...firstItemSnap.data() } as DepoStokItem;
+        if (!matchesCompanyScope(parent as any, currentCompanyId, isSuperAdmin)) {
+          setOrphanedId(firstId);
+          setLoading(false);
+          return;
+        }
         setParentItem(parent);
 
         // Query using hedefKurumId if available, otherwise fall back to hedefKurum (name)
@@ -59,14 +65,22 @@ export default function LabStockDetailPage() {
         if (parent.hedefKurumId) {
             const q = query(collection(db, 'depoStok'), ...baseConstraints, where('hedefKurumId', '==', parent.hedefKurumId));
             const snap = await getDocs(q);
-            fetchedItems = snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+            fetchedItems = filterByCompanyScope(
+              snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
+              currentCompanyId,
+              isSuperAdmin,
+            );
         }
 
         // Also query by hedefKurum (name) for legacy records
         if (parent.hedefKurum) {
             const legacyQ = query(collection(db, 'depoStok'), ...baseConstraints, where('hedefKurum', '==', parent.hedefKurum));
             const legacySnap = await getDocs(legacyQ);
-            const legacyItems = legacySnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+            const legacyItems = filterByCompanyScope(
+              legacySnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
+              currentCompanyId,
+              isSuperAdmin,
+            );
 
             const existingIds = new Set(fetchedItems.map(item => item.id));
             legacyItems.forEach(item => {
@@ -91,7 +105,7 @@ export default function LabStockDetailPage() {
     } finally {
       setLoading(false);
     }
-  }, [firstId, toast]);
+  }, [firstId, toast, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
     fetchItems();

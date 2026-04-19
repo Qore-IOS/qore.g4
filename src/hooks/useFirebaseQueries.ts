@@ -206,13 +206,15 @@ export function useUsers() {
  * No polling - invalidated via metadata listener when stock changes
  */
 export function useDepoStokByDepot(depotId: string | null) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
-    queryKey: ['depoStok', depotId],
+    queryKey: ['depoStok', depotId, currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       if (!depotId) return [];
       const q = query(collection(db, 'depoStok'), where('depotId', '==', depotId));
       const snap = await getDocs(q);
-      return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
     },
     enabled: !!depotId,
     staleTime: 5 * 60 * 1000, // 5 minutes - no polling, relies on metadata listener
@@ -226,11 +228,13 @@ export function useDepoStokByDepot(depotId: string | null) {
  * No polling - invalidated via metadata listener when stock changes
  */
 export function useAllDepoStok() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
-    queryKey: ['depoStok', 'all'],
+    queryKey: ['depoStok', 'all', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       const snap = await getDocs(collection(db, 'depoStok'));
-      return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
     },
     staleTime: 5 * 60 * 1000, // 5 minutes
     gcTime: 30 * 60 * 1000,
@@ -251,9 +255,10 @@ export function useLabStock(
   options: { enabled?: boolean } = {}
 ) {
   const { enabled: externalEnabled = true } = options;
+  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   return useQuery({
-    queryKey: ['depoStok', 'shipped', labIds.sort().join(','), labNames.sort().join(',')],
+    queryKey: ['depoStok', 'shipped', labIds.sort().join(','), labNames.sort().join(','), currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       if (labIds.length === 0) return [];
       // We can only use 'in' with up to 30 values
@@ -290,7 +295,7 @@ export function useLabStock(
         }
       });
 
-      return Array.from(resultMap.values());
+      return filterByCompanyScope(Array.from(resultMap.values()), currentCompanyId, isSuperAdmin);
     },
     enabled: externalEnabled && labIds.length > 0,
     staleTime: 0, // Always stale - allows metadata listener to trigger refetch immediately

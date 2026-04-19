@@ -20,6 +20,7 @@ import type { DepoStokItem, Laboratory, ProductCode, MinMaxRule } from '@/lib/ty
 import { Loader2, Search, ChevronUp, ChevronDown, ListChecks, History, PackageX, FileText } from 'lucide-react';
 import { useMinMaxRules, touchStockMetadata } from '@/hooks/useFirebaseQueries';
 import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { useToast } from '@/hooks/use-toast';
 import LabIrsaliyeOcrModal, { type LabOcrResult } from '@/components/lab/LabIrsaliyeOcrModal';
 import { normalizeMiad } from '@/lib/date';
@@ -104,7 +105,7 @@ type GroupedStockItem = {
 
 export default function LaboratuvarYonetimiPanel() {
   const router = useRouter();
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
   const [laboratories, setLaboratories] = useState<Laboratory[]>([]);
   const [selectedLabId, setSelectedLabId] = useState<string>('');
@@ -139,7 +140,11 @@ export default function LaboratuvarYonetimiPanel() {
         getDocs(collection(db, 'productCodes'))
       ]);
       setLaboratories(labsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Laboratory)));
-      setDepoStok(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)));
+      setDepoStok(filterByCompanyScope(
+        stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
+        currentCompanyId,
+        isSuperAdmin,
+      ));
       
       const names: Record<string, string> = {};
       const codes: ProductCode[] = [];
@@ -154,7 +159,7 @@ export default function LaboratuvarYonetimiPanel() {
       setIsLoading(false);
     }
     fetchData();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   const labStocks = useMemo(() => {
     if (!selectedLabId) return [];
@@ -392,7 +397,7 @@ export default function LaboratuvarYonetimiPanel() {
 
         for (const item of chunk) {
           const docRef = doc(collection(db, 'depoStok'));
-          batch.set(docRef, {
+          batch.set(docRef, withCompanyScope({
             stokKodu: item.stokKodu,
             stokAdi: item.stokAdi,
             lotNumarasi: item.lotNumarasi || null,
@@ -404,7 +409,7 @@ export default function LaboratuvarYonetimiPanel() {
             eklenmeTarihi: Timestamp.now(),
             sevkTarihi: Timestamp.now(),
             kaynak: 'excel_import',
-          });
+          }, currentCompanyId));
         }
 
         await batch.commit();
@@ -429,7 +434,7 @@ export default function LaboratuvarYonetimiPanel() {
       setIsImporting(false);
       setImportProgress('');
     }
-  }, [validRows, selectedLabId, selectedLabName, toast, invalidateDepoStok]);
+  }, [validRows, selectedLabId, selectedLabName, currentCompanyId, toast, invalidateDepoStok]);
 
   const handleOcrResults = useCallback(async (
     results: LabOcrResult[],
@@ -451,7 +456,7 @@ export default function LaboratuvarYonetimiPanel() {
         const qty = Math.max(1, item.quantity || 1);
         for (let i = 0; i < qty; i++) {
           const ref = doc(collection(db, 'depoStok'));
-          batch.set(ref, {
+          batch.set(ref, withCompanyScope({
             depotId: '',
             depotName: '',
             stokKodu: item.stokKodu,
@@ -467,7 +472,7 @@ export default function LaboratuvarYonetimiPanel() {
             hedefKurum: labName,
             createdByName: currentUserProfile?.name || currentUser?.email || 'Unknown',
             createdByUid: currentUser?.uid || null,
-          });
+          }, currentCompanyId));
           totalDocs++;
         }
       }
@@ -485,7 +490,11 @@ export default function LaboratuvarYonetimiPanel() {
 
       // Refresh local stock data
       const stokSnap = await getDocs(query(collection(db, 'depoStok'), where('isShipped', '==', true)));
-      setDepoStok(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)));
+      setDepoStok(filterByCompanyScope(
+        stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
+        currentCompanyId,
+        isSuperAdmin,
+      ));
 
       toast({
         title: 'Stok girişi tamamlandı',
@@ -501,7 +510,7 @@ export default function LaboratuvarYonetimiPanel() {
     } finally {
       setIsOcrProcessing(false);
     }
-  }, [selectedLabId, laboratories, productCodes, currentUser, currentUserProfile, toast]);
+  }, [selectedLabId, laboratories, productCodes, currentUser, currentUserProfile, currentCompanyId, isSuperAdmin, toast]);
 
   return (
     <div className="space-y-6">

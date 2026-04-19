@@ -29,6 +29,7 @@ import { collection, onSnapshot, query, where, getDocs, Timestamp } from 'fireba
 import { db } from '@/lib/firebase';
 import { VIEWS } from '@/lib/constants';
 import { getExchangeRates } from '@/lib/exchange-rates';
+import { matchesCompanyScope } from '@/lib/company-scope';
 
 const motionProps = {
   initial: { scale: 1, y: 0 },
@@ -80,7 +81,7 @@ export default function DashboardPanel({
     tuketimKayitlari,
 }: DashboardPanelProps) {
   const [isConsumptionModalOpen, setIsConsumptionModalOpen] = useState(false);
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { theme } = useTheme();
   const [faultReports, setFaultReports] = useState<DeviceFaultReport[]>([]);
   const [purchasingTasks, setPurchasingTasks] = useState<PurchasingTask[]>([]);
@@ -103,6 +104,7 @@ export default function DashboardPanel({
 
         for (const docSnap of snapshot.docs) {
           const data = docSnap.data();
+          if (!matchesCompanyScope(data as any, currentCompanyId, isSuperAdmin)) continue;
           if (data.isShipped === true) continue;
           const miadStr = typeof data.miad === 'string' ? data.miad : '';
           if (!miadStr) continue;
@@ -121,7 +123,7 @@ export default function DashboardPanel({
         setExpiringProductsCount(0);
       }
     })();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
     const faultQuery = query(collection(db, 'deviceFaultReports'));
@@ -189,7 +191,10 @@ export default function DashboardPanel({
         let depotDocs: any[] = [];
 
         try { const s = await getDocs(collection(db, 'productCodes')); productDocs = s.docs; } catch (e) { console.warn('[Dashboard] productCodes fetch failed:', e); }
-        try { const s = await getDocs(collection(db, 'depoStok')); stockDocs = s.docs; } catch (e) { console.warn('[Dashboard] depoStok fetch failed:', e); }
+        try {
+          const s = await getDocs(collection(db, 'depoStok'));
+          stockDocs = s.docs.filter((d) => matchesCompanyScope(d.data() as any, currentCompanyId, isSuperAdmin));
+        } catch (e) { console.warn('[Dashboard] depoStok fetch failed:', e); }
         try { const s = await getDocs(collection(db, 'depots')); depotDocs = s.docs; } catch (e) { console.warn('[Dashboard] depots fetch failed:', e); }
 
         const depotNameMap = new Map<string, string>();

@@ -27,6 +27,8 @@ import useHidScanner from '@/hooks/useHidScanner';
 import { parseAnyBarcode, resolveProductFromParsed, parseAndResolveBarcode } from '@/lib/barcode';
 import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
 import BackButton from '@/components/BackButton';
+import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope } from '@/lib/company-scope';
 
 type ScanRow = ScannedItem & {
   adet?: number;
@@ -35,6 +37,7 @@ type ScanRow = ScannedItem & {
 
 export default function IstisnaUrunlerPanel() {
   const { toast } = useToast();
+  const { currentUserProfile } = useAuth();
   
   const [barcodeFormats, setBarcodeFormats] = useState<BarcodeFormat[]>([]);
   const [selectedDepotId, setSelectedDepotId] = useState<string>('');
@@ -156,7 +159,7 @@ export default function IstisnaUrunlerPanel() {
       scannedItems.forEach(item => {
           totalItemsWritten++;
           const newDocRef = doc(collection(db, 'depoStok'));
-          const newDepoStokItem: Omit<DepoStokItem, 'id'> = {
+          const newDepoStokItem = withCompanyScope({
             depotId: selectedDepotId,
             depotName: depotName,
             stokKodu: item.stokKodu,
@@ -168,7 +171,7 @@ export default function IstisnaUrunlerPanel() {
             irsaliyeNumarasi: item.irsaliyeNumarasi,
             eklenmeTarihi: item.timestamp,
             isShipped: false,
-          };
+          }, currentUserProfile?.companyId);
           batch.set(newDocRef, newDepoStokItem);
       });
 

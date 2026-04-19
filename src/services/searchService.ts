@@ -9,6 +9,7 @@ import {
   limit,
 } from 'firebase/firestore';
 import type { DepoStokItem, Shipment, ConsumptionRecord, Depot, ProductCode, Transfer } from '@/lib/types';
+import { filterByCompanyScope } from '@/lib/company-scope';
 
 // İşlem tipi
 export type IslemTipi =
@@ -116,7 +117,9 @@ const formatMiad = (d: any): string => {
 export async function searchProductLedger(
   q: string,
   productCodes: ProductCode[],
-  depots: Depot[]
+  depots: Depot[],
+  companyId?: string | null,
+  isSuperAdmin?: boolean,
 ): Promise<SearchResult> {
   if (!q || q.trim().length < 2) {
     return { ledgerRows: [], stockSummary: [], searchType: 'product' };
@@ -243,7 +246,11 @@ export async function searchProductLedger(
   ]);
 
   // Process fetched data
-  const depoStok: DepoStokItem[] = depoStokSnap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
+  const depoStok: DepoStokItem[] = filterByCompanyScope(
+    depoStokSnap.docs.map((d: any) => ({ id: d.id, ...d.data() })) as DepoStokItem[],
+    companyId,
+    isSuperAdmin,
+  );
   const allShipments: Shipment[] = shipmentsSnap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
   const allTransfers: Transfer[] = transfersSnap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
   const consumptionRecords: ConsumptionRecord[] = consumptionSnap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
