@@ -15,6 +15,7 @@ import { useToast } from '@/hooks/use-toast';
 import { formatMiad } from "@/lib/date";
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 import { saveManualChangeSnapshot } from '@/lib/depotCountHistory';
 import { cn, playFeedback } from '@/lib/utils';
 import { parseBarcode as parseRocheBarcode } from '@/lib/utils';
@@ -105,7 +106,7 @@ export default function StockDetailPage() {
   const stockCode = Array.isArray(params?.stockCode) ? params.stockCode[0] : params?.stockCode;
   const lotNumber = Array.isArray(params?.lotNumber) ? params.lotNumber[0] : params?.lotNumber;
   const { toast } = useToast();
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
 
   const [items, setItems] = useState<DepoStokItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -163,7 +164,11 @@ export default function StockDetailPage() {
         where('isShipped', '==', false)
       );
       const snap = await getDocs(q);
-      const fetchedItems = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as DepoStokItem));
+      const fetchedItems = filterByCompanyScope(
+        snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as DepoStokItem)),
+        currentCompanyId,
+        isSuperAdmin,
+      );
       setItems(fetchedItems);
     } catch (err) {
       console.error("Error fetching stock details:", err);
@@ -171,7 +176,7 @@ export default function StockDetailPage() {
     } finally {
       setLoading(false);
     }
-  }, [depotId, stockCode, lotNumber, toast]);
+  }, [depotId, stockCode, lotNumber, toast, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
     fetchItems();

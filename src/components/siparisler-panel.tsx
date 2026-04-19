@@ -63,6 +63,7 @@ import { format as formatDate, parse, compareAsc, isValid } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { Loader2, PlusCircle, Trash2, Check, FileSpreadsheet, History, Calculator, ChevronsUpDown, Undo, ClipboardPlus, ShoppingCart, Package, Plus, Minus, MoreHorizontal, ArrowRight, Search } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 import * as XLSX from 'xlsx';
 import { useRowFocus } from '@/hooks/useRowFocus';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -83,7 +84,7 @@ import { formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
 export default function SiparislerPanel(): JSX.Element {
   const { toast } = useToast();
   const router = useRouter();
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   useRowFocus('focus');
 
   const [depots, setDepots] = useState<Depot[]>([]);
@@ -183,7 +184,11 @@ export default function SiparislerPanel(): JSX.Element {
         setDepots(filteredDepots);
         setHospitals(hSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
         setProductCodes(pSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
-        setDepoStok(sSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)));
+        setDepoStok(filterByCompanyScope(
+          sSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
+          currentCompanyId,
+          isSuperAdmin,
+        ));
         
         if (filteredDepots.length > 0) setSelectedDepotId(filteredDepots[0].id);
       } catch (e) {
@@ -192,7 +197,7 @@ export default function SiparislerPanel(): JSX.Element {
         setIsLoading(false);
       }
     })();
-  }, [toast, currentUserProfile]);
+  }, [toast, currentUserProfile, currentCompanyId, isSuperAdmin]);
 
 
   const addManualItem = () => {

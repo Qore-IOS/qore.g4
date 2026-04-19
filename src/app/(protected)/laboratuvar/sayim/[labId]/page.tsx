@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { useToast } from '@/hooks/use-toast';
 import { Check, X, Loader2, ListFilter } from 'lucide-react';
 import { cn, playFeedback } from '@/lib/utils';
@@ -39,7 +40,7 @@ export default function LaboratuvarSayimPage() {
   const params = useParams();
   const labId = Array.isArray(params?.labId) ? params.labId[0] : (params?.labId as string);
   const router = useRouter();
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
 
   const [labName, setLabName] = useState<string>('');
@@ -123,7 +124,7 @@ export default function LaboratuvarSayimPage() {
 
                     for (let i = 0; i < qtyToAdd; i++) {
                         const newStockRef = doc(collection(db, 'depoStok'));
-                        batch.set(newStockRef, {
+                        batch.set(newStockRef, withCompanyScope({
                             stokKodu: templateItem.stokKodu,
                             stokAdi: templateItem.stokAdi || group.stokAdi,
                             lotNumarasi: templateItem.lotNumarasi || group.lotNumarasi,
@@ -135,7 +136,7 @@ export default function LaboratuvarSayimPage() {
                             eklenmeTarihi: new Date(),
                             ekleyenKullanici: currentUserProfile.name || currentUserProfile.email || 'System',
                             eklemeSebebi: 'sayim_fazlasi', // Added from inventory count surplus
-                        });
+                        }, currentCompanyId));
                         itemsToAdd++;
                     }
                 }
@@ -259,7 +260,7 @@ export default function LaboratuvarSayimPage() {
           .filter(item => !item.hedefKurumId); // Only include items without hedefKurumId to avoid duplicates
 
         docs = [...docs, ...legacyDocs];
-        setRawStock(docs);
+        setRawStock(filterByCompanyScope(docs, currentCompanyId, isSuperAdmin));
       } catch (error) {
         console.error('Error loading lab stock:', error);
         toast({ title: 'Veri Hatası', description: 'Sayım verileri yüklenemedi.', variant: 'destructive' });
@@ -267,7 +268,7 @@ export default function LaboratuvarSayimPage() {
         setIsLoading(false);
       }
     })();
-  }, [labId, toast]);
+  }, [labId, toast, currentCompanyId, isSuperAdmin]);
 
   const existingLabSerials = useMemo(() => new Set(rawStock.map(s => s.seriNumarasi || '').filter(Boolean)), [rawStock]);
 

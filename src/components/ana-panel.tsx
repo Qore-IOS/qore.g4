@@ -58,7 +58,7 @@ import { malKabulLogger, createCorrelationId } from '@/lib/logger';
 import { sanitizeBarcode, sanitizeStockCode, securityCheck } from '@/lib/mal-kabul/validation';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { formatQuantityWithUnit, formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
-import { matchesCompanyScope } from '@/lib/company-scope';
+import { matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
 
 // Child Components
 import ManualInlineAdder from '@/components/mal-kabul/ManualInlineAdder';
@@ -1292,7 +1292,9 @@ export default function AnaPanel(props: AnaPanelProps) {
             batchChunks.map(async (chunk) => {
               const q = query(collection(db, 'depoStok'), where('seriNumarasi', 'in', chunk));
               const snap = await getDocs(q);
-              return snap.docs.map(doc => doc.data().seriNumarasi as string);
+              return snap.docs
+                .filter(doc => matchesCompanyScope(doc.data() as any, currentCompanyId, isSuperAdmin))
+                .map(doc => doc.data().seriNumarasi as string);
             })
           );
           results.flat().forEach(serial => existingSerialsInDb.add(serial));
@@ -1332,7 +1334,7 @@ export default function AnaPanel(props: AnaPanelProps) {
           for (let i = 0; i < adet; i++) {
             docsToCreate.push({
               ref: doc(collection(db, 'depoStok')),
-              data: createDocData(),
+              data: withCompanyScope(createDocData(), currentCompanyId),
               item,
             });
           }
@@ -1340,7 +1342,7 @@ export default function AnaPanel(props: AnaPanelProps) {
           for (const serial of (serialsToProcess.filter(Boolean) as string[])) {
             docsToCreate.push({
               ref: doc(collection(db, 'depoStok')),
-              data: createDocData(serial),
+              data: withCompanyScope(createDocData(serial), currentCompanyId),
               serial,
               item,
             });
