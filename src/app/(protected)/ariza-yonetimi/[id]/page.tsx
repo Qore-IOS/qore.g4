@@ -26,6 +26,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import QRCode from 'qrcode';
+import { prefetchPdfAssets, resolveLabDisplayName, computeFormNo } from '@/lib/pdf-assets';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -1362,26 +1363,17 @@ export default function FaultDetailPage() {
   const generatePdf = async () => {
     if (!fault) return;
 
-    // Turkish font loading (same approach as Teknik Servis Formu)
-    let turkishFontBase64: string | null = null;
-    try {
-      const fontUrl = 'https://fonts.gstatic.com/s/notosans/v36/o-0IIpQlx3QUlC5A4PNr5TRA.ttf';
-      const fontResp = await fetch(fontUrl);
-      if (fontResp.ok) {
-        const fontBlob = await fontResp.blob();
-        turkishFontBase64 = await new Promise<string | null>((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            const result = reader.result as string;
-            resolve(result.split(',')[1]);
-          };
-          reader.onerror = () => resolve(null);
-          reader.readAsDataURL(fontBlob);
-        });
-      }
-    } catch (e) {
-      console.error('Could not load Turkish font:', e);
-    }
+    const hospitalId = fault.hospitalId || fault.labId;
+    const recordUrl = `${window.location.origin}/ariza-yonetimi/${fault.id}`;
+    const typeChar = fault.faultType === 'teknik_servis' ? 'T' : 'A';
+
+    // Fire ALL independent async operations in parallel
+    const [assets, labDisplayName, qrDataUrl, formNo] = await Promise.all([
+      prefetchPdfAssets(),
+      resolveLabDisplayName(hospitalId, fault.labName || ''),
+      QRCode.toDataURL(recordUrl, { errorCorrectionLevel: 'M', margin: 0, scale: 4 }),
+      computeFormNo('deviceFaultReports', 'openedByUid', fault.openedByUid, fault.id, fault.openedByName || '', typeChar, 'openedAt'),
+    ]);
 
     const pdfDoc = new jsPDF({ unit: 'pt', format: 'a4' });
     const pageW = pdfDoc.internal.pageSize.getWidth();
@@ -1389,9 +1381,9 @@ export default function FaultDetailPage() {
     const padX = 40;
 
     let useTurkish = false;
-    if (turkishFontBase64) {
+    if (assets.fontBase64) {
       try {
-        pdfDoc.addFileToVFS('NotoSans-Regular.ttf', turkishFontBase64);
+        pdfDoc.addFileToVFS('NotoSans-Regular.ttf', assets.fontBase64);
         pdfDoc.addFont('NotoSans-Regular.ttf', 'NotoSans', 'normal');
         useTurkish = true;
       } catch (e) {
@@ -1418,7 +1410,7 @@ export default function FaultDetailPage() {
     pdfDoc.setLineWidth(2);
     pdfDoc.rect(padX / 2, padX / 2, pageW - padX, pageH - padX);
 
-    // --- HEADER: Title (left), Logo (center), QR Code (right) ---
+    // --- HEADER ---
     const headerY = 30;
 
     pdfDoc.setTextColor(0, 0, 0);
@@ -1426,31 +1418,12 @@ export default function FaultDetailPage() {
     pdfDoc.setFont(FONT, 'bold');
     pdfDoc.text(txt('Arıza Raporu'), padX, headerY + 20);
 
-    // Logo in center
-    try {
-      let logoResponse = await fetch('/invlogo.png');
-      if (!logoResponse.ok) {
-        logoResponse = await fetch('/invitrolab_LOGO__-_Kopya__1_-removebg.png');
-      }
-      if (logoResponse.ok) {
-        const logoBlob = await logoResponse.blob();
-        const logoData = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.readAsDataURL(logoBlob);
-        });
-        const logoWidth = 132;
-        const logoHeight = 40;
-        const logoX = (pageW / 2) - (logoWidth / 2);
-        pdfDoc.addImage(logoData, 'PNG', logoX, headerY + 5, logoWidth, logoHeight, undefined, 'FAST');
-      }
-    } catch (e) {
-      console.error('Could not load header logo:', e);
+    if (assets.headerLogo) {
+      const logoWidth = 132;
+      const logoHeight = 40;
+      const logoX = (pageW / 2) - (logoWidth / 2);
+      pdfDoc.addImage(assets.headerLogo, 'PNG', logoX, headerY + 5, logoWidth, logoHeight, undefined, 'FAST');
     }
-
-    // QR Code on right with orange rounded border
-    const recordUrl = `${window.location.origin}/ariza-yonetimi/${fault.id}`;
-    const qrDataUrl = await QRCode.toDataURL(recordUrl, { errorCorrectionLevel: 'M', margin: 0, scale: 4 });
 
     const qrSize = 60;
     const qrX = pageW - padX - qrSize - 10;
@@ -1462,77 +1435,20 @@ export default function FaultDetailPage() {
     pdfDoc.roundedRect(qrX - 5, qrY - 5, qrSize + 10, qrSize + 10, 5, 5, 'FD');
     pdfDoc.addImage(qrDataUrl, 'PNG', qrX, qrY, qrSize, qrSize, undefined, 'FAST');
 
-    // System logo below QR
-    try {
-      const sysLogoResponse = await fetch('/newlogoblk.png');
-      if (sysLogoResponse.ok) {
-        const sysLogoBlob = await sysLogoResponse.blob();
-        const sysLogoData = await new Promise<string>((resolve) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.readAsDataURL(sysLogoBlob);
-        });
-        const sysLogoSize = 28;
-        const sysLogoX = qrX + (qrSize / 2) - (sysLogoSize / 2);
-        pdfDoc.addImage(sysLogoData, 'PNG', sysLogoX, qrY + qrSize + 5, sysLogoSize, sysLogoSize, undefined, 'FAST');
-      }
-    } catch (e) {
-      console.error('Could not load system logo:', e);
+    if (assets.sysLogo) {
+      const sysLogoSize = 28;
+      const sysLogoX = qrX + (qrSize / 2) - (sysLogoSize / 2);
+      pdfDoc.addImage(assets.sysLogo, 'PNG', sysLogoX, qrY + qrSize + 5, sysLogoSize, sysLogoSize, undefined, 'FAST');
     }
 
-    // --- FORM INFO SECTION ---
+    // --- FORM INFO ---
     pdfDoc.setFontSize(10);
     pdfDoc.setFont(FONT, 'normal');
     let currentY = 100;
 
-    // Resolve pool main lab name
-    let labDisplayName = fault.labName || '';
-    const hospitalId = fault.hospitalId || fault.labId;
-    if (hospitalId) {
-      try {
-        const poolsSnap = await getDocs(collection(db, 'labPools'));
-        const allPools = poolsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-        const matchingPool = allPools.find((p: any) => p.active && p.memberIds?.includes(hospitalId));
-        if (matchingPool) {
-          const pool = matchingPool as any;
-          if (pool.mainLabId && pool.mainLabId !== hospitalId) {
-            const mainLabDoc = await getDoc(doc(db, 'hospitals', pool.mainLabId));
-            if (mainLabDoc.exists()) {
-              labDisplayName = `${mainLabDoc.data().name} - ${fault.labName || ''}`;
-            }
-          }
-        }
-      } catch (e) {
-        console.error('Could not resolve pool main lab:', e);
-      }
-    }
-
     const normalized = normalizeStatus(fault.status);
     const statusLabel = STATUS_CONFIG[normalized]?.label || fault.status;
     const faultTypeLabel = fault.faultType === 'teknik_servis' ? 'Teknik Servis' : fault.faultType === 'aplikasyon' ? 'Aplikasyon' : (fault.faultType || '-');
-
-    // Compute form number: initials + T/A + sequential ordinal per user
-    let formNo = fault.id;
-    try {
-      const openerName = fault.openedByName || '';
-      const initials = openerName.trim().split(/\s+/).map((w: string) => w.charAt(0).toUpperCase()).join('');
-      const typeChar = fault.faultType === 'teknik_servis' ? 'T' : 'A';
-      const userFaultsQuery = query(
-        collection(db, 'deviceFaultReports'),
-        where('openedByUid', '==', fault.openedByUid)
-      );
-      const userFaultsSnap = await getDocs(userFaultsQuery);
-      const sorted = userFaultsSnap.docs.slice().sort((a, b) => {
-        const ta = a.data().openedAt?.toMillis?.() || 0;
-        const tb = b.data().openedAt?.toMillis?.() || 0;
-        return ta - tb;
-      });
-      const idx = sorted.findIndex(d => d.id === fault.id);
-      const ordinal = idx >= 0 ? idx + 1 : sorted.length + 1;
-      formNo = `${initials}-${typeChar}${String(ordinal).padStart(4, '0')}`;
-    } catch (e) {
-      console.error('Could not compute formNo:', e);
-    }
 
     const info: string[][] = [
       [txt('Arıza No:'), formNo],
