@@ -1511,8 +1511,31 @@ export default function FaultDetailPage() {
     const statusLabel = STATUS_CONFIG[normalized]?.label || fault.status;
     const faultTypeLabel = fault.faultType === 'teknik_servis' ? 'Teknik Servis' : fault.faultType === 'aplikasyon' ? 'Aplikasyon' : (fault.faultType || '-');
 
+    // Compute form number: initials + T/A + sequential ordinal per user
+    let formNo = fault.id;
+    try {
+      const openerName = fault.openedByName || '';
+      const initials = openerName.trim().split(/\s+/).map((w: string) => w.charAt(0).toUpperCase()).join('');
+      const typeChar = fault.faultType === 'teknik_servis' ? 'T' : 'A';
+      const userFaultsQuery = query(
+        collection(db, 'deviceFaultReports'),
+        where('openedByUid', '==', fault.openedByUid)
+      );
+      const userFaultsSnap = await getDocs(userFaultsQuery);
+      const sorted = userFaultsSnap.docs.slice().sort((a, b) => {
+        const ta = a.data().openedAt?.toMillis?.() || 0;
+        const tb = b.data().openedAt?.toMillis?.() || 0;
+        return ta - tb;
+      });
+      const idx = sorted.findIndex(d => d.id === fault.id);
+      const ordinal = idx >= 0 ? idx + 1 : sorted.length + 1;
+      formNo = `${initials}-${typeChar}${String(ordinal).padStart(4, '0')}`;
+    } catch (e) {
+      console.error('Could not compute formNo:', e);
+    }
+
     const info: string[][] = [
-      [txt('Arıza No:'), fault.id],
+      [txt('Arıza No:'), formNo],
       [txt('Laboratuvar:'), txt(labDisplayName)],
       [txt('Cihaz:'), txt(`${fault.model} (SN: ${fault.serial})`)],
       [txt('Arıza Tipi:'), txt(faultTypeLabel)],

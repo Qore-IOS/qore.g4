@@ -8,7 +8,7 @@ import autoTable from 'jspdf-autotable';
 import QRCode from 'qrcode';
 import { format } from 'date-fns';
 import type { Device, Hospital } from '@/lib/types';
-import { collection, getDocs, doc, getDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 // Turkish font cache
@@ -88,6 +88,7 @@ type ActionItem = {
 type ActionFormRecord = {
     id: string;
     createdAt: { toDate: () => Date };
+    createdByUid: string;
     createdByName: string;
     actions: ActionItem[];
     islemTuru?: IslemTuru;
@@ -315,8 +316,29 @@ export async function generateAplikasyonTutanakPDF(
         bitisFormatted = `${actionRecord.bitisTarihi.split('-').reverse().join('.')} ${actionRecord.bitisSaati}`;
     }
 
+    // Compute form number: initials + A + sequential ordinal per user
+    let formNo = actionRecord.id;
+    try {
+      const initials = actionRecord.createdByName.trim().split(/\s+/).map(w => w.charAt(0).toUpperCase()).join('');
+      const userFormsQuery = query(
+        collection(db, 'aplikasyonActionForms'),
+        where('createdByUid', '==', actionRecord.createdByUid)
+      );
+      const userFormsSnap = await getDocs(userFormsQuery);
+      const sorted = userFormsSnap.docs.slice().sort((a, b) => {
+        const ta = a.data().createdAt?.toMillis?.() || 0;
+        const tb = b.data().createdAt?.toMillis?.() || 0;
+        return ta - tb;
+      });
+      const idx = sorted.findIndex(d => d.id === actionRecord.id);
+      const ordinal = idx >= 0 ? idx + 1 : sorted.length + 1;
+      formNo = `${initials}-A${String(ordinal).padStart(4, '0')}`;
+    } catch (e) {
+      console.error('Could not compute formNo:', e);
+    }
+
     const info = [
-        ['Form No:', actionRecord.id],
+        ['Form No:', formNo],
         ['Laboratuvar:', txt(labDisplayName, useTurkish)],
         ['Cihaz:', txt(`${device.cihazAdi || device.model} (SN: ${device.seriNumarasi})`, useTurkish)],
         [txt('İşlemi Yapan:', useTurkish), personnelStr],
@@ -574,7 +596,8 @@ export async function generateAplikasyonTutanakPDF(
       const blobURL = doc.output('bloburl');
       window.open(blobURL, '_blank');
     } else {
-      doc.save(`AplikasyonFormu_${device.seriNumarasi}_${actionRecord.id.substring(0,6)}.pdf`);
+      const safeFormNo = String(formNo || actionRecord.id || '').replace(/[^A-Za-z0-9-_]/g, '');
+      doc.save(`AplikasyonFormu_${device.seriNumarasi}_${safeFormNo || actionRecord.id.substring(0,6)}.pdf`);
     }
   } catch (e) {
     console.error('PDF export error:', e);
