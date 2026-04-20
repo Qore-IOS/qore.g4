@@ -204,6 +204,7 @@ export interface DepoStokItem {
   ambalajDegeri?: number;
   transferId?: string;
   hedefKurumId?: string | null; // NEW
+  companyId?: string; // Şirket ID - multi-tenancy
   [k: string]: any;
 }
 

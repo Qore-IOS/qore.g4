@@ -1,6 +1,7 @@
 'use server';
 import { adminDb } from '@/lib/firebase-admin';
 import type { DepoStokItem, Shipment, ConsumptionRecord, Depot, ProductCode, User, Transfer } from '@/lib/types';
+import { filterByCompanyScope } from '@/lib/company-scope';
 
 // İşlem tipi - tüm alt türleri dahil
 export type IslemTipi =
@@ -200,7 +201,11 @@ async function fetchTransferItemsNoIndex(params: {
  * 6. Mal Kabul records grouped for product/lot searches
  * 7. Timeout protection on all query groups
  */
-export async function searchProductLedger(q: string): Promise<SearchResult> {
+export async function searchProductLedger(
+  q: string,
+  companyId?: string | null,
+  isSuperAdmin?: boolean,
+): Promise<SearchResult> {
   if (!q || q.trim().length < 2) {
     return { ledgerRows: [], stockSummary: [], searchType: 'product' };
   }
@@ -376,7 +381,11 @@ export async function searchProductLedger(q: string): Promise<SearchResult> {
   ] = await withTimeout(Promise.all(corePromises), QUERY_TIMEOUT);
 
   // Process core data
-  const depoStok: DepoStokItem[] = depoStokSnap?.docs?.map((d: any) => ({ id: d.id, ...d.data() })) || [];
+  const depoStok: DepoStokItem[] = filterByCompanyScope(
+    (depoStokSnap?.docs?.map((d: any) => ({ id: d.id, ...d.data() })) || []) as DepoStokItem[],
+    companyId,
+    isSuperAdmin,
+  );
   const verificationReports: any[] = (verifSnap?.docs?.map((d: any) => ({ id: d.id, ...d.data() })) || [])
     .filter((r: any) => r.raporTipi === 'mal_kabul');
   const consumptionRecords: ConsumptionRecord[] = consumptionSnap?.docs?.map((d: any) => ({ id: d.id, ...d.data() })) || [];

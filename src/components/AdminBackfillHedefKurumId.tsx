@@ -7,11 +7,14 @@ import { Card, CardHeader, CardTitle, CardContent, CardFooter, CardDescription }
 import { Button } from '@/components/ui/button';
 import { Loader2, DatabaseZap } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 
 export default function AdminBackfillHedefKurumId() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ updated: number; skipped: number }>({ updated: 0, skipped: 0 });
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   const run = async () => {
     if (!confirm('Bu işlem, eski sevk edilmiş stok kayıtlarını güncelleyecektir. Bu işlem geri alınamaz. Devam etmek istiyor musunuz?')) {
@@ -23,13 +26,21 @@ export default function AdminBackfillHedefKurumId() {
         getDocs(collection(db, 'hospitals')),
         getDocs(query(collection(db, 'depoStok'), where('isShipped', '==', true), where('hedefKurumId', '==', null))),
       ]);
-      const labs: Hospital[] = labsSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+      const labs: Hospital[] = filterByCompanyScope(
+        labsSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) })),
+        currentCompanyId,
+        isSuperAdmin,
+      );
       const nameToId = new Map<string, string>();
       labs.forEach(l => { if (l.name) nameToId.set(l.name, l.id); });
 
-      const docs = stokSnap.docs
-        .map(d => ({ id: d.id, ...(d.data() as any) } as DepoStokItem))
-        .filter(i => !i.hedefKurumId && !!i.hedefKurum); // Double check filter
+      const docs = filterByCompanyScope(
+        stokSnap.docs
+          .map(d => ({ id: d.id, ...(d.data() as any) } as DepoStokItem))
+          .filter(i => !i.hedefKurumId && !!i.hedefKurum), // Double check filter
+        currentCompanyId,
+        isSuperAdmin,
+      );
 
       let updated = 0, skipped = 0;
       for (let i = 0; i < docs.length; i += 400) {

@@ -22,6 +22,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
 import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, addDoc, updateDoc, orderBy, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 import { compareAsc, parse as parseDate, format as formatDate } from 'date-fns';
 import { formatMiad } from '@/lib/date';
 import { tr } from 'date-fns/locale';
@@ -247,7 +248,7 @@ const resolveStockRowUnit = (item: DepoStokItem): number => {
 };
 
 export default function UrunKullanimPanel() {
-  const { currentUser, currentUserProfile, logout, wallpaper } = useAuth();
+  const { currentUser, currentUserProfile, logout, wallpaper, currentCompanyId, isSuperAdmin } = useAuth();
   const { theme } = useTheme();
   const { toast } = useToast();
   const router = useRouter();
@@ -779,19 +780,27 @@ export default function UrunKullanimPanel() {
           return null;
         }
 
-        const items = legacySnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+        const items = filterByCompanyScope(
+          legacySnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
+          currentCompanyId,
+          isSuperAdmin,
+        );
         return seri
           ? items.find(i => i.seriNumarasi === seri) || null
           : pickEarliest(items);
       }
 
-      const items = snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+      const items = filterByCompanyScope(
+        snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
+        currentCompanyId,
+        isSuperAdmin,
+      );
       return seri ? items[0] : pickEarliest(items);
     } catch (error) {
       urunKullanimLogger.error('Firestore stok doğrulama hatası', error, { stokKodu, seri, lot });
       return null;
     }
-  }, [poolMemberIds, poolMemberNames]);
+  }, [poolMemberIds, poolMemberNames, currentCompanyId, isSuperAdmin]);
 
   /**
    * Firestore'dan direkt duplicate kontrolü - cache'e güvenilmez durumlar için

@@ -26,6 +26,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useToast } from '@/hooks/use-toast';
 import { exportDataToExcel, generateId } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 
 type LocationType = 'depot' | 'hospital';
 
@@ -121,7 +122,7 @@ const toDate = (value: unknown): Date | undefined => {
 export default function MerkezSiparisPanel() {
   const { toast } = useToast();
   const router = useRouter();
-  const { currentUserProfile, currentUser } = useAuth();
+  const { currentUserProfile, currentUser, currentCompanyId, isSuperAdmin } = useAuth();
 
   const [isLoading, setIsLoading] = useState(true);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -171,7 +172,11 @@ export default function MerkezSiparisPanel() {
         const depotsData = depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
         const hospitalsData = hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital));
         const productsData = productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode));
-        const stokData = stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+        const stokData = filterByCompanyScope(
+          stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
+          currentCompanyId,
+          isSuperAdmin,
+        );
         const deviceGroupsData = groupsSnap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceGroup));
 
         setDepots(depotsData);
@@ -248,7 +253,7 @@ export default function MerkezSiparisPanel() {
     };
 
     fetchData();
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   const productByStockCode = useMemo(() => {
     return productCodes.reduce<Record<string, ProductCode>>((acc, product) => {

@@ -18,6 +18,8 @@ import type {
   AssignedDevice, 
 } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 
 const processTimestamp = (docData: any) => {
   const data = { ...docData };
@@ -49,6 +51,7 @@ export function useDashboardData() {
   });
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -111,7 +114,11 @@ export function useDashboardData() {
         devices: devicesSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Device)),
         hospitalDeviceAssignments: assignmentsSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as AssignedDevice)),
         productCodes: productCodesSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as ProductCode)),
-        depoStok: depoStokSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem)),
+        depoStok: filterByCompanyScope(
+          depoStokSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem)),
+          currentCompanyId,
+          isSuperAdmin,
+        ),
         tuketimKayitlari: tuketimKayitlariSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as ConsumptionRecord)),
         efficiencyDataRecords: efficiencyHistorySnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) })),
         cihazUstuGecmisi: cihazUstuSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) })),
@@ -129,7 +136,7 @@ export function useDashboardData() {
     } finally {
       setIsLoading(false);
     }
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
     fetchData();

@@ -20,6 +20,7 @@ import {
 } from 'firebase/firestore';
 import { safeCompareByMiad, toDateSafe } from "@/lib/date";
 import { differenceInDays, parse, isValid, compareAsc } from 'date-fns';
+import { filterByCompanyScope } from '@/lib/company-scope';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -41,12 +42,16 @@ function processDoc(doc: QueryDocumentSnapshot<DocumentData>): DepoStokItem {
  * We will filter for un-shipped items on the client-side to avoid needing a composite index.
  * This is intended for panels that need the full list, like DepoSayim.
  */
-export async function getFullDepotStock(depotId: string): Promise<{ items: DepoStokItem[] }> {
+export async function getFullDepotStock(
+  depotId: string,
+  companyId?: string | null,
+  isSuperAdmin?: boolean,
+): Promise<{ items: DepoStokItem[] }> {
   try {
     const ref = collection(db, 'depoStok');
     const q = query(ref, where('depotId', '==', depotId));
     const snap = await getDocs(q);
-    const items = snap.docs.map(processDoc);
+    const items = filterByCompanyScope(snap.docs.map(processDoc), companyId, isSuperAdmin);
     return { items };
   } catch (err) {
     console.error('Error fetching full depot stock:', err);
@@ -54,7 +59,11 @@ export async function getFullDepotStock(depotId: string): Promise<{ items: DepoS
   }
 }
 
-export async function getExpiringItems(depotId: string): Promise<DepoStokItem[]> {
+export async function getExpiringItems(
+  depotId: string,
+  companyId?: string | null,
+  isSuperAdmin?: boolean,
+): Promise<DepoStokItem[]> {
     const depoStokRef = collection(db, 'depoStok');
     const q = query(
         depoStokRef,
@@ -63,7 +72,7 @@ export async function getExpiringItems(depotId: string): Promise<DepoStokItem[]>
     );
 
     const snapshot = await getDocs(q);
-    const allItems = snapshot.docs.map(processDoc);
+    const allItems = filterByCompanyScope(snapshot.docs.map(processDoc), companyId, isSuperAdmin);
 
     const today = new Date();
     today.setHours(0, 0, 0, 0); // Normalize to the start of the day
@@ -239,8 +248,10 @@ export async function getPaginatedDepotStock(params: {
   sortField: string;
   sortDirection: 'asc' | 'desc';
   columnFilters?: Record<string, string[]>;
+  companyId?: string | null;
+  isSuperAdmin?: boolean;
 }): Promise<PaginatedStockResult> {
-  const { depotId, page, pageSize, sortField, sortDirection, columnFilters } = params;
+  const { depotId, page, pageSize, sortField, sortDirection, columnFilters, companyId, isSuperAdmin } = params;
 
   if (!depotId) {
     return { rows: [], totalRows: 0, totalPages: 0, currentPage: 1, columnValues: { stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [] } };
@@ -253,7 +264,7 @@ export async function getPaginatedDepotStock(params: {
     where('isShipped', '==', false)
   );
   const snapshot = await getDocs(stockQuery);
-  const allItems = snapshot.docs.map(processDoc);
+  const allItems = filterByCompanyScope(snapshot.docs.map(processDoc), companyId, isSuperAdmin);
 
   // Group by (stokKodu, lotNumarasi, miad)
   const grouped: Record<string, GroupedStockRow> = {};
@@ -341,7 +352,11 @@ export async function getPaginatedDepotStock(params: {
  * whose miad is within the next `thresholdDays` days,
  * across ALL depots. Server-side computation – only the count is returned.
  */
-export async function getExpiringProductsCount(thresholdDays: number = 45): Promise<number> {
+export async function getExpiringProductsCount(
+  thresholdDays: number = 45,
+  companyId?: string | null,
+  isSuperAdmin?: boolean,
+): Promise<number> {
   try {
     // Composite query: isShipped (requires Firestore index)
     const stockQuery = query(
@@ -355,7 +370,14 @@ export async function getExpiringProductsCount(thresholdDays: number = 45): Prom
     const seenKeys = new Set<string>();
     let count = 0;
 
-    for (const docSnap of snapshot.docs) {
+    const scopedDocs = isSuperAdmin
+      ? snapshot.docs
+      : snapshot.docs.filter((d) => {
+          const data = d.data();
+          return filterByCompanyScope([data], companyId, isSuperAdmin).length > 0;
+        });
+
+    for (const docSnap of scopedDocs) {
       const data = docSnap.data();
       const miadStr = typeof data.miad === 'string' ? data.miad : '';
       if (!miadStr) continue;

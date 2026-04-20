@@ -24,7 +24,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { differenceInDays, isValid, parse } from 'date-fns';
 import { resolveDefaultTrackingMode } from '@/lib/tracking';
 import LabIrsaliyeOcrModal, { type LabOcrResult } from '@/components/lab/LabIrsaliyeOcrModal';
-import { matchesCompanyScope } from '@/lib/company-scope';
+import { matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
 
 function normalizeKey(key: string): string {
   return key
@@ -562,7 +562,7 @@ export default function LaboratuvarYonetimiPanel() {
 
           for (let j = 0; j < chunkSize; j++) {
             const docRef = doc(collection(db, 'depoStok'));
-            batch.set(docRef, {
+            batch.set(docRef, withCompanyScope({
               stokKodu: referenceItem.stokKodu ?? group.stokKodu,
               stokAdi: referenceItem.stokAdi ?? group.stokAdi,
               lotNumarasi: referenceItem.lotNumarasi ?? group.lot ?? null,
@@ -574,7 +574,7 @@ export default function LaboratuvarYonetimiPanel() {
               eklenmeTarihi: Timestamp.now(),
               sevkTarihi: referenceItem.sevkTarihi ?? Timestamp.now(),
               kaynak: 'admin_quantity_edit',
-            });
+            }, currentCompanyId));
           }
           await batch.commit();
         }
@@ -743,7 +743,7 @@ export default function LaboratuvarYonetimiPanel() {
 
         for (const item of chunk) {
           const docRef = doc(collection(db, 'depoStok'));
-          batch.set(docRef, {
+          batch.set(docRef, withCompanyScope({
             stokKodu: item.stokKodu,
             stokAdi: item.stokAdi,
             lotNumarasi: item.lotNumarasi || null,
@@ -755,7 +755,7 @@ export default function LaboratuvarYonetimiPanel() {
             eklenmeTarihi: Timestamp.now(),
             sevkTarihi: Timestamp.now(),
             kaynak: 'excel_import',
-          });
+          }, currentCompanyId));
         }
 
         await batch.commit();
@@ -781,7 +781,7 @@ export default function LaboratuvarYonetimiPanel() {
       setIsImporting(false);
       setImportProgress('');
     }
-  }, [validRows, selectedLabId, selectedLabName, toast, invalidateDepoStok]);
+  }, [validRows, selectedLabId, selectedLabName, currentCompanyId, toast, invalidateDepoStok]);
 
   const handleOcrResults = useCallback(async (
     results: LabOcrResult[],
@@ -843,7 +843,7 @@ export default function LaboratuvarYonetimiPanel() {
         const qty = aiConvertedMap.get(item.stokKodu) || fallbackQty;
         for (let i = 0; i < qty; i++) {
           const ref = doc(collection(db, 'depoStok'));
-          batch.set(ref, {
+          batch.set(ref, withCompanyScope({
             stokKodu: item.stokKodu,
             stokAdi: product.stokAdi || item.stokKodu,
             lotNumarasi: item.lot || '',
@@ -857,7 +857,7 @@ export default function LaboratuvarYonetimiPanel() {
             kaynak: 'irsaliye_ocr',
             createdByName: currentUserProfile?.name || currentUserProfile?.email || 'Unknown',
             createdByUid: currentUserProfile?.uid || null,
-          });
+          }, currentCompanyId));
           totalDocs++;
         }
       }
@@ -888,7 +888,7 @@ export default function LaboratuvarYonetimiPanel() {
     } finally {
       setIsOcrProcessing(false);
     }
-  }, [selectedLabId, selectedLabName, products, currentUserProfile, toast, invalidateDepoStok]);
+  }, [selectedLabId, selectedLabName, products, currentUserProfile, currentCompanyId, toast, invalidateDepoStok]);
 
   return (
     <div className="space-y-6">

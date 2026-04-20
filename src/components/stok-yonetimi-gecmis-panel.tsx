@@ -4,6 +4,8 @@ import { db } from '@/lib/firebase';
 import { collection, getDocs, Timestamp } from 'firebase/firestore';
 import type { Depot, DepoStokItem, ConsumptionRecord } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -44,6 +46,7 @@ interface DetailItem {
 
 export default function StokYonetimiGecmisPanel() {
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [depots, setDepots] = useState<Depot[]>([]);
   const [allStock, setAllStock] = useState<DepoStokItem[]>([]);
   
@@ -79,14 +82,14 @@ export default function StokYonetimiGecmisPanel() {
         });
         return { id: d.id, ...data };
       });
-      setAllStock(processItems(stockSnap));
+      setAllStock(filterByCompanyScope(processItems(stockSnap), currentCompanyId, isSuperAdmin));
 
     } catch (error) {
       toast({ title: 'Hata', description: 'Gerekli ana veriler yüklenemedi.', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
     fetchData();

@@ -37,6 +37,7 @@ import {
 import { exportDataToExcel } from '@/lib/utils';
 import { differenceInDays, parse, isValid, compareAsc } from 'date-fns';
 import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 import { Badge } from './ui/badge';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
@@ -297,7 +298,7 @@ function ColumnFilterPopover({
 export default function StokYonetimiPanel() {
   const router = useRouter();
   const { toast } = useToast();
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
 
   // Master data
   const [depots, setDepots] = useState<Depot[]>([]);
@@ -402,7 +403,11 @@ export default function StokYonetimiPanel() {
         );
         const snapshot = await getDocs(stockQuery);
         if (cancelled) return;
-        const allItems = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+        const allItems = filterByCompanyScope(
+          snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
+          currentCompanyId,
+          isSuperAdmin,
+        );
         setRawDepotStock(allItems);
 
         // Group by (stokKodu, lotNumarasi, miad)
@@ -448,7 +453,7 @@ export default function StokYonetimiPanel() {
       }
     })();
     return () => { cancelled = true; };
-  }, [selectedDepotId, productCodes, toast]);
+  }, [selectedDepotId, productCodes, toast, currentCompanyId, isSuperAdmin]);
 
   const lotTrackedStockCodes = useMemo(() => {
     const tracked = new Set<string>();
@@ -604,7 +609,11 @@ export default function StokYonetimiPanel() {
         where('isShipped', '==', false)
       );
       const snapshot = await getDocs(stockQuery);
-      const allItems = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+      const allItems = filterByCompanyScope(
+        snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
+        currentCompanyId,
+        isSuperAdmin,
+      );
       const fileName = `${depotName}_Stok_Raporu_${detailed ? 'Detayli' : 'Ozet'}`;
       const productCodeMap = new Map<string, ProductCode>(
         productCodes.filter(p => p.stokKodu !== undefined).map(p => [p.stokKodu!, p] as const)
@@ -965,7 +974,11 @@ export default function StokYonetimiPanel() {
     try {
       const shippedQuery = query(collection(db, 'depoStok'), where('isShipped', '==', true));
       const shippedSnap = await getDocs(shippedQuery);
-      const stockForSelectedLabs = shippedSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)).filter(item => item.hedefKurum && labNames.includes(item.hedefKurum));
+      const stockForSelectedLabs = filterByCompanyScope(
+        shippedSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
+        currentCompanyId,
+        isSuperAdmin,
+      ).filter(item => item.hedefKurum && labNames.includes(item.hedefKurum));
       const stockSummary: Record<string, { stokAdi: string; quantity: number }> = {};
       stockForSelectedLabs.forEach(item => {
         if (!item.stokKodu) return;
@@ -1006,7 +1019,11 @@ export default function StokYonetimiPanel() {
       where('isShipped', '==', true)
     );
     const shippedSnap = await getDocs(shippedQuery);
-    const shippedItems = shippedSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+    const shippedItems = filterByCompanyScope(
+      shippedSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
+      currentCompanyId,
+      isSuperAdmin,
+    );
 
     for (const labRule of labRulesResults) {
       const labItems = shippedItems.filter(item =>
@@ -1056,7 +1073,7 @@ export default function StokYonetimiPanel() {
     }
 
     return labStocks;
-  }, [hospitals]);
+  }, [hospitals, currentCompanyId, isSuperAdmin]);
 
   /* ─── Open rescue modal for a single product ─── */
   const handleOpenRescueModal = useCallback(async (stokKodu: string, stokAdi: string, riskyBoxes: number, miadDays: number, miad: string) => {
@@ -1099,8 +1116,11 @@ export default function StokYonetimiPanel() {
         where('isShipped', '==', false)
       );
       const stockSnap = await getDocs(stockQuery);
-      const available = stockSnap.docs
-        .map(d => ({ id: d.id, ...d.data() } as DepoStokItem))
+      const available = filterByCompanyScope(
+        stockSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
+        currentCompanyId,
+        isSuperAdmin,
+      )
         .sort((a, b) => {
           const aDays = getMiadInfoFromString(typeof a.miad === 'string' ? a.miad : '').days;
           const bDays = getMiadInfoFromString(typeof b.miad === 'string' ? b.miad : '').days;
@@ -1199,7 +1219,7 @@ export default function StokYonetimiPanel() {
     } finally {
       setRescueTransferring(false);
     }
-  }, [rescueProduct, currentUserProfile, selectedDepotId, depots, fetchLabStockInfoForProduct, toast]);
+  }, [rescueProduct, currentUserProfile, selectedDepotId, depots, fetchLabStockInfoForProduct, toast, currentCompanyId, isSuperAdmin]);
 
   /* ─── Bulk rescue plan ─── */
   const handleBulkRescuePlan = useCallback(async () => {

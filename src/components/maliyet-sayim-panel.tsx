@@ -52,7 +52,7 @@ import {
   type MaliyetSayimOturum, type SessionParticipant, type PresenceData,
 } from '@/lib/maliyet-session';
 import { emitMaliyetSayimInvitation } from '@/lib/notifications';
-import { normalizeCompanyId } from '@/lib/company-scope';
+import { normalizeCompanyId, filterByCompanyScope } from '@/lib/company-scope';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 
@@ -771,7 +771,8 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
               where('isShipped', '==', false)
             )
           );
-          stockItems = snap.docs.map(d => d.data() as { stokKodu: string });
+          const raw = snap.docs.map(d => d.data() as any);
+          stockItems = filterByCompanyScope(raw, currentCompanyId, isSuperAdmin);
         } else {
           // Lab: shipped items targeted to this lab
           const labName = hospitals.find(h => h.id === selectedLocationId)?.name;
@@ -781,8 +782,8 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
               where('isShipped', '==', true)
             )
           );
-          stockItems = snap.docs
-            .map(d => ({ ...d.data() } as any))
+          const raw = snap.docs.map(d => ({ ...d.data() } as any));
+          stockItems = filterByCompanyScope(raw, currentCompanyId, isSuperAdmin)
             .filter((item: any) =>
               item.hedefKurumId === selectedLocationId ||
               (labName && item.hedefKurum === labName)
@@ -801,7 +802,7 @@ export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: M
       }
     })();
     return () => { cancelled = true; };
-  }, [selectedLocationId, locationType, hospitals]);
+  }, [selectedLocationId, locationType, hospitals, currentCompanyId, isSuperAdmin]);
 
   // ---- Derived data ----
 

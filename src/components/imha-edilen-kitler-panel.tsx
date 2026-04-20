@@ -19,6 +19,7 @@ import { useBarcodeParser } from '@/hooks/useBarcodeParser';
 import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 import * as XLSX from 'xlsx';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
@@ -62,7 +63,7 @@ interface GroupedDestroyedItem {
 
 export default function ImhaEdilenKitlerPanel() {
     const { toast } = useToast();
-    const { currentUser, currentUserProfile } = useAuth();
+    const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
     const router = useRouter();
 
     // Master Data
@@ -191,8 +192,11 @@ export default function ImhaEdilenKitlerPanel() {
             ...(sourceType === 'depot' ? [where('isShipped', '==', false)] : [])
         );
         const snap = await getDocs(q);
-        return snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
-    }, []);
+        const items = snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+        return sourceType === 'depot'
+            ? filterByCompanyScope(items, currentCompanyId, isSuperAdmin)
+            : items;
+    }, [currentCompanyId, isSuperAdmin]);
 
     // Count stock by lot
     const countStockByLot = useCallback(async (stokKodu: string, lot: string, sourceId: string, sourceType: 'depot' | 'laboratory'): Promise<DepoStokItem[]> => {
@@ -207,9 +211,12 @@ export default function ImhaEdilenKitlerPanel() {
             ...(sourceType === 'depot' ? [where('isShipped', '==', false)] : [])
         );
         const snap = await getDocs(q);
-        const allItems = snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+        const allItemsRaw = snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+        const allItems = sourceType === 'depot'
+            ? filterByCompanyScope(allItemsRaw, currentCompanyId, isSuperAdmin)
+            : allItemsRaw;
         return allItems.filter(item => !item.seriNumarasi || item.seriNumarasi.trim() === '');
-    }, []);
+    }, [currentCompanyId, isSuperAdmin]);
 
     // Handle barcode scan
     const handleScan = useCallback(async (raw: string, source: 'hid' | 'camera' = 'hid') => {
@@ -499,9 +506,12 @@ export default function ImhaEdilenKitlerPanel() {
                 }
 
                 const snapshots = await Promise.all(stockPromises);
-                const allStockItems = snapshots.flatMap(snap =>
+                const rawStockItems = snapshots.flatMap(snap =>
                     snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem))
                 );
+                const allStockItems = sourceType === 'depot'
+                    ? filterByCompanyScope(rawStockItems, currentCompanyId, isSuperAdmin)
+                    : rawStockItems;
 
                 return { key, items, stockItems: allStockItems, sourceType, collectionName };
             });

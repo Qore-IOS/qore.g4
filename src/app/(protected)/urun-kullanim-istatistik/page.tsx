@@ -12,6 +12,8 @@ import {
 } from 'firebase/firestore';
 import { Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 
 // Types from your app schema
 import type {
@@ -23,6 +25,7 @@ import type {
 
 export default function UrunKullanimIstatistikPage() {
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   const [isLoading, setIsLoading] = useState(true);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
@@ -50,7 +53,11 @@ export default function UrunKullanimIstatistikPage() {
       setProductCodes(productCodesSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
 
       setHospitalStockItems(
-        hospitalStockSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem))
+        filterByCompanyScope(
+          hospitalStockSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
+          currentCompanyId,
+          isSuperAdmin,
+        )
       );
 
       // Normalize Firestore Timestamp -> Date for consumption
@@ -72,7 +79,7 @@ export default function UrunKullanimIstatistikPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
     fetchAll();

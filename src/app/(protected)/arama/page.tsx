@@ -17,6 +17,7 @@ import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { searchProductLedger, type LedgerRow, type StockSummary, type SearchResult } from '@/actions/searchActions';
+import { useAuth } from '@/contexts/auth-context';
 
 // -----------------------------------------------------
 // Types & Helper Components
@@ -46,6 +47,7 @@ const SortableHeader: React.FC<{
 
 export default function AramaPanel() {
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   // Search counter to discard stale results from previous searches
   const searchCounterRef = useRef(0);
@@ -96,7 +98,7 @@ export default function AramaPanel() {
     setPage(1);
 
     try {
-      const result: SearchResult = await searchProductLedger(q);
+      const result: SearchResult = await searchProductLedger(q, currentCompanyId, isSuperAdmin);
 
       // Discard result if a newer search was started while this one was running
       if (currentSearch !== searchCounterRef.current) return;

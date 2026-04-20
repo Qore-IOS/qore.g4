@@ -16,6 +16,8 @@ import {
 import type { DepoStokItem, ProductCode } from '@/lib/types';
 import { parseAnyBarcode, resolveProductFromParsed, parseAndResolveBarcode } from '@/lib/barcode';
 import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
+import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope, matchesCompanyScope } from '@/lib/company-scope';
 
 type NewFromCount = {
   stokKodu: string;
@@ -48,6 +50,8 @@ export function useLabCountMissingStock(params: {
     poolMemberIds = [],
     poolMemberNames = [],
   } = params;
+
+  const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
 
   const [newFromCount, setNewFromCount] = useState<NewFromCount[]>([]);
 
@@ -118,7 +122,9 @@ export function useLabCountMissingStock(params: {
         candidates.push(...snap.docs.map(d => ({ id: d.id, ...d.data() })));
       }
 
-      const depotSource = candidates.find((c: any) => c?.depotId && !c?.isShipped);
+      const depotSource = candidates.find((c: any) =>
+        c?.depotId && !c?.isShipped && matchesCompanyScope(c, currentCompanyId, isSuperAdmin)
+      );
       if (!depotSource) return null;
 
       const batch = writeBatch(db);
@@ -197,7 +203,7 @@ export function useLabCountMissingStock(params: {
         transferSource: 'depot' as const,
       };
     },
-    [labId, labName]
+    [labId, labName, currentCompanyId, isSuperAdmin]
   );
 
   const transferFromPoolLabToLab = useCallback(
@@ -222,8 +228,10 @@ export function useLabCountMissingStock(params: {
       const poolSource = snap.docs
         .map(d => ({ id: d.id, ...d.data() }))
         .find((item: any) =>
-          poolMemberIds.includes(item.hedefKurumId) ||
-          poolMemberNames.includes(item.hedefKurum)
+          matchesCompanyScope(item, currentCompanyId, isSuperAdmin) && (
+            poolMemberIds.includes(item.hedefKurumId) ||
+            poolMemberNames.includes(item.hedefKurum)
+          )
         );
 
       if (!poolSource) return null;
@@ -300,7 +308,7 @@ export function useLabCountMissingStock(params: {
         sourceLabName,
       };
     },
-    [labId, labName, poolMemberIds, poolMemberNames]
+    [labId, labName, poolMemberIds, poolMemberNames, currentCompanyId, isSuperAdmin]
   );
 
   const onScanAndStageIfMissing = useCallback(
@@ -390,7 +398,7 @@ export function useLabCountMissingStock(params: {
     const batch = writeBatch(db);
     pending.forEach(n => {
       const ref = doc(collection(db, 'depoStok'));
-      const data: Omit<DepoStokItem, 'id'> = {
+      const data: Omit<DepoStokItem, 'id'> = withCompanyScope({
         stokKodu: n.stokKodu,
         stokAdi: n.stokAdi || n.stokKodu,
         lotNumarasi: n.lotNumarasi,
@@ -400,14 +408,14 @@ export function useLabCountMissingStock(params: {
         hedefKurumId: labId,
         hedefKurum: labName,
         eklenmeTarihi: new Date(),
-      };
+      }, currentUserProfile?.companyId);
       batch.set(ref, data as any);
     });
     await batch.commit();
     const created = pending.length;
     setNewFromCount(prev => prev.filter(n => n.persisted));
     return created;
-  }, [labId, labName, newFromCount]);
+  }, [labId, labName, newFromCount, currentUserProfile?.companyId]);
 
   return {
     newFromCount,
