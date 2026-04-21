@@ -226,7 +226,8 @@ export default function SiparislerPanel(): JSX.Element {
       return;
     }
     const orderId = generateId();
-    const hospitalName = hospitals.find(h => h.id === selectedLabId)?.name || 'Bilinmeyen Kurum';
+    const selectedHospital = hospitals.find(h => h.id === selectedLabId);
+    const hospitalName = selectedHospital?.name || 'Bilinmeyen Kurum';
     const newOrder: Omit<Order, 'id'> = {
       depotId: selectedDepotId,
       labId: selectedLabId,
@@ -234,6 +235,7 @@ export default function SiparislerPanel(): JSX.Element {
       items: orderItems,
       createdAt: new Date(),
       status: 'pending',
+      isPeripheral: selectedHospital?.perifer ?? false,
       createdBy: currentUserProfile?.name || currentUser?.email || 'Bilinmeyen Kullanıcı',
       createdById: currentUser?.uid || 'unknown',
       transferredAt: null,
@@ -464,6 +466,23 @@ export default function SiparislerPanel(): JSX.Element {
     () => allOrders.filter(o => o.status !== 'completed'),
     [allOrders]
   );
+
+  const peripheralLabIds = useMemo(() => {
+    const set = new Set<string>();
+    hospitals.forEach(h => { if (h?.perifer && h.id) set.add(h.id); });
+    return set;
+  }, [hospitals]);
+
+  const isOrderPeripheral = useCallback((order: Order) => {
+    if (order.isPeripheral === true) return true;
+    if (order.labId && peripheralLabIds.has(order.labId)) return true;
+    return false;
+  }, [peripheralLabIds]);
+
+  const openPeripheralOrder = useCallback((order: Order) => {
+    if (!order.id) return;
+    router.push(`/siparisler/${order.id}/perifer`);
+  }, [router]);
 
   const totalDraftItems = orderItems.length;
   const totalDraftAdet = orderItems.reduce((sum, i) => sum + (Number(i.adet) || 0), 0);
@@ -953,6 +972,23 @@ export default function SiparislerPanel(): JSX.Element {
               const totalAdet = (order.items ?? []).reduce((sum, it) => sum + (Number(it.adet) || 0), 0);
               const totalKalem = (order.items ?? []).length;
               const isPicking = order.status === 'toplaniyor';
+              const isEksik = order.status === 'eksik';
+              const isPerifer = isOrderPeripheral(order);
+
+              const statusLabel = isEksik
+                ? 'Eksik'
+                : isPicking
+                  ? 'Toplanıyor'
+                  : isPerifer
+                    ? 'Perifer'
+                    : 'Bekliyor';
+              const statusClass = isEksik
+                ? "bg-red-100 text-red-700"
+                : isPicking
+                  ? "bg-blue-100 text-blue-700"
+                  : isPerifer
+                    ? "bg-purple-100 text-purple-700"
+                    : "bg-amber-100 text-amber-700";
 
               return (
                 <article
@@ -972,11 +1008,9 @@ export default function SiparislerPanel(): JSX.Element {
                       {/* Status badge */}
                       <span className={cn(
                         "shrink-0 inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] sm:text-xs font-semibold",
-                        isPicking
-                          ? "bg-blue-100 text-blue-700"
-                          : "bg-amber-100 text-amber-700"
+                        statusClass
                       )}>
-                        {isPicking ? 'Toplanıyor' : 'Bekliyor'}
+                        {statusLabel}
                       </span>
                     </div>
 
@@ -994,19 +1028,35 @@ export default function SiparislerPanel(): JSX.Element {
 
                     {/* Actions */}
                     <div className="flex items-center gap-2 pt-1">
-                      <button
-                        onClick={() => startPickingProcess(order)}
-                        disabled={isProcessing}
-                        className={cn(
-                          "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all",
-                          !isProcessing
-                            ? "bg-[var(--dashboard-accent)] text-white shadow-[var(--dashboard-raised-soft)] hover:-translate-y-0.5 active:translate-y-0 active:shadow-[var(--dashboard-pressed)]"
-                            : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] cursor-not-allowed"
-                        )}
-                      >
-                        {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-                        {isPicking ? 'Toplamaya Devam Et' : 'Toplamayı Başlat'}
-                      </button>
+                      {isPerifer ? (
+                        <button
+                          onClick={() => openPeripheralOrder(order)}
+                          disabled={isProcessing}
+                          className={cn(
+                            "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all",
+                            !isProcessing
+                              ? "bg-purple-600 text-white shadow-[var(--dashboard-raised-soft)] hover:-translate-y-0.5 active:translate-y-0 active:shadow-[var(--dashboard-pressed)]"
+                              : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] cursor-not-allowed"
+                          )}
+                        >
+                          <ArrowRight className="h-4 w-4" />
+                          Siparişi Gör
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => startPickingProcess(order)}
+                          disabled={isProcessing}
+                          className={cn(
+                            "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all",
+                            !isProcessing
+                              ? "bg-[var(--dashboard-accent)] text-white shadow-[var(--dashboard-raised-soft)] hover:-translate-y-0.5 active:translate-y-0 active:shadow-[var(--dashboard-pressed)]"
+                              : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] cursor-not-allowed"
+                          )}
+                        >
+                          {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+                          {isPicking ? 'Toplamaya Devam Et' : 'Toplamayı Başlat'}
+                        </button>
+                      )}
                       <button
                         onClick={() => handleDeleteOrder(order.id ?? '')}
                         disabled={isProcessing}

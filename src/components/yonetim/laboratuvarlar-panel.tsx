@@ -153,7 +153,7 @@ export default function LaboratuvarPanel() {
         })();
 
     } else {
-        setCurrentHospital({ consumptionTrackingEnabled: true, isConsumablesHospital: false, manualDeductionEnabled: false, visualDeductionEnabled: false, fefoEnabled: true, kod: '' }); // Default FEFO to ON for new labs
+        setCurrentHospital({ consumptionTrackingEnabled: true, isConsumablesHospital: false, manualDeductionEnabled: false, visualDeductionEnabled: false, fefoEnabled: true, perifer: false, kod: '' }); // Default FEFO to ON for new labs
         setResponsibleEmailsInput('');
         setIsEditingHospital(false);
         setIsModalOpen(true);
@@ -193,6 +193,7 @@ export default function LaboratuvarPanel() {
         manualDeductionEnabled: currentHospital.manualDeductionEnabled ?? false,
         visualDeductionEnabled: (currentHospital.manualDeductionEnabled ?? false) ? (currentHospital.visualDeductionEnabled ?? false) : false,
         fefoEnabled: currentHospital.fefoEnabled ?? true,
+        perifer: currentHospital.perifer ?? false,
         autoTutanak: (currentHospital as any).autoTutanak ?? false,
         sorumluEmails: responsibleEmails,
         sorumluEmail: responsibleEmails[0] || '',
@@ -690,6 +691,19 @@ export default function LaboratuvarPanel() {
                         Hastane Sarf Kategorisi
                         <p className="text-xs text-muted-foreground">
                             Aktifse, bu laboratuvar sadece Sarf Dağıtım panelinde görünür.
+                        </p>
+                    </Label>
+                </div>
+                <div className="flex items-center space-x-2 rounded-md border p-3">
+                    <Switch
+                        id="perifer-switch"
+                        checked={currentHospital.perifer ?? false}
+                        onCheckedChange={(checked) => setCurrentHospital({ ...currentHospital, perifer: checked })}
+                    />
+                    <Label htmlFor="perifer-switch">
+                        Perifer Laboratuvar
+                        <p className="text-xs text-muted-foreground">
+                            Aktifse, bu laboratuvardan açılan siparişler depo toplama yerine ofis lojistik panelinde (Siparişi Gör) yönetilir.
                         </p>
                     </Label>
                 </div>

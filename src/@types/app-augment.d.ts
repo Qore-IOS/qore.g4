@@ -147,6 +147,7 @@ declare module "@/lib/types" {
     manualDeductionEnabled?: boolean;
     visualDeductionEnabled?: boolean;
     fefoEnabled?: boolean;
+    perifer?: boolean;
     address?: string;
     lat?: number;
     lng?: number;
@@ -306,18 +307,31 @@ declare module "@/lib/types" {
     hospitalId?: ID;
     tarih?: TimestampLike;
     items?: OrderItem[];
-    durum?: "taslak" | "onayli" | "gonderildi" | "kapatildi" | "pending" | "toplaniyor" | "completed" | string;
+    durum?: "taslak" | "onayli" | "gonderildi" | "kapatildi" | "pending" | "toplaniyor" | "completed" | "eksik" | string;
     kurumAdi?: string;
     depotId?: string;
     labId?: string;
     createdAt?: TimestampLike;
-    status?: "pending" | "completed" | "toplaniyor";
+    status?: "pending" | "completed" | "toplaniyor" | "eksik" | string;
     createdBy?: string;
     transferredAt?: TimestampLike;
     depotName?: string;
     createdById?: string;
     transferredById?: string;
     transferredBy?: string;
+    isPeripheral?: boolean;
+    peripheralFulfillment?: {
+      items: Array<{
+        itemId: string;
+        stokKodu: string;
+        requestedAdet: number;
+        sentAdet: number;
+        fulfilled: boolean;
+      }>;
+      updatedAt?: TimestampLike;
+      updatedById?: string | null;
+      updatedBy?: string | null;
+    };
     [k: string]: unknown;
   }
 
