@@ -53,6 +53,7 @@ type ActionFormRecord = {
     createdAt: { toDate: () => Date };
     createdByUid: string;
     createdByName: string;
+    formNo?: string;
     actions: ActionItem[];
     islemTipi?: IslemTipi;
     islemTuru?: IslemTuru;
@@ -155,7 +156,9 @@ export async function generateTeknikServisTutanakPDF(
       prefetchPdfAssets(),
       resolveLabDisplayName(hospitalId, hospital?.name || ''),
       QRCode.toDataURL(recordUrl, { errorCorrectionLevel: 'M', margin: 0, scale: 4 }),
-      computeFormNo('teknikServisActionForms', 'createdByUid', actionRecord.createdByUid, actionRecord.id, actionRecord.createdByName, 'T'),
+      actionRecord.formNo
+        ? Promise.resolve(actionRecord.formNo)
+        : computeFormNo('teknikServisActionForms', 'createdByUid', actionRecord.createdByUid, actionRecord.id, actionRecord.createdByName, 'T'),
     ]);
 
     const pdfDoc = new jsPDF({ unit: 'pt', format: 'a4' });

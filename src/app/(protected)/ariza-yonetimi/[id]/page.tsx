@@ -1372,7 +1372,7 @@ export default function FaultDetailPage() {
       prefetchPdfAssets(),
       resolveLabDisplayName(hospitalId, fault.labName || ''),
       QRCode.toDataURL(recordUrl, { errorCorrectionLevel: 'M', margin: 0, scale: 4 }),
-      computeFormNo('deviceFaultReports', 'openedByUid', fault.openedByUid, fault.id, fault.openedByName || '', typeChar, 'openedAt'),
+      computeFormNo('deviceFaultReports', 'openedByUid', fault.openedByUid, fault.id, fault.openedByName || '', typeChar, 'openedAt', [where('faultType', '==', fault.faultType)]),
     ]);
 
     const pdfDoc = new jsPDF({ unit: 'pt', format: 'a4' });
