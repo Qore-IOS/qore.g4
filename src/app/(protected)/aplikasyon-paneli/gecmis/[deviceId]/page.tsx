@@ -63,6 +63,7 @@ type ActionFormRecord = {
   createdAt: { toDate: () => Date };
   createdByName: string;
   createdByUid?: string;
+  formNo?: string;
   actions: ActionItem[];
   islemTuru?: IslemTuru;
   cihazDurumu?: CihazDurumu;
