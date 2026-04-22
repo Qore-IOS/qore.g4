@@ -1,15 +1,54 @@
 
 'use client';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-  CardFooter,
-} from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Input } from '@/components/ui/input';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  Loader2,
+  Trash2,
+  ClipboardPlus,
+  Check,
+  ChevronsUpDown,
+  Unplug,
+  CalendarDays,
+  Wrench,
+  FlaskConical,
+  History,
+  Search,
+  Plus,
+  Minus,
+  MoreHorizontal,
+  Package,
+  X,
+  ShoppingCart,
+} from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/auth-context';
+import { db } from '@/lib/firebase';
+import {
+  collection,
+  getDocs,
+  doc,
+  setDoc,
+  serverTimestamp,
+} from 'firebase/firestore';
+import type { Depot, Hospital, ProductCode, MinMaxRule, OrderItem } from '@/lib/types';
+import { generateId, playNotificationSound, cn } from '@/lib/utils';
+import BackButton from '@/components/BackButton';
+import { emitOrderCreatedFromRequest } from '@/lib/notifications';
+import { useRouter } from 'next/navigation';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { useActiveDutyShifts, useUpcomingDutyShifts } from '@/hooks/useFirebaseQueries';
+import type { DutyShift } from '@/lib/types';
+import { format as formatDate } from 'date-fns';
+import { tr } from 'date-fns/locale';
 import {
   Popover,
   PopoverContent,
@@ -23,46 +62,10 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2, PlusCircle, Trash2, ClipboardPlus, Check, ChevronsUpDown, Unplug, CalendarDays, Wrench, FlaskConical, History } from 'lucide-react';
-import { useToast } from '@/hooks/use-toast';
-import { useAuth } from '@/contexts/auth-context';
-import { db } from '@/lib/firebase';
-import {
-  collection,
-  getDocs,
-  doc,
-  setDoc,
-  query,
-  where,
-  serverTimestamp,
-} from 'firebase/firestore';
-import type { Depot, Hospital, ProductCode, MinMaxRule, OrderItem } from '@/lib/types';
-import { generateId, playNotificationSound, cn } from '@/lib/utils';
-import BackButton from '@/components/BackButton';
-import { emitOrderCreatedFromRequest } from '@/lib/notifications';
-import { useRouter } from 'next/navigation';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { useActiveDutyShifts, useUpcomingDutyShifts } from '@/hooks/useFirebaseQueries';
-import type { DutyShift } from '@/lib/types';
-import { format as formatDate } from 'date-fns';
-import { tr } from 'date-fns/locale';
+
+/* ═══════════════════════════════════════════════════════
+   DUTY SCHEDULE HELPERS (preserved from original)
+   ═══════════════════════════════════════════════════════ */
 
 function formatShiftDate(date: unknown): string {
   const d = date instanceof Date ? date : new Date(date as any);
@@ -212,6 +215,133 @@ function DutyInfo({ selectedLabId }: { selectedLabId: string | null }) {
 }
 
 
+/* ═══════════════════════════════════════════════════════
+   QUANTITY INPUT DIALOG
+   ═══════════════════════════════════════════════════════ */
+
+interface QuantityDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  product: ProductCode | null;
+  existingQty: number;
+  onConfirm: (productId: string, qty: number) => void;
+}
+
+function QuantityDialog({ open, onOpenChange, product, existingQty, onConfirm }: QuantityDialogProps) {
+  const [qty, setQty] = useState(1);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Reset qty when product changes
+  useEffect(() => {
+    if (open) {
+      setQty(1);
+      // Focus input after dialog opens
+      setTimeout(() => inputRef.current?.select(), 100);
+    }
+  }, [open, product?.id]);
+
+  const handleConfirm = () => {
+    if (product && qty > 0) {
+      onConfirm(product.id, qty);
+      onOpenChange(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleConfirm();
+    }
+  };
+
+  if (!product) return null;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-sm sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="text-center text-xl sm:text-2xl font-bold text-[var(--dashboard-text)] leading-tight">
+            {product.stokAdi}
+          </DialogTitle>
+          <DialogDescription className="text-center text-sm text-[var(--dashboard-muted)]">
+            {product.stokKodu}
+            {existingQty > 0 && (
+              <span className="ml-2 text-amber-500 font-medium">
+                (Listede mevcut: {existingQty})
+              </span>
+            )}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex flex-col items-center gap-6 py-4">
+          {/* Large quantity controls */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setQty(Math.max(1, qty - 1))}
+              className="w-14 h-14 rounded-2xl bg-[var(--dashboard-surface-2)] border border-[var(--dashboard-stroke)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-all active:scale-95 shadow-[var(--dashboard-pressed)]"
+            >
+              <Minus className="h-6 w-6" />
+            </button>
+            <Input
+              ref={inputRef}
+              type="number"
+              min={1}
+              value={qty}
+              onChange={e => setQty(Math.max(1, Number(e.target.value) || 1))}
+              onKeyDown={handleKeyDown}
+              className="w-28 h-14 text-center text-3xl font-bold border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)] rounded-2xl [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+            />
+            <button
+              onClick={() => setQty(qty + 1)}
+              className="w-14 h-14 rounded-2xl bg-[var(--dashboard-surface-2)] border border-[var(--dashboard-stroke)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-all active:scale-95 shadow-[var(--dashboard-pressed)]"
+            >
+              <Plus className="h-6 w-6" />
+            </button>
+          </div>
+
+          {/* Quick qty buttons */}
+          <div className="flex gap-2">
+            {[1, 5, 10, 20].map(n => (
+              <button
+                key={n}
+                onClick={() => setQty(n)}
+                className={cn(
+                  "px-3.5 py-1.5 rounded-xl text-sm font-semibold transition-all",
+                  qty === n
+                    ? "bg-[var(--dashboard-accent)] text-white shadow-[var(--dashboard-raised-soft)]"
+                    : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] hover:text-[var(--dashboard-text)]"
+                )}
+              >
+                {n}
+              </button>
+            ))}
+          </div>
+
+          {/* Confirm button */}
+          <button
+            onClick={handleConfirm}
+            disabled={qty <= 0}
+            className={cn(
+              "w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl text-base font-bold transition-all",
+              qty > 0
+                ? "bg-[var(--dashboard-accent)] text-white shadow-[var(--dashboard-raised)] hover:shadow-[var(--dashboard-raised-soft)] hover:-translate-y-0.5 active:translate-y-0 active:shadow-[var(--dashboard-pressed)]"
+                : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] cursor-not-allowed"
+            )}
+          >
+            <Check className="h-5 w-5" />
+            {existingQty > 0 ? `Listeye Ekle (+${qty})` : `Listeye Ekle (${qty})`}
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+
+/* ═══════════════════════════════════════════════════════
+   MAIN PANEL
+   ═══════════════════════════════════════════════════════ */
+
 export default function UrunTalepPanel() {
   const router = useRouter();
   const { toast } = useToast();
@@ -230,41 +360,101 @@ export default function UrunTalepPanel() {
 
   // Order Basket
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
-  const [selectedProductId, setSelectedProductId] = useState<string>('');
-  const [quantity, setQuantity] = useState<number>(1);
-  const [isProductPopoverOpen, setIsProductPopoverOpen] = useState(false);
+
+  // Product list filter
+  const [selectedLabGroup, setSelectedLabGroup] = useState<string>('all');
+  const [productSearch, setProductSearch] = useState<string>('');
+
+  // Quantity dialog
+  const [qtyDialogOpen, setQtyDialogOpen] = useState(false);
+  const [qtyDialogProduct, setQtyDialogProduct] = useState<ProductCode | null>(null);
+
+  // More menu
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+
+  // Lab popover for multi-lab users
+  const [isLabPopoverOpen, setIsLabPopoverOpen] = useState(false);
 
 
-  // Derived Data
-  const userHospitals = React.useMemo(() => {
+  // ── Derived Data ──
+  const userHospitals = useMemo(() => {
     if (currentUserProfile?.role === 'admin') return allHospitals;
     return allHospitals.filter(h => currentUserProfile?.assignedLaboratories?.includes(h.id));
   }, [allHospitals, currentUserProfile]);
 
-  const selectedLab = React.useMemo(
+  const selectedLab = useMemo(
     () => userHospitals.find(h => h.id === selectedLabId) ?? null,
     [userHospitals, selectedLabId]
   );
 
   const isPeripheralFlow = selectedLab?.perifer === true;
 
-  // Auto-select: if the user is assigned to exactly one lab and it is perifer,
-  // pick it immediately so the user never sees the lab picker.
+  // Auto-select: if the user is assigned to exactly one lab, pick it immediately.
+  // (expanded from original: now works for ALL single-lab users, not just perifer)
+  const singleAutoLab = useMemo(() => {
+    return userHospitals.length === 1 ? userHospitals[0] : null;
+  }, [userHospitals]);
+
   useEffect(() => {
     if (selectedLabId) return;
-    if (userHospitals.length !== 1) return;
-    const only = userHospitals[0];
-    if (only?.perifer && only.id) {
-      setSelectedLabId(only.id);
+    if (singleAutoLab?.id) {
+      setSelectedLabId(singleAutoLab.id);
     }
-  }, [userHospitals, selectedLabId]);
+  }, [singleAutoLab, selectedLabId]);
 
-  const availableProducts = React.useMemo(() => {
+  // Show/hide logic
+  const showLabPicker = !singleAutoLab;
+  const showDepotPicker = !isPeripheralFlow;
+
+  // Available products (min-max defined)
+  const availableProducts = useMemo(() => {
     const ruleStockCodes = new Set(labMinMaxRules.map(r => r.stokKodu));
     return allProducts.filter(p => ruleStockCodes.has(p.stokKodu));
   }, [labMinMaxRules, allProducts]);
-  
-  // Data Fetching
+
+  // Lab groups extracted from available products
+  const labGroups = useMemo(() => {
+    const groups = new Set<string>();
+    availableProducts.forEach(p => {
+      if (p.laboratuvarGrubu) groups.add(p.laboratuvarGrubu);
+    });
+    return Array.from(groups).sort();
+  }, [availableProducts]);
+
+  // Filtered product list
+  const filteredProducts = useMemo(() => {
+    let list = availableProducts;
+
+    // Filter by lab group
+    if (selectedLabGroup !== 'all') {
+      list = list.filter(p => p.laboratuvarGrubu === selectedLabGroup);
+    }
+
+    // Filter by search
+    if (productSearch.trim()) {
+      const q = productSearch.trim().toLowerCase();
+      list = list.filter(p =>
+        p.stokAdi?.toLowerCase().includes(q) ||
+        p.stokKodu?.toLowerCase().includes(q)
+      );
+    }
+
+    return list.sort((a, b) => (a.stokAdi ?? '').localeCompare(b.stokAdi ?? ''));
+  }, [availableProducts, selectedLabGroup, productSearch]);
+
+  // Cart summary
+  const totalDraftItems = orderItems.length;
+  const totalDraftAdet = orderItems.reduce((sum, i) => sum + (Number(i.adet) || 0), 0);
+
+  const selectedLabName = useMemo(
+    () => userHospitals.find(h => h.id === selectedLabId)?.name ?? '',
+    [userHospitals, selectedLabId]
+  );
+
+  const isCreateReady = !!selectedLabId && orderItems.length > 0 && (isPeripheralFlow || !!selectedDepotId);
+
+
+  // ── Data Fetching ──
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
@@ -313,37 +503,38 @@ export default function UrunTalepPanel() {
     fetchRules();
   }, [selectedLabId, toast]);
 
-  // Handlers
-  const addOrderItem = () => {
-    const product = allProducts.find(p => p.id === selectedProductId);
-    if (!product || quantity <= 0) {
-      toast({ title: 'Geçersiz Giriş', description: 'Lütfen ürün seçin ve geçerli bir adet girin.', variant: 'destructive' });
-      return;
-    }
-    
+
+  // ── Handlers ──
+
+  const handleProductClick = (product: ProductCode) => {
+    setQtyDialogProduct(product);
+    setQtyDialogOpen(true);
+  };
+
+  const handleQtyConfirm = (productId: string, qty: number) => {
+    const product = allProducts.find(p => p.id === productId);
+    if (!product || qty <= 0) return;
+
     setOrderItems(prev => {
       const existing = prev.find(item => item.stokKodu === product.stokKodu);
       if (existing) {
         return prev.map(item =>
           item.stokKodu === product.stokKodu
-            ? { ...item, adet: item.adet + quantity }
+            ? { ...item, adet: item.adet + qty }
             : item
         );
       }
       return [
         ...prev,
-        { id: product.id, stokKodu: product.stokKodu, stokAdi: product.stokAdi, adet: quantity },
+        { id: product.id, stokKodu: product.stokKodu, stokAdi: product.stokAdi, adet: qty },
       ];
     });
-    
-    setSelectedProductId('');
-    setQuantity(1);
   };
-  
+
   const removeOrderItem = (productId: string) => {
     setOrderItems(prev => prev.filter(item => item.id !== productId));
   };
-  
+
   const createOrderRequest = async () => {
     if (!selectedLabId || orderItems.length === 0) {
       toast({ title: 'Eksik Bilgi', description: 'Laboratuvar ve en az bir ürün seçmelisiniz.', variant: 'destructive' });
@@ -407,10 +598,10 @@ export default function UrunTalepPanel() {
           : `Siparişiniz "${depotName}" deposuna iletildi.`,
       });
 
-      // Reset form — but keep the auto-selected peripheral lab so the user can
+      // Reset form — but keep the auto-selected lab so the user can
       // immediately create another request without re-picking it.
       setOrderItems([]);
-      if (!(userHospitals.length === 1 && userHospitals[0]?.perifer)) {
+      if (!singleAutoLab) {
         setSelectedLabId('');
         setLabMinMaxRules([]);
       }
@@ -423,183 +614,458 @@ export default function UrunTalepPanel() {
     }
   };
 
+
+  // ── Render ──
+
   return (
-    <div className="p-4 space-y-4">
-      <BackButton fallback="/urun-kullanim" />
-      <Card>
-        <CardHeader>
-          <div className="flex flex-col sm:flex-row justify-between items-start gap-4">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <ClipboardPlus className="h-6 w-6 text-primary" />
-                Ürün Talep Paneli
-              </CardTitle>
-              <CardDescription>
-                Yetkili olduğunuz laboratuvarlar için ürün talebi oluşturun.
-              </CardDescription>
-            </div>
-            <div className="flex items-center gap-2">
-              <DutyInfo selectedLabId={selectedLabId || null} />
-              <Button variant="outline" onClick={() => router.push('/urun-talep/gecmis')}>
-                <History className="mr-2 h-4 w-4" /> Geçmiş
-              </Button>
-              <Button variant="outline" onClick={() => router.push('/cihazdan-cikan-kit')}>
-                <Unplug className="mr-2 h-4 w-4" /> Cihazdan Çıkan Kit
-              </Button>
-            </div>
+    <div
+      className="cihaz-shell px-3 py-4 sm:px-5 sm:py-6 space-y-4 sm:space-y-5 min-h-screen"
+      role="main"
+      aria-label="Ürün talep paneli"
+    >
+      {/* ══════════════════════ HEADER ══════════════════════ */}
+      <div className="flex items-center gap-3">
+        <BackButton fallback="/urun-kullanim" />
+        <div className="flex-1 min-w-0">
+          <h1 className="text-lg sm:text-xl font-bold text-[var(--dashboard-text)] flex items-center gap-2">
+            <ClipboardPlus className="h-5 w-5 text-[var(--dashboard-accent)]" />
+            Ürün Talep
+          </h1>
+          <p className="text-[11px] sm:text-xs text-[var(--dashboard-muted)] truncate">
+            {selectedLabName
+              ? `${selectedLabName}${isPeripheralFlow ? ' · Perifer' : ''}`
+              : 'Yetkili laboratuvarlar için ürün talebi oluşturun'}
+          </p>
+        </div>
+
+        <DutyInfo selectedLabId={selectedLabId || null} />
+
+        {/* CTA — Create Order (top right) */}
+        <button
+          onClick={createOrderRequest}
+          disabled={!isCreateReady || loading}
+          className={cn(
+            "hidden sm:flex items-center gap-2 px-5 py-2.5 rounded-2xl text-sm font-bold transition-all",
+            isCreateReady && !loading
+              ? "bg-green-600 text-white shadow-[var(--dashboard-raised)] hover:shadow-[var(--dashboard-raised-soft)] active:shadow-[var(--dashboard-pressed)] hover:-translate-y-0.5 active:translate-y-0"
+              : "cihaz-pressed text-[var(--dashboard-muted)] cursor-not-allowed"
+          )}
+        >
+          {loading ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <ShoppingCart className="h-4 w-4" />
+          )}
+          {isPeripheralFlow ? 'Talep Oluştur' : 'Talep Oluştur'}
+          {totalDraftItems > 0 && (
+            <span className="ml-0.5 px-1.5 py-0.5 rounded-md bg-white/20 text-[10px] font-bold">{totalDraftItems}</span>
+          )}
+        </button>
+
+        {/* More menu */}
+        <Popover open={moreMenuOpen} onOpenChange={setMoreMenuOpen}>
+          <PopoverTrigger asChild>
+            <button className="cihaz-tool-item flex items-center justify-center w-9 h-9 sm:w-10 sm:h-10">
+              <MoreHorizontal className="h-4 w-4 text-[var(--dashboard-muted)]" />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent className="w-56 p-1" align="end">
+            <button onClick={() => { router.push('/urun-talep/gecmis'); setMoreMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)]">
+              <History className="h-4 w-4 text-[var(--dashboard-muted)]" /> Geçmiş
+            </button>
+            <button onClick={() => { router.push('/cihazdan-cikan-kit'); setMoreMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)]">
+              <Unplug className="h-4 w-4 text-[var(--dashboard-muted)]" /> Cihazdan Çıkan Kit
+            </button>
+          </PopoverContent>
+        </Popover>
+      </div>
+
+
+      {/* ══════════════════════ LAB & DEPOT SELECTORS ══════════════════════ */}
+      <div className="flex flex-wrap gap-3">
+        {/* Depot selector — hidden for perifer flow */}
+        {showDepotPicker && (
+          <div className="cihaz-card p-3 sm:p-4 flex-1 min-w-[180px]">
+            <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1.5">Kaynak Depo</label>
+            <Select value={selectedDepotId} onValueChange={setSelectedDepotId} disabled={loading}>
+              <SelectTrigger className="w-full bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl h-10">
+                <SelectValue placeholder="Depo seçin..." />
+              </SelectTrigger>
+              <SelectContent>
+                {depots.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </div>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {(() => {
-            const singleAutoLab =
-              userHospitals.length === 1 && userHospitals[0]?.perifer ? userHospitals[0] : null;
-            const showLabPicker = !singleAutoLab;
-            const showDepotPicker = !isPeripheralFlow;
+        )}
 
-            if (!showLabPicker && !showDepotPicker && singleAutoLab) {
-              return (
-                <div className="rounded-md border border-purple-500/30 bg-purple-500/5 px-3 py-2 text-sm">
-                  <span className="inline-flex items-center gap-2 font-medium">
-                    <FlaskConical className="h-4 w-4 text-purple-400" />
-                    {singleAutoLab.name}
-                    <span className="text-[10px] font-bold uppercase tracking-wide text-purple-500 px-1.5 py-0.5 rounded bg-purple-500/10">
-                      Perifer
-                    </span>
-                  </span>
+        {/* Lab selector — hidden for single-lab users */}
+        {showLabPicker && (
+          <div className="cihaz-card p-3 sm:p-4 flex-1 min-w-[220px]">
+            <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1.5">Hedef Laboratuvar</label>
+            <Popover open={isLabPopoverOpen} onOpenChange={setIsLabPopoverOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  className={cn(
+                    "w-full flex items-center justify-between px-3 h-10 rounded-xl text-sm transition-all border border-[var(--dashboard-stroke)]",
+                    selectedLabId
+                      ? "bg-[var(--dashboard-surface)] shadow-[var(--dashboard-raised-soft)] font-medium text-[var(--dashboard-text)]"
+                      : "bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)]"
+                  )}
+                  disabled={loading || userHospitals.length === 0}
+                >
+                  <span className="truncate">{selectedLabName || 'Laboratuvar seçin...'}</span>
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
+                <Command>
+                  <CommandInput placeholder="Laboratuvar ara..." />
+                  <CommandList>
+                    <CommandEmpty>Laboratuvar bulunamadı.</CommandEmpty>
+                    <CommandGroup>
+                      {userHospitals.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')).map((hospital) => (
+                        <CommandItem
+                          key={hospital.id}
+                          value={hospital.name ?? ''}
+                          onSelect={() => { setSelectedLabId(hospital.id ?? ''); setIsLabPopoverOpen(false); }}
+                        >
+                          <Check className={cn("mr-2 h-4 w-4", selectedLabId === hospital.id ? "opacity-100" : "opacity-0")} />
+                          <span>{hospital.name}</span>
+                          {hospital.perifer && (
+                            <span className="ml-auto text-[10px] font-bold uppercase tracking-wide text-purple-500 px-1.5 py-0.5 rounded bg-purple-500/10">Perifer</span>
+                          )}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          </div>
+        )}
+
+        {/* Single-lab info banner */}
+        {singleAutoLab && (
+          <div className="cihaz-card p-3 sm:p-4 flex items-center gap-2 flex-1">
+            <FlaskConical className="h-4 w-4 text-purple-400 flex-shrink-0" />
+            <span className="text-sm font-semibold text-[var(--dashboard-text)]">{singleAutoLab.name}</span>
+            {singleAutoLab.perifer && (
+              <span className="text-[10px] font-bold uppercase tracking-wide text-purple-500 px-1.5 py-0.5 rounded bg-purple-500/10">
+                Perifer
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
+
+      {/* ══════════════════════ MAIN SPLIT VIEW ══════════════════════ */}
+      {selectedLabId && (
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-4 sm:gap-5">
+
+          {/* ── LEFT: Product Catalog ── */}
+          <div className="cihaz-card-strong flex flex-col overflow-hidden">
+            {/* Lab Group Chips + Search */}
+            <div className="px-4 py-3 sm:px-5 space-y-3 border-b border-[var(--dashboard-stroke)]">
+              {/* Category chips */}
+              {labGroups.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    onClick={() => setSelectedLabGroup('all')}
+                    className={cn(
+                      "px-3 py-1.5 rounded-xl text-xs sm:text-sm font-semibold transition-all",
+                      selectedLabGroup === 'all'
+                        ? "bg-[var(--dashboard-accent)] text-white shadow-[var(--dashboard-raised-soft)]"
+                        : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] hover:text-[var(--dashboard-text)]"
+                    )}
+                  >
+                    Tümü
+                    <span className="ml-1 opacity-70">({availableProducts.length})</span>
+                  </button>
+                  {labGroups.map(group => {
+                    const count = availableProducts.filter(p => p.laboratuvarGrubu === group).length;
+                    return (
+                      <button
+                        key={group}
+                        onClick={() => setSelectedLabGroup(group)}
+                        className={cn(
+                          "px-3 py-1.5 rounded-xl text-xs sm:text-sm font-semibold transition-all",
+                          selectedLabGroup === group
+                            ? "bg-[var(--dashboard-accent)] text-white shadow-[var(--dashboard-raised-soft)]"
+                            : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] hover:text-[var(--dashboard-text)]"
+                        )}
+                      >
+                        {group}
+                        <span className="ml-1 opacity-70">({count})</span>
+                      </button>
+                    );
+                  })}
                 </div>
-              );
-            }
+              )}
 
-            return (
-              <div
-                className={cn(
-                  'grid gap-4',
-                  showDepotPicker && showLabPicker ? 'md:grid-cols-2' : 'md:grid-cols-1'
-                )}
-              >
-                {showDepotPicker && (
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Kaynak Depo</label>
-                    <Select value={selectedDepotId} onValueChange={setSelectedDepotId} disabled={loading}>
-                      <SelectTrigger><SelectValue placeholder="Depo seçin..." /></SelectTrigger>
-                      <SelectContent>
-                        {depots.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-                {showLabPicker && (
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Hedef Laboratuvar</label>
-                    <Select value={selectedLabId} onValueChange={setSelectedLabId} disabled={loading || userHospitals.length === 0}>
-                      <SelectTrigger><SelectValue placeholder="Laboratuvar seçin..." /></SelectTrigger>
-                      <SelectContent>
-                        {userHospitals.map(h => (
-                          <SelectItem key={h.id} value={h.id}>
-                            {h.name}
-                            {h.perifer ? ' · Perifer' : ''}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+              {/* Search */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-[var(--dashboard-muted)]" />
+                <Input
+                  placeholder="Ürün ara..."
+                  value={productSearch}
+                  onChange={e => setProductSearch(e.target.value)}
+                  className="pl-9 h-10 rounded-xl bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] text-sm"
+                />
+                {productSearch && (
+                  <button
+                    onClick={() => setProductSearch('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2"
+                  >
+                    <X className="h-4 w-4 text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]" />
+                  </button>
                 )}
               </div>
-            );
-          })()}
-          
-          <Card className="border">
-            <CardHeader>
-                <CardTitle className="text-lg">Talep Kalemleri</CardTitle>
-            </CardHeader>
-            <CardContent>
-                <div className="flex gap-2 items-end">
-                    <div className="flex-grow">
-                        <label className="block text-sm font-medium mb-1">Ürün</label>
-                        <Popover open={isProductPopoverOpen} onOpenChange={setIsProductPopoverOpen}>
-                          <PopoverTrigger asChild>
-                            <Button
-                              variant="outline"
-                              role="combobox"
-                              aria-expanded={isProductPopoverOpen}
-                              className="w-full justify-between font-normal"
-                              disabled={!selectedLabId || availableProducts.length === 0}
-                            >
-                              {selectedProductId
-                                ? availableProducts.find((product) => product.id === selectedProductId)?.stokAdi
-                                : "Min-Max tanımlı ürün seçin..."}
-                              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
-                            <Command>
-                              <CommandInput placeholder="Ürün ara..." />
-                              <CommandList>
-                                <CommandEmpty>Ürün bulunamadı.</CommandEmpty>
-                                <CommandGroup>
-                                  {availableProducts.map((product) => (
-                                    <CommandItem
-                                      key={product.id}
-                                      value={product.stokAdi}
-                                      onSelect={() => {
-                                        setSelectedProductId(product.id);
-                                        setIsProductPopoverOpen(false);
-                                      }}
-                                    >
-                                      <Check
-                                        className={cn(
-                                          "mr-2 h-4 w-4",
-                                          selectedProductId === product.id ? "opacity-100" : "opacity-0"
-                                        )}
-                                      />
-                                      {product.stokAdi}
-                                    </CommandItem>
-                                  ))}
-                                </CommandGroup>
-                              </CommandList>
-                            </Command>
-                          </PopoverContent>
-                        </Popover>
-                    </div>
-                    <div className="w-24">
-                        <label className="block text-sm font-medium mb-1">Adet</label>
-                        <Input type="number" value={quantity} onChange={e => setQuantity(Number(e.target.value))} min="1" />
-                    </div>
-                    <Button onClick={addOrderItem} disabled={!selectedProductId}><PlusCircle className="h-4 w-4" /></Button>
-                </div>
+            </div>
 
-                <ScrollArea className="h-48 mt-4 border rounded-md">
-                    <Table>
-                        <TableHeader><TableRow><TableHead>Ürün</TableHead><TableHead>Adet</TableHead><TableHead></TableHead></TableRow></TableHeader>
-                        <TableBody>
-                        {orderItems.length === 0 ? (
-                            <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground">Talep listesi boş.</TableCell></TableRow>
+            {/* Product list */}
+            <div className="flex-1 overflow-auto max-h-[55vh] sm:max-h-[60vh]">
+              {loading ? (
+                <div className="flex flex-col items-center justify-center h-40 gap-2">
+                  <Loader2 className="h-6 w-6 animate-spin text-[var(--dashboard-accent)]" />
+                  <span className="text-sm text-[var(--dashboard-muted)]">Ürünler yükleniyor...</span>
+                </div>
+              ) : filteredProducts.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-40 text-center px-4">
+                  <div className="w-12 h-12 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] flex items-center justify-center mb-3">
+                    <Search className="h-5 w-5 text-[var(--dashboard-muted)]" />
+                  </div>
+                  <p className="text-sm font-medium text-[var(--dashboard-text)]">Ürün bulunamadı</p>
+                  <p className="text-xs text-[var(--dashboard-muted)] mt-0.5">
+                    {productSearch ? 'Arama kriterlerinizi değiştirin' : 'Bu laboratuvar için Min-Max tanımlı ürün yok'}
+                  </p>
+                </div>
+              ) : (
+                filteredProducts.map((product) => {
+                  const inCart = orderItems.find(item => item.stokKodu === product.stokKodu);
+                  return (
+                    <button
+                      key={product.id}
+                      onClick={() => handleProductClick(product)}
+                      className={cn(
+                        "w-full text-left px-4 sm:px-5 py-3 border-b border-[var(--dashboard-stroke)] last:border-b-0 transition-all hover:bg-[var(--dashboard-surface-2)] active:bg-[var(--dashboard-surface-2)] group",
+                        inCart && "bg-[var(--dashboard-accent)]/5"
+                      )}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-[var(--dashboard-text)] truncate group-hover:text-[var(--dashboard-accent)] transition-colors">
+                            {product.stokAdi}
+                          </p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className="text-[11px] text-[var(--dashboard-muted)]">{product.stokKodu}</span>
+                            {product.laboratuvarGrubu && (
+                              <span className="text-[9px] font-semibold uppercase tracking-wide text-[var(--dashboard-muted)] bg-[var(--dashboard-surface-2)] px-1.5 py-0.5 rounded">
+                                {product.laboratuvarGrubu}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        {inCart ? (
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="text-xs font-bold text-[var(--dashboard-accent)] bg-[var(--dashboard-accent)]/10 px-2 py-1 rounded-lg">
+                              {inCart.adet} adet
+                            </span>
+                            <Plus className="h-4 w-4 text-[var(--dashboard-accent)]" />
+                          </div>
                         ) : (
-                            orderItems.map(item => (
-                                <TableRow key={item.id}>
-                                    <TableCell>{item.stokAdi} <span className="text-xs text-muted-foreground">({item.stokKodu})</span></TableCell>
-                                    <TableCell>{item.adet}</TableCell>
-                                    <TableCell className="text-right">
-                                        <Button variant="ghost" size="icon" onClick={() => removeOrderItem(item.id)}>
-                                            <Trash2 className="h-4 w-4 text-destructive" />
-                                        </Button>
-                                    </TableCell>
-                                </TableRow>
-                            ))
+                          <Plus className="h-4 w-4 text-[var(--dashboard-muted)] group-hover:text-[var(--dashboard-accent)] transition-colors shrink-0" />
                         )}
-                        </TableBody>
-                    </Table>
-                </ScrollArea>
-            </CardContent>
-            <CardFooter>
-                <Button onClick={createOrderRequest} disabled={loading || orderItems.length === 0} className="w-full">
-                    {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    {isPeripheralFlow ? 'Talep Oluştur ve Lojistiğe İlet' : 'Talep Oluştur ve Depoya İlet'}
-                </Button>
-            </CardFooter>
-          </Card>
-        </CardContent>
-      </Card>
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Product count footer */}
+            <div className="px-4 sm:px-5 py-2 border-t border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)]">
+              <span className="text-[10px] sm:text-xs text-[var(--dashboard-muted)]">
+                {filteredProducts.length} ürün
+                {selectedLabGroup !== 'all' && ` · ${selectedLabGroup}`}
+              </span>
+            </div>
+          </div>
+
+
+          {/* ── RIGHT: Cart ── */}
+          <div className="cihaz-card-strong flex flex-col overflow-hidden">
+            {/* Cart header */}
+            <div className="flex items-center gap-2 sm:gap-3 px-4 py-3 sm:px-5 border-b border-[var(--dashboard-stroke)]">
+              <div className="flex-shrink-0">
+                <h2 className="text-sm sm:text-base font-semibold text-[var(--dashboard-text)]">
+                  Talep Kalemleri
+                  <span className="ml-1.5 text-[var(--dashboard-muted)]">({totalDraftItems})</span>
+                </h2>
+                <p className="text-[10px] sm:text-xs text-[var(--dashboard-muted)]">
+                  {totalDraftAdet} adet ürün talep edilecek
+                </p>
+              </div>
+              <div className="flex-1" />
+              {orderItems.length > 0 && (
+                <button
+                  onClick={() => setOrderItems([])}
+                  className="cihaz-tool-item flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span className="hidden sm:inline">Temizle</span>
+                </button>
+              )}
+            </div>
+
+            {/* Table header (desktop) */}
+            {orderItems.length > 0 && (
+              <div className="hidden sm:grid grid-cols-[1fr_80px_40px] gap-1 px-4 sm:px-5 py-2 text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] border-b border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)]">
+                <span>Ürün</span>
+                <span className="text-center">Adet</span>
+                <span></span>
+              </div>
+            )}
+
+            {/* Cart items */}
+            <div className="flex-1 overflow-auto max-h-[40vh] sm:max-h-[50vh]">
+              {orderItems.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-[30vh] sm:h-[35vh] text-center px-4">
+                  <div className="w-14 h-14 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] flex items-center justify-center mb-4">
+                    <Package className="h-6 w-6 text-[var(--dashboard-muted)]" />
+                  </div>
+                  <p className="text-sm font-medium text-[var(--dashboard-text)] mb-1">Talep listesi boş</p>
+                  <p className="text-xs text-[var(--dashboard-muted)]">
+                    Soldaki listeden ürün seçerek başlayın
+                  </p>
+                </div>
+              ) : (
+                orderItems.map((item) => (
+                  <div key={item.id} className="border-b border-[var(--dashboard-stroke)] last:border-b-0">
+                    {/* Desktop row */}
+                    <div className="hidden sm:grid grid-cols-[1fr_80px_40px] gap-1 items-center px-4 sm:px-5 py-2.5">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{item.stokAdi}</p>
+                        <p className="text-[10px] text-[var(--dashboard-muted)]">{item.stokKodu}</p>
+                      </div>
+                      <div className="flex items-center justify-center">
+                        <div className="flex items-center gap-0.5">
+                          <button
+                            onClick={() => {
+                              const newQty = Math.max(1, (item.adet ?? 1) - 1);
+                              setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: newQty } : i));
+                            }}
+                            className="w-6 h-6 rounded-md bg-[var(--dashboard-surface-2)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors"
+                          >
+                            <Minus className="h-3 w-3" />
+                          </button>
+                          <span className="text-center text-sm font-bold text-[var(--dashboard-text)] min-w-[32px]">{item.adet}</span>
+                          <button
+                            onClick={() => {
+                              setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: (i.adet ?? 1) + 1 } : i));
+                            }}
+                            className="w-6 h-6 rounded-md bg-[var(--dashboard-surface-2)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors"
+                          >
+                            <Plus className="h-3 w-3" />
+                          </button>
+                        </div>
+                      </div>
+                      <div className="flex justify-center">
+                        <button
+                          onClick={() => removeOrderItem(item.id)}
+                          className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-100 transition-colors"
+                        >
+                          <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                        </button>
+                      </div>
+                    </div>
+                    {/* Mobile row */}
+                    <div className="sm:hidden px-3 py-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{item.stokAdi}</p>
+                          <p className="text-[11px] text-[var(--dashboard-muted)]">{item.stokKodu}</p>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button onClick={() => { const newQty = Math.max(1, (item.adet ?? 1) - 1); setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: newQty } : i)); }} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
+                            <Minus className="h-3 w-3" />
+                          </button>
+                          <span className="text-center text-sm font-bold min-w-[28px]">{item.adet}</span>
+                          <button onClick={() => { setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: (i.adet ?? 1) + 1 } : i)); }} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
+                            <Plus className="h-3 w-3" />
+                          </button>
+                          <button onClick={() => removeOrderItem(item.id)} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-100 ml-1">
+                            <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Sticky CTA bar */}
+            <div className="sticky bottom-0 border-t border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)] px-4 sm:px-5 py-3 flex items-center gap-3">
+              <div className="flex gap-3 sm:gap-4 text-xs">
+                <div>
+                  <span className="text-[var(--dashboard-muted)]">Kalem</span>
+                  <span className="ml-1 font-bold text-[var(--dashboard-text)]">{totalDraftItems}</span>
+                </div>
+                <div>
+                  <span className="text-[var(--dashboard-muted)]">Adet</span>
+                  <span className="ml-1 font-bold text-[var(--dashboard-text)]">{totalDraftAdet}</span>
+                </div>
+              </div>
+              <div className="flex-1" />
+              {/* Mobile CTA */}
+              <button
+                onClick={createOrderRequest}
+                disabled={!isCreateReady || loading}
+                className={cn(
+                  "sm:hidden flex items-center gap-2 px-4 py-2.5 rounded-2xl text-sm font-bold transition-all",
+                  isCreateReady && !loading
+                    ? "bg-green-600 text-white shadow-[var(--dashboard-raised)] hover:shadow-[var(--dashboard-raised-soft)] active:shadow-[var(--dashboard-pressed)]"
+                    : "cihaz-pressed text-[var(--dashboard-muted)] cursor-not-allowed"
+                )}
+              >
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShoppingCart className="h-4 w-4" />}
+                Talep Oluştur
+              </button>
+            </div>
+          </div>
+
+        </div>
+      )}
+
+      {/* Empty state when no lab selected */}
+      {!selectedLabId && !loading && (
+        <div className="cihaz-card-strong flex flex-col items-center justify-center py-16 sm:py-20 text-center px-4">
+          <div className="w-16 h-16 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] flex items-center justify-center mb-4">
+            <FlaskConical className="h-6 w-6 text-[var(--dashboard-muted)]" />
+          </div>
+          <p className="text-sm font-medium text-[var(--dashboard-text)] mb-1">Laboratuvar seçin</p>
+          <p className="text-xs text-[var(--dashboard-muted)]">Ürün listesini görmek için hedef laboratuvarı seçin.</p>
+        </div>
+      )}
+
+      {/* Loading state */}
+      {loading && !selectedLabId && (
+        <div className="cihaz-card-strong flex flex-col items-center justify-center py-16 sm:py-20">
+          <Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)] mb-3" />
+          <p className="text-sm text-[var(--dashboard-muted)]">Veriler yükleniyor...</p>
+        </div>
+      )}
+
+
+      {/* ══════════════════════ QUANTITY DIALOG ══════════════════════ */}
+      <QuantityDialog
+        open={qtyDialogOpen}
+        onOpenChange={setQtyDialogOpen}
+        product={qtyDialogProduct}
+        existingQty={qtyDialogProduct ? (orderItems.find(i => i.stokKodu === qtyDialogProduct.stokKodu)?.adet ?? 0) : 0}
+        onConfirm={handleQtyConfirm}
+      />
     </div>
   );
 }
