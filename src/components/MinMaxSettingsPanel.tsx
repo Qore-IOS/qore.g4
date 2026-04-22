@@ -183,7 +183,6 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
 
   const handleSaveRules = async () => {
     setIsLoading(true);
-    const batch = writeBatch(db);
     let hasError = false;
     if (!targetId) {
       toast({ title: "Hata", description: "Hedef bilgisi eksik.", variant: "destructive" });
@@ -193,11 +192,27 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
     const rulesCollectionRef = collection(db, collectionName, targetId, "minMaxRules");
     const existingRulesSnapshot = await getDocs(rulesCollectionRef);
     const existingRuleIds = new Set(existingRulesSnapshot.docs.map(d => d.id));
-    const historyWrites: Promise<any>[] = [];
+
+    const batches = [];
+    let currentBatch = writeBatch(db);
+    let opCount = 0;
+
+    const BATCH_LIMIT = 450;
+
+    const commitOp = () => {
+      opCount++;
+      if (opCount >= BATCH_LIMIT) {
+        batches.push(currentBatch);
+        currentBatch = writeBatch(db);
+        opCount = 0;
+      }
+    };
 
     for (const stockCode in rules) {
       const rule = rules[stockCode];
       const ruleRef = doc(db, collectionName, targetId, "minMaxRules", stockCode);
+      const historyRef = doc(collection(db, 'minMaxHistory'));
+
       if (rule.enabled) {
         const min = Number(rule.min);
         const max = Number(rule.max);
@@ -214,19 +229,32 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
         if (maxGun !== undefined) dataToSet.maxGun = maxGun;
         if (aylikTuketimLimiti !== undefined) dataToSet.aylikTuketimLimiti = aylikTuketimLimiti;
         if (ortalamaTuketimSuresi !== undefined) { dataToSet.ortalamaTuketimSuresi = ortalamaTuketimSuresi; dataToSet.tuketimSuresiBirimi = tuketimSuresiBirimi; }
-        batch.set(ruleRef, dataToSet);
-        historyWrites.push(addDoc(collection(db, 'minMaxHistory'), { ...dataToSet, locationId: targetId, locationType: targetType, timestamp: serverTimestamp() }));
+        
+        currentBatch.set(ruleRef, dataToSet);
+        commitOp();
+        
+        currentBatch.set(historyRef, { ...dataToSet, locationId: targetId, locationType: targetType, timestamp: serverTimestamp() });
+        commitOp();
       } else {
         if (existingRuleIds.has(stockCode)) {
-          batch.delete(ruleRef);
-          historyWrites.push(addDoc(collection(db, 'minMaxHistory'), { stokKodu: stockCode, min: null, max: null, maxGun: null, aylikTuketimLimiti: null, locationId: targetId, locationType: targetType, timestamp: serverTimestamp(), action: 'deleted' }));
+          currentBatch.delete(ruleRef);
+          commitOp();
+          
+          currentBatch.set(historyRef, { stokKodu: stockCode, min: null, max: null, maxGun: null, aylikTuketimLimiti: null, locationId: targetId, locationType: targetType, timestamp: serverTimestamp(), action: 'deleted' });
+          commitOp();
         }
       }
     }
+    
+    if (opCount > 0) {
+      batches.push(currentBatch);
+    }
+    
     if (hasError) { setIsLoading(false); return; }
     try {
-      await batch.commit();
-      await Promise.all(historyWrites);
+      for (const b of batches) {
+        await b.commit();
+      }
       toast({ title: "Başarılı", description: `${targetName} için min-max kuralları kaydedildi.` });
       onClose();
     } catch (error) {
@@ -253,9 +281,34 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
         setIsLoading(false);
         return;
       }
-      const batch = writeBatch(db);
-      snapshot.forEach(d => batch.delete(d.ref));
-      await batch.commit();
+      
+      const batches = [];
+      let currentBatch = writeBatch(db);
+      let opCount = 0;
+      
+      const BATCH_LIMIT = 450;
+      const commitOp = () => {
+        opCount++;
+        if (opCount >= BATCH_LIMIT) {
+          batches.push(currentBatch);
+          currentBatch = writeBatch(db);
+          opCount = 0;
+        }
+      };
+
+      snapshot.forEach(d => {
+        currentBatch.delete(d.ref);
+        commitOp();
+      });
+
+      if (opCount > 0) {
+        batches.push(currentBatch);
+      }
+
+      for (const b of batches) {
+        await b.commit();
+      }
+      
       setRules({});
       setExistingRuleCodes(new Set());
       toast({ title: "Başarılı", description: `Tüm min-max kuralları sıfırlandı.` });
