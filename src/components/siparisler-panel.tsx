@@ -91,6 +91,7 @@ type PeripheralFulfillmentItem = {
 import { emitOrderCreatedFromRequest } from '@/lib/notifications';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { siparislerLogger } from '@/lib/logger';
+import LojistikSiparisView from '@/components/LojistikSiparisView';
 import { formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
 
 
@@ -603,6 +604,11 @@ export default function SiparislerPanel(): JSX.Element {
     hasLab: !!selectedLabId,
     hasItems: orderItems.length > 0,
   }), [selectedDepotId, selectedLabId, orderItems]);
+
+  // ── Lojistik Sorumlusu: completely different UI ──
+  if (isLojistikSorumlusu) {
+    return <LojistikSiparisView />;
+  }
 
   return (
     <div
