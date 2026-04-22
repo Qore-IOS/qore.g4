@@ -241,6 +241,46 @@ export default function UrunTalepPanel() {
     return allHospitals.filter(h => currentUserProfile?.assignedLaboratories?.includes(h.id));
   }, [allHospitals, currentUserProfile]);
 
+  const selectedLab = React.useMemo(
+    () => userHospitals.find(h => h.id === selectedLabId) ?? null,
+    [userHospitals, selectedLabId]
+  );
+
+  const isPeripheralFlow = selectedLab?.perifer === true;
+
+  // Auto-select: if the user is assigned to exactly one lab and it is perifer,
+  // pick it immediately so the user never sees the lab picker.
+  useEffect(() => {
+    if (selectedLabId) return;
+    if (userHospitals.length !== 1) return;
+    const only = userHospitals[0];
+    if (only?.perifer && only.id) {
+      setSelectedLabId(only.id);
+    }
+  }, [userHospitals, selectedLabId]);
+
+  // Resolve a depot for peripheral orders without asking the user. Prefer the
+  // depot explicitly linked to this lab; otherwise fall back to the first depot.
+  const resolvePeripheralDepotId = useCallback((labId: string): { id: string; name: string } | null => {
+    if (!labId || depots.length === 0) return null;
+    const linked = depots.find(d =>
+      Array.isArray(d.linkedLaboratoryIds) && d.linkedLaboratoryIds.includes(labId)
+    );
+    const picked = linked ?? depots[0];
+    if (!picked?.id) return null;
+    return { id: picked.id, name: picked.name ?? picked.id };
+  }, [depots]);
+
+  // For peripheral flows keep selectedDepotId in sync so downstream validation
+  // and the order payload have a valid source depot (hidden from the user).
+  useEffect(() => {
+    if (!isPeripheralFlow || !selectedLabId) return;
+    const resolved = resolvePeripheralDepotId(selectedLabId);
+    if (resolved && resolved.id !== selectedDepotId) {
+      setSelectedDepotId(resolved.id);
+    }
+  }, [isPeripheralFlow, selectedLabId, resolvePeripheralDepotId, selectedDepotId]);
+
   const availableProducts = React.useMemo(() => {
     const ruleStockCodes = new Set(labMinMaxRules.map(r => r.stokKodu));
     return allProducts.filter(p => ruleStockCodes.has(p.stokKodu));
@@ -327,20 +367,36 @@ export default function UrunTalepPanel() {
   };
   
   const createOrderRequest = async () => {
-    if (!selectedDepotId || !selectedLabId || orderItems.length === 0) {
+    if (!selectedLabId || orderItems.length === 0) {
+      toast({ title: 'Eksik Bilgi', description: 'Laboratuvar ve en az bir ürün seçmelisiniz.', variant: 'destructive' });
+      return;
+    }
+
+    // Peripheral orders auto-resolve a source depot so the user never sees it.
+    let effectiveDepotId = selectedDepotId;
+    let effectiveDepotName = depots.find(d => d.id === selectedDepotId)?.name || '';
+    if (isPeripheralFlow) {
+      const resolved = resolvePeripheralDepotId(selectedLabId);
+      if (!resolved) {
+        toast({ title: 'Hata', description: 'Perifer talebi için bir depo bulunamadı. Lütfen yönetici ile iletişime geçin.', variant: 'destructive' });
+        return;
+      }
+      effectiveDepotId = resolved.id;
+      effectiveDepotName = resolved.name;
+    } else if (!selectedDepotId) {
       toast({ title: 'Eksik Bilgi', description: 'Depo, laboratuvar ve en az bir ürün seçmelisiniz.', variant: 'destructive' });
       return;
     }
+
     setLoading(true);
     try {
       const orderId = generateId();
       const labName = allHospitals.find(h => h.id === selectedLabId)?.name || 'Bilinmeyen Kurum';
-      const depotName = depots.find(d => d.id === selectedDepotId)?.name || 'Bilinmeyen Depo';
-      
+
       const newOrder = {
         id: orderId,
-        depotId: selectedDepotId,
-        depotName: depotName,
+        depotId: effectiveDepotId,
+        depotName: effectiveDepotName || 'Bilinmeyen Depo',
         labId: selectedLabId,
         kurumAdi: labName,
         items: orderItems,
@@ -348,17 +404,18 @@ export default function UrunTalepPanel() {
         createdAt: serverTimestamp(),
         createdBy: currentUserProfile?.name || currentUser?.email || 'Unknown User',
         createdById: currentUser?.uid || 'unknown',
-        requestSource: 'lab_to_depot' as const,
+        requestSource: isPeripheralFlow ? ('lab_to_office' as const) : ('lab_to_depot' as const),
+        isPeripheral: isPeripheralFlow,
         transferredAt: null,
       };
-      
+
       await setDoc(doc(db, 'orders', orderId), newOrder);
-      
+
       await emitOrderCreatedFromRequest({
         actor: { uid: currentUserProfile?.uid || '', name: currentUserProfile?.name || ''},
         orderId: orderId,
         labId: selectedLabId,
-        depotId: selectedDepotId,
+        depotId: effectiveDepotId,
         audienceHint: {
           userId: currentUserProfile?.uid,
           role: currentUserProfile?.role,
@@ -367,14 +424,22 @@ export default function UrunTalepPanel() {
           depotIds: currentUserProfile?.assignedDepots,
         }
       });
-      
-      playNotificationSound(); // Play notification sound on success
-      toast({ title: 'Talep Oluşturuldu', description: `Siparişiniz "${depotName}" deposuna iletildi.` });
-      
-      // Reset form
+
+      playNotificationSound();
+      toast({
+        title: 'Talep Oluşturuldu',
+        description: isPeripheralFlow
+          ? 'Talebiniz ofis lojistiğine iletildi.'
+          : `Siparişiniz "${effectiveDepotName}" deposuna iletildi.`,
+      });
+
+      // Reset form — but keep the auto-selected peripheral lab so the user can
+      // immediately create another request without re-picking it.
       setOrderItems([]);
-      setSelectedLabId('');
-      setLabMinMaxRules([]);
+      if (!(userHospitals.length === 1 && userHospitals[0]?.perifer)) {
+        setSelectedLabId('');
+        setLabMinMaxRules([]);
+      }
 
     } catch (err) {
       console.error('Error creating order request:', err);
@@ -411,26 +476,63 @@ export default function UrunTalepPanel() {
           </div>
         </CardHeader>
         <CardContent className="space-y-6">
-          <div className="grid md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Kaynak Depo</label>
-              <Select value={selectedDepotId} onValueChange={setSelectedDepotId} disabled={loading}>
-                <SelectTrigger><SelectValue placeholder="Depo seçin..." /></SelectTrigger>
-                <SelectContent>
-                  {depots.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Hedef Laboratuvar</label>
-              <Select value={selectedLabId} onValueChange={setSelectedLabId} disabled={loading || userHospitals.length === 0}>
-                <SelectTrigger><SelectValue placeholder="Laboratuvar seçin..." /></SelectTrigger>
-                <SelectContent>
-                  {userHospitals.map(h => <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+          {(() => {
+            const singleAutoLab =
+              userHospitals.length === 1 && userHospitals[0]?.perifer ? userHospitals[0] : null;
+            const showLabPicker = !singleAutoLab;
+            const showDepotPicker = !isPeripheralFlow;
+
+            if (!showLabPicker && !showDepotPicker && singleAutoLab) {
+              return (
+                <div className="rounded-md border border-purple-500/30 bg-purple-500/5 px-3 py-2 text-sm">
+                  <span className="inline-flex items-center gap-2 font-medium">
+                    <FlaskConical className="h-4 w-4 text-purple-400" />
+                    {singleAutoLab.name}
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-purple-500 px-1.5 py-0.5 rounded bg-purple-500/10">
+                      Perifer
+                    </span>
+                  </span>
+                </div>
+              );
+            }
+
+            return (
+              <div
+                className={cn(
+                  'grid gap-4',
+                  showDepotPicker && showLabPicker ? 'md:grid-cols-2' : 'md:grid-cols-1'
+                )}
+              >
+                {showDepotPicker && (
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Kaynak Depo</label>
+                    <Select value={selectedDepotId} onValueChange={setSelectedDepotId} disabled={loading}>
+                      <SelectTrigger><SelectValue placeholder="Depo seçin..." /></SelectTrigger>
+                      <SelectContent>
+                        {depots.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                {showLabPicker && (
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Hedef Laboratuvar</label>
+                    <Select value={selectedLabId} onValueChange={setSelectedLabId} disabled={loading || userHospitals.length === 0}>
+                      <SelectTrigger><SelectValue placeholder="Laboratuvar seçin..." /></SelectTrigger>
+                      <SelectContent>
+                        {userHospitals.map(h => (
+                          <SelectItem key={h.id} value={h.id}>
+                            {h.name}
+                            {h.perifer ? ' · Perifer' : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           
           <Card className="border">
             <CardHeader>
@@ -518,7 +620,7 @@ export default function UrunTalepPanel() {
             <CardFooter>
                 <Button onClick={createOrderRequest} disabled={loading || orderItems.length === 0} className="w-full">
                     {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    Talep Oluştur ve Depoya İlet
+                    {isPeripheralFlow ? 'Talep Oluştur ve Lojistiğe İlet' : 'Talep Oluştur ve Depoya İlet'}
                 </Button>
             </CardFooter>
           </Card>
