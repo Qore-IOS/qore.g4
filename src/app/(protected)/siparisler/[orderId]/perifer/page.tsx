@@ -597,6 +597,16 @@ export default function PeripheralOrderPage() {
                         <span className="text-lg font-bold" style={{ color: 'var(--dashboard-text)' }}>
                           {row.requestedAdet}
                         </span>
+                        {(() => {
+                          const itemAmbalaj = meta?.ambalajDegeri ?? 0;
+                          const itemBirim = meta?.anaBirim || '';
+                          const itemTotal = itemAmbalaj > 0 ? itemAmbalaj * row.requestedAdet : 0;
+                          return itemBirim && itemTotal > 0 ? (
+                            <span className="text-xs font-medium" style={{ color: 'var(--dashboard-muted)' }}>
+                              {itemBirim} ({itemTotal.toLocaleString('tr-TR')} adet)
+                            </span>
+                          ) : null;
+                        })()}
                       </div>
                       <div className="flex items-baseline gap-1">
                         <span className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--dashboard-muted)' }}>
