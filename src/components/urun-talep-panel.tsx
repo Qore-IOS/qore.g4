@@ -63,9 +63,9 @@ import {
   CommandList,
 } from '@/components/ui/command';
 
-/* ═══════════════════════════════════════════════════════
+/* =======================================================
    DUTY SCHEDULE HELPERS (preserved from original)
-   ═══════════════════════════════════════════════════════ */
+   ======================================================= */
 
 function formatShiftDate(date: unknown): string {
   const d = date instanceof Date ? date : new Date(date as any);
@@ -215,9 +215,9 @@ function DutyInfo({ selectedLabId }: { selectedLabId: string | null }) {
 }
 
 
-/* ═══════════════════════════════════════════════════════
+/* =======================================================
    QUANTITY INPUT DIALOG
-   ═══════════════════════════════════════════════════════ */
+   ======================================================= */
 
 interface QuantityDialogProps {
   open: boolean;
@@ -365,9 +365,9 @@ function QuantityDialog({ open, onOpenChange, product, existingQty, onConfirm }:
 }
 
 
-/* ═══════════════════════════════════════════════════════
+/* =======================================================
    MAIN PANEL
-   ═══════════════════════════════════════════════════════ */
+   ======================================================= */
 
 export default function UrunTalepPanel() {
   const router = useRouter();
@@ -403,7 +403,7 @@ export default function UrunTalepPanel() {
   const [isLabPopoverOpen, setIsLabPopoverOpen] = useState(false);
 
 
-  // ── Derived Data ──
+  // -- Derived Data --
   const userHospitals = useMemo(() => {
     if (currentUserProfile?.role === 'admin') return allHospitals;
     return allHospitals.filter(h => currentUserProfile?.assignedLaboratories?.includes(h.id));
@@ -488,7 +488,7 @@ export default function UrunTalepPanel() {
   const isCreateReady = !!selectedLabId && orderItems.length > 0 && (isPeripheralFlow || !!selectedDepotId);
 
 
-  // ── Data Fetching ──
+  // -- Data Fetching --
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
@@ -538,7 +538,7 @@ export default function UrunTalepPanel() {
   }, [selectedLabId, toast]);
 
 
-  // ── Handlers ──
+  // -- Handlers --
 
   const handleProductClick = (product: ProductCode) => {
     setQtyDialogProduct(product);
@@ -649,15 +649,15 @@ export default function UrunTalepPanel() {
   };
 
 
-  // ── Render ──
+  // -- Render --
 
   return (
     <div
       className="cihaz-shell px-3 py-4 sm:px-5 sm:py-6 space-y-4 sm:space-y-5 min-h-screen"
       role="main"
-      aria-label="Ürün talep paneli"
+      aria-label="Urun talep paneli"
     >
-      {/* ══════════════════════ HEADER ══════════════════════ */}
+      {/* ====================== HEADER ====================== */}
       <div className="flex items-center gap-3">
         <BackButton fallback="/urun-kullanim" />
         <div className="flex-1 min-w-0">
@@ -715,7 +715,7 @@ export default function UrunTalepPanel() {
       </div>
 
 
-      {/* ══════════════════════ LAB & DEPOT SELECTORS ══════════════════════ */}
+      {/* ====================== LAB & DEPOT SELECTORS ====================== */}
       <div className="flex flex-wrap gap-3">
         {/* Depot selector — hidden for perifer flow */}
         {showDepotPicker && (
@@ -793,11 +793,11 @@ export default function UrunTalepPanel() {
       </div>
 
 
-      {/* ══════════════════════ MAIN SPLIT VIEW ══════════════════════ */}
+      {/* ====================== MAIN SPLIT VIEW ====================== */}
       {selectedLabId && (
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-4 sm:gap-5">
 
-          {/* ── LEFT: Product Catalog ── */}
+          {/* -- LEFT: Product Catalog -- */}
           <div className="cihaz-card-strong flex flex-col overflow-hidden">
             {/* Lab Group Chips + Search */}
             <div className="px-4 py-3 sm:px-5 space-y-3 border-b border-[var(--dashboard-stroke)]">
@@ -927,7 +927,7 @@ export default function UrunTalepPanel() {
           </div>
 
 
-          {/* ── RIGHT: Cart ── */}
+          {/* -- RIGHT: Cart -- */}
           <div className="cihaz-card-strong flex flex-col overflow-hidden">
             {/* Cart header */}
             <div className="flex items-center gap-2 sm:gap-3 px-4 py-3 sm:px-5 border-b border-[var(--dashboard-stroke)]">
@@ -1111,7 +1111,7 @@ export default function UrunTalepPanel() {
       )}
 
 
-      {/* ══════════════════════ QUANTITY DIALOG ══════════════════════ */}
+      {/* ====================== QUANTITY DIALOG ====================== */}
       <QuantityDialog
         open={qtyDialogOpen}
         onOpenChange={setQtyDialogOpen}
