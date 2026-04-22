@@ -61,7 +61,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { useToast } from '@/hooks/use-toast';
 import { format as formatDate, parse, compareAsc, isValid } from 'date-fns';
 import { tr } from 'date-fns/locale';
-import { Loader2, PlusCircle, Trash2, Check, FileSpreadsheet, History, Calculator, ChevronsUpDown, Undo, ClipboardPlus, ShoppingCart, Package, Plus, Minus, MoreHorizontal, ArrowRight, Search } from 'lucide-react';
+import { Loader2, PlusCircle, Trash2, Check, FileSpreadsheet, History, Calculator, ChevronsUpDown, Undo, ClipboardPlus, ShoppingCart, Package, Plus, Minus, MoreHorizontal, ArrowRight, Search, CheckCircle2, Edit3, Save, Send, Share2 } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import * as XLSX from 'xlsx';
@@ -69,6 +69,25 @@ import { useRowFocus } from '@/hooks/useRowFocus';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { cn } from '@/lib/utils';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { formatMiad, toDateFromAny } from '@/lib/date';
+
+type LojRowState = {
+  itemId: string;
+  stokKodu: string;
+  stokAdi: string;
+  requestedAdet: number;
+  sentAdet: number;
+  fulfilled: boolean;
+};
+
+type PeripheralFulfillmentItem = {
+  itemId: string;
+  stokKodu: string;
+  requestedAdet: number;
+  sentAdet: number;
+  fulfilled: boolean;
+};
 import { emitOrderCreatedFromRequest } from '@/lib/notifications';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { siparislerLogger } from '@/lib/logger';
