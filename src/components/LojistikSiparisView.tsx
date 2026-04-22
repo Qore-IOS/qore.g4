@@ -392,7 +392,8 @@ export default function LojistikSiparisView() {
   }
 
   return (
-    <div className="loj-shell px-4 py-5 sm:px-6 sm:py-6 space-y-5">
+    <div className="loj-shell min-h-screen">
+      <div className="max-w-[1600px] mx-auto px-4 py-5 sm:px-6 sm:py-6 space-y-5">
       {/* Header */}
       <div className="flex items-center gap-3">
         <div className="flex-1 min-w-0">
@@ -823,6 +824,7 @@ export default function LojistikSiparisView() {
             );
           })()}
         </div>
+      </div>
       </div>
     </div>
   );

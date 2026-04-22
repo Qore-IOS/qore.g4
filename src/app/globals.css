@@ -569,6 +569,9 @@
       color: var(--loj-text);
       min-height: 100dvh;
       font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
+      /* Negative margin to bleed out of PageShell padding */
+      margin: -1rem -0.75rem; 
+      width: calc(100% + 1.5rem);
     }
 
     .dark .loj-shell {
@@ -585,6 +588,8 @@
       --loj-raised-soft: 0 2px 10px rgba(0, 0, 0, 0.3);
       --loj-pressed: inset 0 2px 6px rgba(0, 0, 0, 0.4);
       background: #0A0A0A;
+      margin: -1rem -0.75rem; 
+      width: calc(100% + 1.5rem);
     }
 
     .loj-kpi {
