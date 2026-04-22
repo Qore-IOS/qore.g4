@@ -259,28 +259,6 @@ export default function UrunTalepPanel() {
     }
   }, [userHospitals, selectedLabId]);
 
-  // Resolve a depot for peripheral orders without asking the user. Prefer the
-  // depot explicitly linked to this lab; otherwise fall back to the first depot.
-  const resolvePeripheralDepotId = useCallback((labId: string): { id: string; name: string } | null => {
-    if (!labId || depots.length === 0) return null;
-    const linked = depots.find(d =>
-      Array.isArray(d.linkedLaboratoryIds) && d.linkedLaboratoryIds.includes(labId)
-    );
-    const picked = linked ?? depots[0];
-    if (!picked?.id) return null;
-    return { id: picked.id, name: picked.name ?? picked.id };
-  }, [depots]);
-
-  // For peripheral flows keep selectedDepotId in sync so downstream validation
-  // and the order payload have a valid source depot (hidden from the user).
-  useEffect(() => {
-    if (!isPeripheralFlow || !selectedLabId) return;
-    const resolved = resolvePeripheralDepotId(selectedLabId);
-    if (resolved && resolved.id !== selectedDepotId) {
-      setSelectedDepotId(resolved.id);
-    }
-  }, [isPeripheralFlow, selectedLabId, resolvePeripheralDepotId, selectedDepotId]);
-
   const availableProducts = React.useMemo(() => {
     const ruleStockCodes = new Set(labMinMaxRules.map(r => r.stokKodu));
     return allProducts.filter(p => ruleStockCodes.has(p.stokKodu));
@@ -371,19 +349,7 @@ export default function UrunTalepPanel() {
       toast({ title: 'Eksik Bilgi', description: 'Laboratuvar ve en az bir ürün seçmelisiniz.', variant: 'destructive' });
       return;
     }
-
-    // Peripheral orders auto-resolve a source depot so the user never sees it.
-    let effectiveDepotId = selectedDepotId;
-    let effectiveDepotName = depots.find(d => d.id === selectedDepotId)?.name || '';
-    if (isPeripheralFlow) {
-      const resolved = resolvePeripheralDepotId(selectedLabId);
-      if (!resolved) {
-        toast({ title: 'Hata', description: 'Perifer talebi için bir depo bulunamadı. Lütfen yönetici ile iletişime geçin.', variant: 'destructive' });
-        return;
-      }
-      effectiveDepotId = resolved.id;
-      effectiveDepotName = resolved.name;
-    } else if (!selectedDepotId) {
+    if (!isPeripheralFlow && !selectedDepotId) {
       toast({ title: 'Eksik Bilgi', description: 'Depo, laboratuvar ve en az bir ürün seçmelisiniz.', variant: 'destructive' });
       return;
     }
@@ -392,11 +358,12 @@ export default function UrunTalepPanel() {
     try {
       const orderId = generateId();
       const labName = allHospitals.find(h => h.id === selectedLabId)?.name || 'Bilinmeyen Kurum';
+      const depotName = depots.find(d => d.id === selectedDepotId)?.name || '';
 
-      const newOrder = {
+      // Perifer talepleri depo ataması yapmadan kayıt edilir; hangi depoya
+      // yönlendirileceğine ofis lojistik sorumlusu karar verir.
+      const newOrder: Record<string, any> = {
         id: orderId,
-        depotId: effectiveDepotId,
-        depotName: effectiveDepotName || 'Bilinmeyen Depo',
         labId: selectedLabId,
         kurumAdi: labName,
         items: orderItems,
@@ -408,6 +375,13 @@ export default function UrunTalepPanel() {
         isPeripheral: isPeripheralFlow,
         transferredAt: null,
       };
+      if (!isPeripheralFlow) {
+        newOrder.depotId = selectedDepotId;
+        newOrder.depotName = depotName || 'Bilinmeyen Depo';
+      } else {
+        newOrder.depotId = null;
+        newOrder.depotName = null;
+      }
 
       await setDoc(doc(db, 'orders', orderId), newOrder);
 
@@ -415,7 +389,7 @@ export default function UrunTalepPanel() {
         actor: { uid: currentUserProfile?.uid || '', name: currentUserProfile?.name || ''},
         orderId: orderId,
         labId: selectedLabId,
-        depotId: effectiveDepotId,
+        depotId: isPeripheralFlow ? '' : selectedDepotId,
         audienceHint: {
           userId: currentUserProfile?.uid,
           role: currentUserProfile?.role,
@@ -430,7 +404,7 @@ export default function UrunTalepPanel() {
         title: 'Talep Oluşturuldu',
         description: isPeripheralFlow
           ? 'Talebiniz ofis lojistiğine iletildi.'
-          : `Siparişiniz "${effectiveDepotName}" deposuna iletildi.`,
+          : `Siparişiniz "${depotName}" deposuna iletildi.`,
       });
 
       // Reset form — but keep the auto-selected peripheral lab so the user can
