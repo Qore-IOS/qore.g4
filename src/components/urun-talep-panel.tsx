@@ -228,7 +228,7 @@ interface QuantityDialogProps {
 }
 
 function QuantityDialog({ open, onOpenChange, product, existingQty, onConfirm }: QuantityDialogProps) {
-  const [qty, setQty] = useState<number | ''>('');
+  const [qty, setQty] = useState<number | string>('');
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Packaging info
