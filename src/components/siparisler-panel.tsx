@@ -228,7 +228,11 @@ export default function SiparislerPanel(): JSX.Element {
           isSuperAdmin,
         ));
         
-        if (filteredDepots.length > 0) setSelectedDepotId(filteredDepots[0].id);
+        // Lojistik sorumlusu depo seçimine ihtiyaç duymaz; listesini sadece
+        // atanan laboratuvarlara ait perifer siparişlerden oluşturur.
+        if (filteredDepots.length > 0 && currentUserProfile?.role !== 'lojistik_sorumlusu') {
+          setSelectedDepotId(filteredDepots[0].id);
+        }
       } catch (e) {
         toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
       } finally {
@@ -490,6 +494,22 @@ export default function SiparislerPanel(): JSX.Element {
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [isProductPopoverOpen, setIsProductPopoverOpen] = useState(false);
 
+  // Lojistik sorumlusu rolü: sipariş oluşturma ve depo seçim akışları gizlenir,
+  // yalnızca kendisine atanan laboratuvarların perifer siparişlerini görür.
+  const isLojistikSorumlusu = currentUserProfile?.role === 'lojistik_sorumlusu';
+
+  const assignedLabIdSet = useMemo(() => {
+    const set = new Set<string>();
+    (currentUserProfile?.assignedLaboratories ?? []).forEach(id => { if (id) set.add(id); });
+    return set;
+  }, [currentUserProfile?.assignedLaboratories]);
+
+  useEffect(() => {
+    if (isLojistikSorumlusu && activeTab !== 'pending') {
+      setActiveTab('pending');
+    }
+  }, [isLojistikSorumlusu, activeTab]);
+
   const selectedLabName = useMemo(
     () => hospitals.find(h => h.id === selectedLabId)?.name ?? '',
     [hospitals, selectedLabId]
@@ -503,9 +523,17 @@ export default function SiparislerPanel(): JSX.Element {
   const pendingOrders = useMemo(() => {
     const seen = new Set<string>();
     const merged: Order[] = [];
-    [...allOrders, ...peripheralOrders].forEach(o => {
+    // Lojistik sorumlusu sadece perifer akışını yönetir; depo bazlı
+    // listeden gelen siparişler gösterilmez.
+    const sources = isLojistikSorumlusu ? [peripheralOrders] : [allOrders, peripheralOrders];
+    sources.flat().forEach(o => {
       if (!o?.id || seen.has(o.id)) return;
       if (o.status === 'completed') return;
+      if (isLojistikSorumlusu) {
+        // Kullanıcı yönetiminde atanan laboratuvarların dışındaki perifer
+        // siparişleri bu kullanıcıya görünmez.
+        if (!o.labId || !assignedLabIdSet.has(o.labId)) return;
+      }
       seen.add(o.id);
       merged.push(o);
     });
@@ -515,7 +543,7 @@ export default function SiparislerPanel(): JSX.Element {
       return bt - at;
     });
     return merged;
-  }, [allOrders, peripheralOrders]);
+  }, [allOrders, peripheralOrders, isLojistikSorumlusu, assignedLabIdSet]);
 
   const peripheralLabIds = useMemo(() => {
     const set = new Set<string>();
@@ -571,8 +599,9 @@ export default function SiparislerPanel(): JSX.Element {
             Siparişler
           </h1>
           <p className="text-[11px] sm:text-xs text-[var(--dashboard-muted)] truncate">
-            {depotName || 'Depo seçin'}
-            {selectedLabName ? ` · ${selectedLabName}` : ''}
+            {isLojistikSorumlusu
+              ? `Perifer siparişler · ${pendingOrders.length}`
+              : `${depotName || 'Depo seçin'}${selectedLabName ? ` · ${selectedLabName}` : ''}`}
           </p>
         </div>
         {/* Secondary actions - more menu */}
@@ -600,54 +629,58 @@ export default function SiparislerPanel(): JSX.Element {
       </div>
 
       {/* ══════════════════════ DEPOT SELECTOR ══════════════════════ */}
-      <div className="cihaz-card p-3 sm:p-4">
-        <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1.5">Çalışma Deposu</label>
-        <Select value={selectedDepotId} onValueChange={setSelectedDepotId} disabled={isLoading}>
-          <SelectTrigger className="w-full bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl h-10">
-            <SelectValue placeholder="Depo seçin..." />
-          </SelectTrigger>
-          <SelectContent>
-            {depots.map(d => <SelectItem key={d.id} value={d.id ?? ''}>{d.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
+      {!isLojistikSorumlusu && (
+        <div className="cihaz-card p-3 sm:p-4">
+          <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1.5">Çalışma Deposu</label>
+          <Select value={selectedDepotId} onValueChange={setSelectedDepotId} disabled={isLoading}>
+            <SelectTrigger className="w-full bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl h-10">
+              <SelectValue placeholder="Depo seçin..." />
+            </SelectTrigger>
+            <SelectContent>
+              {depots.map(d => <SelectItem key={d.id} value={d.id ?? ''}>{d.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
 
       {/* ══════════════════════ TAB SWITCHER ══════════════════════ */}
-      <div className="flex rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] p-1 gap-1">
-        <button
-          onClick={() => setActiveTab('create')}
-          className={cn(
-            "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs sm:text-sm font-semibold transition-all",
-            activeTab === 'create'
-              ? "bg-[var(--dashboard-surface)] shadow-[var(--dashboard-raised-soft)] text-[var(--dashboard-text)]"
-              : "text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]"
-          )}
-        >
-          <PlusCircle className="h-4 w-4" />
-          Oluştur
-          {totalDraftItems > 0 && (
-            <span className="ml-1 px-1.5 py-0.5 rounded-md bg-[var(--dashboard-accent)] text-white text-[10px] font-bold">{totalDraftItems}</span>
-          )}
-        </button>
-        <button
-          onClick={() => setActiveTab('pending')}
-          className={cn(
-            "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs sm:text-sm font-semibold transition-all",
-            activeTab === 'pending'
-              ? "bg-[var(--dashboard-surface)] shadow-[var(--dashboard-raised-soft)] text-[var(--dashboard-text)]"
-              : "text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]"
-          )}
-        >
-          <Package className="h-4 w-4" />
-          Bekleyen
-          {pendingOrders.length > 0 && (
-            <span className="ml-1 px-1.5 py-0.5 rounded-md bg-amber-500 text-white text-[10px] font-bold">{pendingOrders.length}</span>
-          )}
-        </button>
-      </div>
+      {!isLojistikSorumlusu && (
+        <div className="flex rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] p-1 gap-1">
+          <button
+            onClick={() => setActiveTab('create')}
+            className={cn(
+              "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs sm:text-sm font-semibold transition-all",
+              activeTab === 'create'
+                ? "bg-[var(--dashboard-surface)] shadow-[var(--dashboard-raised-soft)] text-[var(--dashboard-text)]"
+                : "text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]"
+            )}
+          >
+            <PlusCircle className="h-4 w-4" />
+            Oluştur
+            {totalDraftItems > 0 && (
+              <span className="ml-1 px-1.5 py-0.5 rounded-md bg-[var(--dashboard-accent)] text-white text-[10px] font-bold">{totalDraftItems}</span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab('pending')}
+            className={cn(
+              "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs sm:text-sm font-semibold transition-all",
+              activeTab === 'pending'
+                ? "bg-[var(--dashboard-surface)] shadow-[var(--dashboard-raised-soft)] text-[var(--dashboard-text)]"
+                : "text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]"
+            )}
+          >
+            <Package className="h-4 w-4" />
+            Bekleyen
+            {pendingOrders.length > 0 && (
+              <span className="ml-1 px-1.5 py-0.5 rounded-md bg-amber-500 text-white text-[10px] font-bold">{pendingOrders.length}</span>
+            )}
+          </button>
+        </div>
+      )}
 
       {/* ══════════════════════ CREATE TAB ══════════════════════ */}
-      {activeTab === 'create' && (
+      {!isLojistikSorumlusu && activeTab === 'create' && (
         <div className="space-y-4">
           {/* ── Stepper ── */}
           <div className="flex items-center justify-center gap-0 px-2">
@@ -1011,7 +1044,7 @@ export default function SiparislerPanel(): JSX.Element {
       )}
 
       {/* ══════════════════════ PENDING TAB ══════════════════════ */}
-      {activeTab === 'pending' && (
+      {(isLojistikSorumlusu || activeTab === 'pending') && (
         <div className="space-y-3">
           {pendingOrders.length === 0 ? (
             <div className="cihaz-card-strong flex flex-col items-center justify-center py-16 sm:py-20 text-center px-4">
