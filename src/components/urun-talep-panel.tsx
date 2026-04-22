@@ -1055,7 +1055,8 @@ export default function UrunTalepPanel() {
                     </div>
                   </div>
                   );
-                })}
+                })
+              )}
             </div>
 
             {/* Sticky CTA bar */}
