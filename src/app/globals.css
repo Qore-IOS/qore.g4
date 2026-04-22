@@ -783,6 +783,11 @@
     }
     .loj-btn-outline:hover { background: var(--loj-surface-2); }
 
+    .loj-progress [data-progress-indicator] {
+      background-color: var(--loj-accent) !important;
+    }
+
+
     /* --- NEU-CARD: Neumorphic (Light) / Liquid Glass (Dark) --- */
     .neu-card {
         /* Light mode: Neumorphic */
