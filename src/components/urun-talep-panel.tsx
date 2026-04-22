@@ -228,21 +228,27 @@ interface QuantityDialogProps {
 }
 
 function QuantityDialog({ open, onOpenChange, product, existingQty, onConfirm }: QuantityDialogProps) {
-  const [qty, setQty] = useState(1);
+  const [qty, setQty] = useState<number | ''>('');
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Reset qty when product changes
+  // Packaging info
+  const ambalaj = product?.ambalajDegeri ?? 0;
+  const birim = product?.anaBirim || '';
+  const numericQty = typeof qty === 'number' ? qty : 0;
+  const totalUnits = ambalaj > 0 && numericQty > 0 ? ambalaj * numericQty : 0;
+
+  // Reset qty when product changes — start empty
   useEffect(() => {
     if (open) {
-      setQty(1);
+      setQty('');
       // Focus input after dialog opens
-      setTimeout(() => inputRef.current?.select(), 100);
+      setTimeout(() => inputRef.current?.focus(), 100);
     }
   }, [open, product?.id]);
 
   const handleConfirm = () => {
-    if (product && qty > 0) {
-      onConfirm(product.id, qty);
+    if (product && numericQty > 0) {
+      onConfirm(product.id, numericQty);
       onOpenChange(false);
     }
   };
@@ -265,6 +271,9 @@ function QuantityDialog({ open, onOpenChange, product, existingQty, onConfirm }:
           </DialogTitle>
           <DialogDescription className="text-center text-sm text-[var(--dashboard-muted)]">
             {product.stokKodu}
+            {birim && (
+              <span className="ml-2">· {birim}{ambalaj > 0 ? ` (${ambalaj} adet)` : ''}</span>
+            )}
             {existingQty > 0 && (
               <span className="ml-2 text-amber-500 font-medium">
                 (Listede mevcut: {existingQty})
@@ -277,7 +286,7 @@ function QuantityDialog({ open, onOpenChange, product, existingQty, onConfirm }:
           {/* Large quantity controls */}
           <div className="flex items-center gap-3">
             <button
-              onClick={() => setQty(Math.max(1, qty - 1))}
+              onClick={() => setQty(Math.max(1, numericQty - 1))}
               className="w-14 h-14 rounded-2xl bg-[var(--dashboard-surface-2)] border border-[var(--dashboard-stroke)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-all active:scale-95 shadow-[var(--dashboard-pressed)]"
             >
               <Minus className="h-6 w-6" />
@@ -287,17 +296,35 @@ function QuantityDialog({ open, onOpenChange, product, existingQty, onConfirm }:
               type="number"
               min={1}
               value={qty}
-              onChange={e => setQty(Math.max(1, Number(e.target.value) || 1))}
+              onChange={e => {
+                const val = e.target.value;
+                if (val === '') { setQty(''); return; }
+                const num = Number(val);
+                if (!isNaN(num) && num >= 0) setQty(num);
+              }}
               onKeyDown={handleKeyDown}
+              placeholder="0"
               className="w-28 h-14 text-center text-3xl font-bold border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)] rounded-2xl [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
             />
             <button
-              onClick={() => setQty(qty + 1)}
+              onClick={() => setQty(numericQty + 1)}
               className="w-14 h-14 rounded-2xl bg-[var(--dashboard-surface-2)] border border-[var(--dashboard-stroke)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-all active:scale-95 shadow-[var(--dashboard-pressed)]"
             >
               <Plus className="h-6 w-6" />
             </button>
           </div>
+
+          {/* Packaging info */}
+          {totalUnits > 0 && (
+            <div className="text-center">
+              <span className="text-sm font-semibold text-[var(--dashboard-text)]">
+                {numericQty} {birim}
+              </span>
+              <span className="text-sm text-[var(--dashboard-muted)] ml-1">
+                ({totalUnits.toLocaleString('tr-TR')} adet)
+              </span>
+            </div>
+          )}
 
           {/* Quick qty buttons */}
           <div className="flex gap-2">
@@ -307,7 +334,7 @@ function QuantityDialog({ open, onOpenChange, product, existingQty, onConfirm }:
                 onClick={() => setQty(n)}
                 className={cn(
                   "px-3.5 py-1.5 rounded-xl text-sm font-semibold transition-all",
-                  qty === n
+                  numericQty === n
                     ? "bg-[var(--dashboard-accent)] text-white shadow-[var(--dashboard-raised-soft)]"
                     : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] hover:text-[var(--dashboard-text)]"
                 )}
@@ -320,16 +347,16 @@ function QuantityDialog({ open, onOpenChange, product, existingQty, onConfirm }:
           {/* Confirm button */}
           <button
             onClick={handleConfirm}
-            disabled={qty <= 0}
+            disabled={numericQty <= 0}
             className={cn(
               "w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl text-base font-bold transition-all",
-              qty > 0
+              numericQty > 0
                 ? "bg-[var(--dashboard-accent)] text-white shadow-[var(--dashboard-raised)] hover:shadow-[var(--dashboard-raised-soft)] hover:-translate-y-0.5 active:translate-y-0 active:shadow-[var(--dashboard-pressed)]"
                 : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] cursor-not-allowed"
             )}
           >
             <Check className="h-5 w-5" />
-            {existingQty > 0 ? `Listeye Ekle (+${qty})` : `Listeye Ekle (${qty})`}
+            {existingQty > 0 ? `Listeye Ekle (+${numericQty || 0})` : `Listeye Ekle (${numericQty || 0})`}
           </button>
         </div>
       </DialogContent>
@@ -450,6 +477,13 @@ export default function UrunTalepPanel() {
     () => userHospitals.find(h => h.id === selectedLabId)?.name ?? '',
     [userHospitals, selectedLabId]
   );
+
+  // Product lookup by stok kodu for packaging info display
+  const productMetaByCode = useMemo(() => {
+    const map = new Map<string, ProductCode>();
+    allProducts.forEach(p => { if (p.stokKodu) map.set(p.stokKodu, p); });
+    return map;
+  }, [allProducts]);
 
   const isCreateReady = !!selectedLabId && orderItems.length > 0 && (isPeripheralFlow || !!selectedDepotId);
 
@@ -940,13 +974,25 @@ export default function UrunTalepPanel() {
                   </p>
                 </div>
               ) : (
-                orderItems.map((item) => (
+                orderItems.map((item) => {
+                  const meta = productMetaByCode.get(item.stokKodu || '');
+                  const itemAmbalaj = meta?.ambalajDegeri ?? 0;
+                  const itemBirim = meta?.anaBirim || '';
+                  const itemTotalUnits = itemAmbalaj > 0 ? itemAmbalaj * (item.adet ?? 0) : 0;
+                  return (
                   <div key={item.id} className="border-b border-[var(--dashboard-stroke)] last:border-b-0">
                     {/* Desktop row */}
                     <div className="hidden sm:grid grid-cols-[1fr_80px_40px] gap-1 items-center px-4 sm:px-5 py-2.5">
                       <div className="min-w-0">
                         <p className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{item.stokAdi}</p>
-                        <p className="text-[10px] text-[var(--dashboard-muted)]">{item.stokKodu}</p>
+                        <p className="text-[10px] text-[var(--dashboard-muted)]">
+                          {item.stokKodu}
+                          {itemBirim && itemTotalUnits > 0 && (
+                            <span className="ml-1.5 font-medium">
+                              · {item.adet} {itemBirim} ({itemTotalUnits.toLocaleString('tr-TR')} adet)
+                            </span>
+                          )}
+                        </p>
                       </div>
                       <div className="flex items-center justify-center">
                         <div className="flex items-center gap-0.5">
@@ -984,7 +1030,14 @@ export default function UrunTalepPanel() {
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{item.stokAdi}</p>
-                          <p className="text-[11px] text-[var(--dashboard-muted)]">{item.stokKodu}</p>
+                          <p className="text-[11px] text-[var(--dashboard-muted)]">
+                            {item.stokKodu}
+                            {itemBirim && itemTotalUnits > 0 && (
+                              <span className="ml-1 font-medium">
+                                · {item.adet} {itemBirim} ({itemTotalUnits.toLocaleString('tr-TR')} adet)
+                              </span>
+                            )}
+                          </p>
                         </div>
                         <div className="flex items-center gap-1">
                           <button onClick={() => { const newQty = Math.max(1, (item.adet ?? 1) - 1); setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: newQty } : i)); }} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
@@ -1001,8 +1054,8 @@ export default function UrunTalepPanel() {
                       </div>
                     </div>
                   </div>
-                ))
-              )}
+                  );
+                })}
             </div>
 
             {/* Sticky CTA bar */}
