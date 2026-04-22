@@ -92,7 +92,11 @@ export default function SiparislerPanel(): JSX.Element {
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
   const [depoStok, setDepoStok] = useState<DepoStokItem[]>([]);
   const [allOrders, setAllOrders] = useState<Order[]>([]);
-  
+  // Perifer siparişleri (depo atanmamış, ofis tarafından yönlendirilmeyi
+  // bekleyen) deponun seçiminden bağımsız olarak ofis panelinde göstermek
+  // için ayrı bir dinleyiciden geliyor.
+  const [peripheralOrders, setPeripheralOrders] = useState<Order[]>([]);
+
   const [selectedDepotId, setSelectedDepotId] = useState<string>('');
   const [selectedLabId, setSelectedLabId] = useState<string>('');
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
@@ -167,7 +171,41 @@ export default function SiparislerPanel(): JSX.Element {
     startListener();
     return () => { if (unsubscribe) unsubscribe(); };
   }, [selectedDepotId]);
-  
+
+  // Perifer — depo atanmamış siparişleri dinle. Bu liste, seçili depodan
+  // bağımsız olarak ofis lojistik görünümünde her zaman gösterilir.
+  useEffect(() => {
+    const mapSnap = (snap: any) => {
+      const rows = snap.docs
+        .map((d: any) => {
+          const data = d.data();
+          return {
+            ...data,
+            id: d.id,
+            createdAt: (data.createdAt as Timestamp)?.toDate?.() ?? new Date(),
+            transferredAt: data.transferredAt ? (data.transferredAt as Timestamp).toDate() : null,
+          } as Order;
+        })
+        // Only un-routed peripheral orders; routed ones already appear under
+        // their destination depot via the depot-filtered listener above.
+        .filter((o: Order) => !o.depotId);
+      rows.sort((a: Order, b: Order) => {
+        const bTime = b.createdAt instanceof Date ? b.createdAt.getTime() : 0;
+        const aTime = a.createdAt instanceof Date ? a.createdAt.getTime() : 0;
+        return bTime - aTime;
+      });
+      setPeripheralOrders(rows);
+    };
+
+    const qPerif = query(collection(db, 'orders'), where('isPeripheral', '==', true));
+    const unsub = onSnapshot(qPerif, mapSnap, (err) => {
+      siparislerLogger.warn('Perifer sipariş dinleyici hatası', {
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
+    });
+    return () => unsub();
+  }, []);
+
 
   useEffect(() => {
     (async () => {
@@ -462,10 +500,22 @@ export default function SiparislerPanel(): JSX.Element {
     [depots, selectedDepotId]
   );
 
-  const pendingOrders = useMemo(
-    () => allOrders.filter(o => o.status !== 'completed'),
-    [allOrders]
-  );
+  const pendingOrders = useMemo(() => {
+    const seen = new Set<string>();
+    const merged: Order[] = [];
+    [...allOrders, ...peripheralOrders].forEach(o => {
+      if (!o?.id || seen.has(o.id)) return;
+      if (o.status === 'completed') return;
+      seen.add(o.id);
+      merged.push(o);
+    });
+    merged.sort((a, b) => {
+      const at = a.createdAt instanceof Date ? a.createdAt.getTime() : 0;
+      const bt = b.createdAt instanceof Date ? b.createdAt.getTime() : 0;
+      return bt - at;
+    });
+    return merged;
+  }, [allOrders, peripheralOrders]);
 
   const peripheralLabIds = useMemo(() => {
     const set = new Set<string>();
@@ -473,7 +523,11 @@ export default function SiparislerPanel(): JSX.Element {
     return set;
   }, [hospitals]);
 
+  // Bir sipariş "perifer UI" gösterir ancak HENÜZ bir depoya yönlendirilmediyse:
+  // - Ofisin "Siparişi Gör"/"Depoya Yönlendir" akışına uygundur
+  // - Depoya yönlendirildiyse (`depotId` set edilmişse) normal toplama akışına geçer
   const isOrderPeripheral = useCallback((order: Order) => {
+    if (order.depotId) return false;
     if (order.isPeripheral === true) return true;
     if (order.labId && peripheralLabIds.has(order.labId)) return true;
     return false;

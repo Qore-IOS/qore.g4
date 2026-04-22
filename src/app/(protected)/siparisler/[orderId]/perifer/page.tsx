@@ -32,12 +32,14 @@ import {
   CheckCircle2,
   ChevronLeft,
   Edit3,
+  FileSpreadsheet,
   Loader2,
   MapPin,
   Package,
   Pencil,
   Save,
   Send,
+  Share2,
   Truck,
 } from 'lucide-react';
 
@@ -49,6 +51,22 @@ import type {
   Order,
   ProductCode,
 } from '@/lib/types';
+import { exportDataToExcel } from '@/lib/utils';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 type PeripheralFulfillmentItem = {
   itemId: string;
@@ -118,6 +136,10 @@ export default function PeripheralOrderPage() {
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+
+  const [isRouteDialogOpen, setIsRouteDialogOpen] = useState(false);
+  const [routeDepotId, setRouteDepotId] = useState<string>('');
+  const [isRouting, setIsRouting] = useState(false);
 
   // ── Load data ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -335,6 +357,70 @@ export default function PeripheralOrderPage() {
     }
   };
 
+  // ── Route to depot ─────────────────────────────────────────────────────
+  // Ofis lojistik sorumlusu siparişi bir depoya yönlendirebilir; bu durumda
+  // sipariş artık perifer UI'dan çıkar ve ilgili deponun bekleyen siparişler
+  // sekmesinde normal bir lab talebi olarak görünür (barkod okutmaya hazır).
+  const handleRouteToDepot = async () => {
+    if (!order?.id || !routeDepotId) return;
+    const depot = depots.find(d => d.id === routeDepotId);
+    if (!depot) return;
+    setIsRouting(true);
+    try {
+      await setDoc(
+        doc(db, 'orders', order.id),
+        {
+          depotId: depot.id,
+          depotName: depot.name ?? null,
+          status: 'pending',
+          routedToDepotAt: serverTimestamp(),
+          routedToDepotById: currentUser?.uid || null,
+          routedToDepotBy: currentUserProfile?.name || currentUser?.email || null,
+        },
+        { merge: true },
+      );
+      toast({
+        title: 'Depoya Yönlendirildi',
+        description: `Sipariş "${depot.name}" deposuna iletildi; toplama akışı başlayabilir.`,
+      });
+      setIsRouteDialogOpen(false);
+      router.push('/siparisler');
+    } catch (e) {
+      console.error(e);
+      toast({ title: 'Hata', description: 'Sipariş yönlendirilemedi.', variant: 'destructive' });
+    } finally {
+      setIsRouting(false);
+    }
+  };
+
+  // ── Excel export ───────────────────────────────────────────────────────
+  const handleExportExcel = () => {
+    if (!order) return;
+    const createdAt = toDateFromAny(order.createdAt as any);
+    const data = rows.map(row => {
+      const info = computeLabInfo(row.stokKodu);
+      return {
+        'Stok Kodu': row.stokKodu,
+        'Ürün Adı': row.stokAdi,
+        'Talep Adet': row.requestedAdet,
+        'Gönderilen Adet': row.sentAdet,
+        'Labdaki Stok': info.totalAdet,
+        'En Yakın Miadlı Lot': info.closestLot?.lotNumarasi ?? '-',
+        'En Yakın Miad': info.closestLot?.miad ?? '-',
+        'Lot Adeti': info.closestLot?.adet ?? 0,
+        'Son Transfer Tarihi': info.lastTransfer
+          ? formatDateFns(info.lastTransfer.date, 'dd.MM.yyyy', { locale: tr })
+          : '-',
+        'Transferi Yapan Depo': info.lastTransfer?.depotName ?? '-',
+        'Karşılandı': row.fulfilled ? 'Evet' : 'Hayır',
+      };
+    });
+    const fileName = `Perifer_Siparis_${hospital?.kod || hospital?.name || order.kurumAdi || order.id}${
+      createdAt ? '_' + formatDateFns(createdAt, 'yyyyMMdd', { locale: tr }) : ''
+    }`;
+    exportDataToExcel(data, fileName, 'Perifer Sipariş', toast);
+  };
+
   const createdAtStr = useMemo(() => {
     const d = toDateFromAny(order?.createdAt as any);
     return d ? formatDateFns(d, 'dd.MM.yyyy HH:mm', { locale: tr }) : '-';
@@ -393,7 +479,32 @@ export default function PeripheralOrderPage() {
               </span>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={handleExportExcel}
+              disabled={rows.length === 0}
+              className={cn(
+                'inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all',
+                rows.length === 0
+                  ? 'cihaz-pressed text-[var(--dashboard-muted)] cursor-not-allowed'
+                  : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+              )}
+              title="Siparişin tüm detaylarını Excel olarak dışa aktar"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              Excel
+            </button>
+            <button
+              onClick={() => {
+                setRouteDepotId('');
+                setIsRouteDialogOpen(true);
+              }}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold transition-all bg-blue-100 text-blue-700 hover:bg-blue-200"
+              title="Siparişi bir depoya yönlendir (barkod okutma akışı)"
+            >
+              <Share2 className="w-4 h-4" />
+              Depoya Yönlendir
+            </button>
             <button
               onClick={toggleAllFulfilled}
               className={cn(
@@ -623,6 +734,57 @@ export default function PeripheralOrderPage() {
           {allFulfilled ? 'Tamamla ve Kaydet' : 'Eksik Olarak Kaydet'}
         </button>
       </div>
+
+      {/* ── Depoya yönlendirme dialog'u ──────────────────────────────── */}
+      <Dialog open={isRouteDialogOpen} onOpenChange={setIsRouteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Share2 className="h-5 w-5 text-blue-600" />
+              Siparişi Depoya Yönlendir
+            </DialogTitle>
+            <DialogDescription>
+              Sipariş artık seçtiğiniz deponun bekleyen siparişlerinde
+              &quot;Toplamayı Başlat&quot; akışı ile açılacak; toplama barkod
+              okutmaya hazır normal lab talebi gibi ilerleyecek.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-3 space-y-2">
+            <label className="text-sm font-medium">Hedef Depo</label>
+            <Select value={routeDepotId} onValueChange={setRouteDepotId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Depo seçin..." />
+              </SelectTrigger>
+              <SelectContent>
+                {depots.map(d => (
+                  <SelectItem key={d.id} value={d.id ?? ''}>
+                    {d.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <button
+              onClick={() => setIsRouteDialogOpen(false)}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold cihaz-pressed text-[var(--dashboard-text)]"
+            >
+              Vazgeç
+            </button>
+            <button
+              onClick={handleRouteToDepot}
+              disabled={!routeDepotId || isRouting}
+              className={cn(
+                'inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white',
+                !routeDepotId || isRouting ? 'opacity-60 cursor-not-allowed bg-blue-400' : 'bg-blue-600 hover:bg-blue-700'
+              )}
+            >
+              {isRouting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Share2 className="h-4 w-4" />}
+              Yönlendir
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
