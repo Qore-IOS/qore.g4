@@ -3,15 +3,13 @@ import { useEffect, useRef } from 'react';
 
 type UseHidScannerOptions = {
   enabled?: boolean;
-  minLength?: number;            // minimum payload length for idle commit
-  idleMs?: number;               // commit after idle
-  maxScanMs?: number;            // force commit after this duration even if under minLength
+  minLength?: number;            // minimum payload length accepted on terminator
+  idleMs?: number;               // clear stale buffer after this much silence
+  maxScanMs?: number;            // cap on a single scan's buffer duration
   terminators?: string[];        // e.g. ['Enter', 'Tab']
   allowDuringInputs?: boolean;   // allow scan even if an input is focused
   onScan: (payload: { raw: string }) => void;
 };
-
-
 
 function toPrintableChar(e: KeyboardEvent): string | null {
   if (e.ctrlKey || e.metaKey || e.altKey) return null;
@@ -52,18 +50,33 @@ export default function useHidScanner({
   minLength = 4,
   idleMs = 1500,
   maxScanMs = 10000,
-  terminators = ['Enter', 'Tab'],
+  terminators,
   allowDuringInputs = true,
   onScan,
 }: UseHidScannerOptions) {
   const buf = useRef<string>('');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startedAt = useRef<number>(0);
-  const onScanRef = useRef(onScan);
 
+  // All options go through refs so the effect that owns the window listener
+  // does NOT re-run on every parent render (which was tearing down the
+  // listener and dropping keystrokes from slow HID scanners like the
+  // Sunlux XL-9610). Only `enabled` toggles the effect.
+  const onScanRef = useRef(onScan);
+  const minLengthRef = useRef(minLength);
+  const idleMsRef = useRef(idleMs);
+  const maxScanMsRef = useRef(maxScanMs);
+  const terminatorsRef = useRef<string[]>(terminators ?? ['Enter', 'Tab']);
+  const allowDuringInputsRef = useRef(allowDuringInputs);
+
+  useEffect(() => { onScanRef.current = onScan; }, [onScan]);
+  useEffect(() => { minLengthRef.current = minLength; }, [minLength]);
+  useEffect(() => { idleMsRef.current = idleMs; }, [idleMs]);
+  useEffect(() => { maxScanMsRef.current = maxScanMs; }, [maxScanMs]);
   useEffect(() => {
-    onScanRef.current = onScan;
-  }, [onScan]);
+    terminatorsRef.current = terminators ?? ['Enter', 'Tab'];
+  }, [terminators]);
+  useEffect(() => { allowDuringInputsRef.current = allowDuringInputs; }, [allowDuringInputs]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -77,25 +90,24 @@ export default function useHidScanner({
     const commitOnTerminator = () => {
       const raw = buf.current.replace(/[\x00-\x1F\x7F]/g, ''); // strip control chars
       clearBuffer();
-      if (raw && raw.length >= minLength) {
+      if (raw && raw.length >= minLengthRef.current) {
         onScanRef.current({ raw });
       }
     };
 
-    // Slow HID scanners (e.g. Sunlux XL-9610) can take several hundred ms
-    // between characters. We never commit on idle — only on an explicit
-    // terminator (Enter/Tab). The idle timer just clears the buffer if the
-    // user actually stopped scanning, so a stale partial scan cannot bleed
-    // into the next one. maxScanMs caps buffer growth as a safety net.
+    // Slow HID scanners can take several hundred ms between characters.
+    // We never commit on idle — only on an explicit terminator (Enter/Tab).
+    // The idle timer just clears a stale buffer so it can't bleed into
+    // the next scan. maxScanMs caps a single scan's total duration.
     const scheduleIdleClear = () => {
       if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => { clearBuffer(); }, idleMs);
+      timer.current = setTimeout(() => { clearBuffer(); }, idleMsRef.current);
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (!allowDuringInputs && isEditable(document.activeElement)) return;
+      if (!allowDuringInputsRef.current && isEditable(document.activeElement)) return;
 
-      if (terminators.includes(e.key)) {
+      if (terminatorsRef.current.includes(e.key)) {
         if (buf.current.length > 0) {
           if (e.key === 'Tab') e.preventDefault();
           commitOnTerminator();
@@ -109,9 +121,7 @@ export default function useHidScanner({
         if (buf.current.length === 0) {
           startedAt.current = now;
         }
-        // Safety cap: if a buffer has been accumulating far longer than any
-        // real scan should take, drop it before appending more characters.
-        if (startedAt.current && now - startedAt.current > maxScanMs) {
+        if (startedAt.current && now - startedAt.current > maxScanMsRef.current) {
           clearBuffer();
           startedAt.current = now;
         }
@@ -125,5 +135,5 @@ export default function useHidScanner({
       window.removeEventListener('keydown', onKeyDown);
       if (timer.current) clearTimeout(timer.current);
     };
-  }, [enabled, minLength, idleMs, maxScanMs, terminators, allowDuringInputs]);
+  }, [enabled]);
 }
