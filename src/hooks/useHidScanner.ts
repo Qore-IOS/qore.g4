@@ -50,7 +50,7 @@ function isEditable(el: Element | null): boolean {
 export default function useHidScanner({
   enabled = true,
   minLength = 10,
-  idleMs = 250,
+  idleMs = 500,
   maxScanMs = 10000,
   terminators = ['Enter', 'Tab'],
   allowDuringInputs = true,
@@ -59,6 +59,7 @@ export default function useHidScanner({
   const buf = useRef<string>('');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startedAt = useRef<number>(0);
+  const lastKeyAt = useRef<number>(0);
   const onScanRef = useRef(onScan);
 
   useEffect(() => {
@@ -68,9 +69,12 @@ export default function useHidScanner({
   useEffect(() => {
     if (!enabled) return;
 
+    const hasTerminator = terminators.length > 0;
+
     const reset = () => {
       buf.current = '';
       startedAt.current = 0;
+      lastKeyAt.current = 0;
       if (timer.current) { clearTimeout(timer.current); timer.current = null; }
     };
 
@@ -81,9 +85,31 @@ export default function useHidScanner({
         return;
       }
 
-      if (reason === 'idle' && raw.length < minLength) {
-        const elapsed = startedAt.current ? (Date.now() - startedAt.current) : 0;
-        if (elapsed < maxScanMs) {
+      if (reason === 'idle') {
+        const now = Date.now();
+        const elapsed = startedAt.current ? (now - startedAt.current) : 0;
+        const sinceLastKey = lastKeyAt.current ? (now - lastKeyAt.current) : 0;
+
+        // If a new key landed while the idle timer was queued, wait again
+        // (protects slow HID scanners like Sunlux XL-9610 whose inter-key
+        // gap can briefly exceed the idle window).
+        if (sinceLastKey < idleMs && elapsed < maxScanMs) {
+          if (timer.current) clearTimeout(timer.current);
+          timer.current = setTimeout(() => commit('idle'), idleMs - sinceLastKey);
+          return;
+        }
+
+        // When terminators are expected (Enter/Tab), prefer to keep waiting
+        // for the terminator up to maxScanMs rather than committing a
+        // possibly-truncated payload. Only commit on idle if no terminator
+        // is configured OR we've exceeded maxScanMs.
+        if (hasTerminator && elapsed < maxScanMs) {
+          if (timer.current) clearTimeout(timer.current);
+          timer.current = setTimeout(() => commit('idle'), idleMs);
+          return;
+        }
+
+        if (raw.length < minLength && elapsed < maxScanMs) {
           if (timer.current) clearTimeout(timer.current);
           timer.current = setTimeout(() => commit('idle'), idleMs);
           return;
@@ -112,9 +138,11 @@ export default function useHidScanner({
 
       const nextChar = toPrintableChar(e);
       if (nextChar) {
+        const now = Date.now();
         if (buf.current.length === 0) {
-          startedAt.current = Date.now();
+          startedAt.current = now;
         }
+        lastKeyAt.current = now;
         buf.current += nextChar;
         schedule();
       }

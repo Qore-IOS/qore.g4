@@ -469,7 +469,10 @@ export default function LaboratuvarSayimPage() {
       } else if (e.key.length === 1 && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) {
         buffer.current += e.key;
         if (timeout.current) clearTimeout(timeout.current);
-        timeout.current = setTimeout(() => { buffer.current = ''; }, 100);
+        // 1500ms tolerance: slow HID scanners (e.g. Sunlux XL-9610) can take
+        // several hundred ms between characters; aggressive resets caused
+        // Enter to arrive with an already-emptied buffer.
+        timeout.current = setTimeout(() => { buffer.current = ''; }, 1500);
       }
     };
     window.addEventListener('keydown', onKey);

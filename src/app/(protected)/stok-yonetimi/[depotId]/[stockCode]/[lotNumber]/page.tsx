@@ -272,7 +272,10 @@ export default function StockDetailPage() {
       if (e.key.length > 1) return;
       scanBuffer.current += e.key;
       if (scanTimeout.current) clearTimeout(scanTimeout.current);
-      scanTimeout.current = setTimeout(() => { scanBuffer.current = ''; }, 250);
+      // 1500ms tolerance: slow HID scanners (e.g. Sunlux XL-9610) can take
+      // several hundred ms between characters, so 250ms wiped the buffer
+      // mid-scan and the terminating Enter never matched a full barcode.
+      scanTimeout.current = setTimeout(() => { scanBuffer.current = ''; }, 1500);
     };
 
     window.addEventListener('keydown', handleKeyDown);
