@@ -326,6 +326,12 @@ describe('Sanitization Functions', () => {
       assert.ok(sanitizeBarcode(barcodeWithGS).includes(gs));
     });
 
+    it('should normalize scanner GS/FNC1 tokens into GS1 separator', () => {
+      const gs = String.fromCharCode(29);
+      const result = sanitizeBarcode('01ABC<FNC1>10LOT[GS]21SERI');
+      assert.equal(result, `01ABC${gs}10LOT${gs}21SERI`);
+    });
+
     it('should remove non-printable characters except GS1', () => {
       const barcodeWithNull = 'LOT\x00123';
       assert.equal(sanitizeBarcode(barcodeWithNull), 'LOT123');

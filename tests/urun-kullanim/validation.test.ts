@@ -258,6 +258,12 @@ describe('sanitizeBarcode', () => {
     const result = sanitizeBarcode('\x1D01234567890\x1D10LOT');
     assert.ok(result.includes('\x1D'));
   });
+
+  it('should normalize FNC1/GS tokens into GS1 control character', () => {
+    const result = sanitizeBarcode('01ABC<FNC1>10LOT[GS]21SERI');
+    const gs = String.fromCharCode(29);
+    assert.equal(result, `01ABC${gs}10LOT${gs}21SERI`);
+  });
 });
 
 describe('sanitizeDisposalBarcode', () => {

@@ -35,12 +35,37 @@ export function safeWhere<T>(
 }
 
 /**
- * Remove GS1 group separators (ASCII 29) and any whitespace
- * from a raw scanned barcode string.
+ * Normalizes different scanner representations of GS1 Group Separator (ASCII 29)
+ * into the canonical \u001D control character.
+ *
+ * Some scanners may emit GS as:
+ * - literal control char: \u001D
+ * - visible control picture: ␝ (U+241D)
+ * - escaped tokens: "<GS>", "[GS]", "{GS}", "FNC1", "<FNC1>", "\\x1D", "\\u001D"
+ *
+ * This keeps parsing stable across fast/slow scanners that encode FNC1 differently.
+ */
+export function normalizeGS1GroupSeparators(raw: string): string {
+  if (!raw || typeof raw !== 'string') return '';
+
+  return raw
+    .replace(/\u241D/g, '\u001D')
+    .replace(/\\x1d/gi, '\u001D')
+    .replace(/\\u001d/gi, '\u001D')
+    .replace(/<\s*GS\s*>/gi, '\u001D')
+    .replace(/\[\s*GS\s*\]/gi, '\u001D')
+    .replace(/\{\s*GS\s*\}/gi, '\u001D')
+    .replace(/<\s*FNC1\s*>/gi, '\u001D')
+    .replace(/\[\s*FNC1\s*\]/gi, '\u001D')
+    .replace(/\{\s*FNC1\s*\}/gi, '\u001D')
+    .replace(/\bFNC1\b/gi, '\u001D');
+}
+
+/**
+ * Remove normalized GS1 separators and any whitespace from a raw scanned barcode string.
  */
 export function sanitizeGS1(raw: string): string {
-  // The character is \u001D in unicode.
-  return raw.replace(/[\u001D\s]/g, '');
+  return normalizeGS1GroupSeparators(raw).replace(/[\u001D\s]/g, '');
 }
 
 /**

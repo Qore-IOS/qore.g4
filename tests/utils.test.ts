@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isValid61Digits, parseBarcode, sanitizeGS1 } from "../src/lib/utils";
+import { isValid61Digits, normalizeGS1GroupSeparators, parseBarcode, sanitizeGS1 } from "../src/lib/utils";
 
 test("sanitizeGS1 removes separators and whitespace", () => {
   const raw = "]C101234\u001d5678 90\u001d";
   const cleaned = sanitizeGS1(raw);
   assert.equal(cleaned, "]C101234567890");
+});
+
+test("normalizeGS1GroupSeparators converts tokenized separators to ASCII 29", () => {
+  const raw = "010123<FNC1>10LOT[GS]21SERI\\x1DEND␝";
+  const normalized = normalizeGS1GroupSeparators(raw);
+  const gs = String.fromCharCode(29);
+  assert.equal(normalized, `010123${gs}10LOT${gs}21SERI${gs}END${gs}`);
 });
 
 test("isValid61Digits validates strict length", () => {

@@ -7,6 +7,7 @@
  */
 
 import { z } from 'zod';
+import { normalizeGS1GroupSeparators } from '@/lib/utils';
 import type {
   ManualDeductionPayload,
   TrashBinItem,
@@ -236,7 +237,7 @@ export function sanitizeSerialNumber(value: string | null | undefined): string {
 export function sanitizeBarcode(value: string | null | undefined): string {
   if (!value || typeof value !== 'string') return '';
 
-  return value
+  return normalizeGS1GroupSeparators(value)
     .trim()
     .replace(/[^\x1D\x1E\x20-\x7E]/g, '')
     .slice(0, 500);

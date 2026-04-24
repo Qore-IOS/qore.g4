@@ -1,6 +1,6 @@
 // src/lib/barcode.ts
 import { ExpiryPattern, PositionDef, ProductCode } from './types';
-import { sanitizeGS1 } from './utils';
+import { normalizeGS1GroupSeparators, sanitizeGS1 } from './utils';
 import { parseBarcode as legacyRocheParser } from './utils';
 
 type Fields = { reference?: number; lot?: number; expiry?: number; serial?: number; barcodeNumber?: number };
@@ -262,7 +262,9 @@ export function parseAnyBarcode(rawInput: string, formats: AnyFormat[]): ParsedG
   const raw = (rawInput || '').trim();
   if (!raw) return null;
 
-  const candidates = Array.from(new Set([raw, sanitizeGS1?.(raw) || raw]));
+  const normalizedGs = normalizeGS1GroupSeparators(raw);
+  const sanitized = sanitizeGS1?.(raw) || raw;
+  const candidates = Array.from(new Set([raw, normalizedGs, sanitized]));
   const compiled = (formats || []).map(compileFormat);
 
   const results: Array<ParsedGeneric & { formatPriority?: number }> = [];
@@ -394,7 +396,9 @@ export function parseAllBarcodes(rawInput: string, formats: AnyFormat[]): Parsed
   const raw = (rawInput || '').trim();
   if (!raw) return [];
 
-  const candidates = Array.from(new Set([raw, sanitizeGS1?.(raw) || raw]));
+  const normalizedGs = normalizeGS1GroupSeparators(raw);
+  const sanitized = sanitizeGS1?.(raw) || raw;
+  const candidates = Array.from(new Set([raw, normalizedGs, sanitized]));
   const compiled = (formats || []).map(compileFormat);
 
   const results: Array<ParsedGeneric & { formatPriority?: number }> = [];

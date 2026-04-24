@@ -7,6 +7,7 @@
  */
 
 import { z } from 'zod';
+import { normalizeGS1GroupSeparators } from '@/lib/utils';
 import type {
   ScanRow,
   MalKabulLine,
@@ -392,7 +393,7 @@ export function sanitizeBarcode(barcode: string): string {
   if (!barcode) return '';
 
   // Remove non-printable characters except GS1 control chars (29, 30, 31)
-  return barcode
+  return normalizeGS1GroupSeparators(barcode)
     .split('')
     .filter(char => {
       const code = char.charCodeAt(0);
