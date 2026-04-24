@@ -53,6 +53,7 @@ const PushNotificationsClient = dynamic(
   { ssr: false }
 );
 const QoreTechnicShell = dynamic(() => import('./qore-technic-shell'), { ssr: false });
+const LojistikTerminalShell = dynamic(() => import('./lojistik-terminal-shell'), { ssr: false });
 
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -72,6 +73,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const isQoreTechnicRole =
     currentUserProfile?.role === 'teknik_servis' ||
     currentUserProfile?.role === 'aplikasyon';
+  // Lojistik terminal: lojistik_sorumlusu gets a dedicated work terminal
+  // shell (its own collapsible sidebar, no global dock).
+  const isLojistikTerminalRole = currentUserProfile?.role === 'lojistik_sorumlusu';
   const { setTheme } = useTheme();
   const pathname = usePathname();
   const router = useRouter();
@@ -103,6 +107,27 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   if (isLoadingAuth || !currentUser) {
     return null;
+  }
+
+  // Lojistik terminal — dedicated shell for lojistik_sorumlusu role.
+  // No global dock / sidebar / mobile dock. The shell provides its own navigation.
+  if (isLojistikTerminalRole) {
+    return (
+      <>
+        <PushNotificationsErrorBoundary>
+          <PushNotificationsClient />
+        </PushNotificationsErrorBoundary>
+        <PresenceManager />
+        <AutoRedirectOnLogin />
+        <OnlyUsageAutoRedirect />
+        <PersistentNotificationToast />
+        <LojistikTerminalShell>{children}</LojistikTerminalShell>
+        <TaskPlannerPanel
+          open={isPlannerPanelOpen}
+          onClose={() => setIsPlannerPanelOpen(false)}
+        />
+      </>
+    );
   }
 
   // QOREtechnic hub — dedicated shell for teknik_servis and aplikasyon roles.
