@@ -49,8 +49,8 @@ function isEditable(el: Element | null): boolean {
 
 export default function useHidScanner({
   enabled = true,
-  minLength = 10,
-  idleMs = 500,
+  minLength = 4,
+  idleMs = 1500,
   maxScanMs = 10000,
   terminators = ['Enter', 'Tab'],
   allowDuringInputs = true,
@@ -59,7 +59,6 @@ export default function useHidScanner({
   const buf = useRef<string>('');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startedAt = useRef<number>(0);
-  const lastKeyAt = useRef<number>(0);
   const onScanRef = useRef(onScan);
 
   useEffect(() => {
@@ -69,60 +68,28 @@ export default function useHidScanner({
   useEffect(() => {
     if (!enabled) return;
 
-    const hasTerminator = terminators.length > 0;
-
-    const reset = () => {
+    const clearBuffer = () => {
       buf.current = '';
       startedAt.current = 0;
-      lastKeyAt.current = 0;
       if (timer.current) { clearTimeout(timer.current); timer.current = null; }
     };
 
-    const commit = (reason: 'idle' | 'terminator') => {
+    const commitOnTerminator = () => {
       const raw = buf.current.replace(/[\x00-\x1F\x7F]/g, ''); // strip control chars
-      if (!raw) {
-        reset();
-        return;
+      clearBuffer();
+      if (raw && raw.length >= minLength) {
+        onScanRef.current({ raw });
       }
-
-      if (reason === 'idle') {
-        const now = Date.now();
-        const elapsed = startedAt.current ? (now - startedAt.current) : 0;
-        const sinceLastKey = lastKeyAt.current ? (now - lastKeyAt.current) : 0;
-
-        // If a new key landed while the idle timer was queued, wait again
-        // (protects slow HID scanners like Sunlux XL-9610 whose inter-key
-        // gap can briefly exceed the idle window).
-        if (sinceLastKey < idleMs && elapsed < maxScanMs) {
-          if (timer.current) clearTimeout(timer.current);
-          timer.current = setTimeout(() => commit('idle'), idleMs - sinceLastKey);
-          return;
-        }
-
-        // When terminators are expected (Enter/Tab), prefer to keep waiting
-        // for the terminator up to maxScanMs rather than committing a
-        // possibly-truncated payload. Only commit on idle if no terminator
-        // is configured OR we've exceeded maxScanMs.
-        if (hasTerminator && elapsed < maxScanMs) {
-          if (timer.current) clearTimeout(timer.current);
-          timer.current = setTimeout(() => commit('idle'), idleMs);
-          return;
-        }
-
-        if (raw.length < minLength && elapsed < maxScanMs) {
-          if (timer.current) clearTimeout(timer.current);
-          timer.current = setTimeout(() => commit('idle'), idleMs);
-          return;
-        }
-      }
-
-      reset();
-      onScanRef.current({ raw });
     };
 
-    const schedule = () => {
+    // Slow HID scanners (e.g. Sunlux XL-9610) can take several hundred ms
+    // between characters. We never commit on idle — only on an explicit
+    // terminator (Enter/Tab). The idle timer just clears the buffer if the
+    // user actually stopped scanning, so a stale partial scan cannot bleed
+    // into the next one. maxScanMs caps buffer growth as a safety net.
+    const scheduleIdleClear = () => {
       if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => commit('idle'), idleMs);
+      timer.current = setTimeout(() => { clearBuffer(); }, idleMs);
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
@@ -131,7 +98,7 @@ export default function useHidScanner({
       if (terminators.includes(e.key)) {
         if (buf.current.length > 0) {
           if (e.key === 'Tab') e.preventDefault();
-          commit('terminator');
+          commitOnTerminator();
         }
         return;
       }
@@ -142,9 +109,14 @@ export default function useHidScanner({
         if (buf.current.length === 0) {
           startedAt.current = now;
         }
-        lastKeyAt.current = now;
+        // Safety cap: if a buffer has been accumulating far longer than any
+        // real scan should take, drop it before appending more characters.
+        if (startedAt.current && now - startedAt.current > maxScanMs) {
+          clearBuffer();
+          startedAt.current = now;
+        }
         buf.current += nextChar;
-        schedule();
+        scheduleIdleClear();
       }
     };
 
