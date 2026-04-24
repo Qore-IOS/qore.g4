@@ -7,7 +7,7 @@
  */
 
 'use client';
-import React, { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter, useParams } from 'next/navigation';
 import type { Laboratory, DepoStokItem, ConsumptionRecord, Device, ProductCode, BarcodeFormat, LabPool, DeviceGroup, TrashBinRecord, FaultDefinition } from '@/lib/types';
@@ -28,7 +28,6 @@ import { formatMiad } from '@/lib/date';
 import { tr } from 'date-fns/locale';
 import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
-import useHidScanner from '@/hooks/useHidScanner';
 import Image from 'next/image';
 import { Label } from '@/components/ui/label';
 import { useTheme } from 'next-themes';
@@ -1050,10 +1049,38 @@ export default function UrunKullanimPanel() {
     consumeByParsed(barcode);
   }, [consumeByParsed, isExpiryWarningModalOpen, lotReplaceTarget, barcodeFormats, toast, findBySerial, recordConsumption]);
   
-  useHidScanner({
-    enabled: !isCameraScannerOpen && !isExpiryWarningModalOpen && !faultModalOpen && !isManualDeductionOpen,
-    onScan: ({ raw }) => onProcess(raw)
-  });
+  // Same inline HID scanner handler used by laboratuvar/sayim — attaches
+  // once and only depends on the stable onProcess callback, so slow
+  // scanners like Sunlux XL-9610 do not lose characters to listener churn.
+  const scanBuffer = useRef('');
+  const scanTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scannerEnabled =
+    !isCameraScannerOpen && !isExpiryWarningModalOpen && !faultModalOpen && !isManualDeductionOpen;
+
+  useEffect(() => {
+    if (!scannerEnabled) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
+
+      if (e.key === 'Enter') {
+        if (scanBuffer.current.length > 0) {
+          onProcess(scanBuffer.current);
+        }
+        scanBuffer.current = '';
+        if (scanTimeout.current) clearTimeout(scanTimeout.current);
+        return;
+      }
+
+      if (e.key.length > 1) return;
+      scanBuffer.current += e.key;
+      if (scanTimeout.current) clearTimeout(scanTimeout.current);
+      scanTimeout.current = setTimeout(() => { scanBuffer.current = ''; }, 1500);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [scannerEnabled, onProcess]);
 
   const handleCameraScanSuccess = (rawCode: string) => {
     onProcess(rawCode);
