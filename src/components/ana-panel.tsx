@@ -25,7 +25,6 @@ import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
 import { useToast } from "@/hooks/use-toast";
 import { useDepots, useProductCodes, useAddressDefinitions, useBarcodeFormatsQuery, useUsers, useDepoStokByDepot, useInvalidateQueries, touchStockMetadata } from '@/hooks/useFirebaseQueries';
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
-import useHidScanner from '@/hooks/useHidScanner';
 import { useAuth } from '@/contexts/auth-context';
 
 // UI Components
@@ -775,12 +774,38 @@ export default function AnaPanel(props: AnaPanelProps) {
     }
   }, [flashScanFeedback, productCodes, barcodeFormats, existingDepotSerials, productTracking, isBulkScanMode]);
 
-  useHidScanner({
-    enabled: !isPreCheckModalOpen && !isProcessingScan && !isCameraScannerOpen && !showManualInline,
-    onScan: ({ raw }) => {
-      if (raw) processScan(raw, 'barcode');
-    },
-  });
+  // Same inline HID scanner handler used by laboratuvar/sayim — attaches
+  // once and only depends on the stable processScan callback, so slow
+  // scanners like Sunlux XL-9610 do not lose characters to listener churn.
+  const scanBuffer = useRef('');
+  const scanTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scannerEnabled =
+    !isPreCheckModalOpen && !isProcessingScan && !isCameraScannerOpen && !showManualInline;
+
+  useEffect(() => {
+    if (!scannerEnabled) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
+
+      if (e.key === 'Enter') {
+        if (scanBuffer.current.length > 0) {
+          processScan(scanBuffer.current, 'barcode');
+        }
+        scanBuffer.current = '';
+        if (scanTimeout.current) clearTimeout(scanTimeout.current);
+        return;
+      }
+
+      if (e.key.length > 1) return;
+      scanBuffer.current += e.key;
+      if (scanTimeout.current) clearTimeout(scanTimeout.current);
+      scanTimeout.current = setTimeout(() => { scanBuffer.current = ''; }, 1500);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [scannerEnabled, processScan]);
 
   const handleCameraScanSuccess = (rawCode: string) => {
     const trimmed = rawCode.trim();
