@@ -32,15 +32,23 @@ import {
   ClipboardPlus,
   Clock3,
   Truck,
-  CircleDollarSign,
+  Heart,
+  Zap,
+  Hourglass,
+  XCircle,
   Building2,
   Sparkles,
+  ArrowRight,
+  AlertCircle,
+  TrendingUp,
+  TrendingDown,
 } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Progress } from '@/components/ui/progress';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toDateFromAny } from '@/lib/date';
+import OrderConfirmAnimation from '@/components/lojistik-terminal/order-confirm-animation';
 
 type LojFilter = 'all' | 'pending' | 'toplaniyor' | 'teslim_bekliyor' | 'eksik';
 
@@ -333,7 +341,6 @@ export default function LojistikSiparisView() {
 
       await updateDoc(doc(db, 'orders', selectedOrder.id), payload);
       setShowSaveFx(true);
-      window.setTimeout(() => setShowSaveFx(false), 2200);
 
       toast({
         title: isComplete ? 'Sipariş Tamamlandı' : 'Sipariş Onaylandı',
@@ -367,33 +374,56 @@ export default function LojistikSiparisView() {
     const s = order.status;
     if (s === 'pending')
       return {
-        label: 'Bekliyor',
-        cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+        label: 'Beklemede',
+        cls: 'loj-status-badge loj-status-badge--warning',
+        Icon: Hourglass,
       };
     if (s === 'eksik')
       return {
         label: 'Eksik',
-        cls: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
+        cls: 'loj-status-badge loj-status-badge--danger',
+        Icon: AlertCircle,
       };
     if (s === 'toplaniyor')
       return {
-        label: 'Onaylandı',
-        cls: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
+        label: 'Hazırlanıyor',
+        cls: 'loj-status-badge loj-status-badge--info',
+        Icon: Truck,
       };
     if (['shipped', 'transfer_pending', 'teslim_bekliyor', 'yolda'].includes(String(s)))
       return {
-        label: 'Teslim Bekliyor',
-        cls: 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300',
+        label: 'Yolda',
+        cls: 'loj-status-badge loj-status-badge--accent',
+        Icon: Truck,
       };
     if (s === 'completed')
       return {
         label: 'Teslim',
-        cls: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
+        cls: 'loj-status-badge loj-status-badge--success',
+        Icon: CheckCircle2,
+      };
+    if (s === 'cancelled')
+      return {
+        label: 'İptal',
+        cls: 'loj-status-badge loj-status-badge--danger',
+        Icon: XCircle,
       };
     return {
       label: 'İşlemde',
-      cls: 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300',
+      cls: 'loj-status-badge loj-status-badge--info',
+      Icon: Clock3,
     };
+  };
+
+  const getOrderStage = (order: Order | null): number => {
+    if (!order) return 0;
+    const s = String(order.status || '');
+    if (s === 'completed') return 4;
+    if (['shipped', 'transfer_pending', 'teslim_bekliyor', 'yolda'].includes(s)) return 3;
+    if (s === 'toplaniyor') return 2;
+    if (s === 'eksik') return 2;
+    if (s === 'pending') return 1;
+    return 0;
   };
 
   const totalOrders = peripheralOrders.length + completedOrders.length;
@@ -465,57 +495,75 @@ export default function LojistikSiparisView() {
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-        <div className="loj-kpi">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--loj-muted)' }}>
+        <div className="loj-kpi loj-kpi--accent">
+          <div className="flex items-center justify-between mb-2 relative z-[1]">
+            <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--loj-muted)' }}>
               Açık Sipariş
             </span>
-            <Clock3 className="h-4 w-4" style={{ color: 'var(--loj-accent)' }} />
+            <span className="loj-kpi__icon"><Zap className="h-[18px] w-[18px]" /></span>
           </div>
-          <p className="text-2xl sm:text-3xl font-bold" style={{ color: 'var(--loj-accent)' }}>{activeCount}</p>
-          <p className="text-[11px] mt-1" style={{ color: 'var(--loj-muted)' }}>{waitingApprovalCount} bekleyen · {missingCount} eksik</p>
+          <p className="text-2xl sm:text-3xl font-extrabold relative z-[1]" style={{ color: 'var(--loj-text)' }}>{activeCount}</p>
+          <div className="flex items-center gap-1.5 mt-2 relative z-[1]">
+            <span className="loj-kpi__trend">
+              <TrendingUp className="h-3 w-3" />
+              {waitingApprovalCount} bekleyen
+            </span>
+          </div>
         </div>
-        <div className="loj-kpi">
-          <div className="flex items-center justify-between mb-2">
-            <span
-              className="text-[10px] font-semibold uppercase tracking-wider"
-              style={{ color: 'var(--loj-muted)' }}
-            >
+        <div className="loj-kpi loj-kpi--success">
+          <div className="flex items-center justify-between mb-2 relative z-[1]">
+            <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--loj-muted)' }}>
               Toplam Sipariş
             </span>
-            <ShoppingCart className="h-4 w-4" style={{ color: 'var(--loj-accent)' }} />
+            <span className="loj-kpi__icon"><ShoppingCart className="h-[18px] w-[18px]" /></span>
           </div>
-          <p className="text-2xl sm:text-3xl font-bold" style={{ color: 'var(--loj-text)' }}>
+          <p className="text-2xl sm:text-3xl font-extrabold relative z-[1]" style={{ color: 'var(--loj-text)' }}>
             {totalOrders}
           </p>
+          <div className="flex items-center gap-1.5 mt-2 relative z-[1]">
+            <span className="loj-kpi__trend">
+              <TrendingUp className="h-3 w-3" />
+              bu hafta
+            </span>
+          </div>
         </div>
-        <div className="loj-kpi">
-          <div className="flex items-center justify-between mb-2">
-            <span
-              className="text-[10px] font-semibold uppercase tracking-wider"
-              style={{ color: 'var(--loj-muted)' }}
-            >
+        <div className="loj-kpi loj-kpi--info">
+          <div className="flex items-center justify-between mb-2 relative z-[1]">
+            <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--loj-muted)' }}>
               Geçmiş Sipariş
             </span>
-            <History className="h-4 w-4" style={{ color: 'var(--loj-accent)' }} />
+            <span className="loj-kpi__icon"><History className="h-[18px] w-[18px]" /></span>
           </div>
-          <p className="text-2xl sm:text-3xl font-bold" style={{ color: 'var(--loj-text)' }}>
+          <p className="text-2xl sm:text-3xl font-extrabold relative z-[1]" style={{ color: 'var(--loj-text)' }}>
             {completedCount}
           </p>
+          <div className="flex items-center gap-1.5 mt-2 relative z-[1]">
+            <span className="text-[11px]" style={{ color: 'var(--loj-muted)' }}>tamamlanmış</span>
+          </div>
         </div>
-        <div className="loj-kpi">
-          <div className="flex items-center justify-between mb-2">
-            <span
-              className="text-[10px] font-semibold uppercase tracking-wider"
-              style={{ color: 'var(--loj-muted)' }}
-            >
+        <div className="loj-kpi loj-kpi--warning">
+          <div className="flex items-center justify-between mb-2 relative z-[1]">
+            <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--loj-muted)' }}>
               Tamamlanan
             </span>
-            <CircleDollarSign className="h-4 w-4" style={{ color: 'var(--loj-accent)' }} />
+            <span className="loj-kpi__icon"><Heart className="h-[18px] w-[18px]" /></span>
           </div>
-          <p className="text-2xl sm:text-3xl font-bold" style={{ color: 'var(--loj-text)' }}>
+          <p className="text-2xl sm:text-3xl font-extrabold relative z-[1]" style={{ color: 'var(--loj-text)' }}>
             {completedCount}
           </p>
+          <div className="flex items-center gap-1.5 mt-2 relative z-[1]">
+            {missingCount > 0 ? (
+              <span className="loj-kpi__trend loj-kpi__trend--down">
+                <TrendingDown className="h-3 w-3" />
+                {missingCount} eksik
+              </span>
+            ) : (
+              <span className="loj-kpi__trend">
+                <TrendingUp className="h-3 w-3" />
+                başarılı
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -531,8 +579,8 @@ export default function LojistikSiparisView() {
             {([
               ['all', 'Tümü'],
               ['pending', 'Bekleyen'],
-              ['toplaniyor', 'Onaylanan'],
-              ['teslim_bekliyor', 'Teslim Bekleyen'],
+              ['toplaniyor', 'Hazırlanan'],
+              ['teslim_bekliyor', 'Yolda'],
               ['eksik', 'Eksik'],
             ] as [LojFilter, string][]).map(([key, label]) => (
               <button
@@ -575,6 +623,7 @@ export default function LojistikSiparisView() {
             ) : (
               filteredOrders.map((order) => {
                 const status = getStatusInfo(order);
+                const StatusIcon = status.Icon;
                 const totalAdet = (order.items ?? []).reduce(
                   (s, i) => s + (Number(i.adet) || 0),
                   0
@@ -588,13 +637,11 @@ export default function LojistikSiparisView() {
                     className={cn('loj-order-item', isSelected && 'loj-selected')}
                   >
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-bold truncate" style={{ color: 'var(--loj-text)' }}>
-                        <span className="inline-flex items-center gap-1.5">
-                          <Building2 className="h-3.5 w-3.5 opacity-70" />
-                          {order.kurumAdi}
-                        </span>
+                      <p className="text-sm font-bold truncate flex items-center gap-1.5" style={{ color: 'var(--loj-text)' }}>
+                        <Building2 className="h-3.5 w-3.5 opacity-70 shrink-0" />
+                        <span className="truncate">{order.kurumAdi}</span>
                       </p>
-                      <p className="text-[11px] truncate" style={{ color: 'var(--loj-muted)' }}>
+                      <p className="text-[11px] truncate mt-0.5" style={{ color: 'var(--loj-muted)' }}>
                         {firstItem
                           ? productNameMap.get(firstItem.stokKodu ?? '') ??
                             firstItem.stokAdi ??
@@ -603,20 +650,16 @@ export default function LojistikSiparisView() {
                         {(order.items?.length ?? 0) > 1 &&
                           ` +${(order.items?.length ?? 1) - 1}`}
                       </p>
-                      <span
-                        className={cn(
-                          'inline-flex items-center mt-1 px-2 py-0.5 rounded text-[10px] font-semibold',
-                          status.cls
-                        )}
-                      >
+                      <span className={cn(status.cls, 'mt-1.5')}>
+                        <StatusIcon className="h-3 w-3" />
                         {status.label}
                       </span>
                     </div>
                     <div className="text-right shrink-0">
-                      <p className="text-sm font-bold" style={{ color: 'var(--loj-text)' }}>
+                      <p className="text-base font-extrabold" style={{ color: 'var(--loj-accent)' }}>
                         {totalAdet}
                       </p>
-                      <p className="text-[10px]" style={{ color: 'var(--loj-muted)' }}>
+                      <p className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--loj-muted)' }}>
                         adet
                       </p>
                     </div>
@@ -651,6 +694,11 @@ export default function LojistikSiparisView() {
             const createdAtStr = order.createdAt
               ? formatDate(order.createdAt as Date, 'dd MMM · HH:mm', { locale: tr })
               : '-';
+            const orderNo = (order.id ?? '').slice(-6).toUpperCase() || '------';
+            const stage = getOrderStage(order);
+            const headerStatus = getStatusInfo(order);
+            const HeaderStatusIcon = headerStatus.Icon;
+            const stageNames = ['Beklemede', 'Hazırlanıyor', 'Yolda', 'Teslim Edildi'];
 
             return (
               <div className="flex flex-col h-full">
@@ -660,43 +708,85 @@ export default function LojistikSiparisView() {
                   style={{ borderColor: 'var(--loj-stroke)' }}
                 >
                   <div className="min-w-0">
-                    <p className="text-xs" style={{ color: 'var(--loj-muted)' }}>
-                      {createdAtStr} · {order.createdBy || '-'}
+                    <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--loj-muted)' }}>
+                      Sipariş No
                     </p>
                     <h2
-                      className="text-base sm:text-lg font-bold mt-0.5"
+                      className="text-xl sm:text-2xl font-extrabold mt-0.5 tracking-tight"
                       style={{ color: 'var(--loj-text)' }}
                     >
-                      {order.kurumAdi}
+                      ORD-{orderNo}
                     </h2>
+                    <p className="text-xs mt-1.5 flex items-center gap-1.5" style={{ color: 'var(--loj-muted)' }}>
+                      <Building2 className="h-3 w-3" /> {order.kurumAdi}
+                      <span className="opacity-50">·</span>
+                      {createdAtStr}
+                    </p>
                   </div>
-                  <div className="text-right">
+                  <div className="text-right shrink-0">
+                    <span className={headerStatus.cls}>
+                      <HeaderStatusIcon className="h-3 w-3" /> {headerStatus.label}
+                    </span>
                     <p
-                      className="text-xl sm:text-2xl font-bold shrink-0"
+                      className="text-2xl sm:text-3xl font-extrabold mt-1.5"
                       style={{ color: 'var(--loj-accent)' }}
                     >
-                      {totalRequestedAdet}{' '}
-                      <span className="text-sm font-medium" style={{ color: 'var(--loj-muted)' }}>
+                      {totalRequestedAdet}
+                      <span className="text-sm font-medium ml-1" style={{ color: 'var(--loj-muted)' }}>
                         adet
                       </span>
                     </p>
+                  </div>
+                </div>
+
+                {/* Status Timeline */}
+                <div className="px-5 py-4 border-b" style={{ borderColor: 'var(--loj-stroke)' }}>
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--loj-text)' }}>
+                      Sipariş Durumu
+                    </span>
                     <button
+                      type="button"
                       onClick={handleApprove}
                       disabled={isSaving}
-                      className="loj-btn-primary mt-2"
-                      style={{ fontSize: 11, padding: '0.35rem 0.75rem' }}
+                      className="loj-btn-ghost-accent"
                     >
                       {isSaving ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        <Loader2 className="h-3 w-3 animate-spin" />
                       ) : (
-                        <>Siparişi Kaydet <CheckCircle2 className="h-3.5 w-3.5" /></>
+                        <>İlerle <ArrowRight className="h-3 w-3" /></>
                       )}
                     </button>
+                  </div>
+                  <div className="loj-stepper-track">
+                    {stageNames.map((name, idx) => {
+                      const stepIdx = idx + 1;
+                      const isDone = stepIdx < stage || (stepIdx === stage && stage === 4);
+                      const isActive = stepIdx === stage && stage !== 4;
+                      const stepCls = isDone ? 'done' : isActive ? 'active' : 'pending';
+                      return (
+                        <React.Fragment key={name}>
+                          <div className={cn('loj-step', stepCls)}>
+                            <div className={cn('loj-step-circle', stepCls)}>
+                              {isDone ? (
+                                <CheckCircle2 className="h-4 w-4" />
+                              ) : (
+                                stepIdx
+                              )}
+                            </div>
+                            <span className="loj-step-label">{name}</span>
+                          </div>
+                          {idx < stageNames.length - 1 && (
+                            <div className={cn('loj-step-line', stepIdx < stage && 'done')} />
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
                   </div>
                 </div>
 
                 {/* Progress Bar */}
-                <div className="px-5 py-4 border-b" style={{ borderColor: 'var(--loj-stroke)' }}>
+                <div className="px-5 py-3 border-b" style={{ borderColor: 'var(--loj-stroke)' }}>
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs font-semibold" style={{ color: 'var(--loj-muted)' }}>
                       Hazırlanma Oranı
@@ -721,7 +811,7 @@ export default function LojistikSiparisView() {
                         <div
                           key={row.itemId ?? idx}
                           className={cn(
-                            'loj-product-row rounded-xl flex-col items-stretch p-4',
+                            'loj-product-row !flex-col !items-stretch !p-4',
                             row.fulfilled && 'fulfilled'
                           )}
                         >
@@ -803,45 +893,45 @@ export default function LojistikSiparisView() {
                   <div className="loj-meta-grid">
                     <div>
                       <span
-                        className="text-[10px] font-semibold uppercase tracking-wide"
+                        className="text-[10px] font-bold uppercase tracking-wider"
                         style={{ color: 'var(--loj-muted)' }}
                       >
                         Kurum
                       </span>
-                      <p className="text-xs font-bold" style={{ color: 'var(--loj-text)' }}>
+                      <p className="text-xs font-bold mt-0.5" style={{ color: 'var(--loj-text)' }}>
                         {order.kurumAdi}
                       </p>
                     </div>
                     <div>
                       <span
-                        className="text-[10px] font-semibold uppercase tracking-wide"
+                        className="text-[10px] font-bold uppercase tracking-wider"
                         style={{ color: 'var(--loj-muted)' }}
                       >
                         Kalem
                       </span>
-                      <p className="text-xs font-bold" style={{ color: 'var(--loj-text)' }}>
-                        {totalKalem} kalem
+                      <p className="text-xs font-bold mt-0.5" style={{ color: 'var(--loj-text)' }}>
+                        {totalKalem} kalem · {totalRequestedAdet} adet
                       </p>
                     </div>
                     <div>
                       <span
-                        className="text-[10px] font-semibold uppercase tracking-wide"
+                        className="text-[10px] font-bold uppercase tracking-wider"
                         style={{ color: 'var(--loj-muted)' }}
                       >
                         Oluşturan
                       </span>
-                      <p className="text-xs font-bold" style={{ color: 'var(--loj-text)' }}>
+                      <p className="text-xs font-bold mt-0.5 truncate" style={{ color: 'var(--loj-text)' }}>
                         {order.createdBy || '-'}
                       </p>
                     </div>
                     <div>
                       <span
-                        className="text-[10px] font-semibold uppercase tracking-wide"
+                        className="text-[10px] font-bold uppercase tracking-wider"
                         style={{ color: 'var(--loj-muted)' }}
                       >
                         Tarih
                       </span>
-                      <p className="text-xs font-bold" style={{ color: 'var(--loj-text)' }}>
+                      <p className="text-xs font-bold mt-0.5" style={{ color: 'var(--loj-text)' }}>
                         {order.createdAt
                           ? formatDate(order.createdAt as Date, 'dd.MM.yyyy', { locale: tr })
                           : '-'}
@@ -856,14 +946,32 @@ export default function LojistikSiparisView() {
                   style={{ borderColor: 'var(--loj-stroke)' }}
                 >
                   <div className="flex-1 text-xs" style={{ color: 'var(--loj-muted)' }}>
-                    Siparişi düzenlemek için satırları işaretleyin ve &quot;Siparişi Kaydet&quot; butonuna basın.
+                    Satırları işaretleyin ve &quot;Siparişi Kaydet&quot; butonuna basın.
                   </div>
                   <button
                     onClick={() => handleDelete(order.id ?? '')}
                     className="loj-btn-outline"
-                    style={{ color: '#B91C1C' }}
+                    title="Siparişi Sil"
+                    aria-label="Siparişi Sil"
                   >
                     <Trash2 className="h-4 w-4" />
+                  </button>
+                  <button
+                    onClick={handleApprove}
+                    disabled={isSaving}
+                    className="loj-btn-primary"
+                  >
+                    {isSaving ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Kaydediliyor
+                      </>
+                    ) : (
+                      <>
+                        Siparişi Kaydet
+                        <CheckCircle2 className="h-4 w-4" />
+                      </>
+                    )}
                   </button>
                 </div>
               </div>
@@ -871,20 +979,13 @@ export default function LojistikSiparisView() {
           })()}
         </div>
       </div>
-      {showSaveFx && (
-        <div className="loj-savefx-overlay">
-          <div className="loj-savefx-card">
-            <div className="loj-savefx-ripple loj-savefx-ripple--one" />
-            <div className="loj-savefx-ripple loj-savefx-ripple--two" />
-            <svg className="loj-savefx-svg" viewBox="0 0 120 120" aria-hidden="true">
-              <circle className="loj-savefx-circle" cx="60" cy="60" r="42" />
-              <path className="loj-savefx-check" d="M38 61 L54 77 L83 47" />
-            </svg>
-            <div className="loj-savefx-text">Sipariş Kaydedildi</div>
-          </div>
-        </div>
-      )}
       </div>
+      <OrderConfirmAnimation
+        open={showSaveFx}
+        label="Sipariş Kaydedildi"
+        variant="success"
+        onClose={() => setShowSaveFx(false)}
+      />
     </div>
   );
 }
