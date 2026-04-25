@@ -30,7 +30,11 @@ import {
   History,
   MoreHorizontal,
   ClipboardPlus,
-  ArrowRight,
+  Clock3,
+  Truck,
+  CircleDollarSign,
+  Building2,
+  Sparkles,
 } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -38,7 +42,7 @@ import { Progress } from '@/components/ui/progress';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toDateFromAny } from '@/lib/date';
 
-type LojFilter = 'all' | 'pending' | 'eksik';
+type LojFilter = 'all' | 'pending' | 'toplaniyor' | 'teslim_bekliyor' | 'eksik';
 
 type RowState = {
   itemId: string;
@@ -93,6 +97,7 @@ export default function LojistikSiparisView() {
   const [rows, setRows] = useState<RowState[]>([]);
   const [labStock, setLabStock] = useState<DepoStokItem[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [showSaveFx, setShowSaveFx] = useState(false);
 
   const assignedLabIds = useMemo(() => {
     const s = new Set<string>();
@@ -262,7 +267,13 @@ export default function LojistikSiparisView() {
 
   const filteredOrders = useMemo(() => {
     let list = peripheralOrders;
-    if (filter === 'pending') list = list.filter((o) => o.status === 'pending' || o.status === 'toplaniyor');
+    if (filter === 'pending') list = list.filter((o) => o.status === 'pending');
+    else if (filter === 'toplaniyor') list = list.filter((o) => o.status === 'toplaniyor');
+    else if (filter === 'teslim_bekliyor') {
+      list = list.filter((o) =>
+        ['shipped', 'transfer_pending', 'teslim_bekliyor', 'yolda'].includes(String(o.status || ''))
+      );
+    }
     else if (filter === 'eksik') list = list.filter((o) => o.status === 'eksik');
     if (search.trim()) {
       const q = search.trim().toLowerCase();
@@ -321,6 +332,8 @@ export default function LojistikSiparisView() {
       }
 
       await updateDoc(doc(db, 'orders', selectedOrder.id), payload);
+      setShowSaveFx(true);
+      window.setTimeout(() => setShowSaveFx(false), 2200);
 
       toast({
         title: isComplete ? 'Sipariş Tamamlandı' : 'Sipariş Onaylandı',
@@ -352,6 +365,11 @@ export default function LojistikSiparisView() {
 
   const getStatusInfo = (order: Order) => {
     const s = order.status;
+    if (s === 'pending')
+      return {
+        label: 'Bekliyor',
+        cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+      };
     if (s === 'eksik')
       return {
         label: 'Eksik',
@@ -362,20 +380,27 @@ export default function LojistikSiparisView() {
         label: 'Onaylandı',
         cls: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
       };
+    if (['shipped', 'transfer_pending', 'teslim_bekliyor', 'yolda'].includes(String(s)))
+      return {
+        label: 'Teslim Bekliyor',
+        cls: 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300',
+      };
     if (s === 'completed')
       return {
         label: 'Teslim',
         cls: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
       };
     return {
-      label: 'Beklemede',
-      cls: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
+      label: 'İşlemde',
+      cls: 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300',
     };
   };
 
   const totalOrders = peripheralOrders.length + completedOrders.length;
   const activeCount = peripheralOrders.length;
   const completedCount = completedOrders.length;
+  const waitingApprovalCount = peripheralOrders.filter((o) => o.status === 'pending').length;
+  const missingCount = peripheralOrders.filter((o) => o.status === 'eksik').length;
 
   const progressValue = useMemo(() => {
     if (rows.length === 0) return 0;
@@ -393,7 +418,7 @@ export default function LojistikSiparisView() {
 
   return (
     <div className="loj-shell min-h-screen">
-      <div className="max-w-[1600px] mx-auto px-4 py-5 sm:px-6 sm:py-6 space-y-5">
+      <div className="max-w-[1700px] mx-auto px-4 py-5 sm:px-6 sm:py-6 space-y-5">
       {/* Header */}
       <div className="flex items-center gap-3">
         <div className="flex-1 min-w-0">
@@ -404,8 +429,9 @@ export default function LojistikSiparisView() {
             <ShoppingCart className="h-5 w-5" style={{ color: 'var(--loj-accent)' }} />
             Siparişler
           </h1>
-          <p className="text-xs" style={{ color: 'var(--loj-muted)' }}>
-            Perifer siparişler · {activeCount} aktif
+          <p className="text-xs flex items-center gap-2" style={{ color: 'var(--loj-muted)' }}>
+            <Sparkles className="h-3.5 w-3.5" />
+            Lojistik iş terminali · {activeCount} aktif sipariş
           </p>
         </div>
         <Popover open={moreMenuOpen} onOpenChange={setMoreMenuOpen}>
@@ -438,7 +464,17 @@ export default function LojistikSiparisView() {
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-3 gap-3 sm:gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <div className="loj-kpi">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--loj-muted)' }}>
+              Açık Sipariş
+            </span>
+            <Clock3 className="h-4 w-4" style={{ color: 'var(--loj-accent)' }} />
+          </div>
+          <p className="text-2xl sm:text-3xl font-bold" style={{ color: 'var(--loj-accent)' }}>{activeCount}</p>
+          <p className="text-[11px] mt-1" style={{ color: 'var(--loj-muted)' }}>{waitingApprovalCount} bekleyen · {missingCount} eksik</p>
+        </div>
         <div className="loj-kpi">
           <div className="flex items-center justify-between mb-2">
             <span
@@ -459,12 +495,12 @@ export default function LojistikSiparisView() {
               className="text-[10px] font-semibold uppercase tracking-wider"
               style={{ color: 'var(--loj-muted)' }}
             >
-              Bekleyen
+              Geçmiş Sipariş
             </span>
-            <Package className="h-4 w-4" style={{ color: 'var(--loj-accent)' }} />
+            <History className="h-4 w-4" style={{ color: 'var(--loj-accent)' }} />
           </div>
-          <p className="text-2xl sm:text-3xl font-bold" style={{ color: 'var(--loj-accent)' }}>
-            {activeCount}
+          <p className="text-2xl sm:text-3xl font-bold" style={{ color: 'var(--loj-text)' }}>
+            {completedCount}
           </p>
         </div>
         <div className="loj-kpi">
@@ -473,9 +509,9 @@ export default function LojistikSiparisView() {
               className="text-[10px] font-semibold uppercase tracking-wider"
               style={{ color: 'var(--loj-muted)' }}
             >
-              Geçmiş
+              Tamamlanan
             </span>
-            <CheckCircle2 className="h-4 w-4" style={{ color: 'var(--loj-accent)' }} />
+            <CircleDollarSign className="h-4 w-4" style={{ color: 'var(--loj-accent)' }} />
           </div>
           <p className="text-2xl sm:text-3xl font-bold" style={{ color: 'var(--loj-text)' }}>
             {completedCount}
@@ -484,7 +520,7 @@ export default function LojistikSiparisView() {
       </div>
 
       {/* Master-Detail Split */}
-      <div className="grid grid-cols-1 lg:grid-cols-[340px_1fr] gap-4">
+      <div className="grid grid-cols-1 xl:grid-cols-[390px_minmax(0,1fr)] gap-4">
         {/* LEFT: Order List */}
         <div className="loj-list-panel">
           {/* Filter Chips */}
@@ -495,6 +531,8 @@ export default function LojistikSiparisView() {
             {([
               ['all', 'Tümü'],
               ['pending', 'Bekleyen'],
+              ['toplaniyor', 'Onaylanan'],
+              ['teslim_bekliyor', 'Teslim Bekleyen'],
               ['eksik', 'Eksik'],
             ] as [LojFilter, string][]).map(([key, label]) => (
               <button
@@ -551,7 +589,10 @@ export default function LojistikSiparisView() {
                   >
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-bold truncate" style={{ color: 'var(--loj-text)' }}>
-                        {order.kurumAdi}
+                        <span className="inline-flex items-center gap-1.5">
+                          <Building2 className="h-3.5 w-3.5 opacity-70" />
+                          {order.kurumAdi}
+                        </span>
                       </p>
                       <p className="text-[11px] truncate" style={{ color: 'var(--loj-muted)' }}>
                         {firstItem
@@ -648,7 +689,7 @@ export default function LojistikSiparisView() {
                       {isSaving ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
                       ) : (
-                        <>Onayla <CheckCircle2 className="h-3.5 w-3.5" /></>
+                        <>Siparişi Kaydet <CheckCircle2 className="h-3.5 w-3.5" /></>
                       )}
                     </button>
                   </div>
@@ -730,7 +771,12 @@ export default function LojistikSiparisView() {
                             <div className="flex flex-col">
                               <span className="text-[9px] text-[var(--loj-muted)] uppercase tracking-tight">Son Transfer</span>
                               <p className="text-[11px] font-semibold truncate" style={{ color: 'var(--loj-text)' }}>
-                                {info.lastTransfer ? formatDate(info.lastTransfer.date, 'dd.MM.yyyy') : '-'}
+                                {info.lastTransfer ? (
+                                  <span className="inline-flex items-center gap-1">
+                                    <Truck className="h-3 w-3" />
+                                    {formatDate(info.lastTransfer.date, 'dd.MM.yyyy')}
+                                  </span>
+                                ) : '-'}
                               </p>
                             </div>
                             <div className="flex flex-col">
@@ -810,7 +856,7 @@ export default function LojistikSiparisView() {
                   style={{ borderColor: 'var(--loj-stroke)' }}
                 >
                   <div className="flex-1 text-xs" style={{ color: 'var(--loj-muted)' }}>
-                    Siparişi düzenlemek için satırları işaretleyin ve &quot;Onayla&quot; butonuna basın.
+                    Siparişi düzenlemek için satırları işaretleyin ve &quot;Siparişi Kaydet&quot; butonuna basın.
                   </div>
                   <button
                     onClick={() => handleDelete(order.id ?? '')}
@@ -825,6 +871,19 @@ export default function LojistikSiparisView() {
           })()}
         </div>
       </div>
+      {showSaveFx && (
+        <div className="loj-savefx-overlay">
+          <div className="loj-savefx-card">
+            <div className="loj-savefx-ripple loj-savefx-ripple--one" />
+            <div className="loj-savefx-ripple loj-savefx-ripple--two" />
+            <svg className="loj-savefx-svg" viewBox="0 0 120 120" aria-hidden="true">
+              <circle className="loj-savefx-circle" cx="60" cy="60" r="42" />
+              <path className="loj-savefx-check" d="M38 61 L54 77 L83 47" />
+            </svg>
+            <div className="loj-savefx-text">Sipariş Kaydedildi</div>
+          </div>
+        </div>
+      )}
       </div>
     </div>
   );
