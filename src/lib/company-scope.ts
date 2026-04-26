@@ -11,23 +11,19 @@ export function normalizeCompanyId(companyId?: string | null): string {
 }
 
 export function matchesCompanyScope(
-  record: ScopedRecord | null | undefined,
-  currentCompanyId?: string | null,
-  isSuperAdmin?: boolean
+  _record: ScopedRecord | null | undefined,
+  _currentCompanyId?: string | null,
+  _isSuperAdmin?: boolean
 ): boolean {
-  if (isSuperAdmin) return true;
-  const activeCompanyId = normalizeCompanyId(currentCompanyId);
-  const recordCompanyId = normalizeCompanyId(record?.companyId || record?.company);
-  return recordCompanyId === activeCompanyId;
+  return true;
 }
 
 export function filterByCompanyScope<T>(
   records: T[],
-  currentCompanyId?: string | null,
-  isSuperAdmin?: boolean
+  _currentCompanyId?: string | null,
+  _isSuperAdmin?: boolean
 ): T[] {
-  if (isSuperAdmin) return records;
-  return records.filter((record) => matchesCompanyScope(record as ScopedRecord, currentCompanyId, isSuperAdmin));
+  return records;
 }
 
 export function withCompanyScope<T extends Record<string, any>>(
