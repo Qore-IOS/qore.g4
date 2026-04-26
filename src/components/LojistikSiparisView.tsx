@@ -49,6 +49,7 @@ import { Progress } from '@/components/ui/progress';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toDateFromAny } from '@/lib/date';
 import OrderConfirmAnimation from '@/components/lojistik-terminal/order-confirm-animation';
+import DeliveryHistory, { type PartialDelivery } from '@/components/lojistik-terminal/delivery-history';
 
 type LojFilter = 'all' | 'pending' | 'toplaniyor' | 'teslim_bekliyor' | 'eksik';
 
@@ -528,7 +529,12 @@ export default function LojistikSiparisView() {
             </span>
           </div>
         </div>
-        <div className="loj-kpi loj-kpi--info">
+        <button
+          type="button"
+          onClick={() => router.push('/siparis-gecmis')}
+          className="loj-kpi loj-kpi--info loj-kpi--clickable text-left w-full"
+          aria-label="Geçmiş siparişler paneline git"
+        >
           <div className="flex items-center justify-between mb-2 relative z-[1]">
             <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--loj-muted)' }}>
               Geçmiş Sipariş
@@ -536,13 +542,20 @@ export default function LojistikSiparisView() {
             <span className="loj-kpi__icon"><History className="h-[18px] w-[18px]" /></span>
           </div>
           <p className="text-2xl sm:text-3xl font-extrabold relative z-[1]" style={{ color: 'var(--loj-text)' }}>
-            {completedCount}
+            {totalOrders}
           </p>
           <div className="flex items-center gap-1.5 mt-2 relative z-[1]">
-            <span className="text-[11px]" style={{ color: 'var(--loj-muted)' }}>tamamlanmış</span>
+            <span className="text-[11px] inline-flex items-center gap-1" style={{ color: 'var(--loj-muted)' }}>
+              tüm siparişler <ArrowRight className="h-3 w-3" />
+            </span>
           </div>
-        </div>
-        <div className="loj-kpi loj-kpi--warning">
+        </button>
+        <button
+          type="button"
+          onClick={() => router.push('/siparisler/tamamlanan')}
+          className="loj-kpi loj-kpi--warning loj-kpi--clickable text-left w-full"
+          aria-label="Tamamlanan siparişler paneline git"
+        >
           <div className="flex items-center justify-between mb-2 relative z-[1]">
             <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--loj-muted)' }}>
               Tamamlanan
@@ -559,13 +572,12 @@ export default function LojistikSiparisView() {
                 {missingCount} eksik
               </span>
             ) : (
-              <span className="loj-kpi__trend">
-                <TrendingUp className="h-3 w-3" />
-                başarılı
+              <span className="text-[11px] inline-flex items-center gap-1" style={{ color: 'var(--loj-muted)' }}>
+                liste <ArrowRight className="h-3 w-3" />
               </span>
             )}
           </div>
-        </div>
+        </button>
       </div>
 
       {/* Master-Detail Split */}
@@ -798,6 +810,25 @@ export default function LojistikSiparisView() {
                   </div>
                   <Progress value={progressValue} className="h-2 loj-progress" />
                 </div>
+
+                {/* Delivery History */}
+                {(() => {
+                  const deliveries = ((order.peripheralFulfillment as any)?.partialDeliveries ?? []) as PartialDelivery[];
+                  if (deliveries.length === 0) return null;
+                  return (
+                    <div className="px-5 py-3 border-b" style={{ borderColor: 'var(--loj-stroke)' }}>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-xs font-bold uppercase tracking-wider" style={{ color: 'var(--loj-text)' }}>
+                          İrsaliye Teslim Geçmişi
+                        </span>
+                        <span className="text-[11px]" style={{ color: 'var(--loj-muted)' }}>
+                          {deliveries.length} teslim
+                        </span>
+                      </div>
+                      <DeliveryHistory deliveries={deliveries} productNameMap={productNameMap} compact />
+                    </div>
+                  );
+                })()}
 
                 {/* Order Items */}
                 <ScrollArea
