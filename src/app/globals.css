@@ -1270,10 +1270,48 @@
 
     .lt-brand {
       display: flex;
-      align-items: center;
-      gap: 10px;
+      align-items: baseline;
+      gap: 1px;
       flex: 1;
       min-width: 0;
+      line-height: 1;
+      letter-spacing: -0.02em;
+      user-select: none;
+    }
+    .lt-brand__qore {
+      color: var(--loj-text, #0F2A24);
+      font-weight: 800;
+      font-size: 22px;
+      letter-spacing: -0.04em;
+    }
+    .dark .lt-brand__qore { color: var(--loj-text, #F4ECFA); }
+    .lt-brand__logistics {
+      margin-left: 2px;
+      font-family: 'Plus Jakarta Sans', ui-rounded, 'SF Pro Rounded', system-ui, sans-serif;
+      font-weight: 500;
+      font-style: italic;
+      font-size: 22px;
+      letter-spacing: -0.01em;
+      background: linear-gradient(135deg, var(--loj-accent, #10B981) 0%, var(--loj-accent-2, #34D399) 100%);
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+      color: transparent;
+    }
+    .lt-brand__mark-only {
+      width: 38px;
+      height: 38px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 12px;
+      font-weight: 800;
+      font-size: 18px;
+      color: #fff;
+      letter-spacing: -0.02em;
+      background: linear-gradient(135deg, var(--loj-accent, #10B981), var(--loj-accent-2, #34D399));
+      box-shadow: 0 8px 18px -8px var(--loj-accent-glow, rgba(16, 185, 129, 0.4));
+      flex-shrink: 0;
     }
     .lt-brand__mark {
       width: 36px;

@@ -5,7 +5,6 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
-import Image from 'next/image';
 import {
   ChevronLeft,
   ChevronRight,
@@ -17,6 +16,18 @@ import {
   Sun,
   UserCircle,
 } from 'lucide-react';
+
+function QorelogisticsBrand({ collapsed = false }: { collapsed?: boolean }) {
+  if (collapsed) {
+    return <span className="lt-brand__mark-only" aria-label="Qorelogistics">Q</span>;
+  }
+  return (
+    <div className="lt-brand" aria-label="Qorelogistics">
+      <span className="lt-brand__qore">QORE</span>
+      <span className="lt-brand__logistics">logistics</span>
+    </div>
+  );
+}
 
 interface NavItem {
   key: string;
@@ -127,22 +138,7 @@ export default function LojistikTerminalShell({ children }: { children: React.Re
       {/* Desktop / Tablet sidebar */}
       <aside className="lt-sidebar hidden md:flex">
         <div className="lt-sidebar__brand">
-          <div className="lt-brand">
-            <div className="lt-brand__mark">
-              <Image
-                src="/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG"
-                alt="Qore"
-                width={28}
-                height={28}
-              />
-            </div>
-            {!collapsed && (
-              <div className="lt-brand__text">
-                <span className="lt-brand__title">Qore</span>
-                <span className="lt-brand__subtitle">Lojistik Terminal</span>
-              </div>
-            )}
-          </div>
+          <QorelogisticsBrand collapsed={collapsed} />
           <button
             type="button"
             aria-label={collapsed ? 'Menüyü genişlet' : 'Menüyü daralt'}
@@ -230,20 +226,7 @@ export default function LojistikTerminalShell({ children }: { children: React.Re
 
       {/* Mobile top bar */}
       <header className="lt-mobile-header md:hidden">
-        <div className="lt-brand">
-          <div className="lt-brand__mark">
-            <Image
-              src="/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG"
-              alt="Qore"
-              width={24}
-              height={24}
-            />
-          </div>
-          <div className="lt-brand__text">
-            <span className="lt-brand__title">Qore</span>
-            <span className="lt-brand__subtitle">Lojistik Terminal</span>
-          </div>
-        </div>
+        <QorelogisticsBrand />
         <button
           type="button"
           className="lt-theme-toggle lt-theme-toggle--compact"

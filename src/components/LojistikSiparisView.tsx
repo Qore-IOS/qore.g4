@@ -323,7 +323,7 @@ export default function LojistikSiparisView() {
         fulfilled: r.fulfilled,
       }));
 
-      const isComplete = fulfillmentItems.length > 0 && fulfillmentItems.every((it) => it.fulfilled);
+      const isFullyApproved = fulfillmentItems.length > 0 && fulfillmentItems.every((it) => it.fulfilled);
       const payload: Record<string, any> = {
         peripheralFulfillment: {
           items: fulfillmentItems,
@@ -331,25 +331,26 @@ export default function LojistikSiparisView() {
           updatedById: currentUser?.uid || null,
           updatedBy: currentUserProfile?.name || currentUser?.email || null,
         },
-        status: isComplete ? 'completed' : 'eksik',
+        // Approval is *preparation*, not delivery. Fully approved orders
+        // move into "Hazırlanan" (toplaniyor); they only graduate to
+        // "completed" when an irsaliye-based lab acceptance reconciles
+        // the items. Partially approved orders are flagged "eksik".
+        status: isFullyApproved ? 'toplaniyor' : 'eksik',
+        approvedAt: serverTimestamp(),
+        approvedById: currentUser?.uid || null,
+        approvedBy: currentUserProfile?.name || currentUser?.email || null,
       };
-      if (isComplete) {
-        payload.transferredAt = serverTimestamp();
-        payload.transferredById = currentUser?.uid || null;
-        payload.transferredBy = currentUserProfile?.name || currentUser?.email || null;
-      }
 
       await updateDoc(doc(db, 'orders', selectedOrder.id), payload);
       setShowSaveFx(true);
 
       toast({
-        title: isComplete ? 'Sipariş Tamamlandı' : 'Sipariş Onaylandı',
-        description: isComplete
-          ? 'Sipariş tamamlanan siparişlere taşındı.'
+        title: isFullyApproved ? 'Sipariş Hazırlanıyor' : 'Sipariş Eksik Onaylandı',
+        description: isFullyApproved
+          ? 'Sipariş hazırlanan listesine taşındı; irsaliye kabulü ile tamamlanacak.'
           : 'Sipariş eksik kalemler ile bekleyen listede güncellendi.',
       });
-      // Optionally deselect if completed
-      if (isComplete) setSelectedOrderId(null);
+      if (isFullyApproved) setSelectedOrderId(null);
     } catch (e) {
       console.error(e);
       toast({ title: 'Hata', description: 'Sipariş kaydedilemedi.', variant: 'destructive' });
