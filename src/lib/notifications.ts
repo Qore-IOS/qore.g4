@@ -14,6 +14,7 @@ import {
 export type NotificationType =
   | "order_created"
   | "order_created_from_request"
+  | "order_reconciled"
   | "transfer_to_lab"
   | "spare_part_transfer"
   | "fefo_override"
@@ -644,3 +645,76 @@ export async function emitWeeklyPlanRejected(params: {
     },
   });
 }
+
+/**
+ * Notify lojistik-yöneticisi (and admins) that a hospital irsaliye has been
+ * reconciled against one or more peripheral orders. Includes a per-order
+ * summary so the bell + push payload can show which orders closed and which
+ * are still partially short.
+ */
+export async function emitOrderReconciled(params: {
+  actor: Actor;
+  hospitalId?: string;
+  hospitalName?: string;
+  irsaliyeFileName?: string;
+  results: {
+    orderId: string;
+    fullyDelivered: boolean;
+    deliveredAdet: number;
+    missingAdet: number;
+    extras?: { stokKodu: string; adet: number }[];
+  }[];
+  leftoverItems?: { stokKodu: string; adet: number }[];
+}) {
+  const closed = params.results.filter((r) => r.fullyDelivered);
+  const partial = params.results.filter((r) => !r.fullyDelivered);
+
+  let title: string;
+  let message: string;
+  if (closed.length > 0 && partial.length === 0) {
+    title = "Sipariş Teslim Edildi";
+    message =
+      closed.length === 1
+        ? `${params.hospitalName || "Hastane"} için 1 sipariş irsaliye ile tam teslim edildi.`
+        : `${params.hospitalName || "Hastane"} için ${closed.length} sipariş irsaliye ile tam teslim edildi.`;
+  } else if (partial.length > 0 && closed.length === 0) {
+    title = "Sipariş Kısmi Teslim";
+    message = `${params.hospitalName || "Hastane"} için ${partial.length} siparişte kısmi teslim alındı; eksik adetler not edildi.`;
+  } else {
+    title = "Sipariş İrsaliye Eşleşmesi";
+    message = `${params.hospitalName || "Hastane"} irsaliyesi ile ${closed.length} sipariş tam, ${partial.length} sipariş kısmi olarak teslim edildi.`;
+  }
+
+  const targets = Array.from(
+    new Set([
+      "role:admin",
+      "role:lojistik_sorumlusu",
+      ...(params.hospitalId ? [`lab:${params.hospitalId}`] : []),
+    ])
+  );
+
+  // First closed/partial order id is used to build the deep link via
+  // buildHrefForResource. Lojistik shell route is /siparisler.
+  const focusOrderId = (closed[0] ?? partial[0])?.orderId;
+
+  await createNotification({
+    type: "order_reconciled",
+    channel: "push",
+    title,
+    message,
+    href: "/siparisler",
+    resource: focusOrderId ? { type: "order", id: focusOrderId } : undefined,
+    actor: params.actor,
+    targets,
+    meta: {
+      hospitalId: params.hospitalId,
+      hospitalName: params.hospitalName,
+      irsaliyeFileName: params.irsaliyeFileName,
+      closedOrderIds: closed.map((r) => r.orderId),
+      partialOrderIds: partial.map((r) => r.orderId),
+      results: params.results,
+      leftoverItems: params.leftoverItems ?? [],
+    },
+  });
+}
+
