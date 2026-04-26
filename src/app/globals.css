@@ -693,6 +693,20 @@
     }
     .loj-kpi:hover::after { opacity: 0.95; }
 
+    button.loj-kpi--clickable {
+      cursor: pointer;
+      font: inherit;
+      text-align: left;
+      width: 100%;
+    }
+    button.loj-kpi--clickable:hover {
+      transform: translateY(-3px);
+      box-shadow: var(--loj-raised),
+        0 0 0 1px color-mix(in srgb, var(--loj-kpi-tone, var(--loj-accent)) 36%, transparent),
+        0 14px 30px -14px var(--loj-accent-glow);
+    }
+    button.loj-kpi--clickable:active { transform: translateY(-1px); }
+
     .loj-kpi__icon {
       display: inline-flex;
       align-items: center;

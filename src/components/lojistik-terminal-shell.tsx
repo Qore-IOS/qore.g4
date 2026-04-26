@@ -9,6 +9,8 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardList,
+  CheckCircle2,
+  History as HistoryIcon,
   FilePlus,
   LogOut,
   Moon,
@@ -43,7 +45,12 @@ const NAV_ITEMS: NavItem[] = [
     label: 'Bekleyen Siparişler',
     icon: ClipboardList,
     href: '/siparisler',
-    match: (p) => p === '/siparisler' || p.startsWith('/siparisler/') && !p.startsWith('/siparisler/olustur') && !p.startsWith('/siparisler/toplu'),
+    match: (p) =>
+      (p === '/siparisler' ||
+        (p.startsWith('/siparisler/') &&
+          !p.startsWith('/siparisler/olustur') &&
+          !p.startsWith('/siparisler/toplu') &&
+          !p.startsWith('/siparisler/tamamlanan'))),
   },
   {
     key: 'olustur',
@@ -58,6 +65,20 @@ const NAV_ITEMS: NavItem[] = [
     icon: Send,
     href: '/route-planlayici',
     match: (p) => p.startsWith('/route-planlayici') || p.startsWith('/siparisler/toplu'),
+  },
+  {
+    key: 'tamamlanan',
+    label: 'Tamamlanan',
+    icon: CheckCircle2,
+    href: '/siparisler/tamamlanan',
+    match: (p) => p.startsWith('/siparisler/tamamlanan'),
+  },
+  {
+    key: 'gecmis',
+    label: 'Geçmiş Siparişler',
+    icon: HistoryIcon,
+    href: '/siparis-gecmis',
+    match: (p) => p.startsWith('/siparis-gecmis'),
   },
 ];
 
