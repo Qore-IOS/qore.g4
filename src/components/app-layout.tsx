@@ -66,6 +66,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     toggleOrbAnimation,
     toggleNavMode,
   } = useAuth();
+  const pathname = usePathname();
 
   // Check if user is a teknisyen - hide dock for them
   const isTeknisyen = currentUserProfile?.role === 'teknisyen';
@@ -76,8 +77,16 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // Lojistik terminal: lojistik_sorumlusu gets a dedicated work terminal
   // shell (its own collapsible sidebar, no global dock).
   const isLojistikTerminalRole = currentUserProfile?.role === 'lojistik_sorumlusu';
+  const isLojistikTerminalPath =
+    !!pathname &&
+    (
+      pathname === '/siparisler' ||
+      pathname.startsWith('/siparisler/') ||
+      pathname.startsWith('/merkez-siparis') ||
+      pathname.startsWith('/route-planlayici') ||
+      pathname.startsWith('/siparis-gecmis')
+    );
   const { setTheme } = useTheme();
-  const pathname = usePathname();
   const router = useRouter();
 
   const isWideContentRoute = pathname?.startsWith("/total-verimlilik");
@@ -111,7 +120,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   // Lojistik terminal — dedicated shell for lojistik_sorumlusu role.
   // No global dock / sidebar / mobile dock. The shell provides its own navigation.
-  if (isLojistikTerminalRole) {
+  if (isLojistikTerminalRole && isLojistikTerminalPath) {
     return (
       <>
         <PushNotificationsErrorBoundary>
