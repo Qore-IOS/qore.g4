@@ -493,10 +493,10 @@ export default function LojistikSiparisView() {
             >
               <History className="h-4 w-4" style={{ color: 'var(--loj-muted)' }} /> Geçmiş
             </button>
-            <button
-              onClick={() => {
-                exportOrdersToExcel(
-                  [...peripheralOrders, ...completedOrders],
+              <button
+                onClick={() => {
+                  exportOrdersToExcel(
+                    [...peripheralOrders, ...completedOrders],
                   {
                     fileBaseName: 'aktif_siparisler',
                     productNameByStokKodu: productNameMap,
@@ -508,6 +508,21 @@ export default function LojistikSiparisView() {
               className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Download className="h-4 w-4" style={{ color: 'var(--loj-muted)' }} /> Excel İndir
+            </button>
+            <button
+              onClick={() => {
+                if (!selectedOrder) return;
+                const orderNo = ((selectedOrder.id ?? '').slice(-6) || '').toUpperCase();
+                exportOrdersToExcel([selectedOrder], {
+                  fileBaseName: orderNo ? `siparis_${orderNo}` : 'siparis_detayi',
+                  productNameByStokKodu: productNameMap,
+                });
+                setMoreMenuOpen(false);
+              }}
+              disabled={!selectedOrder}
+              className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Download className="h-4 w-4" style={{ color: 'var(--loj-muted)' }} /> Seçili Sipariş Excel
             </button>
           </PopoverContent>
         </Popover>
@@ -686,11 +701,14 @@ export default function LojistikSiparisView() {
                         {status.label}
                       </span>
                     </div>
-                    <div className="text-right shrink-0">
+                    <div className="text-right shrink-0 w-14 sm:w-16">
                       <p className="text-base font-extrabold" style={{ color: 'var(--loj-accent)' }}>
                         {totalAdet}
                       </p>
-                      <p className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--loj-muted)' }}>
+                      <p
+                        className="text-[10px] uppercase tracking-wide whitespace-nowrap"
+                        style={{ color: 'var(--loj-muted)' }}
+                      >
                         adet
                       </p>
                     </div>
@@ -758,6 +776,20 @@ export default function LojistikSiparisView() {
                     <span className={headerStatus.cls}>
                       <HeaderStatusIcon className="h-3 w-3" /> {headerStatus.label}
                     </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const orderNo = ((order.id ?? '').slice(-6) || '').toUpperCase();
+                        exportOrdersToExcel([order], {
+                          fileBaseName: orderNo ? `siparis_${orderNo}` : 'siparis_detayi',
+                          productNameByStokKodu: productNameMap,
+                        });
+                      }}
+                      className="loj-btn-outline mt-2 ml-auto"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      Excel
+                    </button>
                     <p
                       className="text-2xl sm:text-3xl font-extrabold mt-1.5"
                       style={{ color: 'var(--loj-accent)' }}
