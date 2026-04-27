@@ -21,6 +21,7 @@ import {
   Building2,
   CheckCircle2,
   Clock3,
+  Download,
   History as HistoryIcon,
   Hourglass,
   Loader2,
@@ -32,6 +33,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import DeliveryHistory, {
   type PartialDelivery,
 } from '@/components/lojistik-terminal/delivery-history';
+import { exportOrdersToExcel } from '@/lib/lojistik/export-orders';
 import { cn } from '@/lib/utils';
 
 type StatusFilter =
@@ -127,6 +129,14 @@ export default function LojistikSiparisGecmisPanel() {
     return m;
   }, [productCodes]);
 
+  const hospitalNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    hospitals.forEach((h) => {
+      if (h.id) m.set(h.id, (h.name || (h as any).ad || '') as string);
+    });
+    return m;
+  }, [hospitals]);
+
   const visibleHospitals = useMemo(
     () => hospitals.filter((h) => assignedLabIds.has(h.id ?? '')),
     [hospitals, assignedLabIds]
@@ -208,6 +218,23 @@ export default function LojistikSiparisGecmisPanel() {
                 : 'Atanmış laboratuvar yok'}
             </p>
           </div>
+          <button
+            type="button"
+            onClick={() =>
+              exportOrdersToExcel(filteredOrders, {
+                fileBaseName: 'siparis_gecmisi',
+                hospitalNameById,
+                productNameByStokKodu: productNameMap,
+              })
+            }
+            disabled={filteredOrders.length === 0}
+            className="loj-btn-primary"
+            title={`${filteredOrders.length} siparişi Excel olarak indir`}
+          >
+            <Download className="h-4 w-4" />
+            Excel İndir
+            <span className="opacity-80 font-medium ml-1">({filteredOrders.length})</span>
+          </button>
         </div>
 
         {/* KPI strip */}
