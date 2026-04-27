@@ -1535,12 +1535,16 @@ export default function FaultDetailPage() {
 
       autoTable(pdfDoc, {
         head: [[txt('Parça'), 'Kod', txt('Seri No'), 'Adet']],
-        body: faultPartChanges.map(part => [
-          txt(part.stokAdi || '-'),
-          txt(part.stokKodu || '-'),
-          txt(part.serialNumber || '-'),
-          String(part.quantity || 1),
-        ]),
+        body: faultPartChanges.map(part => {
+          const serial = (part.serialNumber || '').trim();
+          const displayPartName = serial ? `${part.stokAdi || '-'} (SN: ${serial})` : (part.stokAdi || '-');
+          return [
+            txt(displayPartName),
+            txt(part.stokKodu || '-'),
+            txt(serial || '-'),
+            String(part.quantity || 1),
+          ];
+        }),
         startY: currentY,
         theme: 'grid',
         styles: { font: FONT, fontSize: 10 },

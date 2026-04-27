@@ -46,6 +46,7 @@ type ActionItem = {
   removedHucreNumarasi?: string;
   channelSelections?: ('CH1' | 'CH2')[];
   removedPartSerialNumber?: string;
+  serialNumber?: string;
 };
 
 type ActionFormRecord = {
@@ -361,15 +362,18 @@ export async function generateTeknikServisTutanakPDF(
       currentY += 18;
 
       autoTable(pdfDoc, {
-        head: [[txt('Parça', useTurkish), 'Kod', 'Adet', txt('Birim', useTurkish)]],
+        head: [[txt('Parça', useTurkish), 'Kod', txt('Seri No', useTurkish), 'Adet', txt('Birim', useTurkish)]],
         body: parts.map(act => {
           let partName = act.stokAdi || act.action;
           if (act.isManualEntry && act.stokKodu && act.stokAdi) {
             partName = `${act.stokKodu} - ${act.stokAdi}`;
           }
+          const serial = (act.serialNumber || '').trim();
+          const displayPartName = serial ? `${partName} (SN: ${serial})` : partName;
           return [
-            txt(partName, useTurkish),
+            txt(displayPartName, useTurkish),
             txt(act.stokKodu || '-', useTurkish),
+            txt(serial || '-', useTurkish),
             String(act.quantity),
             txt(act.anaBirim ? act.anaBirim.toLocaleLowerCase('tr-TR') : 'adet', useTurkish)
           ];
