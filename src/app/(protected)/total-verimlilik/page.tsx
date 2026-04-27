@@ -17,9 +17,11 @@ export default function TotalVerimlilikPage() {
   }
 
   return (
-    <TotalVerimlilikPanel
-      hospitals={hospitals}
-      productCodes={productCodes}
-    />
+    <div className="fixed inset-0 z-10">
+      <TotalVerimlilikPanel
+        hospitals={hospitals}
+        productCodes={productCodes}
+      />
+    </div>
   );
 }

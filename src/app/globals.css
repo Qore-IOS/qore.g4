@@ -5007,3 +5007,40 @@ html.qt-active body[data-scroll-locked] .qore-technic-bottom-nav {
     padding-top: 4px;
   }
 }
+
+/* ─── Total Verimlilik (Excel-style cells) ───────────────────────── */
+.tv-cell-input {
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: transparent;
+  border: 0;
+  outline: 0;
+  padding: 0 6px;
+  margin: 0;
+  text-align: right;
+  font-family: 'DM Mono', ui-monospace, monospace;
+  font-size: 11px;
+  color: inherit;
+  -moz-appearance: textfield;
+}
+.tv-cell-input::-webkit-outer-spin-button,
+.tv-cell-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.tv-cell-input:focus {
+  outline: 2px solid #1d4ed8;
+  outline-offset: -2px;
+  background: #fff;
+}
+.tv-cell {
+  position: relative;
+  cursor: cell;
+  user-select: none;
+}
+.tv-cell-selected {
+  outline: 2px solid #1d4ed8;
+  outline-offset: -2px;
+  z-index: 4;
+}

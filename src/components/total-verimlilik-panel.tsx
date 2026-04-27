@@ -81,7 +81,6 @@ import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { totalVerimlilikLogger } from '@/lib/logger';
-import BackButton from '@/components/BackButton';
 import { exportDataToExcel } from '@/lib/utils';
 import { getExchangeRates } from '@/lib/exchange-rates';
 import Link from 'next/link';
@@ -191,11 +190,15 @@ const COLS_BY_ID: Record<string, ColDef> = COLS.reduce((m, c) => { m[c.id] = c; 
 const FROZEN_LEFT: Record<number, number> = { 1: 0, 2: 200, 3: 316 };
 
 // ─── FORMAT PALETTES ──────────────────────────────────────────────────────
+// Palettes ordered by hue (warm → cool) so visual flow is predictable
 const FILL_PALETTE = [
-  '#fef9c3', '#fde68a', '#fed7aa', '#fecaca', '#bbf7d0',
-  '#a7f3d0', '#bfdbfe', '#c7d2fe', '#ddd6fe', '#fbcfe8',
+  // Row 1 — warm pastels (yellow → orange → red → pink)
+  '#fef9c3', '#fde68a', '#fed7aa', '#fecaca', '#fbcfe8',
+  // Row 2 — cool pastels (green → teal → blue → indigo → violet)
+  '#bbf7d0', '#a7f3d0', '#bfdbfe', '#c7d2fe', '#ddd6fe',
 ];
-const TEXT_PALETTE = ['#111111', '#b91c1c', '#c2410c', '#15803d', '#1d4ed8', '#7c3aed', '#be185d', '#6b7280'];
+// Text palette ordered: black → grey → primary hues (red → orange → green → blue → purple → pink)
+const TEXT_PALETTE = ['#111111', '#6b7280', '#b91c1c', '#c2410c', '#15803d', '#1d4ed8', '#7c3aed', '#be185d'];
 
 // ─── ADVANCED FILTER OPERATORS ────────────────────────────────────────────
 type AdvOp = '=' | '!=' | '>' | '<' | '>=' | '<=' | 'contains' | 'startsWith';
@@ -295,10 +298,11 @@ const DebouncedInput = memo(function DebouncedInput({
   }, []);
 
   return (
-    <Input
+    <input
       {...props}
       value={localValue}
       onChange={handleChange}
+      className={`tv-cell-input ${props.className || ''}`}
     />
   );
 });
@@ -548,6 +552,9 @@ export default function TotalVerimlilikPanel({
   // Bulk selection
   const [selRows, setSelRows] = useState<Set<string>>(new Set());
   const [selCols, setSelCols] = useState<Set<string>>(new Set());
+  // Cell-level selection (Excel-style click). Anchor + active = current selection
+  const [selCells, setSelCells] = useState<Set<string>>(new Set());
+  const cellAnchor = useRef<{ rowId: string; colId: string } | null>(null);
   // Per-cell / per-row / per-col formatting (persisted)
   type FmtRec = { bold?: boolean; italic?: boolean; align?: 'left' | 'center' | 'right'; textColor?: string; bg?: string };
   const [cellFmts, setCellFmts] = useState<Record<string, FmtRec>>(() => loadLS('totalVerim_cellFmts', {}));
@@ -2519,6 +2526,14 @@ export default function TotalVerimlilikPanel({
   }, [deferredRows, advFilters, advMode, colValFilters]);
 
   const totalVisibleRows = useMemo(() => groupedRows.reduce((s, g) => s + g.rows.length, 0), [groupedRows]);
+  // Flat ordered row IDs across visible (expanded) groups - used for shift-range selection
+  const visibleRowIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const g of groupedRows) {
+      if (expandedLabs.has(g.labId)) for (const r of g.rows) ids.push(r.id);
+    }
+    return ids;
+  }, [groupedRows, expandedLabs]);
 
   // Auto-expand the first lab when groups appear so users see data
   useEffect(() => {
@@ -2546,18 +2561,54 @@ export default function TotalVerimlilikPanel({
     e?.stopPropagation();
     setSelCols(prev => { const n = new Set(prev); n.has(colId) ? n.delete(colId) : n.add(colId); return n; });
   }, []);
-  const clearSel = useCallback(() => { setSelRows(new Set()); setSelCols(new Set()); }, []);
+  const clearSel = useCallback(() => { setSelRows(new Set()); setSelCols(new Set()); setSelCells(new Set()); cellAnchor.current = null; }, []);
 
-  // Apply format to current selection (rows + cols + cells at intersection)
+  // Cell-level click selection (Excel-style). Shift = extend, Ctrl = toggle individual.
+  const selectCell = useCallback((rowId: string, colId: string, e: React.MouseEvent) => {
+    const key = `${rowId}-${colId}`;
+    if (e.shiftKey && cellAnchor.current) {
+      // Range select between anchor and current
+      const anchor = cellAnchor.current;
+      const r1 = visibleRowIds.indexOf(anchor.rowId);
+      const r2 = visibleRowIds.indexOf(rowId);
+      const c1 = visibleCols.findIndex(c => c.id === anchor.colId);
+      const c2 = visibleCols.findIndex(c => c.id === colId);
+      if (r1 < 0 || r2 < 0 || c1 < 0 || c2 < 0) { setSelCells(new Set([key])); return; }
+      const [rA, rB] = [Math.min(r1, r2), Math.max(r1, r2)];
+      const [cA, cB] = [Math.min(c1, c2), Math.max(c1, c2)];
+      const next = new Set<string>();
+      for (let i = rA; i <= rB; i++) {
+        for (let j = cA; j <= cB; j++) next.add(`${visibleRowIds[i]}-${visibleCols[j].id}`);
+      }
+      setSelCells(next);
+    } else if (e.ctrlKey || e.metaKey) {
+      setSelCells(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
+      cellAnchor.current = { rowId, colId };
+    } else {
+      setSelCells(new Set([key]));
+      cellAnchor.current = { rowId, colId };
+      // Clear row/col selection so toolbar reflects only this cell
+      setSelRows(new Set());
+      setSelCols(new Set());
+    }
+  }, [visibleRowIds, visibleCols]);
+
+  // Apply format to current selection (cells + rows + cols)
   const applyToSelection = useCallback(<K extends keyof FmtRec>(key: K, value: FmtRec[K]) => {
     setActiveFmt(p => {
       const k = key === 'bg' ? 'fillColor' : (key as string);
       return { ...p, [k]: value as never };
     });
-    if (selRows.size === 0 && selCols.size === 0) {
-      // No selection - inform the user
-      toast({ title: 'Seçim yok', description: 'Önce satır ve/veya sütun seçin.', variant: 'destructive' });
+    if (selRows.size === 0 && selCols.size === 0 && selCells.size === 0) {
+      toast({ title: 'Seçim yok', description: 'Önce hücre, satır veya sütun seçin.', variant: 'destructive' });
       return;
+    }
+    if (selCells.size > 0) {
+      setCellFmts(prev => {
+        const n = { ...prev };
+        selCells.forEach(k => { n[k] = { ...(n[k] || {}), [key]: value }; });
+        return n;
+      });
     }
     if (selRows.size > 0) {
       setRowFmts(prev => {
@@ -2573,7 +2624,7 @@ export default function TotalVerimlilikPanel({
         return n;
       });
     }
-  }, [selRows, selCols, toast]);
+  }, [selRows, selCols, selCells, toast]);
 
   const toggleFmt = useCallback((key: 'bold' | 'italic') => {
     const next = !activeFmt[key];
@@ -2661,27 +2712,26 @@ export default function TotalVerimlilikPanel({
           <DebouncedInput
             type="number"
             min="0"
-            className="h-7 w-full px-2 text-right font-mono text-[11px]"
             value={v || ''}
             onChange={(value) => handleValueChange(row.id, col.id as never, value)}
-            placeholder="0"
+            placeholder=""
           />
         );
       }
       case 'kurumlarArasiSevk':
         return (
-          <div className="flex flex-col gap-0.5">
-            <Input
-              type="number" min="0"
-              className="h-7 w-full px-2 text-right font-mono text-[11px]"
+          <>
+            <input
+              type="number" min={0}
+              className="tv-cell-input"
               value={row.kurumlarArasiSevk || ''}
               onChange={e => handleKurumlarArasiSevkChange(row.id, e.target.value)}
-              placeholder="0"
+              placeholder=""
             />
             {interLabTransfers[row.id] && (
-              <span className="text-[9px] text-orange-600">← {interLabTransfers[row.id].sourceLabName}</span>
+              <span className="absolute bottom-0 left-1 text-[8px] text-orange-600 leading-none">← {interLabTransfers[row.id].sourceLabName}</span>
             )}
-          </div>
+          </>
         );
       case 'totalAyBasiStok': return <span className="font-mono text-[11px] font-semibold">{fmtN(row.totalAyBasiStok)}</span>;
       case 'sevkiyatlarSonrasiTotalTest': return <span className="font-mono text-[11px] font-semibold">{fmtN(row.sevkiyatlarSonrasiTotalTest)}</span>;
@@ -2802,11 +2852,10 @@ export default function TotalVerimlilikPanel({
   };
 
   return (
-    <div className="flex flex-col h-[calc(100vh-3rem)] bg-[#f3f3f1] dark:bg-zinc-950 text-[13px]" role="main" aria-label="Total Verimlilik Paneli">
+    <div className="relative flex flex-col h-full w-full bg-[#f3f3f1] dark:bg-zinc-950 text-[13px]" role="main" aria-label="Total Verimlilik Paneli">
 
       {/* ─── TOP BAR ─────────────────────────────────────────────────── */}
       <div className="bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 px-3 h-11 flex items-center gap-2 flex-shrink-0">
-        <BackButton fallback="/" />
         <div className="flex items-center gap-1.5">
           <BarChart3 className="h-4 w-4 text-orange-500" />
           <span className="font-bold tracking-tight text-[13px]">Total Verimlilik</span>
@@ -2915,14 +2964,14 @@ export default function TotalVerimlilikPanel({
             <span className="w-4 h-0.5 rounded" style={{ background: activeFmt.textColor || '#111' }} />
           </button>
           {openDrop === 'textColor' && (
-            <div className="tv-color-pop absolute top-full left-0 mt-1 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-md shadow-lg z-50 p-2">
-              <div className="text-[9px] font-bold text-zinc-400 uppercase mb-1">Metin Rengi</div>
-              <div className="grid grid-cols-5 gap-1">
+            <div className="tv-color-pop absolute top-full left-0 mt-1 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-lg shadow-xl z-50 p-2.5 w-[178px]">
+              <div className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mb-2">Metin Rengi</div>
+              <div className="grid grid-cols-4 gap-1.5 mb-1.5">
                 {TEXT_PALETTE.map(c => (
-                  <button key={c} className={`w-5 h-5 rounded border ${activeFmt.textColor === c ? 'ring-2 ring-blue-500' : 'border-zinc-200'}`} style={{ background: c }} onClick={() => { applyToSelection('textColor', c); setOpenDrop(null); }} />
+                  <button key={c} title={c} className={`h-7 rounded border ${activeFmt.textColor === c ? 'ring-2 ring-offset-1 ring-blue-500' : 'border-zinc-200 dark:border-zinc-700'}`} style={{ background: c }} onClick={() => { applyToSelection('textColor', c); setOpenDrop(null); }} />
                 ))}
-                <button className="w-5 h-5 rounded border border-dashed border-zinc-300 text-zinc-400 text-[10px]" onClick={() => { applyToSelection('textColor', undefined); setOpenDrop(null); }}>✕</button>
               </div>
+              <button className="w-full h-7 rounded border border-dashed border-zinc-300 dark:border-zinc-700 text-zinc-500 text-[11px] hover:bg-zinc-50 dark:hover:bg-zinc-800" onClick={() => { applyToSelection('textColor', undefined); setOpenDrop(null); }}>Renksiz</button>
             </div>
           )}
         </div>
@@ -2934,14 +2983,14 @@ export default function TotalVerimlilikPanel({
             <span className="w-4 h-0.5 rounded border border-zinc-300" style={{ background: activeFmt.fillColor || 'transparent' }} />
           </button>
           {openDrop === 'fillColor' && (
-            <div className="tv-color-pop absolute top-full left-0 mt-1 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-md shadow-lg z-50 p-2">
-              <div className="text-[9px] font-bold text-zinc-400 uppercase mb-1">Hücre Rengi</div>
-              <div className="grid grid-cols-5 gap-1">
+            <div className="tv-color-pop absolute top-full left-0 mt-1 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-lg shadow-xl z-50 p-2.5 w-[206px]">
+              <div className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider mb-2">Hücre Rengi</div>
+              <div className="grid grid-cols-5 gap-1.5 mb-1.5">
                 {FILL_PALETTE.map(c => (
-                  <button key={c} className={`w-5 h-5 rounded border ${activeFmt.fillColor === c ? 'ring-2 ring-blue-500' : 'border-zinc-200'}`} style={{ background: c }} onClick={() => { applyToSelection('bg', c); setOpenDrop(null); }} />
+                  <button key={c} title={c} className={`h-7 rounded border ${activeFmt.fillColor === c ? 'ring-2 ring-offset-1 ring-blue-500' : 'border-zinc-200 dark:border-zinc-700'}`} style={{ background: c }} onClick={() => { applyToSelection('bg', c); setOpenDrop(null); }} />
                 ))}
-                <button className="w-5 h-5 rounded border border-dashed border-zinc-300 text-zinc-400 text-[10px]" onClick={() => { applyToSelection('bg', undefined); setOpenDrop(null); }}>✕</button>
               </div>
+              <button className="w-full h-7 rounded border border-dashed border-zinc-300 dark:border-zinc-700 text-zinc-500 text-[11px] hover:bg-zinc-50 dark:hover:bg-zinc-800" onClick={() => { applyToSelection('bg', undefined); setOpenDrop(null); }}>Renksiz</button>
             </div>
           )}
         </div>
@@ -2956,11 +3005,15 @@ export default function TotalVerimlilikPanel({
         ))}
 
         {/* Selection badge */}
-        {(selRows.size > 0 || selCols.size > 0) && (
+        {(selRows.size > 0 || selCols.size > 0 || selCells.size > 0) && (
           <>
             <div className="w-px h-4 bg-zinc-200 dark:bg-zinc-700 mx-0.5" />
             <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-700 border border-blue-200">
-              {selRows.size > 0 && `${selRows.size} satır`}{selRows.size > 0 && selCols.size > 0 && ' + '}{selCols.size > 0 && `${selCols.size} sütun`}
+              {[
+                selCells.size > 0 && `${selCells.size} hücre`,
+                selRows.size > 0 && `${selRows.size} satır`,
+                selCols.size > 0 && `${selCols.size} sütun`,
+              ].filter(Boolean).join(' + ')}
             </span>
             <button onClick={clearSel} className="w-6 h-6 rounded flex items-center justify-center hover:bg-zinc-100 dark:hover:bg-zinc-800" title="Seçimi temizle">
               <X className="h-3 w-3" />
@@ -3238,14 +3291,17 @@ export default function TotalVerimlilikPanel({
                                 {visibleCols.map(col => {
                                   const stickyLeft = col.frozen ? FROZEN_LEFT[col.frozen] + 36 : undefined;
                                   const isColSel = selCols.has(col.id);
+                                  const isCellSel = selCells.has(`${row.id}-${col.id}`);
                                   const cellFmt = getMergedFmt(row.id, col.id);
                                   const cellStyle = fmtToStyle(cellFmt);
                                   const baseBg = !cellFmt.bg ? typeBgClass(col.type) : '';
+                                  const isManual = col.type === 'manual';
                                   return (
                                     <td
                                       key={col.id}
+                                      onClick={(e) => selectCell(row.id, col.id, e)}
                                       onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, rowId: row.id, colId: col.id }); }}
-                                      className={`border-b border-r border-zinc-200 dark:border-zinc-800 ${rowHeightCls} px-2 align-middle ${baseBg} ${col.frozen ? 'sticky z-10 bg-white dark:bg-zinc-900' : ''} ${isColSel ? 'outline outline-1 outline-blue-300 -outline-offset-1' : ''} ${isRowSel ? '!bg-blue-50 dark:!bg-blue-950/40' : ''}`}
+                                      className={`tv-cell border-b border-r border-zinc-200 dark:border-zinc-800 ${rowHeightCls} ${isManual ? 'p-0' : 'px-2'} align-middle ${baseBg} ${col.frozen ? 'sticky z-10 bg-white dark:bg-zinc-900' : ''} ${isColSel ? 'outline outline-1 outline-blue-300 -outline-offset-1' : ''} ${isRowSel ? '!bg-blue-50 dark:!bg-blue-950/40' : ''} ${isCellSel ? 'tv-cell-selected' : ''}`}
                                       style={{ width: col.w, minWidth: col.w, left: stickyLeft, ...cellStyle }}
                                     >
                                       {col.id === 'lab' ? (
@@ -3333,61 +3389,73 @@ export default function TotalVerimlilikPanel({
         />
       )}
 
-      {/* ─── ADVANCED FILTER BUILDER MODAL ──────────────────────────── */}
-      <Dialog open={advFilterOpen} onOpenChange={setAdvFilterOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><SlidersHorizontal className="h-4 w-4 text-blue-600" />Gelişmiş Filtre</DialogTitle>
-            <DialogDescription>Birden fazla kolon bazlı koşul ekleyin. AND tüm koşullar geçerli olmalı, OR herhangi biri yeterli.</DialogDescription>
-          </DialogHeader>
-          <div className="py-2 space-y-2">
-            {/* Mode selector */}
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] text-zinc-500">Birleştirme:</span>
-              <div className="inline-flex rounded border border-zinc-200">
-                {(['AND', 'OR'] as const).map(m => (
-                  <button key={m} onClick={() => setAdvMode(m)} className={`px-3 py-1 text-[11px] font-semibold ${advMode === m ? 'bg-blue-600 text-white' : 'hover:bg-zinc-100'}`}>{m}</button>
-                ))}
+      {/* ─── ADVANCED FILTER SIDE PANEL (right slide-in) ───────────── */}
+      {advFilterOpen && (
+        <div className="absolute inset-0 z-40 pointer-events-none">
+          {/* backdrop click area only on left side, panel is non-blocking */}
+          <div className="absolute inset-0 pointer-events-auto" onClick={() => setAdvFilterOpen(false)} />
+          <aside className="absolute right-0 top-0 bottom-0 w-[420px] max-w-full bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 shadow-2xl pointer-events-auto flex flex-col" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex items-center justify-between px-4 h-12 border-b border-zinc-200 dark:border-zinc-800 flex-shrink-0">
+              <div className="flex items-center gap-2">
+                <SlidersHorizontal className="h-4 w-4 text-blue-600" />
+                <span className="font-semibold text-[13px]">Gelişmiş Filtre</span>
               </div>
-              <div className="flex-1" />
-              <button onClick={addAdvFilter} className="flex items-center gap-1 px-2 py-1 rounded border border-zinc-200 text-[11px] hover:bg-zinc-50"><Plus className="h-3 w-3" />Koşul ekle</button>
-              {advFilters.length > 0 && <button onClick={clearAdvFilters} className="flex items-center gap-1 px-2 py-1 rounded border border-zinc-200 text-[11px] text-rose-600 hover:bg-rose-50"><Trash2 className="h-3 w-3" />Tümünü temizle</button>}
+              <div className="flex items-center gap-1">
+                <div className="inline-flex rounded border border-zinc-200 dark:border-zinc-700 overflow-hidden">
+                  {(['AND', 'OR'] as const).map(m => (
+                    <button key={m} onClick={() => setAdvMode(m)} className={`px-2.5 py-1 text-[10.5px] font-bold ${advMode === m ? 'bg-blue-600 text-white' : 'hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>{m}</button>
+                  ))}
+                </div>
+                <button onClick={() => setAdvFilterOpen(false)} className="w-7 h-7 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center justify-center" title="Kapat">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </div>
-            {advFilters.length === 0 && (
-              <div className="border border-dashed border-zinc-200 rounded-md p-4 text-center text-[11.5px] text-zinc-400">
-                Henüz koşul eklenmedi. Yukarıdan "Koşul ekle" diyerek başlayın.
-              </div>
-            )}
-            {advFilters.map((f, i) => (
-              <div key={f.id} className="flex items-center gap-2 p-2 bg-zinc-50 dark:bg-zinc-800 rounded">
-                {i > 0 && <span className="text-[10px] font-bold text-blue-600 px-1.5 py-0.5 bg-blue-50 rounded">{advMode}</span>}
-                <Select value={f.col} onValueChange={v => updateAdvFilter(f.id, { col: v })}>
-                  <SelectTrigger className="h-7 w-44 text-[11.5px]"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {COLS.filter(c => c.id !== 'lab').map(c => <SelectItem key={c.id} value={c.id}>{c.num}. {c.label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                <Select value={f.op} onValueChange={v => updateAdvFilter(f.id, { op: v as AdvOp })}>
-                  <SelectTrigger className="h-7 w-32 text-[11.5px]"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {ADV_OPS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                <Input value={f.val} onChange={e => updateAdvFilter(f.id, { val: e.target.value })} placeholder="Değer..." className="h-7 flex-1 text-[11.5px]" />
-                <button onClick={() => removeAdvFilter(f.id)} className="w-7 h-7 rounded flex items-center justify-center text-rose-500 hover:bg-rose-50"><Trash2 className="h-3 w-3" /></button>
-              </div>
-            ))}
-            {advFilters.length > 0 && (
-              <div className="text-[11px] text-zinc-500 bg-zinc-50 px-2 py-1.5 rounded">
-                <strong>{totalVisibleRows}</strong>/{rows.length} satır gösteriliyor
-              </div>
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setAdvFilterOpen(false)}>Kapat</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto p-3 space-y-2">
+              {advFilters.length === 0 ? (
+                <div className="border border-dashed border-zinc-200 dark:border-zinc-700 rounded-md p-6 text-center text-[11.5px] text-zinc-400">
+                  Henüz kural eklenmedi. Aşağıdaki "Kural Ekle" tuşuyla başlayın.
+                </div>
+              ) : advFilters.map((f, i) => (
+                <div key={f.id} className="flex items-center gap-2">
+                  <span className="text-[9px] font-bold uppercase text-zinc-400 w-6 text-right">{i === 0 ? 'GİR' : advMode}</span>
+                  <Select value={f.col} onValueChange={v => updateAdvFilter(f.id, { col: v })}>
+                    <SelectTrigger className="h-8 flex-1 text-[11.5px]"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {COLS.filter(c => c.id !== 'lab').map(c => <SelectItem key={c.id} value={c.id}>{c.num}. {c.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <Select value={f.op} onValueChange={v => updateAdvFilter(f.id, { op: v as AdvOp })}>
+                    <SelectTrigger className="h-8 w-24 text-[11.5px]"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {ADV_OPS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <Input value={f.val} onChange={e => updateAdvFilter(f.id, { val: e.target.value })} placeholder="değer" className="h-8 w-24 text-[11.5px]" />
+                  <button onClick={() => removeAdvFilter(f.id)} className="w-7 h-7 rounded flex items-center justify-center text-zinc-400 hover:text-rose-500 hover:bg-rose-50" title="Kaldır">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+              <button onClick={addAdvFilter} className="w-full mt-2 flex items-center justify-center gap-1.5 py-2 border border-dashed border-zinc-300 dark:border-zinc-700 rounded text-[11.5px] text-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:border-zinc-400">
+                <Plus className="h-3.5 w-3.5" />Kural Ekle
+              </button>
+              {advFilters.length > 0 && (
+                <div className="text-[11px] text-zinc-500 bg-zinc-50 dark:bg-zinc-800 px-2 py-1.5 rounded mt-2">
+                  <strong>{totalVisibleRows}</strong>/{rows.length} satır gösteriliyor
+                </div>
+              )}
+            </div>
+            {/* Footer */}
+            <div className="flex gap-2 p-3 border-t border-zinc-200 dark:border-zinc-800 flex-shrink-0">
+              <button onClick={clearAdvFilters} className="flex-1 h-9 rounded bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-[12px] font-medium">Temizle</button>
+              <button onClick={() => setAdvFilterOpen(false)} className="flex-1 h-9 rounded bg-blue-600 hover:bg-blue-700 text-white text-[12px] font-semibold">Uygula</button>
+            </div>
+          </aside>
+        </div>
+      )}
 
       {/* Sevkiyat Bilgisi Modal - Sütun 11 */}
       <Dialog open={showSevkiyatBilgisiModal} onOpenChange={setShowSevkiyatBilgisiModal}>
