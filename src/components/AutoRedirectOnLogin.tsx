@@ -27,6 +27,12 @@ export default function AutoRedirectOnLogin() {
       return;
     }
 
+    // Lojistik sorumlusu doğrudan lojistik terminalde bekleyen siparişlere iner.
+    if (userRole === 'lojistik_sorumlusu' && pathname === '/dashboard') {
+      router.replace('/siparisler');
+      return;
+    }
+
     // Redirect teknik_servis and aplikasyon users to /cihaz-yonetimi-ana
     if ((userRole === 'teknik_servis' || userRole === 'aplikasyon') && pathname === '/dashboard') {
       router.replace('/cihaz-yonetimi-ana');
