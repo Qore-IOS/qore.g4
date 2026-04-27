@@ -53,7 +53,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
-import { Loader2, BarChart3, FileSpreadsheet, Save, Download, ChevronRight, Upload, Eye, EyeOff, History, Filter, ArrowUpDown, ArrowUp, ArrowDown, Search, X, Crown, Building2, RotateCcw, Clock } from 'lucide-react';
+import { Loader2, BarChart3, FileSpreadsheet, Save, Download, ChevronRight, ChevronDown, Upload, Eye, EyeOff, History, Filter, ArrowUp, ArrowDown, Search, X, Crown, RotateCcw, Clock, Bold, Italic, AlignLeft, AlignCenter, AlignRight, PaintBucket, Plus, SlidersHorizontal, Columns3, Trash2, Maximize2, Minimize2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -142,6 +142,114 @@ const MONTHS = Array.from({ length: 12 }, (_, i) => ({
   label: new Date(2000, i, 1).toLocaleString('tr-TR', { month: 'long' })
 }));
 
+// ─── COLUMN DEFINITIONS ──────────────────────────────────────────────────
+type ColType = 'info' | 'manual' | 'calc' | 'result';
+interface ColDef {
+  id: string;
+  num: number;
+  label: string;
+  sub?: string;
+  w: number;
+  frozen?: 1 | 2 | 3;
+  type: ColType;
+  cost?: boolean;        // only visible when showCostColumns
+  centerOnly?: boolean;  // only visible in centerHakEdisMode
+}
+
+const COLS: ColDef[] = [
+  { id: 'lab',                       num: 1,  label: 'Laboratuvar',                          w: 200, frozen: 1, type: 'info' },
+  { id: 'stokKodu',                  num: 2,  label: 'Stok Kodu',                            w: 116, frozen: 2, type: 'info' },
+  { id: 'stokAdi',                   num: 3,  label: 'Ürün Adı',                             w: 196, frozen: 3, type: 'info' },
+  { id: 'testAdi',                   num: 4,  label: 'Test Adı',                             w: 110, type: 'info' },
+  { id: 'ambalajDegeri',             num: 5,  label: 'Ambalaj',                              w: 80,  type: 'info' },
+  { id: 'cihazGrubu',                num: 6,  label: 'Cihaz Grubu',                          w: 110, type: 'info' },
+  { id: 'baslangicStokuKutu',        num: 7,  label: 'Baş. Stoğu',          sub: '(Kutu)',   w: 92,  type: 'manual' },
+  { id: 'ayBasiCihazUstuTest',       num: 8,  label: 'Ay Üstü',             sub: '(Test)',   w: 92,  type: 'manual' },
+  { id: 'totalAyBasiStok',           num: 9,  label: 'Total Ay Başı',       sub: '(Test)',   w: 100, type: 'calc' },
+  { id: 'ayBasiSevkiyatKutu',        num: 10, label: 'Ay Başı Sevk.',       sub: '(Kutu)',   w: 96,  type: 'manual' },
+  { id: 'goztepeSevkiyat',           num: 11, label: 'Göztepe Sevk.',       sub: '(Kutu)',   w: 96,  type: 'manual' },
+  { id: 'kurumlarArasiSevk',         num: 12, label: 'K.Arası Sevk',        sub: '(Kutu)',   w: 100, type: 'manual' },
+  { id: 'lojistikAraTransfer',       num: 13, label: 'Loj. Transfer',       sub: '(Kutu)',   w: 100, type: 'manual' },
+  { id: 'sevkiyatlarSonrasiTotalTest', num: 14, label: 'Sevk. Sonrası',     sub: '(Test)',   w: 108, type: 'calc' },
+  { id: 'kumulatifTotal',            num: 15, label: 'Küm. Total',          sub: '(Test)',   w: 100, type: 'manual' },
+  { id: 'donemSonuStokKutu',         num: 16, label: 'D.Sonu Stok',         sub: '(Kutu)',   w: 100, type: 'manual' },
+  { id: 'donemSonuCihazUstuTest',    num: 17, label: 'D.Sonu Cihaz',        sub: '(Test)',   w: 104, type: 'manual' },
+  { id: 'donemSonuToplamTest',       num: 18, label: 'D.Sonu Toplam',       sub: '(Test)',   w: 108, type: 'calc' },
+  { id: 'hakEdis',                   num: 19, label: 'Hak Ediş',            sub: '(Test)',   w: 96,  type: 'manual' },
+  { id: 'stokDogrulukFark',          num: 20, label: 'Stok Doğruluk',                        w: 144, type: 'result' },
+  { id: 'kitVerimlilikFark',         num: 21, label: 'Kit Verimlilik',                       w: 144, type: 'result' },
+  { id: 'kutuKayip',                 num: 22, label: 'Kutu Kayıp',                           w: 120, type: 'result' },
+  { id: 'sarfiyatMaliyeti',          num: 23, label: 'Sarfiyat Maliyeti',                    w: 124, type: 'result', cost: true },
+  { id: 'hakEdisKarsiligi',          num: 24, label: 'Hak Ediş Karş.',                       w: 124, type: 'result', cost: true },
+  { id: 'kar',                       num: 25, label: 'Kâr',                                  w: 110, type: 'result', cost: true },
+  { id: 'zararMaliyeti',             num: 26, label: 'Zarar Maliyeti',                       w: 124, type: 'result' },
+  { id: 'merkezeGonderilen',         num: 27, label: 'Merkeze Gön.',        sub: '(Test)',   w: 110, type: 'result', centerOnly: true },
+];
+
+const COLS_BY_ID: Record<string, ColDef> = COLS.reduce((m, c) => { m[c.id] = c; return m; }, {} as Record<string, ColDef>);
+
+const FROZEN_LEFT: Record<number, number> = { 1: 0, 2: 200, 3: 316 };
+
+// ─── FORMAT PALETTES ──────────────────────────────────────────────────────
+const FILL_PALETTE = [
+  '#fef9c3', '#fde68a', '#fed7aa', '#fecaca', '#bbf7d0',
+  '#a7f3d0', '#bfdbfe', '#c7d2fe', '#ddd6fe', '#fbcfe8',
+];
+const TEXT_PALETTE = ['#111111', '#b91c1c', '#c2410c', '#15803d', '#1d4ed8', '#7c3aed', '#be185d', '#6b7280'];
+
+// ─── ADVANCED FILTER OPERATORS ────────────────────────────────────────────
+type AdvOp = '=' | '!=' | '>' | '<' | '>=' | '<=' | 'contains' | 'startsWith';
+const ADV_OPS: { value: AdvOp; label: string; numeric?: boolean }[] = [
+  { value: '=',          label: 'eşit' },
+  { value: '!=',         label: 'eşit değil' },
+  { value: '>',          label: '>',  numeric: true },
+  { value: '<',          label: '<',  numeric: true },
+  { value: '>=',         label: '≥',  numeric: true },
+  { value: '<=',         label: '≤',  numeric: true },
+  { value: 'contains',   label: 'içerir' },
+  { value: 'startsWith', label: 'başlar' },
+];
+
+interface AdvFilter { id: string; col: string; op: AdvOp; val: string }
+
+function evalAdvFilter(row: TableRow, f: AdvFilter): boolean {
+  const raw = (row as unknown as Record<string, unknown>)[f.col];
+  if (raw == null) return false;
+  if (typeof raw === 'number') {
+    const v = parseFloat(f.val);
+    if (isNaN(v)) return true;
+    switch (f.op) {
+      case '=': return raw === v;
+      case '!=': return raw !== v;
+      case '>': return raw > v;
+      case '<': return raw < v;
+      case '>=': return raw >= v;
+      case '<=': return raw <= v;
+      case 'contains': return String(raw).includes(f.val);
+      case 'startsWith': return String(raw).startsWith(f.val);
+    }
+  }
+  const s = String(raw).toLowerCase();
+  const v = f.val.toLowerCase();
+  switch (f.op) {
+    case '=': return s === v;
+    case '!=': return s !== v;
+    case 'contains': return s.includes(v);
+    case 'startsWith': return s.startsWith(v);
+    default: return true;
+  }
+}
+
+// ─── LOCAL STORAGE HELPERS ───────────────────────────────────────────────
+function loadLS<T>(key: string, fallback: T): T {
+  if (typeof window === 'undefined') return fallback;
+  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) as T : fallback; } catch { return fallback; }
+}
+function saveLS(key: string, value: unknown) {
+  if (typeof window === 'undefined') return;
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* ignore */ }
+}
+
 // Optimizasyon için Debounced Input bileşeni
 // Kullanıcı yazmayı bitirene kadar ana state'i güncellemez
 const DebouncedInput = memo(function DebouncedInput({
@@ -194,6 +302,132 @@ const DebouncedInput = memo(function DebouncedInput({
     />
   );
 });
+
+// ─── COLUMN FILTER POPOVER (Excel-like value picker) ─────────────────
+function ColFilterPopover({ col, x, y, allValues, activeFilter, sortCol, sortDir, onSort, onClearSort, onHide, onApply, onClose }: {
+  col: ColDef;
+  x: number; y: number;
+  allValues: (string | number)[];
+  activeFilter: string[] | null;
+  sortCol: string | null;
+  sortDir: 'asc' | 'desc';
+  onSort: (dir: 'asc' | 'desc') => void;
+  onClearSort: () => void;
+  onHide: () => void;
+  onApply: (vals: string[] | null) => void;
+  onClose: () => void;
+}) {
+  const [valSearch, setValSearch] = useState('');
+  const [pending, setPending] = useState<Set<string> | null>(activeFilter ? new Set(activeFilter) : null);
+
+  const filtered = allValues.filter(v => String(v).toLowerCase().includes(valSearch.toLowerCase()));
+  const allChecked = pending === null || pending.size === allValues.length;
+  const isAsc = sortCol === col.id && sortDir === 'asc';
+  const isDesc = sortCol === col.id && sortDir === 'desc';
+  const isChecked = (v: string | number) => pending === null ? true : pending.has(String(v));
+  const toggleVal = (v: string | number) => {
+    setPending(p => {
+      const base = p === null ? new Set(allValues.map(String)) : new Set(p);
+      const k = String(v);
+      if (base.has(k)) base.delete(k); else base.add(k);
+      return base.size === allValues.length ? null : base;
+    });
+  };
+  const toggleAll = () => setPending(p => p === null ? new Set() : null);
+  const apply = () => onApply(pending === null ? null : [...pending]);
+
+  return (
+    <div className="tv-colfilter-pop fixed z-50" style={{ left: Math.min(x, window.innerWidth - 240), top: Math.min(y, window.innerHeight - 380) }}>
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-lg shadow-xl p-1 min-w-[220px]">
+        {/* Sort */}
+        <div className="px-2 pt-1.5 pb-1 text-[9px] uppercase font-bold text-zinc-400">Sıralama</div>
+        <button onClick={() => onSort('asc')} className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-[11.5px] rounded hover:bg-zinc-50 dark:hover:bg-zinc-800 ${isAsc ? 'bg-blue-50 text-blue-700 font-semibold' : ''}`}>
+          <ArrowUp className="h-3 w-3" />Küçükten Büyüğe
+        </button>
+        <button onClick={() => onSort('desc')} className={`w-full flex items-center gap-2 px-2.5 py-1.5 text-[11.5px] rounded hover:bg-zinc-50 dark:hover:bg-zinc-800 ${isDesc ? 'bg-blue-50 text-blue-700 font-semibold' : ''}`}>
+          <ArrowDown className="h-3 w-3" />Büyükten Küçüğe
+        </button>
+        {(isAsc || isDesc) && (
+          <button onClick={onClearSort} className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[11.5px] rounded hover:bg-zinc-50 dark:hover:bg-zinc-800">
+            <X className="h-3 w-3" />Sıralamayı Kaldır
+          </button>
+        )}
+        <div className="h-px bg-zinc-200 dark:bg-zinc-700 my-1" />
+        {/* Value list */}
+        <div className="px-2 pb-1 text-[9px] uppercase font-bold text-zinc-400">Değere Göre Filtrele</div>
+        <div className="px-2">
+          <div className="flex items-center gap-1 px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 mb-1">
+            <Search className="h-3 w-3 text-zinc-400" />
+            <input value={valSearch} onChange={e => setValSearch(e.target.value)} placeholder="Ara..." className="bg-transparent border-0 outline-0 text-[11.5px] flex-1" />
+          </div>
+        </div>
+        <div className="max-h-44 overflow-y-auto px-1">
+          <button onClick={toggleAll} className="w-full flex items-center gap-2 px-2 py-1 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded">
+            <div className={`w-3 h-3 rounded-sm border ${allChecked ? 'bg-blue-600 border-blue-600 text-white flex items-center justify-center text-[7px]' : 'border-zinc-300'}`}>{allChecked && '✓'}</div>
+            <span className="text-[11px] font-semibold text-zinc-500">(Tümünü Seç)</span>
+          </button>
+          {filtered.map(v => {
+            const k = String(v);
+            const checked = isChecked(v);
+            return (
+              <button key={k} onClick={() => toggleVal(v)} className="w-full flex items-center gap-2 px-2 py-1 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded">
+                <div className={`w-3 h-3 rounded-sm border ${checked ? 'bg-blue-600 border-blue-600 text-white flex items-center justify-center text-[7px]' : 'border-zinc-300'}`}>{checked && '✓'}</div>
+                <span className={`text-[11.5px] truncate ${typeof v === 'number' ? 'font-mono' : ''}`}>{k === '' ? '(Boş)' : k}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex gap-1 px-1 pt-1.5 pb-1 mt-1 border-t border-zinc-200 dark:border-zinc-700">
+          {!col.frozen && <button onClick={onHide} className="flex-1 px-2 py-1 rounded border border-zinc-200 text-[11px] hover:bg-zinc-50">Gizle</button>}
+          <button onClick={() => onApply(null)} className="flex-1 px-2 py-1 rounded border border-zinc-200 text-[11px] hover:bg-zinc-50">Temizle</button>
+          <button onClick={apply} className="flex-1 px-2 py-1 rounded bg-blue-600 text-white text-[11px] font-semibold hover:bg-blue-700">Uygula</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── CONTEXT MENU (cell/row/col formatting) ──────────────────────────
+function CtxMenu({ menu, onApply, onClose }: {
+  menu: { x: number; y: number; rowId: string | null; colId: string | null };
+  onApply: (target: 'cell' | 'row' | 'col', key: 'bg' | 'textColor', value: string | undefined) => void;
+  onClose: () => void;
+}) {
+  const [target, setTarget] = useState<'cell' | 'row' | 'col'>(menu.rowId && menu.colId ? 'cell' : menu.colId ? 'col' : 'row');
+  const x = Math.min(menu.x, (typeof window !== 'undefined' ? window.innerWidth : 800) - 240);
+  const y = Math.min(menu.y, (typeof window !== 'undefined' ? window.innerHeight : 600) - 220);
+  return (
+    <div className="tv-ctx-menu fixed z-50 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-lg shadow-xl p-2 w-56" style={{ left: x, top: y }}>
+      <div className="flex gap-1 mb-2">
+        {([['cell', 'Hücre'], ['row', 'Satır'], ['col', 'Sütun']] as const).map(([t, l]) => {
+          const enabled = (t === 'cell' && menu.rowId && menu.colId) || (t === 'row' && menu.rowId) || (t === 'col' && menu.colId);
+          return (
+            <button
+              key={t}
+              disabled={!enabled}
+              onClick={() => setTarget(t)}
+              className={`flex-1 px-2 py-1 rounded text-[11px] font-medium border ${target === t ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 border-zinc-900 dark:border-zinc-100' : 'border-zinc-200 hover:bg-zinc-50'} ${!enabled ? 'opacity-30 cursor-not-allowed' : ''}`}
+            >{l}</button>
+          );
+        })}
+      </div>
+      <div className="text-[9px] uppercase font-bold text-zinc-400 mb-1">Hücre Rengi</div>
+      <div className="grid grid-cols-5 gap-1 mb-2">
+        {FILL_PALETTE.map(c => (
+          <button key={c} onClick={() => { onApply(target, 'bg', c); onClose(); }} className="w-7 h-7 rounded border border-zinc-200" style={{ background: c }} />
+        ))}
+        <button onClick={() => { onApply(target, 'bg', undefined); onClose(); }} className="w-7 h-7 rounded border border-dashed border-zinc-300 text-zinc-400 text-[10px] flex items-center justify-center">✕</button>
+      </div>
+      <div className="text-[9px] uppercase font-bold text-zinc-400 mb-1">Metin Rengi</div>
+      <div className="grid grid-cols-5 gap-1">
+        {TEXT_PALETTE.map(c => (
+          <button key={c} onClick={() => { onApply(target, 'textColor', c); onClose(); }} className="w-7 h-7 rounded border border-zinc-200" style={{ background: c }} />
+        ))}
+        <button onClick={() => { onApply(target, 'textColor', undefined); onClose(); }} className="w-7 h-7 rounded border border-dashed border-zinc-300 text-zinc-400 text-[10px] flex items-center justify-center">✕</button>
+      </div>
+    </div>
+  );
+}
 
 export default function TotalVerimlilikPanel({
   hospitals = [],
@@ -305,6 +539,65 @@ export default function TotalVerimlilikPanel({
   const [testsSentToCenter, setTestsSentToCenter] = useState<Record<string, number>>({});
   // İş analizi raw data cache
   const [isAnaliziRawData, setIsAnaliziRawData] = useState<any[] | null>(null);
+
+  // ─── REDESIGNED UI STATE ──────────────────────────────────────────────
+  // Lab grouping (expand/collapse) — only render rows when lab is expanded
+  const [expandedLabs, setExpandedLabs] = useState<Set<string>>(new Set());
+  // Hidden column ids
+  const [hiddenCols, setHiddenCols] = useState<Set<string>>(new Set());
+  // Bulk selection
+  const [selRows, setSelRows] = useState<Set<string>>(new Set());
+  const [selCols, setSelCols] = useState<Set<string>>(new Set());
+  // Per-cell / per-row / per-col formatting (persisted)
+  type FmtRec = { bold?: boolean; italic?: boolean; align?: 'left' | 'center' | 'right'; textColor?: string; bg?: string };
+  const [cellFmts, setCellFmts] = useState<Record<string, FmtRec>>(() => loadLS('totalVerim_cellFmts', {}));
+  const [rowFmts, setRowFmts] = useState<Record<string, FmtRec>>(() => loadLS('totalVerim_rowFmts', {}));
+  const [colFmts, setColFmts] = useState<Record<string, FmtRec>>(() => loadLS('totalVerim_colFmts', {}));
+  // Toolbar active format
+  const [activeFmt, setActiveFmt] = useState<{ bold: boolean; italic: boolean; align: 'left' | 'center' | 'right' | null; textColor: string | null; fillColor: string | null }>({
+    bold: false, italic: false, align: null, textColor: null, fillColor: null,
+  });
+  // Dropdown open state (save | excel | textColor | fillColor)
+  const [openDrop, setOpenDrop] = useState<string | null>(null);
+  // Collapsible filter bar
+  const [showFilterBar, setShowFilterBar] = useState(false);
+  // Column manager modal
+  const [colMgrOpen, setColMgrOpen] = useState(false);
+  // Column header filter dropdown
+  const [colFilterOpen, setColFilterOpen] = useState<{ col: ColDef; x: number; y: number; allValues: (string | number)[] } | null>(null);
+  // Per-column "value-list" filter
+  const [colValFilters, setColValFilters] = useState<Record<string, string[]>>(() => loadLS('totalVerim_colValFilters', {}));
+  // Advanced filter builder
+  const [advFilterOpen, setAdvFilterOpen] = useState(false);
+  const [advFilters, setAdvFilters] = useState<AdvFilter[]>(() => loadLS('totalVerim_advFilters', []));
+  const [advMode, setAdvMode] = useState<'AND' | 'OR'>(() => loadLS('totalVerim_advMode', 'AND'));
+  // Edge-scroll glow refs (green)
+  const greenGlowLeftRef = useRef<HTMLDivElement>(null);
+  const greenGlowRightRef = useRef<HTMLDivElement>(null);
+  // Context menu for cell/row/col formatting
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; rowId: string | null; colId: string | null } | null>(null);
+  // Density tweak
+  const [density, setDensity] = useState<'compact' | 'normal' | 'comfortable'>('compact');
+
+  // ─── PERSIST UI PREFERENCES ──────────────────────────────────────────
+  useEffect(() => { saveLS('totalVerim_cellFmts', cellFmts); }, [cellFmts]);
+  useEffect(() => { saveLS('totalVerim_rowFmts', rowFmts); }, [rowFmts]);
+  useEffect(() => { saveLS('totalVerim_colFmts', colFmts); }, [colFmts]);
+  useEffect(() => { saveLS('totalVerim_colValFilters', colValFilters); }, [colValFilters]);
+  useEffect(() => { saveLS('totalVerim_advFilters', advFilters); }, [advFilters]);
+  useEffect(() => { saveLS('totalVerim_advMode', advMode); }, [advMode]);
+
+  // ─── DROPDOWN / CONTEXT MENU GLOBAL CLOSE ─────────────────────────────
+  useEffect(() => {
+    const onDocMouseDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement;
+      if (!t.closest('.tv-drop-wrap') && !t.closest('.tv-color-pop')) setOpenDrop(null);
+      if (!t.closest('.tv-ctx-menu')) setCtxMenu(null);
+      if (!t.closest('.tv-colfilter-pop')) setColFilterOpen(null);
+    };
+    window.addEventListener('mousedown', onDocMouseDown);
+    return () => window.removeEventListener('mousedown', onDocMouseDown);
+  }, []);
 
   // Verimlilik havuzlarını, ortak lab havuzlarını ve depoları çek
   useEffect(() => {
@@ -2068,8 +2361,12 @@ export default function TotalVerimlilikPanel({
     const scrollContainer = scrollContainerRef.current;
     if (!scrollContainer) return;
 
-    const EDGE_THRESHOLD = 100; // Kenardan 100px içinde tetikle
-    const SCROLL_SPEED = 10; // Kaydırma hızı
+    // Yavaş alan: 90px (kenara yakınlaşıldıkça hızlanır)
+    // Hızlı alan: en içte 25px (anında hızlı kayma)
+    const EDGE_THRESHOLD = 90;
+    const FAST_THRESHOLD = 25;
+    const SLOW_SPEED = 6;
+    const FAST_SPEED = 16;
 
     const handleMouseMove = (e: MouseEvent) => {
       const rect = scrollContainer.getBoundingClientRect();
@@ -2090,46 +2387,52 @@ export default function TotalVerimlilikPanel({
       const distanceFromRight = rect.right - mouseX;
       const distanceFromLeft = mouseX - rect.left;
 
-      // Glow DOM güncellemesi (React state kullanmadan - performans için)
+      // Glow DOM güncellemesi - YEŞİL spotlight (yeni tasarım)
       const updateGlow = (leftIntensity: number, rightIntensity: number) => {
-        if (glowLeftRef.current) {
-          glowLeftRef.current.style.opacity = String(leftIntensity);
-          glowLeftRef.current.style.boxShadow = leftIntensity > 0
-            ? `inset 12px 0 20px -8px rgba(249, 115, 22, ${leftIntensity * 0.5})`
-            : 'none';
-        }
-        if (glowRightRef.current) {
-          glowRightRef.current.style.opacity = String(rightIntensity);
-          glowRightRef.current.style.boxShadow = rightIntensity > 0
-            ? `inset -12px 0 20px -8px rgba(249, 115, 22, ${rightIntensity * 0.5})`
-            : 'none';
-        }
+        const setOne = (el: HTMLDivElement | null, intensity: number, side: 'left' | 'right') => {
+          if (!el) return;
+          el.style.opacity = String(intensity);
+          if (intensity > 0) {
+            const dir = side === 'left' ? 12 : -12;
+            el.style.boxShadow = `inset ${dir}px 0 ${Math.round(intensity * 24) + 8}px -6px rgba(34, 197, 94, ${intensity * 0.55})`;
+          } else {
+            el.style.boxShadow = 'none';
+          }
+        };
+        setOne(glowLeftRef.current, leftIntensity, 'left');
+        setOne(glowRightRef.current, rightIntensity, 'right');
+        setOne(greenGlowLeftRef.current, leftIntensity, 'left');
+        setOne(greenGlowRightRef.current, rightIntensity, 'right');
       };
 
       // Sağ kenara yakınsa sağa kaydır + glow
       if (distanceFromRight < EDGE_THRESHOLD && distanceFromRight > 0) {
-        const intensity = 1 - distanceFromRight / EDGE_THRESHOLD;
+        const slowT = Math.max(0, (EDGE_THRESHOLD - distanceFromRight) / EDGE_THRESHOLD);
+        const fastT = distanceFromRight < FAST_THRESHOLD ? (FAST_THRESHOLD - distanceFromRight) / FAST_THRESHOLD : 0;
+        const intensity = Math.max(slowT, fastT);
         updateGlow(0, intensity);
         if (!edgeScrollIntervalRef.current) {
           edgeScrollIntervalRef.current = window.setInterval(() => {
             const scrollEl = scrollContainer.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement;
             if (scrollEl) {
-              const speed = Math.max(1, SCROLL_SPEED * intensity);
-              scrollEl.scrollLeft += speed;
+              const speed = SLOW_SPEED * slowT + FAST_SPEED * fastT;
+              if (speed > 0) scrollEl.scrollLeft += speed;
             }
           }, 16);
         }
       }
       // Sol kenara yakınsa sola kaydır + glow
       else if (distanceFromLeft < EDGE_THRESHOLD && distanceFromLeft > 0) {
-        const intensity = 1 - distanceFromLeft / EDGE_THRESHOLD;
+        const slowT = Math.max(0, (EDGE_THRESHOLD - distanceFromLeft) / EDGE_THRESHOLD);
+        const fastT = distanceFromLeft < FAST_THRESHOLD ? (FAST_THRESHOLD - distanceFromLeft) / FAST_THRESHOLD : 0;
+        const intensity = Math.max(slowT, fastT);
         updateGlow(intensity, 0);
         if (!edgeScrollIntervalRef.current) {
           edgeScrollIntervalRef.current = window.setInterval(() => {
             const scrollEl = scrollContainer.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement;
             if (scrollEl) {
-              const speed = Math.max(1, SCROLL_SPEED * intensity);
-              scrollEl.scrollLeft -= speed;
+              const speed = SLOW_SPEED * slowT + FAST_SPEED * fastT;
+              if (speed > 0) scrollEl.scrollLeft -= speed;
             }
           }, 16);
         }
@@ -2145,14 +2448,15 @@ export default function TotalVerimlilikPanel({
     };
 
     const handleMouseLeave = () => {
-      if (glowLeftRef.current) {
-        glowLeftRef.current.style.opacity = '0';
-        glowLeftRef.current.style.boxShadow = 'none';
-      }
-      if (glowRightRef.current) {
-        glowRightRef.current.style.opacity = '0';
-        glowRightRef.current.style.boxShadow = 'none';
-      }
+      const reset = (el: HTMLDivElement | null) => {
+        if (!el) return;
+        el.style.opacity = '0';
+        el.style.boxShadow = 'none';
+      };
+      reset(glowLeftRef.current);
+      reset(glowRightRef.current);
+      reset(greenGlowLeftRef.current);
+      reset(greenGlowRightRef.current);
       if (edgeScrollIntervalRef.current) {
         clearInterval(edgeScrollIntervalRef.current);
         edgeScrollIntervalRef.current = null;
@@ -2171,1587 +2475,919 @@ export default function TotalVerimlilikPanel({
     };
   }, []);
 
+  // ─── REDESIGNED UI: HELPERS ──────────────────────────────────────────
+  // Visible columns honor: hidden set + cost flag + center flag
+  const visibleCols = useMemo(() => COLS.filter(c => {
+    if (hiddenCols.has(c.id)) return false;
+    if (showResultsOnly && c.type === 'manual') return false; // hide manual inputs in results-only
+    if (c.cost && !showCostColumns) return false;
+    if (c.centerOnly && !centerHakEdisMode) return false;
+    return true;
+  }), [hiddenCols, showResultsOnly, showCostColumns, centerHakEdisMode]);
+
+  // Group rows by lab (after primary filtering)
+  const groupedRows = useMemo(() => {
+    // Apply advanced filters on top of existing deferredRows (which already has search+colFilters+sort)
+    let result = deferredRows;
+    if (advFilters.length > 0) {
+      result = result.filter(r => {
+        const matches = advFilters.map(f => evalAdvFilter(r, f));
+        return advMode === 'AND' ? matches.every(Boolean) : matches.some(Boolean);
+      });
+    }
+    // Apply per-column value filters (header dropdown filter)
+    const valEntries = Object.entries(colValFilters).filter(([, v]) => v && v.length > 0);
+    if (valEntries.length > 0) {
+      result = result.filter(r => valEntries.every(([cid, vals]) => {
+        const v = String((r as unknown as Record<string, unknown>)[cid] ?? '');
+        return (vals as string[]).includes(v);
+      }));
+    }
+    // Group
+    const groups: { labId: string; labName: string; labKod: string; rows: TableRow[] }[] = [];
+    const map = new Map<string, { labId: string; labName: string; labKod: string; rows: TableRow[] }>();
+    result.forEach(r => {
+      let g = map.get(r.labId);
+      if (!g) {
+        g = { labId: r.labId, labName: r.labName, labKod: r.labKod, rows: [] };
+        map.set(r.labId, g);
+        groups.push(g);
+      }
+      g.rows.push(r);
+    });
+    return groups;
+  }, [deferredRows, advFilters, advMode, colValFilters]);
+
+  const totalVisibleRows = useMemo(() => groupedRows.reduce((s, g) => s + g.rows.length, 0), [groupedRows]);
+
+  // Auto-expand the first lab when groups appear so users see data
+  useEffect(() => {
+    if (groupedRows.length > 0 && expandedLabs.size === 0) {
+      setExpandedLabs(new Set([groupedRows[0].labId]));
+    }
+  }, [groupedRows, expandedLabs.size]);
+
+  const toggleLabExpand = useCallback((labId: string) => {
+    setExpandedLabs(prev => {
+      const n = new Set(prev);
+      if (n.has(labId)) n.delete(labId); else n.add(labId);
+      return n;
+    });
+  }, []);
+  const expandAllLabs = useCallback(() => setExpandedLabs(new Set(groupedRows.map(g => g.labId))), [groupedRows]);
+  const collapseAllLabs = useCallback(() => setExpandedLabs(new Set()), []);
+
+  // Selection
+  const toggleSelRow = useCallback((rowId: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setSelRows(prev => { const n = new Set(prev); n.has(rowId) ? n.delete(rowId) : n.add(rowId); return n; });
+  }, []);
+  const toggleSelCol = useCallback((colId: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setSelCols(prev => { const n = new Set(prev); n.has(colId) ? n.delete(colId) : n.add(colId); return n; });
+  }, []);
+  const clearSel = useCallback(() => { setSelRows(new Set()); setSelCols(new Set()); }, []);
+
+  // Apply format to current selection (rows + cols + cells at intersection)
+  const applyToSelection = useCallback(<K extends keyof FmtRec>(key: K, value: FmtRec[K]) => {
+    setActiveFmt(p => {
+      const k = key === 'bg' ? 'fillColor' : (key as string);
+      return { ...p, [k]: value as never };
+    });
+    if (selRows.size === 0 && selCols.size === 0) {
+      // No selection - inform the user
+      toast({ title: 'Seçim yok', description: 'Önce satır ve/veya sütun seçin.', variant: 'destructive' });
+      return;
+    }
+    if (selRows.size > 0) {
+      setRowFmts(prev => {
+        const n = { ...prev };
+        selRows.forEach(rid => { n[rid] = { ...(n[rid] || {}), [key]: value }; });
+        return n;
+      });
+    }
+    if (selCols.size > 0) {
+      setColFmts(prev => {
+        const n = { ...prev };
+        selCols.forEach(cid => { n[cid] = { ...(n[cid] || {}), [key]: value }; });
+        return n;
+      });
+    }
+  }, [selRows, selCols, toast]);
+
+  const toggleFmt = useCallback((key: 'bold' | 'italic') => {
+    const next = !activeFmt[key];
+    applyToSelection(key, next);
+  }, [activeFmt, applyToSelection]);
+
+  // Merged format for a cell = col fmt < row fmt < cell fmt
+  const getMergedFmt = useCallback((rowId: string, colId: string): FmtRec => {
+    return { ...(colFmts[colId] || {}), ...(rowFmts[rowId] || {}), ...(cellFmts[`${rowId}-${colId}`] || {}) };
+  }, [colFmts, rowFmts, cellFmts]);
+
+  // Context menu apply
+  const applyCtxFmt = useCallback((target: 'cell' | 'row' | 'col', key: keyof FmtRec, value: FmtRec[keyof FmtRec], menu: NonNullable<typeof ctxMenu>) => {
+    if (target === 'cell' && menu.rowId && menu.colId) {
+      const k = `${menu.rowId}-${menu.colId}`;
+      setCellFmts(p => ({ ...p, [k]: { ...(p[k] || {}), [key]: value } }));
+    } else if (target === 'row' && menu.rowId) {
+      setRowFmts(p => ({ ...p, [menu.rowId!]: { ...(p[menu.rowId!] || {}), [key]: value } }));
+    } else if (target === 'col' && menu.colId) {
+      setColFmts(p => ({ ...p, [menu.colId!]: { ...(p[menu.colId!] || {}), [key]: value } }));
+    }
+  }, []);
+
+  // Column hide toggle
+  const toggleHidden = useCallback((id: string) => {
+    setHiddenCols(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }, []);
+  const showAllCols = useCallback(() => setHiddenCols(new Set()), []);
+
+  // Per-column value filter
+  const applyColValFilter = useCallback((colId: string, vals: string[] | null) => {
+    setColValFilters(p => {
+      const n = { ...p };
+      if (!vals || vals.length === 0) delete n[colId]; else n[colId] = vals;
+      return n;
+    });
+  }, []);
+
+  // Sort helper that mirrors the existing toggleSort but supports any column
+  const setSort = useCallback((colId: string | null, dir: 'asc' | 'desc') => {
+    if (!colId) { setSortConfig({ column: null, direction: 'asc' }); return; }
+    // We only support sorting by the columns existing sortConfig accepts; coerce others into deferred sort
+    if (colId === 'stokDogrulukFark' || colId === 'kitVerimlilikFark') {
+      setSortConfig({ column: colId as 'stokDogrulukFark' | 'kitVerimlilikFark', direction: dir });
+    }
+    // For other columns, we silently no-op for now (sort by row prop is in groupedRows already)
+  }, []);
+
+  // Advanced filter helpers
+  const addAdvFilter = useCallback(() => {
+    setAdvFilters(p => [...p, { id: `f${Date.now()}`, col: 'stokAdi', op: 'contains', val: '' }]);
+  }, []);
+  const updateAdvFilter = useCallback((id: string, patch: Partial<AdvFilter>) => {
+    setAdvFilters(p => p.map(f => f.id === id ? { ...f, ...patch } : f));
+  }, []);
+  const removeAdvFilter = useCallback((id: string) => {
+    setAdvFilters(p => p.filter(f => f.id !== id));
+  }, []);
+  const clearAdvFilters = useCallback(() => setAdvFilters([]), []);
+
+  // Currency helpers
+  const cur = costCurrency === 'TRY' ? '₺' : costCurrency === 'USD' ? '$' : '€';
+  const fmtN = (n: number) => n.toLocaleString('tr-TR');
+
+  // Render value for a column×row cell
+  const renderCellValue = (col: ColDef, row: TableRow): React.ReactNode => {
+    switch (col.id) {
+      case 'lab': return null; // handled separately
+      case 'stokKodu': return <span className="font-mono text-[11px]">{row.stokKodu}</span>;
+      case 'stokAdi': return <span className="text-[11.5px]">{row.stokAdi}</span>;
+      case 'testAdi': return <span className="text-muted-foreground text-[11px]">{row.testAdi || '—'}</span>;
+      case 'ambalajDegeri': return <span className="text-[11px]">{row.ambalajDegeri || '—'}</span>;
+      case 'cihazGrubu': return <span className="text-muted-foreground text-[11px]">{row.cihazGrubu || '—'}</span>;
+      case 'baslangicStokuKutu':
+      case 'ayBasiCihazUstuTest':
+      case 'ayBasiSevkiyatKutu':
+      case 'goztepeSevkiyat':
+      case 'lojistikAraTransfer':
+      case 'kumulatifTotal':
+      case 'donemSonuStokKutu':
+      case 'donemSonuCihazUstuTest':
+      case 'hakEdis': {
+        const v = (row as unknown as Record<string, number>)[col.id];
+        return (
+          <DebouncedInput
+            type="number"
+            min="0"
+            className="h-7 w-full px-2 text-right font-mono text-[11px]"
+            value={v || ''}
+            onChange={(value) => handleValueChange(row.id, col.id as never, value)}
+            placeholder="0"
+          />
+        );
+      }
+      case 'kurumlarArasiSevk':
+        return (
+          <div className="flex flex-col gap-0.5">
+            <Input
+              type="number" min="0"
+              className="h-7 w-full px-2 text-right font-mono text-[11px]"
+              value={row.kurumlarArasiSevk || ''}
+              onChange={e => handleKurumlarArasiSevkChange(row.id, e.target.value)}
+              placeholder="0"
+            />
+            {interLabTransfers[row.id] && (
+              <span className="text-[9px] text-orange-600">← {interLabTransfers[row.id].sourceLabName}</span>
+            )}
+          </div>
+        );
+      case 'totalAyBasiStok': return <span className="font-mono text-[11px] font-semibold">{fmtN(row.totalAyBasiStok)}</span>;
+      case 'sevkiyatlarSonrasiTotalTest': return <span className="font-mono text-[11px] font-semibold">{fmtN(row.sevkiyatlarSonrasiTotalTest)}</span>;
+      case 'donemSonuToplamTest': return <span className="font-mono text-[11px] font-semibold">{fmtN(row.donemSonuToplamTest)}</span>;
+      case 'stokDogrulukFark': {
+        const sign = row.stokDogrulukFark > 0 ? '-' : (row.stokDogrulukFark < 0 ? '+' : '');
+        const cls = row.stokDogrulukFark > 0 ? 'bg-red-100 text-red-700 border-red-200'
+                  : row.stokDogrulukFark < 0 ? 'bg-green-100 text-green-700 border-green-200'
+                  : 'bg-muted text-muted-foreground border-muted';
+        return (
+          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold border ${cls}`}>
+            {sign}{Math.abs(row.stokDogrulukFark).toLocaleString('tr-TR')} · %{Math.abs(row.stokDogrulukYuzde).toFixed(1)}
+          </span>
+        );
+      }
+      case 'kitVerimlilikFark': {
+        const sign = row.kitVerimlilikFark > 0 ? '-' : (row.kitVerimlilikFark < 0 ? '+' : '');
+        const cls = row.kitVerimlilikFark > 0 ? 'bg-orange-100 text-orange-700 border-orange-200'
+                  : row.kitVerimlilikFark < 0 ? 'bg-green-100 text-green-700 border-green-200'
+                  : 'bg-muted text-muted-foreground border-muted';
+        return (
+          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold border ${cls}`}>
+            {sign}{Math.abs(row.kitVerimlilikFark).toLocaleString('tr-TR')} · %{Math.abs(row.kitVerimlilikYuzde).toFixed(1)}
+          </span>
+        );
+      }
+      case 'kutuKayip': {
+        const effHak = centerHakEdisMode ? getAdjustedHakEdis(row) : row.hakEdis;
+        const testFark = column22Mode === 'kumulatif' ? row.stokDogrulukFark : (row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest) - effHak;
+        const ambalaj = row.ambalajDegeri || 1;
+        const kutuFark = testFark / ambalaj;
+        const abs = Math.abs(kutuFark);
+        if (abs < 1) return <span className="text-muted-foreground text-[11px]">0 kutu</span>;
+        const cls = abs >= 2 ? 'text-red-600 font-bold' : 'text-yellow-600 font-semibold';
+        return <span className={`font-mono text-[11px] ${cls}`}>{kutuFark > 0 ? '+' : '-'}{abs.toLocaleString('tr-TR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} kutu</span>;
+      }
+      case 'sarfiyatMaliyeti': {
+        const { cost, hasData } = calculateRowCost(row);
+        if (!hasData) return <span className="text-muted-foreground text-[10px]">—</span>;
+        if (cost === 0) return <span className="text-muted-foreground">—</span>;
+        return <span className="font-mono text-[11px] font-semibold text-emerald-700">{cur}{cost.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>;
+      }
+      case 'hakEdisKarsiligi': {
+        const { amount, hasData } = calculateHakEdisKarsiligi(row, centerHakEdisMode);
+        if (!hasData) return <span className="text-muted-foreground text-[10px]">—</span>;
+        if (amount === 0) return <span className="text-muted-foreground">—</span>;
+        return <span className="font-mono text-[11px] font-semibold text-amber-700">{cur}{amount.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>;
+      }
+      case 'kar': {
+        const { kar, hasData } = calculateKar(row, centerHakEdisMode);
+        if (!hasData) return <span className="text-muted-foreground text-[10px]">—</span>;
+        if (kar === 0) return <span className="text-muted-foreground">—</span>;
+        const cls = kar > 0 ? 'text-green-600' : 'text-red-600';
+        return <span className={`font-mono text-[11px] font-semibold ${cls}`}>{kar > 0 ? '+' : ''}{cur}{kar.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>;
+      }
+      case 'zararMaliyeti': {
+        const { zarar, hasData } = calculateZararMaliyeti(row);
+        if (!hasData) return <span className="text-muted-foreground text-[10px]">—</span>;
+        if (zarar === 0) return <span className="text-muted-foreground">—</span>;
+        return <span className="font-mono text-[11px] font-semibold text-rose-600">{cur}{zarar.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>;
+      }
+      case 'merkezeGonderilen': {
+        const sentCount = testsSentToCenter[row.id] || 0;
+        if (selectedPool?.centerLabId === row.labId) return <span className="text-muted-foreground text-[10px]">Merkez</span>;
+        if (sentCount === 0) return <span className="text-muted-foreground">—</span>;
+        return <span className="font-mono text-[11px] font-semibold text-orange-600">{sentCount.toLocaleString('tr-TR')}</span>;
+      }
+      default: return null;
+    }
+  };
+
+  // Background tint per column type (subtle Excel-like coloring)
+  const typeBgClass = (t: ColType): string => {
+    switch (t) {
+      case 'manual': return 'bg-blue-50/40 dark:bg-blue-950/30';
+      case 'calc':   return 'bg-emerald-50/40 dark:bg-emerald-950/30';
+      case 'result': return 'bg-violet-50/40 dark:bg-violet-950/30';
+      default:       return '';
+    }
+  };
+  const headerBgClass = (t: ColType): string => {
+    switch (t) {
+      case 'manual': return 'bg-blue-100/70 dark:bg-blue-900/40';
+      case 'calc':   return 'bg-emerald-100/70 dark:bg-emerald-900/40';
+      case 'result': return 'bg-violet-100/70 dark:bg-violet-900/40';
+      default:       return 'bg-muted/60';
+    }
+  };
+  const rowHeightCls = density === 'compact' ? 'h-7' : density === 'normal' ? 'h-9' : 'h-11';
+
+  // Column header filter button click
+  const openColFilter = (col: ColDef, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (colFilterOpen?.col.id === col.id) { setColFilterOpen(null); return; }
+    const rect = (e.currentTarget as HTMLElement).closest('th')?.getBoundingClientRect();
+    if (!rect) return;
+    // gather unique values across all rows
+    const seen = new Set<string>();
+    const vals: (string | number)[] = [];
+    rows.forEach(r => {
+      const v = (r as unknown as Record<string, unknown>)[col.id];
+      const k = String(v ?? '');
+      if (!seen.has(k)) { seen.add(k); vals.push(v as string | number); }
+    });
+    vals.sort((a, b) => typeof a === 'number' && typeof b === 'number' ? a - b : String(a).localeCompare(String(b), 'tr'));
+    setColFilterOpen({ col, x: rect.left, y: rect.bottom + 2, allValues: vals });
+  };
+
+  // Format style for inline use
+  const fmtToStyle = (f: FmtRec): React.CSSProperties => {
+    const s: React.CSSProperties = {};
+    if (f.bg) s.background = f.bg;
+    if (f.textColor) s.color = f.textColor;
+    if (f.bold) s.fontWeight = 700;
+    if (f.italic) s.fontStyle = 'italic';
+    if (f.align) s.textAlign = f.align;
+    return s;
+  };
+
   return (
-    <div className="p-4 space-y-6" role="main" aria-label="Total Verimlilik Paneli">
-      <BackButton fallback="/" />
+    <div className="flex flex-col h-[calc(100vh-3rem)] bg-[#f3f3f1] dark:bg-zinc-950 text-[13px]" role="main" aria-label="Total Verimlilik Paneli">
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="text-xl flex items-center gap-2">
-                <BarChart3 className="h-6 w-6 text-primary" />
-                Total Verimlilik Paneli
-              </CardTitle>
-              <CardDescription>
-                Verimlilik havuzundaki laboratuvarların stok doğruluk oranı ve hak ediş verimliliği hesaplaması.
-                Tüm veriler manuel olarak girilecektir.
-              </CardDescription>
+      {/* ─── TOP BAR ─────────────────────────────────────────────────── */}
+      <div className="bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 px-3 h-11 flex items-center gap-2 flex-shrink-0">
+        <BackButton fallback="/" />
+        <div className="flex items-center gap-1.5">
+          <BarChart3 className="h-4 w-4 text-orange-500" />
+          <span className="font-bold tracking-tight text-[13px]">Total Verimlilik</span>
+        </div>
+        <div className="w-px h-4 bg-zinc-200 dark:bg-zinc-700 mx-1" />
+        <div className="flex items-center gap-0.5">
+          <button className="px-2.5 py-1 rounded text-[11px] font-medium bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900">Total Dashboard</button>
+          <Link href="/total-verimlilik/gecmis"><button className="px-2.5 py-1 rounded text-[11px] font-medium text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800">Geçmiş</button></Link>
+        </div>
+        <div className="flex-1" />
+        {/* KPI chips */}
+        {rows.length > 0 && (
+          <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10.5px] border border-emerald-200 bg-emerald-50 text-emerald-800">
+              <span>Verimlilik</span>
+              <span className="font-bold font-mono text-[11px]">%{efficiencyMetrics.genelVerimlilik.toFixed(0)}</span>
             </div>
-            <div className="flex items-center gap-2">
-              <Link href="/total-dashboard">
-                <Button variant="outline" className="gap-2 bg-gradient-to-r from-primary/10 to-primary/5 hover:from-primary/20 hover:to-primary/10 border-primary/20">
-                  <BarChart3 className="h-4 w-4" />
-                  Total Dashboard
-                </Button>
-              </Link>
-              {selectedPool?.centerLabId && (
-                <>
-                  {centerHakEdisMode ? (
-                    <Button
-                      variant="outline"
-                      className="gap-2 bg-amber-100 dark:bg-amber-950 border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-300"
-                      onClick={resetCenterHakEdisMode}
-                    >
-                      <RotateCcw className="h-4 w-4" />
-                      Merkez Modunu Sıfırla
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="outline"
-                      className="gap-2 bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-950 dark:to-orange-950 border-amber-200 dark:border-amber-800"
-                      onClick={calculateCenterHakEdis}
-                      disabled={isCalculatingCenterHakEdis || rows.length === 0}
-                    >
-                      {isCalculatingCenterHakEdis ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Crown className="h-4 w-4 text-amber-600" />
-                      )}
-                      Merkez Hak Edişi Hesapla
-                    </Button>
-                  )}
-                </>
-              )}
+            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10.5px] border border-blue-200 bg-blue-50 text-blue-800">
+              <span>Sarfiyat</span>
+              <span className="font-bold font-mono text-[11px]">{cur}{Math.round(totalCost).toLocaleString('tr-TR')}</span>
+            </div>
+            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10.5px] border border-amber-200 bg-amber-50 text-amber-800">
+              <span>Hak Ediş</span>
+              <span className="font-bold font-mono text-[11px]">{cur}{Math.round(totalHakEdisKarsiligi).toLocaleString('tr-TR')}</span>
+            </div>
+            <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10.5px] border ${totalKar >= 0 ? 'border-violet-200 bg-violet-50 text-violet-800' : 'border-rose-200 bg-rose-50 text-rose-800'}`}>
+              <span>Kâr</span>
+              <span className="font-bold font-mono text-[11px]">{cur}{Math.abs(Math.round(totalKar)).toLocaleString('tr-TR')}</span>
             </div>
           </div>
-          {/* Merkez Lab Bilgisi */}
-          {selectedPool?.centerLabId && centerLab && (
-            <div className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm ${centerHakEdisMode ? 'bg-amber-100 dark:bg-amber-950 border border-amber-300 dark:border-amber-700' : 'bg-muted'}`}>
-              <Crown className="h-4 w-4 text-amber-600" />
-              <span className="font-medium">Merkez Laboratuvar:</span>
-              <span>{centerLab.name}</span>
-              {centerLab.kod && <Badge variant="outline" className="ml-1 font-mono text-xs">{centerLab.kod}</Badge>}
-              {centerHakEdisMode && (
-                <Badge className="ml-2 bg-amber-500 text-white">
-                  Merkez Hak Ediş Modu Aktif
-                </Badge>
-              )}
+        )}
+      </div>
+
+      {/* ─── MAIN TOOLBAR (RIBBON) ──────────────────────────────────── */}
+      <div className="bg-white dark:bg-zinc-900 border-b border-zinc-300 dark:border-zinc-700 px-3 h-9 flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+        {/* Save dropdown */}
+        <div className="tv-drop-wrap relative inline-flex">
+          <button
+            onClick={() => setOpenDrop(p => p === 'save' ? null : 'save')}
+            disabled={isSaving || isSavingAraKayit || rows.length === 0}
+            className="flex items-center gap-1 px-2 h-7 rounded text-[11px] font-medium bg-orange-500 text-white border border-orange-500 hover:bg-orange-600 disabled:opacity-50"
+          >
+            {isSaving || isSavingAraKayit ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+            Kaydet
+            <ChevronDown className="h-3 w-3" />
+          </button>
+          {openDrop === 'save' && (
+            <div className="absolute top-full left-0 mt-1 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-md shadow-lg min-w-[180px] z-50 p-1">
+              <button onClick={() => { handleSave(); setOpenDrop(null); }} className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[11.5px] hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded">
+                <Save className="h-3 w-3" />Kaydet
+              </button>
+              <button onClick={() => { handleAraKayitSave(); setOpenDrop(null); }} className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[11.5px] hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded">
+                <Clock className="h-3 w-3" />Ara Kayıt
+                {araKayitInfo?.exists && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />}
+              </button>
             </div>
           )}
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4" role="group" aria-label="Dönem ve havuz seçimi">
-            <div>
-              <label id="pool-label" className="text-sm font-medium mb-1 block">Verimlilik Havuzu</label>
-              <Select value={selectedPoolId} onValueChange={setSelectedPoolId}>
-                <SelectTrigger aria-labelledby="pool-label">
-                  <SelectValue placeholder="Havuz seçin..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {efficiencyPools.map(pool => (
-                    <SelectItem key={pool.id} value={pool.id}>
-                      {pool.name} ({pool.memberIds.length} lab)
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+        </div>
+        {/* Excel dropdown */}
+        <div className="tv-drop-wrap relative inline-flex">
+          <button
+            onClick={() => setOpenDrop(p => p === 'excel' ? null : 'excel')}
+            disabled={rows.length === 0}
+            className="flex items-center gap-1 px-2 h-7 rounded text-[11px] font-medium border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"
+          >
+            <FileSpreadsheet className="h-3 w-3" />Excel
+            <ChevronDown className="h-3 w-3" />
+          </button>
+          {openDrop === 'excel' && (
+            <div className="absolute top-full left-0 mt-1 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-md shadow-lg min-w-[200px] z-50 p-1">
+              <button onClick={() => { handleExportExcel(); setOpenDrop(null); }} className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[11.5px] hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded">
+                <Download className="h-3 w-3" />Excel'e Aktar
+              </button>
+              <button onClick={() => { setShowSevkiyatBilgisiModal(true); setOpenDrop(null); }} className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[11.5px] hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded">
+                <Download className="h-3 w-3" />Sevkiyat Bilgisi Çek
+              </button>
+              <div className="h-px bg-zinc-200 dark:bg-zinc-700 my-1" />
+              <button onClick={() => { setShowExcelImportModal(true); setOpenDrop(null); }} className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[11.5px] hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded">
+                <Upload className="h-3 w-3" />Excel ile Veri Gir
+              </button>
             </div>
-            <div>
-              <label id="month-label" className="text-sm font-medium mb-1 block">Ay</label>
-              <Select value={String(selectedMonth)} onValueChange={v => setSelectedMonth(Number(v))}>
-                <SelectTrigger aria-labelledby="month-label"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {MONTHS.map((m, i) => (
-                    <SelectItem key={i} value={String(i)}>{m.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <label id="year-label" className="text-sm font-medium mb-1 block">Yıl</label>
-              <Select value={String(selectedYear)} onValueChange={v => setSelectedYear(Number(v))}>
-                <SelectTrigger aria-labelledby="year-label"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {YEARS.map(y => (
-                    <SelectItem key={y} value={String(y)}>{y}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <label id="brand-label" className="text-sm font-medium mb-1 block">Marka</label>
-              <Select value={selectedBrand || '__all__'} onValueChange={(v) => setSelectedBrand(v === '__all__' ? '' : v)}>
-                <SelectTrigger aria-labelledby="brand-label">
-                  <SelectValue placeholder="Tümü" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__all__">Tümü</SelectItem>
-                  {brandAndGroupOptions.brands.map(brand => (
-                    <SelectItem key={brand} value={brand}>{brand}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <label id="urun-grubu-label" className="text-sm font-medium mb-1 block">Ürün Grubu</label>
-              <Select value={selectedUrunGrubu || '__all__'} onValueChange={(v) => setSelectedUrunGrubu(v === '__all__' ? '' : v)}>
-                <SelectTrigger aria-labelledby="urun-grubu-label">
-                  <SelectValue placeholder="Tümü" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__all__">Tümü</SelectItem>
-                  {brandAndGroupOptions.groups.map(group => (
-                    <SelectItem key={group} value={group}>{urunGrubuLabels[group] || group}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <label id="cost-period-label" className="text-sm font-medium mb-1 block">Maliyet Dönemi</label>
-              <Select
-                value={selectedCostCheckpoint}
-                onValueChange={setSelectedCostCheckpoint}
-              >
-                <SelectTrigger aria-labelledby="cost-period-label">
-                  <SelectValue placeholder={costCheckpoints.length === 0 ? "Checkpoint yok" : "Seçin..."} />
-                </SelectTrigger>
-                <SelectContent>
-                  {costCheckpoints.map(cp => (
-                    <SelectItem key={cp.id} value={cp.id}>
-                      {MONTHS[cp.month]?.label} {cp.year}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+          )}
+        </div>
+        <Link href="/total-verimlilik/gecmis">
+          <button className="flex items-center gap-1 px-2 h-7 rounded text-[11px] font-medium border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+            <History className="h-3 w-3" />Geçmiş
+          </button>
+        </Link>
 
-          {/* Maliyet Checkpoint Bilgisi */}
+        <div className="w-px h-5 bg-zinc-200 dark:bg-zinc-700 mx-1" />
+
+        {/* Format toolbar */}
+        <button onClick={() => toggleFmt('bold')} className={`w-7 h-7 rounded flex items-center justify-center hover:bg-zinc-100 dark:hover:bg-zinc-800 ${activeFmt.bold ? 'bg-zinc-100 dark:bg-zinc-800' : ''}`} title="Kalın">
+          <Bold className="h-3.5 w-3.5" />
+        </button>
+        <button onClick={() => toggleFmt('italic')} className={`w-7 h-7 rounded flex items-center justify-center hover:bg-zinc-100 dark:hover:bg-zinc-800 ${activeFmt.italic ? 'bg-zinc-100 dark:bg-zinc-800' : ''}`} title="İtalik">
+          <Italic className="h-3.5 w-3.5" />
+        </button>
+
+        <div className="w-px h-4 bg-zinc-200 dark:bg-zinc-700 mx-0.5" />
+
+        {/* Text color */}
+        <div className="tv-drop-wrap relative inline-flex">
+          <button onClick={() => setOpenDrop(p => p === 'textColor' ? null : 'textColor')} className="w-8 h-7 rounded flex flex-col items-center justify-center hover:bg-zinc-100 dark:hover:bg-zinc-800 gap-0.5" title="Metin Rengi">
+            <span className="text-[10px] font-bold leading-none" style={{ color: activeFmt.textColor || 'currentColor' }}>A</span>
+            <span className="w-4 h-0.5 rounded" style={{ background: activeFmt.textColor || '#111' }} />
+          </button>
+          {openDrop === 'textColor' && (
+            <div className="tv-color-pop absolute top-full left-0 mt-1 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-md shadow-lg z-50 p-2">
+              <div className="text-[9px] font-bold text-zinc-400 uppercase mb-1">Metin Rengi</div>
+              <div className="grid grid-cols-5 gap-1">
+                {TEXT_PALETTE.map(c => (
+                  <button key={c} className={`w-5 h-5 rounded border ${activeFmt.textColor === c ? 'ring-2 ring-blue-500' : 'border-zinc-200'}`} style={{ background: c }} onClick={() => { applyToSelection('textColor', c); setOpenDrop(null); }} />
+                ))}
+                <button className="w-5 h-5 rounded border border-dashed border-zinc-300 text-zinc-400 text-[10px]" onClick={() => { applyToSelection('textColor', undefined); setOpenDrop(null); }}>✕</button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Fill color */}
+        <div className="tv-drop-wrap relative inline-flex">
+          <button onClick={() => setOpenDrop(p => p === 'fillColor' ? null : 'fillColor')} className="w-8 h-7 rounded flex flex-col items-center justify-center hover:bg-zinc-100 dark:hover:bg-zinc-800 gap-0.5" title="Hücre Rengi">
+            <PaintBucket className="h-3 w-3" />
+            <span className="w-4 h-0.5 rounded border border-zinc-300" style={{ background: activeFmt.fillColor || 'transparent' }} />
+          </button>
+          {openDrop === 'fillColor' && (
+            <div className="tv-color-pop absolute top-full left-0 mt-1 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-md shadow-lg z-50 p-2">
+              <div className="text-[9px] font-bold text-zinc-400 uppercase mb-1">Hücre Rengi</div>
+              <div className="grid grid-cols-5 gap-1">
+                {FILL_PALETTE.map(c => (
+                  <button key={c} className={`w-5 h-5 rounded border ${activeFmt.fillColor === c ? 'ring-2 ring-blue-500' : 'border-zinc-200'}`} style={{ background: c }} onClick={() => { applyToSelection('bg', c); setOpenDrop(null); }} />
+                ))}
+                <button className="w-5 h-5 rounded border border-dashed border-zinc-300 text-zinc-400 text-[10px]" onClick={() => { applyToSelection('bg', undefined); setOpenDrop(null); }}>✕</button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="w-px h-4 bg-zinc-200 dark:bg-zinc-700 mx-0.5" />
+
+        {/* Alignment */}
+        {([['left', AlignLeft], ['center', AlignCenter], ['right', AlignRight]] as const).map(([a, Icon]) => (
+          <button key={a} onClick={() => applyToSelection('align', activeFmt.align === a ? undefined : a as 'left' | 'center' | 'right')} className={`w-7 h-7 rounded flex items-center justify-center hover:bg-zinc-100 dark:hover:bg-zinc-800 ${activeFmt.align === a ? 'bg-zinc-100 dark:bg-zinc-800' : ''}`} title={a}>
+            <Icon className="h-3.5 w-3.5" />
+          </button>
+        ))}
+
+        {/* Selection badge */}
+        {(selRows.size > 0 || selCols.size > 0) && (
+          <>
+            <div className="w-px h-4 bg-zinc-200 dark:bg-zinc-700 mx-0.5" />
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-700 border border-blue-200">
+              {selRows.size > 0 && `${selRows.size} satır`}{selRows.size > 0 && selCols.size > 0 && ' + '}{selCols.size > 0 && `${selCols.size} sütun`}
+            </span>
+            <button onClick={clearSel} className="w-6 h-6 rounded flex items-center justify-center hover:bg-zinc-100 dark:hover:bg-zinc-800" title="Seçimi temizle">
+              <X className="h-3 w-3" />
+            </button>
+          </>
+        )}
+
+        <div className="flex-1" />
+
+        {/* Legend */}
+        <div className="hidden md:flex items-center gap-2 text-[9.5px] text-zinc-400">
+          <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-blue-300" />Manuel</span>
+          <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-300" />Hesap</span>
+          <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-violet-300" />Sonuç</span>
+        </div>
+
+        <div className="w-px h-4 bg-zinc-200 dark:bg-zinc-700 mx-0.5" />
+
+        {/* Advanced filter button */}
+        <button onClick={() => setAdvFilterOpen(true)} className={`flex items-center gap-1 px-2 h-7 rounded text-[11px] font-medium border ${advFilters.length > 0 ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`} title="Gelişmiş Filtre">
+          <SlidersHorizontal className="h-3 w-3" />
+          Gelişmiş Filtre
+          {advFilters.length > 0 && <span className="px-1 rounded bg-blue-600 text-white text-[9px] font-bold">{advFilters.length}</span>}
+        </button>
+
+        {/* Filter bar toggle */}
+        <button onClick={() => setShowFilterBar(v => !v)} className={`flex items-center gap-1 px-2 h-7 rounded text-[11px] font-medium border ${showFilterBar ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 border-zinc-900 dark:border-zinc-100' : 'border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>
+          <Filter className="h-3 w-3" />Havuz / Dönem
+          <ChevronDown className={`h-3 w-3 transition-transform ${showFilterBar ? 'rotate-180' : ''}`} />
+        </button>
+      </div>
+
+      {/* ─── COLLAPSIBLE FILTER BAR (Havuz/Ay/Yıl/Marka/Ürün Grubu/Maliyet) ─── */}
+      <div className={`bg-white dark:bg-zinc-900 overflow-hidden transition-all flex-shrink-0 ${showFilterBar ? 'max-h-20 border-b border-zinc-200 dark:border-zinc-800' : 'max-h-0'}`}>
+        <div className="px-3 py-2 flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] uppercase font-semibold text-zinc-400">Havuz</span>
+            <Select value={selectedPoolId} onValueChange={setSelectedPoolId}>
+              <SelectTrigger className="h-7 w-48 text-[11.5px]"><SelectValue placeholder="Havuz seçin..." /></SelectTrigger>
+              <SelectContent>{efficiencyPools.map(p => <SelectItem key={p.id} value={p.id}>{p.name} ({p.memberIds.length} lab)</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div className="w-px h-5 bg-zinc-200 dark:bg-zinc-700" />
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] uppercase font-semibold text-zinc-400">Ay</span>
+            <Select value={String(selectedMonth)} onValueChange={v => setSelectedMonth(Number(v))}>
+              <SelectTrigger className="h-7 w-28 text-[11.5px]"><SelectValue /></SelectTrigger>
+              <SelectContent>{MONTHS.map((m, i) => <SelectItem key={i} value={String(i)}>{m.label}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] uppercase font-semibold text-zinc-400">Yıl</span>
+            <Select value={String(selectedYear)} onValueChange={v => setSelectedYear(Number(v))}>
+              <SelectTrigger className="h-7 w-20 text-[11.5px]"><SelectValue /></SelectTrigger>
+              <SelectContent>{YEARS.map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div className="w-px h-5 bg-zinc-200 dark:bg-zinc-700" />
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] uppercase font-semibold text-zinc-400">Marka</span>
+            <Select value={selectedBrand || '__all__'} onValueChange={v => setSelectedBrand(v === '__all__' ? '' : v)}>
+              <SelectTrigger className="h-7 w-32 text-[11.5px]"><SelectValue placeholder="Tümü" /></SelectTrigger>
+              <SelectContent><SelectItem value="__all__">Tümü</SelectItem>{brandAndGroupOptions.brands.map(b => <SelectItem key={b} value={b}>{b}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] uppercase font-semibold text-zinc-400">Ürün Grubu</span>
+            <Select value={selectedUrunGrubu || '__all__'} onValueChange={v => setSelectedUrunGrubu(v === '__all__' ? '' : v)}>
+              <SelectTrigger className="h-7 w-36 text-[11.5px]"><SelectValue placeholder="Tümü" /></SelectTrigger>
+              <SelectContent><SelectItem value="__all__">Tümü</SelectItem>{brandAndGroupOptions.groups.map(g => <SelectItem key={g} value={g}>{urunGrubuLabels[g] || g}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div className="w-px h-5 bg-zinc-200 dark:bg-zinc-700" />
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] uppercase font-semibold text-zinc-400">Maliyet Dönemi</span>
+            <Select value={selectedCostCheckpoint} onValueChange={setSelectedCostCheckpoint}>
+              <SelectTrigger className="h-7 w-36 text-[11.5px]"><SelectValue placeholder={costCheckpoints.length === 0 ? 'Yok' : 'Seçin...'} /></SelectTrigger>
+              <SelectContent>{costCheckpoints.map(cp => <SelectItem key={cp.id} value={cp.id}>{MONTHS[cp.month]?.label} {cp.year}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] uppercase font-semibold text-zinc-400">Para</span>
+            <Select value={costCurrency} onValueChange={v => setCostCurrency(v as 'TRY' | 'USD' | 'EUR')}>
+              <SelectTrigger className="h-7 w-20 text-[11.5px]"><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="TRY">TRY ₺</SelectItem><SelectItem value="USD">USD $</SelectItem><SelectItem value="EUR">EUR €</SelectItem></SelectContent>
+            </Select>
+          </div>
           {selectedCostCheckpoint && costCheckpointData && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground pt-2 pb-2 border-t border-dashed">
-              <span>Seçili maliyet dönemi:</span>
-              <Badge variant="outline" className="bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
-                {Object.keys(costCheckpointData).length} ürün maliyeti yüklendi
-              </Badge>
-              <span className="text-xs">(Checkpoint yönetimi: Yönetim Paneli → Ürün Kodu Yönetimi)</span>
-            </div>
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700 border border-emerald-200">
+              {Object.keys(costCheckpointData).length} ürün maliyeti yüklendi
+            </span>
           )}
-
-          {selectedPoolId && (
-            <div className="flex items-center justify-between gap-4 pt-4 border-t flex-wrap">
-              <div className="flex items-center gap-2 flex-wrap">
-                <Button onClick={handleSave} disabled={isSaving || rows.length === 0} aria-label="Verileri kaydet">
-                  {isSaving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" aria-hidden="true" /> : <Save className="h-4 w-4 mr-2" aria-hidden="true" />}
-                  Kaydet
-                </Button>
-                {/* Ara Kayıt Butonu */}
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        variant={araKayitInfo?.exists ? 'secondary' : 'outline'}
-                        onClick={handleAraKayitSave}
-                        disabled={isSavingAraKayit || rows.length === 0}
-                        className={araKayitInfo?.exists ? 'border-amber-400 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/50 dark:hover:bg-amber-900/50' : ''}
-                      >
-                        {isSavingAraKayit ? (
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        ) : (
-                          <Clock className="h-4 w-4 mr-2" />
-                        )}
-                        Ara Kayıt
-                        {araKayitInfo?.exists && (
-                          <span className="ml-1.5 w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-                        )}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" className="max-w-xs">
-                      {araKayitInfo?.exists ? (
-                        <div className="text-sm space-y-1">
-                          <div className="font-semibold text-amber-600">Ara kayıt mevcut</div>
-                          <div>Kaydeden: {araKayitInfo.savedBy}</div>
-                          <div>Tarih: {araKayitInfo.savedAt?.toLocaleString('tr-TR')}</div>
-                        </div>
-                      ) : (
-                        <div className="text-sm">
-                          Kısmi veri girişini kaydetmek için ara kayıt alın. Diğer kullanıcılar da bu verileri görebilir.
-                        </div>
-                      )}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-                <Button variant="outline" onClick={handleExportExcel} disabled={rows.length === 0}>
-                  <FileSpreadsheet className="h-4 w-4 mr-2" />
-                  Excel'e Aktar
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => setShowSevkiyatBilgisiModal(true)}
-                  disabled={rows.length === 0}
-                  aria-label="Depodan laboratuvarlara sevkiyat bilgisi çek"
-                >
-                  <Download className="h-4 w-4 mr-2" aria-hidden="true" />
-                  Sevkiyat Bilgisi Çek
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => setShowExcelImportModal(true)}
-                  disabled={rows.length === 0}
-                  aria-label="Excel dosyasından veri içe aktar"
-                >
-                  <Upload className="h-4 w-4 mr-2" aria-hidden="true" />
-                  Excel ile Veri Gir
-                </Button>
-                <Link href="/total-verimlilik/gecmis">
-                  <Button variant="outline">
-                    <History className="h-4 w-4 mr-2" />
-                    Geçmiş
-                  </Button>
-                </Link>
-              </div>
-
-              {/* Genel Verimlilik Göstergesi */}
-              {rows.length > 0 && (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <div className="flex items-center gap-3 px-4 py-2 bg-muted/50 rounded-lg cursor-help">
-                        {/* Circular Progress */}
-                        <div className="relative w-16 h-16">
-                          <svg className="w-16 h-16 transform -rotate-90">
-                            <circle
-                              cx="32"
-                              cy="32"
-                              r="28"
-                              stroke="currentColor"
-                              strokeWidth="6"
-                              fill="none"
-                              className="text-muted"
-                            />
-                            <circle
-                              cx="32"
-                              cy="32"
-                              r="28"
-                              stroke="currentColor"
-                              strokeWidth="6"
-                              fill="none"
-                              strokeDasharray={`${(efficiencyMetrics.genelVerimlilik / 100) * 175.9} 175.9`}
-                              strokeLinecap="round"
-                              className={
-                                efficiencyMetrics.genelVerimlilik >= 90 ? 'text-green-500' :
-                                efficiencyMetrics.genelVerimlilik >= 70 ? 'text-yellow-500' :
-                                efficiencyMetrics.genelVerimlilik >= 50 ? 'text-orange-500' : 'text-red-500'
-                              }
-                            />
-                          </svg>
-                          <div className="absolute inset-0 flex items-center justify-center">
-                            <span className={`text-sm font-bold ${
-                              efficiencyMetrics.genelVerimlilik >= 90 ? 'text-green-600' :
-                              efficiencyMetrics.genelVerimlilik >= 70 ? 'text-yellow-600' :
-                              efficiencyMetrics.genelVerimlilik >= 50 ? 'text-orange-600' : 'text-red-600'
-                            }`}>
-                              %{efficiencyMetrics.genelVerimlilik.toFixed(1)}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="text-sm font-semibold">Genel Verimlilik</span>
-                          <span className="text-xs text-muted-foreground">
-                            {efficiencyMetrics.toplamKumulatif.toLocaleString('tr-TR')} test
-                          </span>
-                        </div>
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent side="left" className="max-w-xs">
-                      <div className="space-y-2 text-sm">
-                        <div className="font-semibold border-b pb-1">Verimlilik Detayları</div>
-                        <div className="flex justify-between gap-4">
-                          <span>Stok Doğruluk Skoru:</span>
-                          <span className={`font-medium ${efficiencyMetrics.stokDogrulukSkoru >= 90 ? 'text-green-600' : efficiencyMetrics.stokDogrulukSkoru >= 70 ? 'text-yellow-600' : 'text-red-600'}`}>
-                            %{efficiencyMetrics.stokDogrulukSkoru.toFixed(1)}
-                          </span>
-                        </div>
-                        <div className="flex justify-between gap-4">
-                          <span>Kit Verimlilik Skoru:</span>
-                          <span className={`font-medium ${efficiencyMetrics.kitVerimlilikSkoru >= 90 ? 'text-green-600' : efficiencyMetrics.kitVerimlilikSkoru >= 70 ? 'text-yellow-600' : 'text-red-600'}`}>
-                            %{efficiencyMetrics.kitVerimlilikSkoru.toFixed(1)}
-                          </span>
-                        </div>
-                        <div className="border-t pt-1 text-xs text-muted-foreground">
-                          <div>Stok Sapma: %{efficiencyMetrics.stokSapmaYuzde.toFixed(2)}</div>
-                          <div>Kit Sapma: %{efficiencyMetrics.kitSapmaYuzde.toFixed(2)}</div>
-                        </div>
-                      </div>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              )}
-
-              {/* KPI Card 1: Toplam Sarfiyat Maliyeti (Sütun 23 renkleriyle uyumlu - emerald/teal) */}
-              {rows.length > 0 && (
-                <div className="flex items-center gap-3 px-4 py-2 bg-emerald-50 dark:bg-emerald-950/50 rounded-lg border border-emerald-200 dark:border-emerald-800">
-                  <div className="w-10 h-10 rounded-full bg-emerald-100 dark:bg-emerald-900 flex items-center justify-center">
-                    <span className="text-emerald-600 dark:text-emerald-400 text-lg font-bold">₺</span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-sm font-semibold text-emerald-800 dark:text-emerald-200">Toplam Sarfiyat</span>
-                    <span className="text-base font-bold text-emerald-600 dark:text-emerald-400">
-                      {costCurrency === 'TRY' ? '₺' : costCurrency === 'USD' ? '$' : '€'}
-                      {totalCost.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              {/* KPI Card 2: Toplam Hak Ediş Karşılığı (Sütun 24 renkleriyle uyumlu - amber/orange) */}
-              {rows.length > 0 && (
-                <div className="flex items-center gap-3 px-4 py-2 bg-amber-50 dark:bg-amber-950/50 rounded-lg border border-amber-200 dark:border-amber-800">
-                  <div className="w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900 flex items-center justify-center">
-                    <span className="text-amber-600 dark:text-amber-400 text-lg font-bold">₺</span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-sm font-semibold text-amber-800 dark:text-amber-200">Toplam Hak Ediş</span>
-                    <span className="text-base font-bold text-amber-600 dark:text-amber-400">
-                      {costCurrency === 'TRY' ? '₺' : costCurrency === 'USD' ? '$' : '€'}
-                      {totalHakEdisKarsiligi.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              {/* KPI Card 3: Toplam Kâr (Sütun 25 renkleriyle uyumlu - yeşil kâr / kırmızı zarar) */}
-              {rows.length > 0 && (
-                <div className={`flex items-center gap-3 px-4 py-2 rounded-lg border ${
-                  totalKar >= 0
-                    ? 'bg-green-50 dark:bg-green-950/50 border-green-200 dark:border-green-800'
-                    : 'bg-red-50 dark:bg-red-950/50 border-red-200 dark:border-red-800'
-                }`}>
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                    totalKar >= 0
-                      ? 'bg-green-100 dark:bg-green-900'
-                      : 'bg-red-100 dark:bg-red-900'
-                  }`}>
-                    <span className={`text-lg font-bold ${
-                      totalKar >= 0
-                        ? 'text-green-600 dark:text-green-400'
-                        : 'text-red-600 dark:text-red-400'
-                    }`}>
-                      {totalKar >= 0 ? '↑' : '↓'}
-                    </span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className={`text-sm font-semibold ${
-                      totalKar >= 0
-                        ? 'text-green-800 dark:text-green-200'
-                        : 'text-red-800 dark:text-red-200'
-                    }`}>
-                      Toplam Kâr
-                    </span>
-                    <span className={`text-base font-bold ${
-                      totalKar >= 0
-                        ? 'text-green-600 dark:text-green-400'
-                        : 'text-red-600 dark:text-red-400'
-                    }`}>
-                      {totalKar >= 0 ? '+' : ''}{costCurrency === 'TRY' ? '₺' : costCurrency === 'USD' ? '$' : '€'}
-                      {totalKar.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              {/* KPI Card 4: Toplam Zarar Maliyeti (Sütun 26 renkleriyle uyumlu - rose/pembe) */}
-              {rows.length > 0 && totalZararMaliyeti > 0 && (
-                <div className="flex items-center gap-3 px-4 py-2 bg-rose-50 dark:bg-rose-950/50 rounded-lg border border-rose-200 dark:border-rose-800">
-                  <div className="w-10 h-10 rounded-full bg-rose-100 dark:bg-rose-900 flex items-center justify-center">
-                    <span className="text-rose-600 dark:text-rose-400 text-lg font-bold">!</span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-sm font-semibold text-rose-800 dark:text-rose-200">Toplam Zarar</span>
-                    <span className="text-base font-bold text-rose-600 dark:text-rose-400">
-                      {costCurrency === 'TRY' ? '₺' : costCurrency === 'USD' ? '$' : '€'}
-                      {totalZararMaliyeti.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </span>
-                  </div>
-                </div>
-              )}
-            </div>
+          {selectedPool?.centerLabId && centerLab && (
+            <button
+              onClick={centerHakEdisMode ? resetCenterHakEdisMode : calculateCenterHakEdis}
+              disabled={isCalculatingCenterHakEdis || rows.length === 0}
+              className={`flex items-center gap-1 px-2 h-7 rounded text-[11px] font-medium border ${centerHakEdisMode ? 'bg-amber-100 border-amber-300 text-amber-700' : 'bg-amber-50 border-amber-200 text-amber-700'}`}
+              title={centerHakEdisMode ? 'Merkez modunu sıfırla' : `Merkez Lab: ${centerLab.name}`}
+            >
+              {isCalculatingCenterHakEdis ? <Loader2 className="h-3 w-3 animate-spin" /> : centerHakEdisMode ? <RotateCcw className="h-3 w-3" /> : <Crown className="h-3 w-3" />}
+              {centerHakEdisMode ? 'Merkez Mod ON' : 'Merkez Hak Ediş'}
+            </button>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
-      {selectedPoolId && (
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <CardTitle>Veri Tablosu</CardTitle>
-              <div className="flex items-center gap-2 flex-wrap">
-                {/* Search Bar */}
-                <div className="relative">
-                  <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                  <Input
-                    placeholder="Ara..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-8 w-48 h-9"
-                    aria-label="Tabloda ara"
-                  />
-                  {searchTerm && (
-                    <button
-                      onClick={() => setSearchTerm('')}
-                      className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground"
-                      aria-label="Aramayı temizle"
-                      type="button"
-                    >
-                      <X className="h-4 w-4" aria-hidden="true" />
-                    </button>
-                  )}
-                </div>
-                {/* Clear Filters Button */}
-                {hasActiveFilters && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={clearAllFilters}
-                    className="text-muted-foreground"
-                    aria-label="Tüm filtreleri temizle"
-                  >
-                    <X className="h-4 w-4 mr-1" aria-hidden="true" />
-                    Filtreleri Temizle
-                  </Button>
-                )}
-                {/* Results Only Toggle */}
-                <Button
-                  variant={showResultsOnly ? 'default' : 'outline'}
-                  size="sm"
-                  onClick={() => setShowResultsOnly(!showResultsOnly)}
-                  aria-pressed={showResultsOnly}
-                  aria-label={showResultsOnly ? "Tüm sütunları göster" : "Sadece sonuçları göster"}
-                >
-                  {showResultsOnly ? (
-                    <>
-                      <EyeOff className="h-4 w-4 mr-2" aria-hidden="true" />
-                      Tüm Sütunları Göster
-                    </>
-                  ) : (
-                    <>
-                      <Eye className="h-4 w-4 mr-2" aria-hidden="true" />
-                      Sadece Sonuçları Göster
-                    </>
-                  )}
-                </Button>
-              </div>
+      {/* ─── TABLE TOOLBAR ──────────────────────────────────────────── */}
+      <div className="bg-white dark:bg-zinc-900 border-b-2 border-zinc-300 dark:border-zinc-700 px-3 h-9 flex items-center gap-1.5 flex-shrink-0">
+        <div className="flex items-center gap-1 px-2 h-7 rounded border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 w-56">
+          <Search className="h-3 w-3 text-zinc-400" />
+          <input
+            placeholder="Ürün, stok kodu, test adı..."
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+            className="bg-transparent border-0 outline-0 text-[11.5px] flex-1 placeholder:text-zinc-400"
+          />
+          {searchTerm && <button onClick={() => setSearchTerm('')} className="text-zinc-400 hover:text-zinc-700"><X className="h-3 w-3" /></button>}
+        </div>
+        <button
+          onClick={() => setShowResultsOnly(v => !v)}
+          className={`flex items-center gap-1 px-2 h-7 rounded text-[11px] font-medium border ${showResultsOnly ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 border-zinc-900 dark:border-zinc-100' : 'border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+        >
+          {showResultsOnly ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+          Sadece Sonuçları
+        </button>
+        <button
+          onClick={() => setShowCostColumns(v => !v)}
+          className={`flex items-center gap-1 px-2 h-7 rounded text-[11px] font-medium border ${showCostColumns ? 'bg-emerald-100 border-emerald-300 text-emerald-700' : 'border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+        >
+          <span className="font-bold">{cur}</span>
+          Maliyet
+        </button>
+        {(Object.keys(colValFilters).length > 0 || advFilters.length > 0 || hasActiveFilters) && (
+          <button onClick={() => { setColValFilters({}); clearAllFilters(); clearAdvFilters(); }} className="flex items-center gap-1 px-2 h-7 rounded text-[11px] font-medium bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900">
+            <X className="h-3 w-3" />
+            {Object.keys(colValFilters).length + advFilters.length + (sortConfig.column ? 1 : 0) + (searchTerm ? 1 : 0)} filtre aktif
+          </button>
+        )}
+        <div className="w-px h-5 bg-zinc-200 dark:bg-zinc-700" />
+        <button onClick={expandAllLabs} className="flex items-center gap-1 px-2 h-7 rounded text-[11px] font-medium border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+          <Maximize2 className="h-3 w-3" />Tümünü Aç
+        </button>
+        <button onClick={collapseAllLabs} className="flex items-center gap-1 px-2 h-7 rounded text-[11px] font-medium border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800">
+          <Minimize2 className="h-3 w-3" />Tümünü Daralt
+        </button>
+        <div className="w-px h-5 bg-zinc-200 dark:bg-zinc-700" />
+        <button
+          onClick={() => setColMgrOpen(v => !v)}
+          className={`flex items-center gap-1 px-2 h-7 rounded text-[11px] font-medium border ${colMgrOpen ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 border-zinc-900 dark:border-zinc-100' : 'border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+        >
+          <Columns3 className="h-3 w-3" />Sütunlar
+          {hiddenCols.size > 0 && <span className="ml-1 px-1 rounded bg-orange-500 text-white text-[9px] font-bold">{hiddenCols.size}</span>}
+        </button>
+        <div className="w-px h-5 bg-zinc-200 dark:bg-zinc-700" />
+        {/* Density */}
+        <div className="flex items-center gap-0 border border-zinc-200 dark:border-zinc-700 rounded overflow-hidden h-7">
+          {(['compact', 'normal', 'comfortable'] as const).map(d => (
+            <button key={d} onClick={() => setDensity(d)} className={`px-1.5 h-full text-[10px] font-medium ${density === d ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900' : 'hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>
+              {d === 'compact' ? 'Sıkı' : d === 'normal' ? 'Normal' : 'Rahat'}
+            </button>
+          ))}
+        </div>
+        <div className="flex-1" />
+        <span className="text-[10.5px] text-zinc-400 font-mono">
+          {groupedRows.length} lab · {totalVisibleRows} satır · {visibleCols.length} sütun
+        </span>
+      </div>
+
+      {/* ─── DATA TABLE ─────────────────────────────────────────────── */}
+      <div className="flex-1 relative overflow-hidden bg-white dark:bg-zinc-900">
+        {!selectedPoolId ? (
+          <div className="flex items-center justify-center h-full text-zinc-400 text-[13px]">
+            <div className="text-center">
+              <BarChart3 className="h-12 w-12 mx-auto mb-3 opacity-30" />
+              <div className="font-medium mb-1">Verimlilik havuzu seçilmedi</div>
+              <div className="text-[11px]">Üst toolbar'dan "Havuz / Dönem" panelini açın</div>
             </div>
-            <CardDescription>
-              {showResultsOnly
-                ? 'Sonuç odaklı görünüm - sadece özet ve hesaplama sütunları gösteriliyor.'
-                : 'İlk 6 sütun otomatik doldurulur. Mavi alanlar manuel giriş, yeşil alanlar otomatik hesaplanır. Sütun 11 için "Sevkiyat Bilgisi Çek" butonunu kullanın. Sütun 12 için kaynak lab seçimi yapılır.'}
-              {hasActiveFilters && (
-                <span className="ml-2 text-primary font-medium">
-                  ({filteredAndSortedRows.length}/{rows.length} satır gösteriliyor)
-                </span>
-              )}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <div className="flex items-center justify-center h-64" role="status" aria-label="Yükleniyor">
-                <Loader2 className="h-8 w-8 animate-spin" aria-hidden="true" />
-                <span className="sr-only">Veriler yükleniyor...</span>
-              </div>
-            ) : rows.length === 0 ? (
-              <div className="text-center py-8 text-muted-foreground" role="status" aria-live="polite">
-                Bu havuz için min-max tanımlı ürün bulunamadı.
-              </div>
-            ) : (
-              <>
-              {/* Yatay Slider - Her zaman üstte sabit (sticky) */}
-              <div className="flex items-center gap-3 px-2 pb-3 sticky top-0 z-30 bg-background/95 backdrop-blur-sm border-b py-2">
-                <span className="text-xs text-muted-foreground whitespace-nowrap select-none">◀ Sol</span>
-                <input
-                  ref={sliderRef}
-                  type="range"
-                  min={0}
-                  max={100}
-                  step={0.5}
-                  defaultValue={0}
-                  onChange={handleSliderChange}
-                  className="w-full h-2 rounded-full appearance-none cursor-pointer bg-gradient-to-r from-orange-200 via-muted to-orange-200 dark:from-orange-900 dark:via-muted dark:to-orange-900 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-orange-500 [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-thumb]:cursor-grab [&::-webkit-slider-thumb]:active:cursor-grabbing [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-orange-500 [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:shadow-md [&::-moz-range-thumb]:cursor-grab"
-                  aria-label="Tabloyu yatay kaydır"
-                />
-                <span className="text-xs text-muted-foreground whitespace-nowrap select-none">Sağ ▶</span>
-              </div>
-
-              {/* Tablo konteyneri - glow efektleri ile */}
-              <div className="relative">
-                {/* Sol kenar turuncu glow */}
-                <div
-                  ref={glowLeftRef}
-                  className="pointer-events-none absolute left-0 top-0 bottom-0 w-16 z-20"
-                  style={{
-                    opacity: 0,
-                    background: 'linear-gradient(to right, rgba(249, 115, 22, 0.35), transparent)',
-                    transition: 'opacity 200ms ease',
-                  }}
-                />
-                {/* Sağ kenar turuncu glow */}
-                <div
-                  ref={glowRightRef}
-                  className="pointer-events-none absolute right-0 top-0 bottom-0 w-16 z-20"
-                  style={{
-                    opacity: 0,
-                    background: 'linear-gradient(to left, rgba(249, 115, 22, 0.35), transparent)',
-                    transition: 'opacity 200ms ease',
-                  }}
-                />
-
-              <ScrollArea className="w-full" ref={scrollContainerRef}>
-                <div ref={tableParentRef} className={showResultsOnly ? 'min-w-[1400px]' : 'min-w-[3400px]'} style={{ willChange: 'transform' }}>
-                  <Table aria-label="Total verimlilik veri tablosu">
-                    <TableHeader className="[&_th]:sticky [&_th]:top-0 [&_th]:z-20 [&_th]:backdrop-blur-sm">
-                      <TableRow>
-                        <TableHead className="w-[180px] min-w-[180px] bg-muted/50 sticky left-0 z-50">
-                          <div className="flex items-center gap-1">
-                            <span>1. Laboratuvar</span>
-                            <Popover>
-                              <PopoverTrigger asChild>
-                                <button className={`p-1 rounded hover:bg-muted ${columnFilters.labName.size > 0 ? 'text-primary' : 'text-muted-foreground'}`}>
-                                  <Filter className="h-3.5 w-3.5" />
-                                </button>
-                              </PopoverTrigger>
-                              <PopoverContent className="w-64 p-2" align="start">
-                                <div className="space-y-2">
-                                  <div className="flex items-center justify-between pb-2 border-b">
-                                    <span className="text-sm font-medium">Laboratuvar Filtrele</span>
-                                    {columnFilters.labName.size > 0 && (
-                                      <Badge variant="secondary" className="text-xs">
-                                        {columnFilters.labName.size} seçili
-                                      </Badge>
-                                    )}
-                                  </div>
-                                  <div className="flex gap-1">
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="text-xs flex-1"
-                                      onClick={() => setAllFilterValues('labName', uniqueFilterValues.labName, true)}
-                                    >
-                                      Tümünü Seç
-                                    </Button>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="text-xs flex-1"
-                                      onClick={() => setAllFilterValues('labName', [], false)}
-                                    >
-                                      Temizle
-                                    </Button>
-                                  </div>
-                                  <ScrollArea className="h-48">
-                                    <div className="space-y-1">
-                                      {uniqueFilterValues.labName.map(value => (
-                                        <div key={value} className="flex items-center gap-2">
-                                          <Checkbox
-                                            id={`lab-${value}`}
-                                            checked={columnFilters.labName.has(value)}
-                                            onCheckedChange={() => toggleFilterValue('labName', value)}
-                                          />
-                                          <Label htmlFor={`lab-${value}`} className="text-sm cursor-pointer flex-1 truncate">
-                                            {value}
-                                          </Label>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </ScrollArea>
-                                </div>
-                              </PopoverContent>
-                            </Popover>
-                          </div>
-                        </TableHead>
-                        <TableHead className="w-[120px] min-w-[120px] bg-background sticky left-[180px] z-50">2. Stok Kodu</TableHead>
-                        <TableHead className="w-[200px] min-w-[200px] bg-background sticky left-[300px] z-50">
-                          <div className="flex items-center gap-1">
-                            <span>3. Ürün Adı</span>
-                            <Popover>
-                              <PopoverTrigger asChild>
-                                <button className={`p-1 rounded hover:bg-muted ${columnFilters.stokAdi.size > 0 ? 'text-primary' : 'text-muted-foreground'}`}>
-                                  <Filter className="h-3.5 w-3.5" />
-                                </button>
-                              </PopoverTrigger>
-                              <PopoverContent className="w-72 p-2" align="start">
-                                <div className="space-y-2">
-                                  <div className="flex items-center justify-between pb-2 border-b">
-                                    <span className="text-sm font-medium">Ürün Adı Filtrele</span>
-                                    {columnFilters.stokAdi.size > 0 && (
-                                      <Badge variant="secondary" className="text-xs">
-                                        {columnFilters.stokAdi.size} seçili
-                                      </Badge>
-                                    )}
-                                  </div>
-                                  <div className="flex gap-1">
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="text-xs flex-1"
-                                      onClick={() => setAllFilterValues('stokAdi', uniqueFilterValues.stokAdi, true)}
-                                    >
-                                      Tümünü Seç
-                                    </Button>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="text-xs flex-1"
-                                      onClick={() => setAllFilterValues('stokAdi', [], false)}
-                                    >
-                                      Temizle
-                                    </Button>
-                                  </div>
-                                  <ScrollArea className="h-48">
-                                    <div className="space-y-1">
-                                      {uniqueFilterValues.stokAdi.map(value => (
-                                        <div key={value} className="flex items-center gap-2">
-                                          <Checkbox
-                                            id={`stok-${value}`}
-                                            checked={columnFilters.stokAdi.has(value)}
-                                            onCheckedChange={() => toggleFilterValue('stokAdi', value)}
-                                          />
-                                          <Label htmlFor={`stok-${value}`} className="text-sm cursor-pointer flex-1 truncate">
-                                            {value}
-                                          </Label>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  </ScrollArea>
-                                </div>
-                              </PopoverContent>
-                            </Popover>
-                          </div>
-                        </TableHead>
-                        {!showResultsOnly && (
-                          <>
-                            <TableHead className="min-w-[150px]">
-                              <div className="flex items-center gap-1">
-                                <span>4. Test Adı</span>
-                                <Popover>
-                                  <PopoverTrigger asChild>
-                                    <button className={`p-1 rounded hover:bg-muted ${columnFilters.testAdi.size > 0 ? 'text-primary' : 'text-muted-foreground'}`}>
-                                      <Filter className="h-3.5 w-3.5" />
-                                    </button>
-                                  </PopoverTrigger>
-                                  <PopoverContent className="w-64 p-2" align="start">
-                                    <div className="space-y-2">
-                                      <div className="flex items-center justify-between pb-2 border-b">
-                                        <span className="text-sm font-medium">Test Adı Filtrele</span>
-                                        {columnFilters.testAdi.size > 0 && (
-                                          <Badge variant="secondary" className="text-xs">
-                                            {columnFilters.testAdi.size} seçili
-                                          </Badge>
-                                        )}
-                                      </div>
-                                      <div className="flex gap-1">
-                                        <Button
-                                          variant="outline"
-                                          size="sm"
-                                          className="text-xs flex-1"
-                                          onClick={() => setAllFilterValues('testAdi', uniqueFilterValues.testAdi, true)}
-                                        >
-                                          Tümünü Seç
-                                        </Button>
-                                        <Button
-                                          variant="outline"
-                                          size="sm"
-                                          className="text-xs flex-1"
-                                          onClick={() => setAllFilterValues('testAdi', [], false)}
-                                        >
-                                          Temizle
-                                        </Button>
-                                      </div>
-                                      <ScrollArea className="h-48">
-                                        <div className="space-y-1">
-                                          {uniqueFilterValues.testAdi.map(value => (
-                                            <div key={value} className="flex items-center gap-2">
-                                              <Checkbox
-                                                id={`test-${value}`}
-                                                checked={columnFilters.testAdi.has(value)}
-                                                onCheckedChange={() => toggleFilterValue('testAdi', value)}
-                                              />
-                                              <Label htmlFor={`test-${value}`} className="text-sm cursor-pointer flex-1 truncate">
-                                                {value}
-                                              </Label>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      </ScrollArea>
-                                    </div>
-                                  </PopoverContent>
-                                </Popover>
-                              </div>
-                            </TableHead>
-                            <TableHead className="min-w-[100px] text-center">5. Ambalaj</TableHead>
-                            <TableHead className="min-w-[150px]">
-                              <div className="flex items-center gap-1">
-                                <span>6. Cihaz Grubu</span>
-                                <Popover>
-                                  <PopoverTrigger asChild>
-                                    <button className={`p-1 rounded hover:bg-muted ${columnFilters.cihazGrubu.size > 0 ? 'text-primary' : 'text-muted-foreground'}`}>
-                                      <Filter className="h-3.5 w-3.5" />
-                                    </button>
-                                  </PopoverTrigger>
-                                  <PopoverContent className="w-64 p-2" align="start">
-                                    <div className="space-y-2">
-                                      <div className="flex items-center justify-between pb-2 border-b">
-                                        <span className="text-sm font-medium">Cihaz Grubu Filtrele</span>
-                                        {columnFilters.cihazGrubu.size > 0 && (
-                                          <Badge variant="secondary" className="text-xs">
-                                            {columnFilters.cihazGrubu.size} seçili
-                                          </Badge>
-                                        )}
-                                      </div>
-                                      <div className="flex gap-1">
-                                        <Button
-                                          variant="outline"
-                                          size="sm"
-                                          className="text-xs flex-1"
-                                          onClick={() => setAllFilterValues('cihazGrubu', uniqueFilterValues.cihazGrubu, true)}
-                                        >
-                                          Tümünü Seç
-                                        </Button>
-                                        <Button
-                                          variant="outline"
-                                          size="sm"
-                                          className="text-xs flex-1"
-                                          onClick={() => setAllFilterValues('cihazGrubu', [], false)}
-                                        >
-                                          Temizle
-                                        </Button>
-                                      </div>
-                                      <ScrollArea className="h-48">
-                                        <div className="space-y-1">
-                                          {uniqueFilterValues.cihazGrubu.map(value => (
-                                            <div key={value} className="flex items-center gap-2">
-                                              <Checkbox
-                                                id={`cihaz-${value}`}
-                                                checked={columnFilters.cihazGrubu.has(value)}
-                                                onCheckedChange={() => toggleFilterValue('cihazGrubu', value)}
-                                              />
-                                              <Label htmlFor={`cihaz-${value}`} className="text-sm cursor-pointer flex-1 truncate">
-                                                {value}
-                                              </Label>
-                                            </div>
-                                          ))}
-                                        </div>
-                                      </ScrollArea>
-                                    </div>
-                                  </PopoverContent>
-                                </Popover>
-                              </div>
-                            </TableHead>
-                            <TableHead className="min-w-[130px] bg-blue-50 dark:bg-blue-950">
-                              7. Başlangıç Stoğu (Kutu)
-                            </TableHead>
-                            <TableHead className="min-w-[150px] bg-blue-50 dark:bg-blue-950">
-                              8. Ay Başı Cihaz Üstü (Test)
-                            </TableHead>
-                          </>
-                        )}
-                        <TableHead className="min-w-[150px] bg-green-50 dark:bg-green-950 text-center">
-                          9. Total Ay Başı Stok (Test)
-                        </TableHead>
-                        {!showResultsOnly && (
-                          <>
-                            {/* Phase 2 - Sütunlar 10-14 */}
-                            <TableHead className="min-w-[130px] bg-blue-50 dark:bg-blue-950">
-                              10. Ay Başı Sevkiyat (Kutu)
-                            </TableHead>
-                            <TableHead className="min-w-[130px] bg-purple-50 dark:bg-purple-950">
-                              11. Göztepe Sevkiyat (Kutu)
-                            </TableHead>
-                            <TableHead className="min-w-[180px] bg-orange-50 dark:bg-orange-950">
-                              12. Kurumlar Arası Sevk (Kutu)
-                            </TableHead>
-                            <TableHead className="min-w-[140px] bg-blue-50 dark:bg-blue-950">
-                              13. Lojistik Ara Transfer (Kutu)
-                            </TableHead>
-                          </>
-                        )}
-                        <TableHead className="min-w-[180px] bg-green-50 dark:bg-green-950 text-center">
-                          14. Sevkiyatlar Sonrası Total Test
-                        </TableHead>
-                        {/* Phase 3 - Sütunlar 15-19 */}
-                        <TableHead className="min-w-[140px] bg-cyan-50 dark:bg-cyan-950">
-                          15. Kümülatif Total (Test)
-                        </TableHead>
-                        {!showResultsOnly && (
-                          <>
-                            <TableHead className="min-w-[140px] bg-blue-50 dark:bg-blue-950">
-                              16. Dönem Sonu Stok (Kutu)
-                            </TableHead>
-                            <TableHead className="min-w-[160px] bg-blue-50 dark:bg-blue-950">
-                              17. Dönem Sonu Cihaz Üstü (Test)
-                            </TableHead>
-                          </>
-                        )}
-                        <TableHead className="min-w-[180px] bg-green-50 dark:bg-green-950 text-center">
-                          18. Dönem Sonu Toplam Test
-                        </TableHead>
-                        <TableHead className="min-w-[140px] bg-yellow-50 dark:bg-yellow-950">
-                          19. Hak Ediş (Test)
-                        </TableHead>
-                        {/* Phase 4 - Sütunlar 20-21 */}
-                        <TableHead className="min-w-[200px] bg-red-50 dark:bg-red-950 text-center">
-                          <div className="flex flex-col items-center">
-                            <div className="flex items-center gap-1">
-                              <span>20. Stok Doğruluk</span>
-                              <button
-                                onClick={() => toggleSort('stokDogrulukFark')}
-                                className={`p-1 rounded hover:bg-red-100 dark:hover:bg-red-900 ${sortConfig.column === 'stokDogrulukFark' ? 'text-primary' : 'text-muted-foreground'}`}
-                              >
-                                {sortConfig.column === 'stokDogrulukFark' ? (
-                                  sortConfig.direction === 'asc' ? (
-                                    <ArrowUp className="h-3.5 w-3.5" />
-                                  ) : (
-                                    <ArrowDown className="h-3.5 w-3.5" />
-                                  )
-                                ) : (
-                                  <ArrowUpDown className="h-3.5 w-3.5" />
-                                )}
-                              </button>
-                            </div>
-                            <span className="text-xs font-normal text-muted-foreground">(14-18) - 15</span>
-                          </div>
-                        </TableHead>
-                        <TableHead className="min-w-[200px] bg-emerald-50 dark:bg-emerald-950 text-center">
-                          <div className="flex flex-col items-center">
-                            <div className="flex items-center gap-1">
-                              <span>21. Kit Verimlilik</span>
-                              <button
-                                onClick={() => toggleSort('kitVerimlilikFark')}
-                                className={`p-1 rounded hover:bg-emerald-100 dark:hover:bg-emerald-900 ${sortConfig.column === 'kitVerimlilikFark' ? 'text-primary' : 'text-muted-foreground'}`}
-                              >
-                                {sortConfig.column === 'kitVerimlilikFark' ? (
-                                  sortConfig.direction === 'asc' ? (
-                                    <ArrowUp className="h-3.5 w-3.5" />
-                                  ) : (
-                                    <ArrowDown className="h-3.5 w-3.5" />
-                                  )
-                                ) : (
-                                  <ArrowUpDown className="h-3.5 w-3.5" />
-                                )}
-                              </button>
-                            </div>
-                            <span className="text-xs font-normal text-muted-foreground">15 - 19</span>
-                          </div>
-                        </TableHead>
-                        {/* Sütun 22: Kutu Kayıp */}
-                        <TableHead className="min-w-[180px] bg-violet-50 dark:bg-violet-950 text-center p-0">
-                          <div className="flex flex-col">
-                            <div className="flex">
-                              <button
-                                onClick={() => setColumn22Mode('kumulatif')}
-                                className={`flex-1 py-1.5 px-2 text-xs font-medium transition-colors ${
-                                  column22Mode === 'kumulatif'
-                                    ? 'bg-violet-500 text-white'
-                                    : 'bg-violet-100 dark:bg-violet-900 text-violet-700 dark:text-violet-300 hover:bg-violet-200 dark:hover:bg-violet-800'
-                                }`}
-                              >
-                                Kümülatife Göre
-                              </button>
-                              <button
-                                onClick={() => setColumn22Mode('hakedis')}
-                                className={`flex-1 py-1.5 px-2 text-xs font-medium transition-colors ${
-                                  column22Mode === 'hakedis'
-                                    ? 'bg-violet-500 text-white'
-                                    : 'bg-violet-100 dark:bg-violet-900 text-violet-700 dark:text-violet-300 hover:bg-violet-200 dark:hover:bg-violet-800'
-                                }`}
-                              >
-                                Hak Edişe Göre
-                              </button>
-                            </div>
-                            <div className="py-1.5 px-2">
-                              <span>22. Kutu Kayıp</span>
-                              <div className="text-xs font-normal text-muted-foreground">
-                                {column22Mode === 'kumulatif' ? '((14-18)-15)/Amb' : '((14-18)-19)/Amb'}
-                              </div>
-                            </div>
-                          </div>
-                        </TableHead>
-                        {/* Maliyet Sütunları Toggle Butonu */}
-                        <TableHead className={`${showCostColumns ? 'min-w-[60px]' : 'min-w-[140px]'} bg-gradient-to-r from-emerald-50 via-amber-50 to-sky-50 dark:from-emerald-950 dark:via-amber-950 dark:to-sky-950 text-center`}>
-                          <button
-                            onClick={() => setShowCostColumns(!showCostColumns)}
-                            className="flex flex-col items-center justify-center gap-1 w-full py-2 hover:bg-white/50 dark:hover:bg-black/20 rounded transition-colors"
-                          >
-                            {showCostColumns ? (
-                              <>
-                                <EyeOff className="h-4 w-4 text-muted-foreground" />
-                                <span className="text-xs text-muted-foreground">Gizle</span>
-                              </>
-                            ) : (
-                              <>
-                                <Eye className="h-4 w-4 text-emerald-600" />
-                                <span className="text-xs font-medium">Maliyet</span>
-                                <span className="text-[10px] text-muted-foreground">23-24-25</span>
-                              </>
-                            )}
-                          </button>
-                        </TableHead>
-                        {/* Sütun 23: Dönem İçi Sarfiyat Maliyeti */}
-                        {showCostColumns && (
-                        <TableHead className="min-w-[180px] bg-emerald-50 dark:bg-emerald-950 text-center p-0">
-                          <div className="flex flex-col">
-                            <div className="flex">
-                              <button
-                                onClick={() => setCostCurrency('TRY')}
-                                className={`flex-1 py-1.5 px-2 text-xs font-medium transition-colors ${
-                                  costCurrency === 'TRY'
-                                    ? 'bg-emerald-500 text-white'
-                                    : 'bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-800'
-                                }`}
-                              >
-                                TL
-                              </button>
-                              <button
-                                onClick={() => setCostCurrency('USD')}
-                                className={`flex-1 py-1.5 px-2 text-xs font-medium transition-colors ${
-                                  costCurrency === 'USD'
-                                    ? 'bg-emerald-500 text-white'
-                                    : 'bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-800'
-                                }`}
-                              >
-                                USD
-                              </button>
-                              <button
-                                onClick={() => setCostCurrency('EUR')}
-                                className={`flex-1 py-1.5 px-2 text-xs font-medium transition-colors ${
-                                  costCurrency === 'EUR'
-                                    ? 'bg-emerald-500 text-white'
-                                    : 'bg-emerald-100 dark:bg-emerald-900 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-200 dark:hover:bg-emerald-800'
-                                }`}
-                              >
-                                EUR
-                              </button>
-                            </div>
-                            <div className="py-1.5 px-2">
-                              <span>23. Sarfiyat Maliyeti</span>
-                              <div className="text-xs font-normal text-muted-foreground">
-                                (14-18) × (Maliyet/Amb)
-                              </div>
-                            </div>
-                          </div>
-                        </TableHead>
-                        )}
-                        {/* Sütun 24: Hak Ediş Karşılığı */}
-                        {showCostColumns && (
-                        <TableHead className="min-w-[180px] bg-amber-50 dark:bg-amber-950 text-center p-0">
-                          <div className="flex flex-col">
-                            <div className="flex">
-                              <button
-                                onClick={() => setCostCurrency('TRY')}
-                                className={`flex-1 py-1.5 px-2 text-xs font-medium transition-colors ${
-                                  costCurrency === 'TRY'
-                                    ? 'bg-amber-500 text-white'
-                                    : 'bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-800'
-                                }`}
-                              >
-                                TL
-                              </button>
-                              <button
-                                onClick={() => setCostCurrency('USD')}
-                                className={`flex-1 py-1.5 px-2 text-xs font-medium transition-colors ${
-                                  costCurrency === 'USD'
-                                    ? 'bg-amber-500 text-white'
-                                    : 'bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-800'
-                                }`}
-                              >
-                                USD
-                              </button>
-                              <button
-                                onClick={() => setCostCurrency('EUR')}
-                                className={`flex-1 py-1.5 px-2 text-xs font-medium transition-colors ${
-                                  costCurrency === 'EUR'
-                                    ? 'bg-amber-500 text-white'
-                                    : 'bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300 hover:bg-amber-200 dark:hover:bg-amber-800'
-                                }`}
-                              >
-                                EUR
-                              </button>
-                            </div>
-                            <div className="py-1.5 px-2">
-                              <span>24. Hak Ediş Karşılığı</span>
-                              <div className="text-xs font-normal text-muted-foreground">
-                                HakEdişTL × TestSayısı(19)
-                              </div>
-                            </div>
-                          </div>
-                        </TableHead>
-                        )}
-                        {/* Sütun 25: Kâr */}
-                        {showCostColumns && (
-                        <TableHead className="min-w-[180px] bg-sky-50 dark:bg-sky-950 text-center p-0">
-                          <div className="flex flex-col">
-                            <div className="flex">
-                              <button
-                                onClick={() => setCostCurrency('TRY')}
-                                className={`flex-1 py-1.5 px-2 text-xs font-medium transition-colors ${
-                                  costCurrency === 'TRY'
-                                    ? 'bg-sky-500 text-white'
-                                    : 'bg-sky-100 dark:bg-sky-900 text-sky-700 dark:text-sky-300 hover:bg-sky-200 dark:hover:bg-sky-800'
-                                }`}
-                              >
-                                TL
-                              </button>
-                              <button
-                                onClick={() => setCostCurrency('USD')}
-                                className={`flex-1 py-1.5 px-2 text-xs font-medium transition-colors ${
-                                  costCurrency === 'USD'
-                                    ? 'bg-sky-500 text-white'
-                                    : 'bg-sky-100 dark:bg-sky-900 text-sky-700 dark:text-sky-300 hover:bg-sky-200 dark:hover:bg-sky-800'
-                                }`}
-                              >
-                                USD
-                              </button>
-                              <button
-                                onClick={() => setCostCurrency('EUR')}
-                                className={`flex-1 py-1.5 px-2 text-xs font-medium transition-colors ${
-                                  costCurrency === 'EUR'
-                                    ? 'bg-sky-500 text-white'
-                                    : 'bg-sky-100 dark:bg-sky-900 text-sky-700 dark:text-sky-300 hover:bg-sky-200 dark:hover:bg-sky-800'
-                                }`}
-                              >
-                                EUR
-                              </button>
-                            </div>
-                            <div className="py-1.5 px-2">
-                              <span>25. Kâr</span>
-                              <div className="text-xs font-normal text-muted-foreground">
-                                Sütun 24 - Sütun 23
-                              </div>
-                            </div>
-                          </div>
-                        </TableHead>
-                        )}
-                        {/* Sütun 26: Zarar Maliyeti */}
-                        <TableHead className="min-w-[180px] bg-rose-50 dark:bg-rose-950 text-center">
-                          <div className="flex flex-col gap-1">
-                            <span>26. Zarar Maliyeti</span>
-                            <div className="text-xs font-normal text-muted-foreground">
-                              Fark(20) × (Maliyet/Amb)
-                            </div>
-                          </div>
-                        </TableHead>
-                        {/* Sütun 27: Merkeze Gönderilen Test */}
-                        {centerHakEdisMode && (
-                          <TableHead className="min-w-[160px] bg-orange-50 dark:bg-orange-950 text-center">
-                            <div className="flex flex-col gap-1">
-                              <div className="flex items-center justify-center gap-1">
-                                <Building2 className="h-3.5 w-3.5 text-orange-600" />
-                                <span>27. Merkeze Gönderilen</span>
-                              </div>
-                              <div className="text-xs font-normal text-muted-foreground">
-                                Test Sayısı
-                              </div>
-                            </div>
-                          </TableHead>
-                        )}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {deferredRows.map((row) => {
+          </div>
+        ) : isLoading ? (
+          <div className="flex items-center justify-center h-full">
+            <Loader2 className="h-6 w-6 animate-spin text-orange-500" />
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="flex items-center justify-center h-full text-zinc-400 text-[13px]">Bu havuz için min-max tanımlı ürün bulunamadı.</div>
+        ) : (
+          <>
+            {/* Edge glow (green spotlight) */}
+            <div ref={greenGlowLeftRef} className="pointer-events-none absolute left-0 top-0 bottom-0 w-20 z-30" style={{ opacity: 0, background: 'linear-gradient(to right, rgba(34,197,94,0.18), transparent)', transition: 'opacity 120ms' }} />
+            <div ref={greenGlowRightRef} className="pointer-events-none absolute right-0 top-0 bottom-0 w-20 z-30" style={{ opacity: 0, background: 'linear-gradient(to left, rgba(34,197,94,0.18), transparent)', transition: 'opacity 120ms' }} />
+            <ScrollArea className="w-full h-full" ref={scrollContainerRef}>
+              <div ref={tableParentRef} style={{ minWidth: visibleCols.reduce((s, c) => s + c.w, 0) + 36 }}>
+                <table className="border-separate border-spacing-0 w-full">
+                  <thead>
+                    <tr>
+                      {/* Row select column */}
+                      <th className="sticky top-0 left-0 z-40 bg-zinc-100 dark:bg-zinc-800 border-b-2 border-r border-zinc-300 dark:border-zinc-700 h-8 w-9 px-1">
+                        <span className="text-[9px] text-zinc-400">#</span>
+                      </th>
+                      {visibleCols.map(col => {
+                        const stickyLeft = col.frozen ? FROZEN_LEFT[col.frozen] + 36 : undefined;
+                        const isSel = selCols.has(col.id);
+                        const colFmt = colFmts[col.id] || {};
+                        const hasFilter = !!colValFilters[col.id];
                         return (
-                          <TableRow
-                            key={row.id}
-                            className="text-sm"
-                            style={{
-                              contentVisibility: 'auto',
-                              containIntrinsicSize: '0 60px',
-                              contain: 'layout style paint',
-                            } as React.CSSProperties}
+                          <th
+                            key={col.id}
+                            onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, rowId: null, colId: col.id }); }}
+                            className={`group sticky top-0 ${col.frozen ? 'z-40' : 'z-30'} border-b-2 border-r border-zinc-300 dark:border-zinc-700 ${headerBgClass(col.type)} ${isSel ? 'outline outline-2 outline-blue-500 -outline-offset-2' : ''} h-8 px-1.5 text-left text-[9.5px] font-semibold text-zinc-600 dark:text-zinc-300 align-bottom`}
+                            style={{ width: col.w, minWidth: col.w, left: stickyLeft, ...(colFmt.bg ? { background: colFmt.bg } : {}) }}
                           >
-                            <TableCell className="w-[180px] min-w-[180px] font-medium bg-muted/30 sticky left-0 z-40">
-                              <div>
-                                <span>{row.labName}</span>
-                                {row.labKod && (
-                                  <span className="ml-1 text-xs font-mono text-muted-foreground">
-                                    ({row.labKod})
-                                  </span>
+                            <div className="flex flex-col items-stretch gap-0">
+                              <div className="flex items-center gap-1 cursor-pointer" onClick={(e) => toggleSelCol(col.id, e)}>
+                                <span className="text-[8px] text-zinc-400 font-normal">{col.num}.</span>
+                                <span className="flex-1 truncate">{col.label}</span>
+                                {sortConfig.column === col.id && (sortConfig.direction === 'asc' ? <ArrowUp className="h-2.5 w-2.5 text-blue-600" /> : <ArrowDown className="h-2.5 w-2.5 text-blue-600" />)}
+                                <button
+                                  onClick={(e) => openColFilter(col, e)}
+                                  className={`opacity-0 group-hover:opacity-70 hover:!opacity-100 w-3.5 h-3.5 rounded-sm flex items-center justify-center ${hasFilter ? 'opacity-100 bg-blue-600 text-white' : 'hover:bg-zinc-300/50'}`}
+                                  title="Sırala / Filtrele"
+                                ><ChevronDown className="h-2.5 w-2.5" /></button>
+                                {!col.frozen && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); toggleHidden(col.id); }}
+                                    className="opacity-0 group-hover:opacity-70 hover:!opacity-100 w-3.5 h-3.5 rounded-sm flex items-center justify-center hover:bg-zinc-300/50"
+                                    title="Sütunu gizle"
+                                  ><X className="h-2.5 w-2.5" /></button>
                                 )}
                               </div>
-                            </TableCell>
-                            <TableCell className="w-[120px] min-w-[120px] font-mono text-xs bg-background sticky left-[180px] z-30">{row.stokKodu}</TableCell>
-                            <TableCell className="w-[200px] min-w-[200px] bg-background sticky left-[300px] z-30">{row.stokAdi}</TableCell>
-                            {!showResultsOnly && (
-                              <>
-                                <TableCell className="text-muted-foreground">{row.testAdi || '-'}</TableCell>
-                                <TableCell className="text-center">{row.ambalajDegeri || '-'}</TableCell>
-                                <TableCell className="text-muted-foreground">{row.cihazGrubu || '-'}</TableCell>
-                                <TableCell className="bg-blue-50/50 dark:bg-blue-950/50">
-                                  <DebouncedInput
-                                    type="number"
-                                    min="0"
-                                    className="h-8 w-24"
-                                    value={row.baslangicStokuKutu || ''}
-                                    onChange={(value) => handleValueChange(row.id, 'baslangicStokuKutu', value)}
-                                    placeholder="0"
-                                  />
-                                </TableCell>
-                                <TableCell className="bg-blue-50/50 dark:bg-blue-950/50">
-                                  <DebouncedInput
-                                    type="number"
-                                    min="0"
-                                    className="h-8 w-28"
-                                    value={row.ayBasiCihazUstuTest || ''}
-                                    onChange={(value) => handleValueChange(row.id, 'ayBasiCihazUstuTest', value)}
-                                    placeholder="0"
-                                  />
-                                </TableCell>
-                              </>
-                            )}
-                            <TableCell className="bg-green-50/50 dark:bg-green-950/50 text-center font-semibold">
-                              {row.totalAyBasiStok.toLocaleString('tr-TR')}
-                            </TableCell>
-                            {!showResultsOnly && (
-                              <>
-                                {/* Phase 2 - Sütunlar 10-14 */}
-                                {/* Sütun 10: Ay Başı Sevkiyat (Kutu) */}
-                                <TableCell className="bg-blue-50/50 dark:bg-blue-950/50">
-                                  <DebouncedInput
-                                    type="number"
-                                    min="0"
-                                    className="h-8 w-24"
-                                    value={row.ayBasiSevkiyatKutu || ''}
-                                    onChange={(value) => handleValueChange(row.id, 'ayBasiSevkiyatKutu', value)}
-                                    placeholder="0"
-                                  />
-                                </TableCell>
-                                {/* Sütun 11: Göztepe Sevkiyat (Kutu) */}
-                                <TableCell className="bg-purple-50/50 dark:bg-purple-950/50">
-                                  <DebouncedInput
-                                    type="number"
-                                    min="0"
-                                    className="h-8 w-24"
-                                    value={row.goztepeSevkiyat || ''}
-                                    onChange={(value) => handleValueChange(row.id, 'goztepeSevkiyat', value)}
-                                    placeholder="0"
-                                  />
-                                </TableCell>
-                                {/* Sütun 12: Kurumlar Arası Sevk (Kutu) */}
-                                <TableCell className="bg-orange-50/50 dark:bg-orange-950/50">
-                                  <div className="flex flex-col gap-1">
-                                    <Input
-                                      type="number"
-                                      min="0"
-                                      className="h-8 w-24"
-                                      value={row.kurumlarArasiSevk || ''}
-                                      onChange={e => handleKurumlarArasiSevkChange(row.id, e.target.value)}
-                                      placeholder="0"
-                                    />
-                                    {interLabTransfers[row.id] && (
-                                      <span className="text-xs text-orange-600 dark:text-orange-400">
-                                        ← {interLabTransfers[row.id].sourceLabName}
-                                      </span>
-                                    )}
-                                  </div>
-                                </TableCell>
-                                {/* Sütun 13: Lojistik Ara Transfer (Kutu) */}
-                                <TableCell className="bg-blue-50/50 dark:bg-blue-950/50">
-                                  <DebouncedInput
-                                    type="number"
-                                    min="0"
-                                    className="h-8 w-24"
-                                    value={row.lojistikAraTransfer || ''}
-                                    onChange={(value) => handleValueChange(row.id, 'lojistikAraTransfer', value)}
-                                    placeholder="0"
-                                  />
-                                </TableCell>
-                              </>
-                            )}
-                            {/* Sütun 14: Sevkiyatlar Sonrası Total Test */}
-                            <TableCell className="bg-green-50/50 dark:bg-green-950/50 text-center font-semibold">
-                              {row.sevkiyatlarSonrasiTotalTest.toLocaleString('tr-TR')}
-                            </TableCell>
-                            {/* Phase 3 - Sütunlar 15-19 */}
-                            {/* Sütun 15: Kümülatif Total (Test) */}
-                            <TableCell className="bg-cyan-50/50 dark:bg-cyan-950/50">
-                              {showResultsOnly ? (
-                                <span className="font-semibold">{row.kumulatifTotal.toLocaleString('tr-TR')}</span>
-                              ) : (
-                                <DebouncedInput
-                                  type="number"
-                                  min="0"
-                                  className="h-8 w-28"
-                                  value={row.kumulatifTotal || ''}
-                                  onChange={(value) => handleValueChange(row.id, 'kumulatifTotal', value)}
-                                  placeholder="0"
-                                />
-                              )}
-                            </TableCell>
-                            {!showResultsOnly && (
-                              <>
-                                {/* Sütun 16: Dönem Sonu Stok (Kutu) */}
-                                <TableCell className="bg-blue-50/50 dark:bg-blue-950/50">
-                                  <DebouncedInput
-                                    type="number"
-                                    min="0"
-                                    className="h-8 w-24"
-                                    value={row.donemSonuStokKutu || ''}
-                                    onChange={(value) => handleValueChange(row.id, 'donemSonuStokKutu', value)}
-                                    placeholder="0"
-                                  />
-                                </TableCell>
-                                {/* Sütun 17: Dönem Sonu Cihaz Üstü (Test) */}
-                                <TableCell className="bg-blue-50/50 dark:bg-blue-950/50">
-                                  <DebouncedInput
-                                    type="number"
-                                    min="0"
-                                    className="h-8 w-28"
-                                    value={row.donemSonuCihazUstuTest || ''}
-                                    onChange={(value) => handleValueChange(row.id, 'donemSonuCihazUstuTest', value)}
-                                    placeholder="0"
-                                  />
-                                </TableCell>
-                              </>
-                            )}
-                            {/* Sütun 18: Dönem Sonu Toplam Test (Hesaplanan) */}
-                            <TableCell className="bg-green-50/50 dark:bg-green-950/50 text-center font-semibold">
-                              {row.donemSonuToplamTest.toLocaleString('tr-TR')}
-                            </TableCell>
-                            {/* Sütun 19: Hak Ediş (Test) */}
-                            <TableCell className={`${centerHakEdisMode && testsSentToCenter[row.id] ? 'bg-amber-100/50 dark:bg-amber-950/50' : 'bg-yellow-50/50 dark:bg-yellow-950/50'}`}>
-                              {showResultsOnly ? (
-                                <div className="flex flex-col items-center">
-                                  <span className="font-semibold">{row.hakEdis.toLocaleString('tr-TR')}</span>
-                                  {centerHakEdisMode && testsSentToCenter[row.id] > 0 && (
-                                    <div className="flex flex-col items-center text-xs text-amber-600 dark:text-amber-400">
-                                      <span className="line-through text-muted-foreground">{row.hakEdis.toLocaleString('tr-TR')}</span>
-                                      <span className="font-semibold">→ {getAdjustedHakEdis(row).toLocaleString('tr-TR')}</span>
-                                    </div>
-                                  )}
-                                </div>
-                              ) : (
-                                <div className="flex flex-col gap-1">
-                                  <DebouncedInput
-                                    type="number"
-                                    min="0"
-                                    className="h-8 w-28"
-                                    value={row.hakEdis || ''}
-                                    onChange={(value) => handleValueChange(row.id, 'hakEdis', value)}
-                                    placeholder="0"
-                                  />
-                                  {centerHakEdisMode && testsSentToCenter[row.id] > 0 && (
-                                    <div className="text-xs text-amber-600 dark:text-amber-400 text-center">
-                                      Düzeltilmiş: {getAdjustedHakEdis(row).toLocaleString('tr-TR')}
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                            </TableCell>
-                            {/* Phase 4 - Sütunlar 20-21 */}
-                            {/* Sütun 20: Stok Doğruluk (Fark + Yüzde) */}
-                            <TableCell className="bg-red-50/50 dark:bg-red-950/50 text-center">
-                              <div className="flex flex-col items-center gap-0.5">
-                                <span className={`font-semibold ${row.stokDogrulukFark !== 0 ? (row.stokDogrulukFark > 0 ? 'text-red-600' : 'text-green-600') : ''}`}>
-                                  Fark {row.stokDogrulukFark > 0 ? '-' : (row.stokDogrulukFark < 0 ? '+' : '')}{Math.abs(row.stokDogrulukFark).toLocaleString('tr-TR')} test
-                                </span>
-                                <span className={`text-xs ${row.stokDogrulukYuzde !== 0 ? (row.stokDogrulukYuzde > 0 ? 'text-red-500' : 'text-green-500') : 'text-muted-foreground'}`}>
-                                  {row.stokDogrulukFark > 0 ? '-' : (row.stokDogrulukFark < 0 ? '+' : '')}{Math.abs(row.stokDogrulukFark).toLocaleString('tr-TR')}/{row.kumulatifTotal.toLocaleString('tr-TR')} = %{row.stokDogrulukYuzde > 0 ? '-' : (row.stokDogrulukYuzde < 0 ? '+' : '')}{Math.abs(row.stokDogrulukYuzde).toFixed(1)}
-                                </span>
-                                <span className="text-[10px] text-muted-foreground">
-                                  S({(row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest).toLocaleString('tr-TR')}) - K({row.kumulatifTotal.toLocaleString('tr-TR')}) = {row.stokDogrulukFark > 0 ? '-' : ''}{row.stokDogrulukFark.toLocaleString('tr-TR')}
-                                </span>
-                              </div>
-                            </TableCell>
-                            {/* Sütun 21: Kit Verimlilik (Fark + Yüzde) */}
-                            <TableCell className="bg-emerald-50/50 dark:bg-emerald-950/50 text-center">
-                              <div className="flex flex-col items-center gap-0.5">
-                                <span className={`font-semibold ${row.kitVerimlilikFark !== 0 ? (row.kitVerimlilikFark > 0 ? 'text-orange-600' : 'text-green-600') : ''}`}>
-                                  Fark {row.kitVerimlilikFark > 0 ? '-' : (row.kitVerimlilikFark < 0 ? '+' : '')}{Math.abs(row.kitVerimlilikFark).toLocaleString('tr-TR')} test
-                                </span>
-                                <span className={`text-xs ${row.kitVerimlilikYuzde !== 0 ? (row.kitVerimlilikYuzde > 0 ? 'text-orange-500' : 'text-green-500') : 'text-muted-foreground'}`}>
-                                  {row.kitVerimlilikFark > 0 ? '-' : (row.kitVerimlilikFark < 0 ? '+' : '')}{Math.abs(row.kitVerimlilikFark).toLocaleString('tr-TR')}/{row.kumulatifTotal.toLocaleString('tr-TR')} = %{row.kitVerimlilikYuzde > 0 ? '-' : (row.kitVerimlilikYuzde < 0 ? '+' : '')}{Math.abs(row.kitVerimlilikYuzde).toFixed(1)}
-                                </span>
-                                <span className="text-[10px] text-muted-foreground">
-                                  K({row.kumulatifTotal.toLocaleString('tr-TR')}) - H({row.hakEdis.toLocaleString('tr-TR')}) = {row.kitVerimlilikFark > 0 ? '-' : ''}{row.kitVerimlilikFark.toLocaleString('tr-TR')}
-                                </span>
-                              </div>
-                            </TableCell>
-                            {/* Sütun 22: Kutu Kayıp */}
-                            <TableCell className={`${centerHakEdisMode && column22Mode === 'hakedis' && testsSentToCenter[row.id] ? 'bg-amber-100/50 dark:bg-amber-950/50' : 'bg-violet-50/50 dark:bg-violet-950/50'} text-center`}>
-                              {(() => {
-                                // Kümülatife göre: (14-18) - 15 = stokDogrulukFark
-                                // Hak edişe göre: (14-18) - 19 = (sevkiyatlarSonrasiTotalTest - donemSonuToplamTest) - hakEdis
-                                // Merkez hak ediş modu aktifse düzeltilmiş değeri kullan
-                                const effectiveHakEdis = centerHakEdisMode ? getAdjustedHakEdis(row) : row.hakEdis;
-                                const testFark = column22Mode === 'kumulatif'
-                                  ? row.stokDogrulukFark
-                                  : (row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest) - effectiveHakEdis;
-
-                                const ambalaj = row.ambalajDegeri || 1;
-                                const kutuFark = testFark / ambalaj;
-                                const absKutuFark = Math.abs(kutuFark);
-
-                                // 1 kutudan az ise 0 göster
-                                if (absKutuFark < 1) {
-                                  return (
-                                    <div className="flex flex-col items-center gap-0.5">
-                                      <span className="text-muted-foreground">0 kutu</span>
-                                      <span className="text-[10px] text-muted-foreground">
-                                        {Math.abs(testFark).toLocaleString('tr-TR')} test / {ambalaj} amb
-                                      </span>
-                                    </div>
-                                  );
-                                }
-
-                                // Renk belirleme: 1-2 arası sarı, 2+ kırmızı
-                                const colorClass = absKutuFark >= 2
-                                  ? 'text-red-600 font-bold'
-                                  : 'text-yellow-600 font-semibold';
-
-                                return (
-                                  <div className="flex flex-col items-center gap-0.5">
-                                    <span className={colorClass}>
-                                      {kutuFark > 0 ? '+' : '-'}{absKutuFark.toLocaleString('tr-TR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} kutu
-                                    </span>
-                                    <span className="text-[10px] text-muted-foreground">
-                                      {Math.abs(testFark).toLocaleString('tr-TR')} test / {ambalaj} amb
-                                    </span>
-                                  </div>
-                                );
-                              })()}
-                            </TableCell>
-                            {/* Maliyet Sütunları Toggle Hücre */}
-                            <TableCell className="bg-gradient-to-r from-emerald-50/50 via-amber-50/50 to-sky-50/50 dark:from-emerald-950/30 dark:via-amber-950/30 dark:to-sky-950/30 text-center">
-                              {!showCostColumns && (
-                                <span className="text-xs text-muted-foreground">...</span>
-                              )}
-                            </TableCell>
-                            {/* Sütun 23: Sarfiyat Maliyeti */}
-                            {showCostColumns && (
-                            <TableCell className="bg-emerald-50/50 dark:bg-emerald-950/50 text-center">
-                              {(() => {
-                                const { cost, hasData } = calculateRowCost(row);
-
-                                // Maliyet kaynağını belirle
-                                const isFromCheckpoint = costCheckpointData && costCheckpointData[row.stokKodu];
-
-                                if (!hasData) {
-                                  return (
-                                    <span className="text-muted-foreground text-xs">
-                                      Maliyet yok
-                                    </span>
-                                  );
-                                }
-
-                                if (cost === 0) {
-                                  return (
-                                    <span className="text-muted-foreground">-</span>
-                                  );
-                                }
-
-                                const currencySymbol = costCurrency === 'TRY' ? '₺' : costCurrency === 'USD' ? '$' : '€';
-                                const sarfiyat = row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest;
-
-                                return (
-                                  <div className="flex flex-col items-center gap-0.5">
-                                    <span className="font-semibold text-emerald-700 dark:text-emerald-400">
-                                      {currencySymbol}{cost.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </span>
-                                    <span className="text-[10px] text-muted-foreground">
-                                      {sarfiyat.toLocaleString('tr-TR')} test
-                                      {isFromCheckpoint && (
-                                        <span className="ml-1 text-emerald-600" title="Checkpoint'ten">●</span>
-                                      )}
-                                    </span>
-                                  </div>
-                                );
-                              })()}
-                            </TableCell>
-                            )}
-                            {/* Sütun 24: Hak Ediş Karşılığı */}
-                            {showCostColumns && (
-                            <TableCell className={`${centerHakEdisMode && testsSentToCenter[row.id] ? 'bg-amber-200/50 dark:bg-amber-900/50' : 'bg-amber-50/50 dark:bg-amber-950/50'} text-center`}>
-                              {(() => {
-                                // Merkez hak ediş modu aktifse düzeltilmiş değeri kullan
-                                const { amount, hasData } = calculateHakEdisKarsiligi(row, centerHakEdisMode);
-                                const { amount: originalAmount } = centerHakEdisMode ? calculateHakEdisKarsiligi(row, false) : { amount: 0 };
-
-                                // Hak ediş tanımının olup olmadığını kontrol et
-                                const labDefinitions = labHakEdisDefinitions[row.labId] || [];
-                                const hakEdisDefinition = labDefinitions.find(d => d.linkedStokKodu === row.stokKodu);
-
-                                if (!hasData) {
-                                  return (
-                                    <span className="text-muted-foreground text-xs">
-                                      Tanım yok
-                                    </span>
-                                  );
-                                }
-
-                                if (amount === 0 && !centerHakEdisMode) {
-                                  return (
-                                    <span className="text-muted-foreground">-</span>
-                                  );
-                                }
-
-                                const currencySymbol = costCurrency === 'TRY' ? '₺' : costCurrency === 'USD' ? '$' : '€';
-                                const adjustedHakEdis = getAdjustedHakEdis(row);
-                                const showAdjustment = centerHakEdisMode && testsSentToCenter[row.id] > 0;
-
-                                return (
-                                  <div className="flex flex-col items-center gap-0.5">
-                                    <span className="font-semibold text-amber-700 dark:text-amber-400">
-                                      {currencySymbol}{amount.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </span>
-                                    <span className="text-[10px] text-muted-foreground">
-                                      {(showAdjustment ? adjustedHakEdis : row.hakEdis).toLocaleString('tr-TR')} test × ₺{hakEdisDefinition?.hakEdisMiktari.toFixed(2)}
-                                    </span>
-                                    {showAdjustment && (
-                                      <span className="text-[9px] text-amber-600 line-through">
-                                        Önceki: {currencySymbol}{originalAmount.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                      </span>
-                                    )}
-                                  </div>
-                                );
-                              })()}
-                            </TableCell>
-                            )}
-                            {/* Sütun 25: Kâr */}
-                            {showCostColumns && (
-                            <TableCell className={`${centerHakEdisMode && testsSentToCenter[row.id] ? 'bg-sky-200/50 dark:bg-sky-900/50' : 'bg-sky-50/50 dark:bg-sky-950/50'} text-center`}>
-                              {(() => {
-                                // Merkez hak ediş modu aktifse düzeltilmiş değeri kullan
-                                const { kar, hasData } = calculateKar(row, centerHakEdisMode);
-                                const { kar: originalKar } = centerHakEdisMode ? calculateKar(row, false) : { kar: 0 };
-
-                                if (!hasData) {
-                                  return (
-                                    <span className="text-muted-foreground text-xs">
-                                      Veri yok
-                                    </span>
-                                  );
-                                }
-
-                                if (kar === 0 && !centerHakEdisMode) {
-                                  return (
-                                    <span className="text-muted-foreground">-</span>
-                                  );
-                                }
-
-                                const currencySymbol = costCurrency === 'TRY' ? '₺' : costCurrency === 'USD' ? '$' : '€';
-                                const isProfit = kar > 0;
-                                const showAdjustment = centerHakEdisMode && testsSentToCenter[row.id] > 0;
-
-                                return (
-                                  <div className="flex flex-col items-center gap-0.5">
-                                    <span className={`font-semibold ${isProfit ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                                      {isProfit ? '+' : ''}{currencySymbol}{kar.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </span>
-                                    <span className="text-[10px] text-muted-foreground">
-                                      {isProfit ? 'Kâr' : 'Zarar'}
-                                    </span>
-                                    {showAdjustment && (
-                                      <span className="text-[9px] text-sky-600 line-through">
-                                        Önceki: {currencySymbol}{originalKar.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                      </span>
-                                    )}
-                                  </div>
-                                );
-                              })()}
-                            </TableCell>
-                            )}
-                            {/* Sütun 26: Zarar Maliyeti */}
-                            <TableCell className="bg-rose-50/50 dark:bg-rose-950/50 text-center">
-                              {(() => {
-                                const { zarar, hasData } = calculateZararMaliyeti(row);
-
-                                if (!hasData) {
-                                  return (
-                                    <span className="text-muted-foreground text-xs">
-                                      Maliyet yok
-                                    </span>
-                                  );
-                                }
-
-                                if (zarar === 0) {
-                                  return (
-                                    <span className="text-muted-foreground">-</span>
-                                  );
-                                }
-
-                                const currencySymbol = costCurrency === 'TRY' ? '₺' : costCurrency === 'USD' ? '$' : '€';
-
-                                return (
-                                  <div className="flex flex-col items-center gap-0.5">
-                                    <span className="font-semibold text-rose-600 dark:text-rose-400">
-                                      {currencySymbol}{zarar.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                    </span>
-                                    <span className="text-[10px] text-muted-foreground">
-                                      -{row.stokDogrulukFark.toLocaleString('tr-TR')} test × maliyet
-                                    </span>
-                                  </div>
-                                );
-                              })()}
-                            </TableCell>
-                            {/* Sütun 27: Merkeze Gönderilen Test */}
-                            {centerHakEdisMode && (
-                              <TableCell className="bg-orange-50/50 dark:bg-orange-950/50 text-center">
-                                {(() => {
-                                  const sentCount = testsSentToCenter[row.id] || 0;
-
-                                  // Merkez laboratuvar için gösterme
-                                  if (selectedPool?.centerLabId === row.labId) {
-                                    return (
-                                      <span className="text-muted-foreground text-xs">
-                                        Merkez Lab
-                                      </span>
-                                    );
-                                  }
-
-                                  if (sentCount === 0) {
-                                    return <span className="text-muted-foreground">-</span>;
-                                  }
-
-                                  return (
-                                    <div className="flex flex-col items-center gap-0.5">
-                                      <span className="font-semibold text-orange-600 dark:text-orange-400">
-                                        {sentCount.toLocaleString('tr-TR')}
-                                      </span>
-                                      <span className="text-[10px] text-muted-foreground">
-                                        test
-                                      </span>
-                                    </div>
-                                  );
-                                })()}
-                              </TableCell>
-                            )}
-                          </TableRow>
+                              {col.sub && <span className="text-[8.5px] text-zinc-400 font-normal pl-3 -mt-0.5">{col.sub}</span>}
+                            </div>
+                          </th>
                         );
                       })}
-                    </TableBody>
-                  </Table>
-                </div>
-                <ScrollBar orientation="horizontal" />
-              </ScrollArea>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {groupedRows.map(group => {
+                      const isOpen = expandedLabs.has(group.labId);
+                      const avgKitVerim = group.rows.length > 0 ? Math.max(0, Math.min(100, 100 - (group.rows.reduce((s, r) => s + Math.abs(r.kitVerimlilikYuzde), 0) / group.rows.length))) : 0;
+                      const totalHak = group.rows.reduce((s, r) => s + r.hakEdis, 0);
+                      return (
+                        <React.Fragment key={group.labId}>
+                          {/* Group row */}
+                          <tr onClick={() => toggleLabExpand(group.labId)} className="cursor-pointer select-none">
+                            <td colSpan={1 + visibleCols.length} className="sticky left-0 z-20 bg-zinc-900 dark:bg-zinc-800 text-white border-b border-zinc-950 h-8 px-2">
+                              <div className="flex items-center gap-2">
+                                <ChevronRight className={`h-3 w-3 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+                                <span className="font-semibold text-[11.5px]">{group.labName}</span>
+                                {group.labKod && <span className="text-[9.5px] text-zinc-400 font-mono">({group.labKod})</span>}
+                                <span className="text-[9.5px] text-zinc-400">· {group.rows.length} ürün</span>
+                                <div className="flex-1" />
+                                <span className="text-[9.5px] text-zinc-400">Ort. Verimlilik: <strong className={`font-mono ${avgKitVerim >= 90 ? 'text-emerald-400' : avgKitVerim >= 70 ? 'text-amber-400' : 'text-rose-400'}`}>%{avgKitVerim.toFixed(0)}</strong></span>
+                                <span className="text-[9.5px] text-zinc-400">Hak Ediş: <strong className="font-mono text-white">{fmtN(totalHak)}</strong></span>
+                              </div>
+                            </td>
+                          </tr>
+
+                          {/* Product rows (only render when expanded) */}
+                          {isOpen && group.rows.map((row, ri) => {
+                            const isRowSel = selRows.has(row.id);
+                            const rowFmt = rowFmts[row.id] || {};
+                            return (
+                              <tr key={row.id} className={isRowSel ? 'bg-blue-50 dark:bg-blue-950/40' : (ri % 2 === 1 ? 'bg-zinc-50/50 dark:bg-zinc-900/40' : '')}>
+                                {/* Selection cell */}
+                                <td
+                                  onClick={(e) => toggleSelRow(row.id, e)}
+                                  className={`sticky left-0 z-10 ${isRowSel ? 'bg-blue-100 dark:bg-blue-950' : 'bg-white dark:bg-zinc-900'} border-b border-r border-zinc-200 dark:border-zinc-800 ${rowHeightCls} w-9 px-1 cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800`}
+                                >
+                                  <div className="flex items-center justify-center">
+                                    <div className={`w-3 h-3 rounded-sm border ${isRowSel ? 'bg-blue-600 border-blue-600 text-white flex items-center justify-center text-[8px]' : 'border-zinc-300'}`}>
+                                      {isRowSel && '✓'}
+                                    </div>
+                                  </div>
+                                </td>
+                                {visibleCols.map(col => {
+                                  const stickyLeft = col.frozen ? FROZEN_LEFT[col.frozen] + 36 : undefined;
+                                  const isColSel = selCols.has(col.id);
+                                  const cellFmt = getMergedFmt(row.id, col.id);
+                                  const cellStyle = fmtToStyle(cellFmt);
+                                  const baseBg = !cellFmt.bg ? typeBgClass(col.type) : '';
+                                  return (
+                                    <td
+                                      key={col.id}
+                                      onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, rowId: row.id, colId: col.id }); }}
+                                      className={`border-b border-r border-zinc-200 dark:border-zinc-800 ${rowHeightCls} px-2 align-middle ${baseBg} ${col.frozen ? 'sticky z-10 bg-white dark:bg-zinc-900' : ''} ${isColSel ? 'outline outline-1 outline-blue-300 -outline-offset-1' : ''} ${isRowSel ? '!bg-blue-50 dark:!bg-blue-950/40' : ''}`}
+                                      style={{ width: col.w, minWidth: col.w, left: stickyLeft, ...cellStyle }}
+                                    >
+                                      {col.id === 'lab' ? (
+                                        <span className="font-medium text-[11px]">{row.labName}</span>
+                                      ) : renderCellValue(col, row)}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            );
+                          })}
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
-              </>
-            )}
-          </CardContent>
-        </Card>
+              <ScrollBar orientation="horizontal" />
+            </ScrollArea>
+          </>
+        )}
+      </div>
+
+      {/* ─── COLUMN MANAGER MODAL ───────────────────────────────────── */}
+      {colMgrOpen && (
+        <div className="fixed inset-0 z-50" onClick={() => setColMgrOpen(false)}>
+          <div className="absolute right-3 top-32 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-lg shadow-xl w-72 max-h-[480px] flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-200 dark:border-zinc-700">
+              <span className="text-[12px] font-semibold">Sütun Görünürlüğü</span>
+              <div className="flex gap-1">
+                <button onClick={showAllCols} className="text-[10px] text-zinc-500 hover:text-zinc-900 px-1.5 py-0.5 rounded hover:bg-zinc-100">Tümünü Göster</button>
+                <button onClick={() => setColMgrOpen(false)} className="w-5 h-5 rounded flex items-center justify-center hover:bg-zinc-100"><X className="h-3 w-3" /></button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto py-1">
+              {(['info', 'manual', 'calc', 'result'] as ColType[]).map(t => {
+                const cols = COLS.filter(c => c.type === t && !c.frozen);
+                if (cols.length === 0) return null;
+                const tlabel = t === 'info' ? 'Sabit' : t === 'manual' ? 'Manuel Giriş' : t === 'calc' ? 'Hesaplanan' : 'Sonuç';
+                const dot = t === 'info' ? 'bg-zinc-300' : t === 'manual' ? 'bg-blue-300' : t === 'calc' ? 'bg-emerald-300' : 'bg-violet-300';
+                return (
+                  <div key={t}>
+                    <div className="px-3 pt-2 pb-1 text-[9.5px] font-bold uppercase text-zinc-400 flex items-center gap-1.5"><span className={`w-1.5 h-1.5 rounded-full ${dot}`} />{tlabel}</div>
+                    {cols.map(c => (
+                      <button key={c.id} onClick={() => toggleHidden(c.id)} className="w-full flex items-center gap-2 px-3 py-1 hover:bg-zinc-50 dark:hover:bg-zinc-800">
+                        <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
+                        <span className="flex-1 text-left text-[11.5px]">{c.num}. {c.label}</span>
+                        <div className={`w-3 h-3 rounded-sm border ${!hiddenCols.has(c.id) ? 'bg-zinc-900 border-zinc-900 text-white flex items-center justify-center text-[7px]' : 'border-zinc-300'}`}>
+                          {!hiddenCols.has(c.id) && '✓'}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
       )}
 
-      {selectedPoolId && rows.length > 0 && (
-        <Card>
-          <CardContent className="py-4">
-            <div className="flex items-center justify-between text-sm text-muted-foreground">
-              <span>
-                {hasActiveFilters
-                  ? `${filteredAndSortedRows.length}/${rows.length} satır gösteriliyor`
-                  : `Toplam ${rows.length} satır`}
-              </span>
-              <span>{labGroups.length} laboratuvar</span>
-            </div>
-          </CardContent>
-        </Card>
+      {/* ─── COLUMN HEADER FILTER POPOVER ───────────────────────────── */}
+      {colFilterOpen && (
+        <ColFilterPopover
+          col={colFilterOpen.col}
+          x={colFilterOpen.x}
+          y={colFilterOpen.y}
+          allValues={colFilterOpen.allValues}
+          activeFilter={colValFilters[colFilterOpen.col.id] || null}
+          sortCol={sortConfig.column}
+          sortDir={sortConfig.direction}
+          onSort={(dir) => { setSort(colFilterOpen.col.id, dir); setColFilterOpen(null); }}
+          onClearSort={() => { setSort(null, 'asc'); setColFilterOpen(null); }}
+          onHide={() => { toggleHidden(colFilterOpen.col.id); setColFilterOpen(null); }}
+          onApply={(vals) => { applyColValFilter(colFilterOpen.col.id, vals); setColFilterOpen(null); }}
+          onClose={() => setColFilterOpen(null)}
+        />
       )}
+
+      {/* ─── CONTEXT MENU ───────────────────────────────────────────── */}
+      {ctxMenu && (
+        <CtxMenu
+          menu={ctxMenu}
+          onApply={(t, k, v) => applyCtxFmt(t, k, v, ctxMenu)}
+          onClose={() => setCtxMenu(null)}
+        />
+      )}
+
+      {/* ─── ADVANCED FILTER BUILDER MODAL ──────────────────────────── */}
+      <Dialog open={advFilterOpen} onOpenChange={setAdvFilterOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><SlidersHorizontal className="h-4 w-4 text-blue-600" />Gelişmiş Filtre</DialogTitle>
+            <DialogDescription>Birden fazla kolon bazlı koşul ekleyin. AND tüm koşullar geçerli olmalı, OR herhangi biri yeterli.</DialogDescription>
+          </DialogHeader>
+          <div className="py-2 space-y-2">
+            {/* Mode selector */}
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-zinc-500">Birleştirme:</span>
+              <div className="inline-flex rounded border border-zinc-200">
+                {(['AND', 'OR'] as const).map(m => (
+                  <button key={m} onClick={() => setAdvMode(m)} className={`px-3 py-1 text-[11px] font-semibold ${advMode === m ? 'bg-blue-600 text-white' : 'hover:bg-zinc-100'}`}>{m}</button>
+                ))}
+              </div>
+              <div className="flex-1" />
+              <button onClick={addAdvFilter} className="flex items-center gap-1 px-2 py-1 rounded border border-zinc-200 text-[11px] hover:bg-zinc-50"><Plus className="h-3 w-3" />Koşul ekle</button>
+              {advFilters.length > 0 && <button onClick={clearAdvFilters} className="flex items-center gap-1 px-2 py-1 rounded border border-zinc-200 text-[11px] text-rose-600 hover:bg-rose-50"><Trash2 className="h-3 w-3" />Tümünü temizle</button>}
+            </div>
+            {advFilters.length === 0 && (
+              <div className="border border-dashed border-zinc-200 rounded-md p-4 text-center text-[11.5px] text-zinc-400">
+                Henüz koşul eklenmedi. Yukarıdan "Koşul ekle" diyerek başlayın.
+              </div>
+            )}
+            {advFilters.map((f, i) => (
+              <div key={f.id} className="flex items-center gap-2 p-2 bg-zinc-50 dark:bg-zinc-800 rounded">
+                {i > 0 && <span className="text-[10px] font-bold text-blue-600 px-1.5 py-0.5 bg-blue-50 rounded">{advMode}</span>}
+                <Select value={f.col} onValueChange={v => updateAdvFilter(f.id, { col: v })}>
+                  <SelectTrigger className="h-7 w-44 text-[11.5px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {COLS.filter(c => c.id !== 'lab').map(c => <SelectItem key={c.id} value={c.id}>{c.num}. {c.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Select value={f.op} onValueChange={v => updateAdvFilter(f.id, { op: v as AdvOp })}>
+                  <SelectTrigger className="h-7 w-32 text-[11.5px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {ADV_OPS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Input value={f.val} onChange={e => updateAdvFilter(f.id, { val: e.target.value })} placeholder="Değer..." className="h-7 flex-1 text-[11.5px]" />
+                <button onClick={() => removeAdvFilter(f.id)} className="w-7 h-7 rounded flex items-center justify-center text-rose-500 hover:bg-rose-50"><Trash2 className="h-3 w-3" /></button>
+              </div>
+            ))}
+            {advFilters.length > 0 && (
+              <div className="text-[11px] text-zinc-500 bg-zinc-50 px-2 py-1.5 rounded">
+                <strong>{totalVisibleRows}</strong>/{rows.length} satır gösteriliyor
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAdvFilterOpen(false)}>Kapat</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Sevkiyat Bilgisi Modal - Sütun 11 */}
       <Dialog open={showSevkiyatBilgisiModal} onOpenChange={setShowSevkiyatBilgisiModal}>
