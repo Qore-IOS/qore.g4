@@ -13,6 +13,7 @@ export { createCustomTokenForNfcUser } from './createCustomTokenForNfcUser';
 export { mirrorPresenceToFirestore } from './presence';
 export { nfcLoginWithSerial } from './nfc-login';
 export { onTeknikServisFormCreated, onAplikasyonFormCreated } from './actionFormEmailNotification';
+export { onPeripheralOrderCreatedSendMail } from './orderCreatedPeripheralEmail';
 
 function chunk<T>(arr: T[], size = 500): T[][] {
   const out: T[][] = [];
