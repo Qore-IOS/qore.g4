@@ -14,10 +14,12 @@ import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from '@
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, doc, deleteDoc, getDocFromServer, writeBatch, Timestamp, onSnapshot, orderBy } from 'firebase/firestore';
 import type { DepoStokItem, Laboratory, MinMaxRule } from '@/lib/types';
-import { Loader2, Search, ListChecks, History, FileSpreadsheet, MoreVertical, Eye, AlertCircle, AlertTriangle, Upload, CheckCircle, Pencil, Check, X } from 'lucide-react';
+import { Loader2, Search, ListChecks, History, FileSpreadsheet, MoreVertical, Eye, AlertCircle, AlertTriangle, Upload, CheckCircle, Pencil, Check, X, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
 import { touchStockMetadata, useLabStock, useLabPools, useHospitals, useProductCodes, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
+import { cn } from '@/lib/utils';
 import { exportDataToExcel } from '@/lib/utils';
 import { formatMiad, normalizeMiad } from '@/lib/date';
 import { useAuth } from '@/contexts/auth-context';
@@ -114,6 +116,10 @@ export default function LaboratuvarYonetimiPanel() {
   const [rowsPerPage, setRowsPerPage] = useState(20);
   const [minMaxRules, setMinMaxRules] = useState<Record<string, MinMaxRule>>({});
   const [isDeletingGroup, setIsDeletingGroup] = useState<string | null>(null);
+
+  // Warnings state
+  const [expandedCategory, setExpandedCategory] = useState<string | null>(null);
+  const [selectedWarnings, setSelectedWarnings] = useState<Set<string>>(new Set());
 
   // Quantity edit states (admin only)
   const [editingGroupKey, setEditingGroupKey] = useState<string | null>(null);
@@ -428,6 +434,52 @@ export default function LaboratuvarYonetimiPanel() {
   }, [sorted, currentPage, rowsPerPage]);
 
   const goToDetail = (id: string) => router.push(`/laboratuvar-yonetimi/${id}`);
+
+  const handleDeleteMultipleWarnings = async () => {
+    if (selectedWarnings.size === 0) return;
+    
+    if (!confirm(`Seçilen ${selectedWarnings.size} adet uyarıdaki tüm stok kayıtları kalıcı olarak silinecek. Devam etmek istiyor musunuz?`)) {
+        return;
+    }
+
+    setIsDeletingGroup('bulk-warning');
+    let successCount = 0;
+    let failCount = 0;
+
+    try {
+        for (const groupKey of selectedWarnings) {
+            const group = groupedMap[groupKey];
+            if (!group) continue;
+            
+            const itemsToDelete = group.items.filter(item => item.id);
+            for (const item of itemsToDelete) {
+                try {
+                    await deleteDoc(doc(db, 'depoStok', item.id!));
+                    successCount++;
+                } catch (e) {
+                    console.error('Delete error', e);
+                    failCount++;
+                }
+            }
+        }
+        
+        await invalidateDepoStok();
+        toast({
+            title: 'Toplu Silme Tamamlandı',
+            description: `${successCount} kayıt silindi${failCount > 0 ? `, ${failCount} hata oluştu` : ''}.`,
+            variant: failCount > 0 ? 'destructive' : 'default'
+        });
+        setSelectedWarnings(new Set());
+    } catch (e: any) {
+        toast({
+            title: 'Hata',
+            description: e.message || 'Silme işlemi sırasında hata oluştu.',
+            variant: 'destructive'
+        });
+    } finally {
+        setIsDeletingGroup(null);
+    }
+  };
 
   // Delete all items in a group directly (for incorrectly entered items)
   const handleDeleteGroup = async (groupKey: string) => {
@@ -898,55 +950,142 @@ export default function LaboratuvarYonetimiPanel() {
           <CardDescription>Laboratuvarlardaki mevcut stokları özet halinde görüntüleyebilirsiniz.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* ── STOCK WARNINGS SECTION (top, blinking red borders) ──
-              Shows rows for: expiring soon, min-stock reached, and qty=1 (only if max>2) */}
+          {/* ── STOCK WARNINGS SECTION (Categorized, Collapsible) ── */}
           {selectedLabId && stockWarningRows.length > 0 && (
-            <div className="space-y-2">
+            <div className="space-y-4">
               <div className="flex items-center gap-2">
                 <AlertTriangle className="h-5 w-5 text-red-500 animate-pulse" />
                 <h3 className="text-base font-semibold text-red-500">
                   Stok Uyarıları ({stockWarningRows.length})
                 </h3>
-                <span className="text-xs text-muted-foreground">
-                  · Miadı yaklaşan, min stoğa düşen, 1 adet kalan ürünler
-                </span>
               </div>
-              <div className="space-y-2">
-                {stockWarningRows.map((row) => (
-                  <div
-                    key={`warn-${row.groupKey}`}
-                    className="stock-warning-blink bg-red-500/5 px-3 py-2"
-                  >
-                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-                      <div className="flex-1 min-w-[200px]">
-                        <p className="font-semibold">{row.stokAdi}</p>
-                        <p className="text-[11px] text-muted-foreground font-mono">
-                          {row.stokKodu}
-                          {row.lot ? ` · Lot: ${row.lot}` : ''}
-                          {row.miad ? ` · Miad: ${row.miad}` : ''}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-3 text-[11px]">
-                        <span className="inline-flex items-center gap-1 rounded bg-red-500/10 px-2 py-0.5 text-red-600 dark:text-red-400 font-semibold">
-                          Bu lot: {row.quantity}
-                        </span>
-                        <span className="inline-flex items-center gap-1 rounded bg-red-500/10 px-2 py-0.5 text-red-600 dark:text-red-400 font-semibold">
-                          Toplam: {row.totalForStokKodu}
-                        </span>
-                        {row.minStock != null && (
-                          <span className="text-muted-foreground">Min: {row.minStock}</span>
+              
+              <div className="space-y-3">
+                {[
+                    { 
+                        id: 'miad', 
+                        title: 'Miad Uyarıları', 
+                        items: stockWarningRows.filter(r => r.warningReasons.some(w => w.includes('Miad'))), 
+                        color: 'text-red-500', 
+                        bg: 'bg-red-50', 
+                        darkBg: 'dark:bg-red-950/20' 
+                    },
+                    { 
+                        id: 'minStok', 
+                        title: 'Kritik Stok Uyarıları', 
+                        items: stockWarningRows.filter(r => r.warningReasons.some(w => w.includes('stok'))), 
+                        color: 'text-orange-500', 
+                        bg: 'bg-orange-50', 
+                        darkBg: 'dark:bg-orange-950/20' 
+                    },
+                    { 
+                        id: 'tekAdet', 
+                        title: 'Tek Kalan Ürünler', 
+                        items: stockWarningRows.filter(r => r.warningReasons.some(w => w.includes('1 adet'))), 
+                        color: 'text-amber-500', 
+                        bg: 'bg-amber-50', 
+                        darkBg: 'dark:bg-amber-950/20' 
+                    }
+                ].filter(cat => cat.items.length > 0).map(cat => (
+                    <div key={cat.id} className="border border-slate-200 dark:border-slate-800 rounded-lg overflow-hidden bg-white dark:bg-slate-900 shadow-sm transition-all">
+                        <div 
+                            className={cn("flex items-center justify-between p-3 cursor-pointer select-none transition-colors", cat.bg, cat.darkBg)}
+                            onClick={() => setExpandedCategory(expandedCategory === cat.id ? null : cat.id)}
+                        >
+                            <div className="flex items-center gap-2">
+                                <span className={cn("font-semibold", cat.color)}>{cat.title} ({cat.items.length})</span>
+                            </div>
+                            {expandedCategory === cat.id ? <ChevronUp className="h-5 w-5 text-slate-500" /> : <ChevronDown className="h-5 w-5 text-slate-500" />}
+                        </div>
+                        
+                        {expandedCategory === cat.id && (
+                            <div className="p-3 border-t border-slate-100 dark:border-slate-800">
+                                <div className="flex justify-between items-center px-3 py-2 mb-3 bg-slate-50 dark:bg-slate-800/50 rounded-md border border-slate-100 dark:border-slate-800/80">
+                                    <div className="flex items-center gap-3">
+                                        <Checkbox 
+                                            id={`selectAll-${cat.id}`}
+                                            checked={cat.items.length > 0 && cat.items.every(item => selectedWarnings.has(item.groupKey))}
+                                            onCheckedChange={(checked) => {
+                                                const newSet = new Set(selectedWarnings);
+                                                if (checked) {
+                                                    cat.items.forEach(item => newSet.add(item.groupKey));
+                                                } else {
+                                                    cat.items.forEach(item => newSet.delete(item.groupKey));
+                                                }
+                                                setSelectedWarnings(newSet);
+                                            }}
+                                        />
+                                        <label htmlFor={`selectAll-${cat.id}`} className="text-sm font-medium cursor-pointer select-none">Tümünü Seç</label>
+                                    </div>
+                                    <Button 
+                                        variant="destructive" 
+                                        size="sm" 
+                                        className="h-8 shadow-sm"
+                                        disabled={Array.from(selectedWarnings).filter(key => cat.items.some(i => i.groupKey === key)).length === 0 || isDeletingGroup === 'bulk-warning'}
+                                        onClick={handleDeleteMultipleWarnings}
+                                    >
+                                        {isDeletingGroup === 'bulk-warning' ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Trash2 className="h-4 w-4 mr-2" />}
+                                        Seçilileri Sil ({Array.from(selectedWarnings).filter(key => cat.items.some(i => i.groupKey === key)).length})
+                                    </Button>
+                                </div>
+                                
+                                <div className="space-y-2">
+                                    {cat.items.map(row => (
+                                        <div key={`warn-${row.groupKey}`} className="flex items-start gap-3 p-3 hover:bg-slate-50 dark:hover:bg-slate-800/50 rounded-md border border-transparent hover:border-slate-100 dark:hover:border-slate-800 transition-colors group">
+                                            <div className="pt-1">
+                                                <Checkbox 
+                                                    checked={selectedWarnings.has(row.groupKey)}
+                                                    onCheckedChange={(checked) => {
+                                                        const newSet = new Set(selectedWarnings);
+                                                        if (checked) newSet.add(row.groupKey);
+                                                        else newSet.delete(row.groupKey);
+                                                        setSelectedWarnings(newSet);
+                                                    }}
+                                                />
+                                            </div>
+                                            <div className="flex-1">
+                                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                                    <div className="flex-1 min-w-[200px]">
+                                                        <p className="font-semibold text-sm">{row.stokAdi}</p>
+                                                        <p className="text-[11px] text-muted-foreground font-mono mt-0.5">
+                                                          {row.stokKodu}
+                                                          {row.lot ? ` · Lot: ${row.lot}` : ''}
+                                                          {row.miad ? ` · Miad: ${row.miad}` : ''}
+                                                        </p>
+                                                    </div>
+                                                    <div className="flex items-center gap-2 text-[11px] flex-shrink-0">
+                                                        <span className="inline-flex items-center rounded bg-slate-100 dark:bg-slate-800 px-2 py-1 font-medium">
+                                                          Bu lot: <span className="ml-1 font-bold">{row.quantity}</span>
+                                                        </span>
+                                                        <span className="inline-flex items-center rounded bg-slate-100 dark:bg-slate-800 px-2 py-1 font-medium">
+                                                          Toplam: <span className="ml-1 font-bold">{row.totalForStokKodu}</span>
+                                                        </span>
+                                                    </div>
+                                                </div>
+                                                <ul className="mt-2 text-[12px] text-red-600 dark:text-red-400 font-medium space-y-1">
+                                                  {row.warningReasons.map((r, i) => (
+                                                    <li key={i} className="flex items-center gap-1.5">
+                                                        <span className="w-1 h-1 rounded-full bg-red-500 flex-shrink-0" />
+                                                        {r}
+                                                    </li>
+                                                  ))}
+                                                </ul>
+                                            </div>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="opacity-0 group-hover:opacity-100 transition-opacity text-destructive hover:text-destructive/90 hover:bg-destructive/10 flex-shrink-0 -mt-1 -mr-1"
+                                                onClick={(e) => { e.stopPropagation(); handleDeleteGroup(row.groupKey); }}
+                                                disabled={isDeletingGroup === row.groupKey}
+                                            >
+                                                {isDeletingGroup === row.groupKey ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                                            </Button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
                         )}
-                        {row.maxStock != null && (
-                          <span className="text-muted-foreground">Max: {row.maxStock}</span>
-                        )}
-                      </div>
                     </div>
-                    <ul className="mt-1 text-[11px] text-red-600 dark:text-red-400 list-disc list-inside">
-                      {row.warningReasons.map((r, i) => (
-                        <li key={i}>{r}</li>
-                      ))}
-                    </ul>
-                  </div>
                 ))}
               </div>
             </div>
