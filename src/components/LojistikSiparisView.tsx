@@ -31,6 +31,7 @@ import {
   MoreHorizontal,
   ClipboardPlus,
   Clock3,
+  Download,
   Truck,
   Heart,
   Zap,
@@ -50,6 +51,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { toDateFromAny } from '@/lib/date';
 import OrderConfirmAnimation from '@/components/lojistik-terminal/order-confirm-animation';
 import DeliveryHistory, { type PartialDelivery } from '@/components/lojistik-terminal/delivery-history';
+import { exportOrdersToExcel } from '@/lib/lojistik/export-orders';
 
 type LojFilter = 'all' | 'pending' | 'toplaniyor' | 'teslim_bekliyor' | 'eksik';
 
@@ -490,6 +492,22 @@ export default function LojistikSiparisView() {
               className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-black/5 dark:hover:bg-white/5"
             >
               <History className="h-4 w-4" style={{ color: 'var(--loj-muted)' }} /> Geçmiş
+            </button>
+            <button
+              onClick={() => {
+                exportOrdersToExcel(
+                  [...peripheralOrders, ...completedOrders],
+                  {
+                    fileBaseName: 'aktif_siparisler',
+                    productNameByStokKodu: productNameMap,
+                  }
+                );
+                setMoreMenuOpen(false);
+              }}
+              disabled={peripheralOrders.length + completedOrders.length === 0}
+              className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Download className="h-4 w-4" style={{ color: 'var(--loj-muted)' }} /> Excel İndir
             </button>
           </PopoverContent>
         </Popover>

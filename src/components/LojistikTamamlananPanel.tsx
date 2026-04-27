@@ -19,6 +19,7 @@ import {
   ArrowLeft,
   Building2,
   CheckCircle2,
+  Download,
   Loader2,
   Search,
   Truck,
@@ -28,6 +29,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import DeliveryHistory, {
   type PartialDelivery,
 } from '@/components/lojistik-terminal/delivery-history';
+import { exportOrdersToExcel } from '@/lib/lojistik/export-orders';
 import { cn } from '@/lib/utils';
 
 export default function LojistikTamamlananPanel() {
@@ -152,6 +154,22 @@ export default function LojistikTamamlananPanel() {
               İrsaliye ile eksiksiz teslim edilen siparişler · {totalDelivered} sipariş
             </p>
           </div>
+          <button
+            type="button"
+            onClick={() =>
+              exportOrdersToExcel(filtered, {
+                fileBaseName: 'tamamlanan_siparisler',
+                productNameByStokKodu: productNameMap,
+              })
+            }
+            disabled={filtered.length === 0}
+            className="loj-btn-primary"
+            title={`${filtered.length} tamamlanan siparişi Excel olarak indir`}
+          >
+            <Download className="h-4 w-4" />
+            Excel İndir
+            <span className="opacity-80 font-medium ml-1">({filtered.length})</span>
+          </button>
         </div>
 
         {/* KPI mini */}
