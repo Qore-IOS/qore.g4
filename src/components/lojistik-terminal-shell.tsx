@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
+import { VIEWS } from '@/lib/constants';
 import {
   ChevronLeft,
   ChevronRight,
@@ -136,6 +137,24 @@ export default function LojistikTerminalShell({ children }: { children: React.Re
   const isActive = (item: NavItem) =>
     item.match ? item.match(pathname) : pathname === item.href;
 
+  const extraNavItems: NavItem[] = React.useMemo(() => {
+    const excluded = new Set<string>([
+      'siparisler',
+      'route-planlayici',
+      'planner',
+    ]);
+    const allowed = new Set<string>(currentUserProfile?.accessibleViews || []);
+    return VIEWS
+      .filter((v) => v.type === 'nav' && !!v.href && allowed.has(v.key) && !excluded.has(v.key))
+      .map((v) => ({
+        key: `extra-${v.key}`,
+        label: v.label,
+        icon: v.icon,
+        href: v.href!,
+        match: (p: string) => p === v.href || p.startsWith(`${v.href}/`),
+      }));
+  }, [currentUserProfile?.accessibleViews]);
+
   const handleLogout = async () => {
     try {
       await logout();
@@ -177,6 +196,30 @@ export default function LojistikTerminalShell({ children }: { children: React.Re
 
         <nav className="lt-sidebar__nav" aria-label="Lojistik terminal navigasyon">
           {NAV_ITEMS.map((item) => {
+            const active = isActive(item);
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.key}
+                type="button"
+                onClick={() => router.push(item.href)}
+                className={cn('lt-navitem', active && 'lt-navitem--active')}
+                title={collapsed ? item.label : undefined}
+              >
+                <span className="lt-navitem__icon">
+                  <Icon className="h-[18px] w-[18px]" />
+                </span>
+                <span className="lt-navitem__label">{item.label}</span>
+                {active && <span className="lt-navitem__indicator" aria-hidden="true" />}
+              </button>
+            );
+          })}
+          {extraNavItems.length > 0 && !collapsed && (
+            <div className="px-2 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--lt-text-dim)]">
+              Diğer Paneller
+            </div>
+          )}
+          {extraNavItems.map((item) => {
             const active = isActive(item);
             const Icon = item.icon;
             return (
@@ -266,6 +309,21 @@ export default function LojistikTerminalShell({ children }: { children: React.Re
       {/* Mobile bottom nav */}
       <nav className="lt-bottom-nav md:hidden" aria-label="Lojistik terminal menü">
         {NAV_ITEMS.map((item) => {
+          const active = isActive(item);
+          const Icon = item.icon;
+          return (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => router.push(item.href)}
+              className={cn('lt-bottom-item', active && 'lt-bottom-item--active')}
+            >
+              <Icon className="h-4 w-4" />
+              <span>{item.label}</span>
+            </button>
+          );
+        })}
+        {extraNavItems.map((item) => {
           const active = isActive(item);
           const Icon = item.icon;
           return (
