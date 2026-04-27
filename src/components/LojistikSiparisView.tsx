@@ -102,7 +102,7 @@ export default function LojistikSiparisView() {
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [depots, setDepots] = useState<Depot[]>([]);
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
-  const [maxByStokKodu, setMaxByStokKodu] = useState<Map<string, number>>(new Map());
+  const [maxByStokKodu, setMaxByStokKodu] = useState<Map<string, { max: number; maxGun?: number }>>(new Map());
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [filter, setFilter] = useState<LojFilter>('all');
   const [search, setSearch] = useState('');
@@ -253,12 +253,14 @@ export default function LojistikSiparisView() {
     (async () => {
       try {
         const rulesSnap = await getDocs(collection(db, 'hospitals', selectedOrder.labId!, 'minMaxRules'));
-        const next = new Map<string, number>();
+        const next = new Map<string, { max: number; maxGun?: number }>();
         rulesSnap.docs.forEach((d) => {
-          const data = d.data() as { stokKodu?: string; max?: number };
+          const data = d.data() as { stokKodu?: string; max?: number; maxGun?: number };
           const code = data.stokKodu || d.id;
           const max = Number(data.max);
-          if (code && Number.isFinite(max) && max > 0) next.set(code, max);
+          if (code && Number.isFinite(max) && max > 0) {
+            next.set(code, { max, maxGun: data.maxGun });
+          }
         });
         setMaxByStokKodu(next);
       } catch {
@@ -266,6 +268,37 @@ export default function LojistikSiparisView() {
       }
     })();
   }, [selectedOrder?.id, selectedOrder?.labId]);
+
+  // Product ambalaj lookup by stokKodu
+  const productAmbalajMap = useMemo(() => {
+    const m = new Map<string, number>();
+    productCodes.forEach((p) => {
+      if (p.stokKodu && p.ambalajDegeri && p.ambalajDegeri > 0) m.set(p.stokKodu, p.ambalajDegeri);
+    });
+    return m;
+  }, [productCodes]);
+
+  /**
+   * 30 günlük normalize max adet hesaplama:
+   * 1. max (kutu) × ambalajDegeri = toplam max test
+   * 2. toplam max test ÷ maxGun = günlük max test
+   * 3. günlük max test × 30 = 30 günlük max test
+   * 4. 30 günlük max test ÷ ambalajDegeri = 30 günlük kutu (ceil)
+   * Basitleştirilmiş: Math.ceil(max × 30 / maxGun)
+   */
+  const compute30DayMax = useCallback(
+    (stokKodu: string): number | null => {
+      const rule = maxByStokKodu.get(stokKodu);
+      if (!rule || rule.max <= 0) return null;
+      const ambalaj = productAmbalajMap.get(stokKodu) ?? 0;
+      const maxGun = rule.maxGun;
+      // maxGun tanımlı değilse veya 0 ise hesaplama yapılamaz, ham max göster
+      if (!maxGun || maxGun <= 0 || ambalaj <= 0) return rule.max;
+      // Formül: ceil((max * ambalaj / maxGun * 30) / ambalaj) = ceil(max * 30 / maxGun)
+      return Math.ceil((rule.max * ambalaj / maxGun * 30) / ambalaj);
+    },
+    [maxByStokKodu, productAmbalajMap]
+  );
 
   const labStockByStokKodu = useMemo(() => {
     const groups = new Map<string, DepoStokItem[]>();
@@ -989,7 +1022,7 @@ export default function LojistikSiparisView() {
                     {rows.map((row, idx) => {
                       const pName = productNameMap.get(row.stokKodu) || row.stokAdi || row.stokKodu;
                       const info = computeLabInfo(row.stokKodu);
-                      const productMax = maxByStokKodu.get(row.stokKodu);
+                      const productMax30 = compute30DayMax(row.stokKodu);
                       return (
                         <div
                           key={row.itemId ?? idx}
@@ -1018,9 +1051,9 @@ export default function LojistikSiparisView() {
                                 >
                                   {row.stokKodu}
                                 </p>
-                                {typeof productMax === 'number' && productMax > 0 && (
+                                {typeof productMax30 === 'number' && productMax30 > 0 && (
                                   <span className="inline-flex mt-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border border-emerald-400/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
-                                    Max: {productMax}
+                                    30g Max: {productMax30}
                                   </span>
                                 )}
                               </div>
