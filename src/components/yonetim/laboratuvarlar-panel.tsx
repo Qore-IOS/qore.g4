@@ -8,9 +8,10 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { PlusCircle, Edit3, Trash2, SlidersHorizontal, Map, Loader2, Warehouse, Network, Plus, X, FlaskConical, Users, Star, FileSpreadsheet, BarChart3, ListOrdered, Mail, Upload, Download, CheckCircle2, AlertCircle } from 'lucide-react';
+import { PlusCircle, Edit3, Trash2, SlidersHorizontal, Map, Loader2, Warehouse, Network, Plus, X, FlaskConical, Users, Star, FileSpreadsheet, BarChart3, ListOrdered, Mail, Upload, Download, CheckCircle2, AlertCircle, Search, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
@@ -45,6 +46,12 @@ export default function LaboratuvarPanel() {
   const [responsibleEmailsInput, setResponsibleEmailsInput] = useState('');
   const [isMinMaxPanelOpen, setIsMinMaxPanelOpen] = useState(false);
   const [minMaxTarget, setMinMaxTarget] = useState<Hospital | null>(null);
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(20);
+  const [sortField, setSortField] = useState<keyof Hospital | 'sorumluEmails'>('name');
+  const [sortAsc, setSortAsc] = useState(true);
 
   const [hospitalSubPoints, setHospitalSubPoints] = useState<{ id?: string; name: string; isActive?: boolean }[]>([]);
   const [newSubPointName, setNewSubPointName] = useState('');
@@ -130,6 +137,47 @@ export default function LaboratuvarPanel() {
   useEffect(() => {
     fetchHospitalsAndProducts();
   }, [fetchHospitalsAndProducts]);
+
+  const filteredHospitals = useMemo(() => {
+    if (!searchQuery) return hospitals;
+    const q = searchQuery.toLowerCase();
+    return hospitals.filter(h => 
+      h.name?.toLowerCase().includes(q) ||
+      h.kod?.toLowerCase().includes(q) ||
+      h.address?.toLowerCase().includes(q) ||
+      h.sorumluEmails?.some(email => email.toLowerCase().includes(q))
+    );
+  }, [hospitals, searchQuery]);
+
+  const sortedHospitals = useMemo(() => {
+    return [...filteredHospitals].sort((a, b) => {
+      let valA: any = a[sortField as keyof Hospital];
+      let valB: any = b[sortField as keyof Hospital];
+
+      if (sortField === 'sorumluEmails') {
+        valA = a.sorumluEmails?.[0] || '';
+        valB = b.sorumluEmails?.[0] || '';
+      }
+
+      valA = String(valA || '').toLowerCase();
+      valB = String(valB || '').toLowerCase();
+
+      let cmp = valA.localeCompare(valB, 'tr');
+      return sortAsc ? cmp : -cmp;
+    });
+  }, [filteredHospitals, sortField, sortAsc]);
+
+  const pageCount = Math.max(1, Math.ceil(sortedHospitals.length / rowsPerPage));
+  const paginatedHospitals = useMemo(() => {
+    const start = (currentPage - 1) * rowsPerPage;
+    return sortedHospitals.slice(start, start + rowsPerPage);
+  }, [sortedHospitals, currentPage, rowsPerPage]);
+
+  const onSortClick = (field: keyof Hospital | 'sorumluEmails') => {
+    if (sortField === field) setSortAsc(!sortAsc);
+    else { setSortField(field); setSortAsc(true); }
+    setCurrentPage(1);
+  };
 
   const openModal = (hospital?: Hospital) => {
     if (hospital && hospital.id) {
@@ -518,38 +566,38 @@ export default function LaboratuvarPanel() {
   };
 
   return (
-    <>
-      <div className="p-4 space-y-4">
+    <div className="dashboard-neu-page p-3 sm:p-4 md:p-4 space-y-4 sm:space-y-6 pt-6 sm:pt-8 min-h-screen">
+      <div className="space-y-4">
         <BackButton fallback="/yonetim" />
-        <Card className="shadow-lg">
-          <CardHeader className="flex flex-row justify-between items-center">
+        <Card className="cihaz-card shadow-lg">
+          <CardHeader className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
             <div>
-              <CardTitle className="text-xl font-headline flex items-center">
+              <CardTitle className="text-xl font-headline flex items-center text-slate-800 dark:text-slate-100">
                 <FlaskConical className="mr-2 h-6 w-6 text-green-500" />
                 Laboratuvar Yönetimi
               </CardTitle>
               <CardDescription>Yeni laboratuvarlar ekleyin veya mevcutları düzenleyin.</CardDescription>
             </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <Button variant="outline" onClick={() => setIsEfficiencyPoolListOpen(true)} size="sm" disabled={isLoading}>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button className="cihaz-action-tile text-xs" variant="outline" onClick={() => setIsEfficiencyPoolListOpen(true)} size="sm" disabled={isLoading}>
                 <BarChart3 className="mr-2 h-4 w-4" />
                 Verimlilik Havuzları
               </Button>
-              <Button variant="secondary" onClick={() => setIsEfficiencyPoolModalOpen(true)} size="sm" disabled={isLoading}>
+              <Button className="cihaz-action-tile text-xs" variant="secondary" onClick={() => setIsEfficiencyPoolModalOpen(true)} size="sm" disabled={isLoading}>
                 <PlusCircle className="mr-2 h-4 w-4" />
                 Verimlilik Havuzu Oluştur
               </Button>
-              <Button variant="secondary" onClick={() => setIsPoolListModalOpen(true)} size="sm" disabled={isLoading}>
+              <Button className="cihaz-action-tile text-xs" variant="secondary" onClick={() => setIsPoolListModalOpen(true)} size="sm" disabled={isLoading}>
                   Ortak Laboratuvarları Göster
               </Button>
-              <Button onClick={() => setIsPoolModalOpen(true)} size="sm" disabled={isLoading}>
+              <Button className="cihaz-action-tile text-xs" onClick={() => setIsPoolModalOpen(true)} size="sm" disabled={isLoading}>
                 Ortak Laboratuvar Oluştur
               </Button>
-              <Button variant="outline" onClick={handleDownloadTemplate} size="sm" disabled={isLoading}>
+              <Button className="cihaz-action-tile text-xs" variant="outline" onClick={handleDownloadTemplate} size="sm" disabled={isLoading}>
                 <Download className="mr-2 h-4 w-4" />
                 Şablon İndir
               </Button>
-              <Button variant="outline" onClick={() => excelFileInputRef.current?.click()} size="sm" disabled={isLoading}>
+              <Button className="cihaz-action-tile text-xs" variant="outline" onClick={() => excelFileInputRef.current?.click()} size="sm" disabled={isLoading}>
                 <Upload className="mr-2 h-4 w-4" />
                 Excel ile İçe Aktar
               </Button>
@@ -560,36 +608,128 @@ export default function LaboratuvarPanel() {
                 className="hidden"
                 onChange={handleExcelFileSelect}
               />
-              <Button onClick={() => openModal()} size="sm" disabled={isLoading}>
-                <PlusCircle className="mr-2 h-4 w-4" />
+              <Button className="cihaz-action-tile text-xs" onClick={() => openModal()} size="sm" disabled={isLoading}>
+                <PlusCircle className="mr-2 h-4 w-4 text-green-500" />
                 Yeni Laboratuvar
               </Button>
             </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
+            <div className="flex items-center gap-2 max-w-sm">
+                <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                        placeholder="Laboratuvar Adı, Kodu veya Adresi ile ara..."
+                        value={searchQuery}
+                        onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
+                        className="pl-9"
+                    />
+                </div>
+            </div>
+
             {isLoading ? (
-              <div className="flex justify-center p-4"><Loader2 className="h-6 w-6 animate-spin" /></div>
+              <div className="flex justify-center p-8"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>
             ) : (
-              <ScrollArea className="h-[300px] border rounded-md">
+              <>
+              <ScrollArea className="h-[400px] border rounded-md bg-white/50 dark:bg-black/20">
                 <Table>
-                  <TableHeader><TableRow><TableHead>Adı</TableHead><TableHead>Kod</TableHead><TableHead>Adres</TableHead><TableHead className="text-right">İşlemler</TableHead></TableRow></TableHeader>
+                  <TableHeader className="sticky top-0 bg-background/95 backdrop-blur-sm z-10 shadow-sm">
+                    <TableRow>
+                        <TableHead onClick={() => onSortClick('name')} className="cursor-pointer hover:bg-muted/50 transition-colors">
+                            <div className="flex items-center">
+                                Adı
+                                {sortField === 'name' && (sortAsc ? <ChevronUp className="h-4 w-4 ml-1" /> : <ChevronDown className="h-4 w-4 ml-1" />)}
+                            </div>
+                        </TableHead>
+                        <TableHead onClick={() => onSortClick('kod')} className="cursor-pointer hover:bg-muted/50 transition-colors">
+                            <div className="flex items-center">
+                                Kod
+                                {sortField === 'kod' && (sortAsc ? <ChevronUp className="h-4 w-4 ml-1" /> : <ChevronDown className="h-4 w-4 ml-1" />)}
+                            </div>
+                        </TableHead>
+                        <TableHead onClick={() => onSortClick('address')} className="cursor-pointer hover:bg-muted/50 transition-colors">
+                            <div className="flex items-center">
+                                Adres
+                                {sortField === 'address' && (sortAsc ? <ChevronUp className="h-4 w-4 ml-1" /> : <ChevronDown className="h-4 w-4 ml-1" />)}
+                            </div>
+                        </TableHead>
+                        <TableHead onClick={() => onSortClick('sorumluEmails')} className="cursor-pointer hover:bg-muted/50 transition-colors">
+                            <div className="flex items-center">
+                                E-posta
+                                {sortField === 'sorumluEmails' && (sortAsc ? <ChevronUp className="h-4 w-4 ml-1" /> : <ChevronDown className="h-4 w-4 ml-1" />)}
+                            </div>
+                        </TableHead>
+                        <TableHead className="text-right">İşlemler</TableHead>
+                    </TableRow>
+                  </TableHeader>
                   <TableBody>
-                    {hospitals.map(h => (
-                      <TableRow key={h.id}>
+                    {paginatedHospitals.map(h => (
+                      <TableRow key={h.id} className="hover:bg-muted/50 transition-colors group">
                         <TableCell className="font-medium">{h.name}</TableCell>
-                        <TableCell className="font-mono text-xs">{h.kod}</TableCell>
-                        <TableCell>{h.address}</TableCell>
+                        <TableCell className="font-mono text-xs text-muted-foreground">{h.kod || '-'}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground truncate max-w-[200px]" title={h.address}>{h.address || '-'}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground truncate max-w-[200px]" title={(h.sorumluEmails || []).join(', ')}>
+                            {h.sorumluEmails?.[0] || '-'}
+                            {h.sorumluEmails && h.sorumluEmails.length > 1 && ` (+${h.sorumluEmails.length - 1})`}
+                        </TableCell>
                         <TableCell className="text-right space-x-1">
                           <Button variant="ghost" size="icon" onClick={() => openMinMaxPanel(h)} title="Min-Max Ayarları"><SlidersHorizontal className="h-4 w-4 text-primary" /></Button>
                           <Button variant="ghost" size="icon" onClick={() => { setProductOrderTarget(h); setIsProductOrderModalOpen(true); }} title="Özel Sıralama"><ListOrdered className="h-4 w-4 text-amber-500" /></Button>
-                          <Button variant="ghost" size="icon" onClick={() => openModal(h)} title="Düzenle"><Edit3 className="h-4 w-4" /></Button>
-                          <Button variant="ghost" size="icon" onClick={() => handleDelete(h.id)} title="Sil"><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                          <Button variant="ghost" size="icon" onClick={() => openModal(h)} title="Düzenle"><Edit3 className="h-4 w-4 text-muted-foreground group-hover:text-foreground" /></Button>
+                          <Button variant="ghost" size="icon" onClick={() => handleDelete(h.id!)} title="Sil"><Trash2 className="h-4 w-4 text-destructive/70 group-hover:text-destructive" /></Button>
                         </TableCell>
                       </TableRow>
                     ))}
+                    {paginatedHospitals.length === 0 && (
+                        <TableRow>
+                            <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                                Laboratuvar bulunamadı.
+                            </TableCell>
+                        </TableRow>
+                    )}
                   </TableBody>
                 </Table>
               </ScrollArea>
+              
+              <div className="flex flex-col sm:flex-row items-center justify-between py-2 gap-4">
+                  <div className="flex items-center space-x-2 text-sm text-muted-foreground">
+                    <span>Satır / sayfa:</span>
+                    <Select value={String(rowsPerPage)} onValueChange={val => { setRowsPerPage(Number(val)); setCurrentPage(1); }}>
+                        <SelectTrigger className="w-20 h-8">
+                        <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                        {[10, 20, 50, 100].map(n => (
+                            <SelectItem key={n} value={String(n)}>{n}</SelectItem>
+                        ))}
+                        </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 w-8 p-0"
+                        disabled={currentPage === 1}
+                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    >
+                        <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <span className="text-sm font-medium text-muted-foreground min-w-[3rem] text-center">
+                        {currentPage} / {pageCount}
+                    </span>
+                    <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 w-8 p-0"
+                        disabled={currentPage === pageCount || pageCount === 0}
+                        onClick={() => setCurrentPage(p => Math.min(pageCount, p + 1))}
+                    >
+                        <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+              </div>
+              </>
             )}
           </CardContent>
         </Card>
@@ -1047,6 +1187,6 @@ export default function LaboratuvarPanel() {
           )}
         </DialogContent>
       </Dialog>
-    </>
+    </div>
   );
 }
