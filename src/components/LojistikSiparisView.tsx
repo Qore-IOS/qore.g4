@@ -411,13 +411,13 @@ export default function LojistikSiparisView() {
         id: r.itemId,
         stokKodu: r.stokKodu,
         stokAdi: r.stokAdi,
-        adet: r.requestedAdet,
+        adet: r.sentAdet,
       }));
 
       const fulfillmentItems: PeripheralFulfillmentItem[] = rows.map((r) => ({
         itemId: r.itemId,
         stokKodu: r.stokKodu,
-        requestedAdet: r.requestedAdet,
+        requestedAdet: r.sentAdet,
         sentAdet: r.sentAdet,
         fulfilled: r.fulfilled,
       }));
@@ -465,10 +465,27 @@ export default function LojistikSiparisView() {
     if (!depot) return;
     setIsRouting(true);
     try {
+      const updatedOrderItems = rows.map((r) => ({
+        id: r.itemId,
+        stokKodu: r.stokKodu,
+        stokAdi: r.stokAdi,
+        adet: r.sentAdet,
+      }));
+
+      const fulfillmentItems: PeripheralFulfillmentItem[] = rows.map((r) => ({
+        itemId: r.itemId,
+        stokKodu: r.stokKodu,
+        requestedAdet: r.sentAdet,
+        sentAdet: r.sentAdet,
+        fulfilled: r.fulfilled,
+      }));
+
       await updateDoc(doc(db, 'orders', selectedOrder.id), {
         depotId: depot.id,
         depotName: depot.name ?? null,
         status: 'pending',
+        items: updatedOrderItems,
+        'peripheralFulfillment.items': fulfillmentItems,
         routedToDepotAt: serverTimestamp(),
         routedToDepotById: currentUser?.uid || null,
         routedToDepotBy: currentUserProfile?.name || currentUser?.email || null,
@@ -500,6 +517,36 @@ export default function LojistikSiparisView() {
 
   const removeRow = (itemId: string) => {
     setRows((prev) => prev.filter((r) => r.itemId !== itemId));
+  };
+
+  const handleSaveRowAmount = async (itemId: string, newAdet: number) => {
+    if (!selectedOrder?.id) return;
+    try {
+      const updatedOrderItems = rows.map((r) => ({
+        id: r.itemId,
+        stokKodu: r.stokKodu,
+        stokAdi: r.stokAdi,
+        adet: r.itemId === itemId ? newAdet : r.sentAdet,
+      }));
+
+      const fulfillmentItems: PeripheralFulfillmentItem[] = rows.map((r) => ({
+        itemId: r.itemId,
+        stokKodu: r.stokKodu,
+        requestedAdet: r.itemId === itemId ? newAdet : r.sentAdet,
+        sentAdet: r.itemId === itemId ? newAdet : r.sentAdet,
+        fulfilled: r.fulfilled,
+      }));
+
+      await updateDoc(doc(db, 'orders', selectedOrder.id), {
+        items: updatedOrderItems,
+        'peripheralFulfillment.items': fulfillmentItems,
+      });
+      
+      setRows((prev) => prev.map(r => r.itemId === itemId ? { ...r, requestedAdet: newAdet } : r));
+      toast({ title: 'Başarılı', description: 'Adet kaydedildi.' });
+    } catch (e) {
+      toast({ title: 'Hata', description: 'Adet kaydedilemedi.', variant: 'destructive' });
+    }
   };
 
   const getStatusInfo = (order: Order) => {
@@ -1066,13 +1113,23 @@ export default function LojistikSiparisView() {
                               <div className="h-8 w-[1px] bg-black/5 dark:bg-white/5 mx-1" />
                               <div className="flex flex-col items-end">
                                 <span className="text-[10px] text-[var(--loj-muted)] uppercase">Onaylanan</span>
-                                <input
-                                  type="number"
-                                  value={row.sentAdet}
-                                  onChange={(e) => setRowSentAdet(row.itemId, e.target.value)}
-                                  className="w-14 h-8 text-center text-sm font-bold rounded-lg border-0 outline-none focus:ring-1 ring-[var(--loj-accent)]"
-                                  style={{ background: 'var(--loj-surface-2)', color: 'var(--loj-text)' }}
-                                />
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    type="number"
+                                    value={row.sentAdet}
+                                    onChange={(e) => setRowSentAdet(row.itemId, e.target.value)}
+                                    className="w-14 h-8 text-center text-sm font-bold rounded-lg border-0 outline-none focus:ring-1 ring-[var(--loj-accent)]"
+                                    style={{ background: 'var(--loj-surface-2)', color: 'var(--loj-text)' }}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSaveRowAmount(row.itemId, row.sentAdet)}
+                                    className="loj-btn-outline h-8 px-2"
+                                    title="Adedi Kaydet"
+                                  >
+                                    <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+                                  </button>
+                                </div>
                               </div>
                               <button
                                 type="button"
