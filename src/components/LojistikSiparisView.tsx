@@ -347,8 +347,23 @@ export default function LojistikSiparisView() {
 
   const handleApprove = async () => {
     if (!selectedOrder?.id) return;
+    if (rows.length === 0) {
+      toast({
+        title: 'Eksik Kalem',
+        description: 'Siparişte en az bir kalem olmalıdır.',
+        variant: 'destructive',
+      });
+      return;
+    }
     setIsSaving(true);
     try {
+      const updatedOrderItems = rows.map((r) => ({
+        id: r.itemId,
+        stokKodu: r.stokKodu,
+        stokAdi: r.stokAdi,
+        adet: r.requestedAdet,
+      }));
+
       const fulfillmentItems: PeripheralFulfillmentItem[] = rows.map((r) => ({
         itemId: r.itemId,
         stokKodu: r.stokKodu,
@@ -365,6 +380,7 @@ export default function LojistikSiparisView() {
           updatedById: currentUser?.uid || null,
           updatedBy: currentUserProfile?.name || currentUser?.email || null,
         },
+        items: updatedOrderItems,
         // Approval is *preparation*, not delivery. Fully approved orders
         // move into "Hazırlanan" (toplaniyor); they only graduate to
         // "completed" when an irsaliye-based lab acceptance reconciles
@@ -430,6 +446,10 @@ export default function LojistikSiparisView() {
     const n = parseInt(val, 10);
     const safe = isNaN(n) ? 0 : Math.max(0, n);
     setRows((prev) => (prev.map((r) => (r.itemId === itemId ? { ...r, sentAdet: safe } : r))));
+  };
+
+  const removeRow = (itemId: string) => {
+    setRows((prev) => prev.filter((r) => r.itemId !== itemId));
   };
 
   const getStatusInfo = (order: Order) => {
@@ -1004,6 +1024,14 @@ export default function LojistikSiparisView() {
                                   style={{ background: 'var(--loj-surface-2)', color: 'var(--loj-text)' }}
                                 />
                               </div>
+                              <button
+                                type="button"
+                                onClick={() => removeRow(row.itemId)}
+                                className="loj-btn-outline h-8 px-2"
+                                title="Kalemi siparişten sil"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
                             </div>
                           </div>
 
