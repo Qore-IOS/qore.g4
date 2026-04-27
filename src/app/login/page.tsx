@@ -25,17 +25,20 @@ export default function LoginPage() {
 
 
   const router = useRouter();
-  const { login, currentUser, isLoadingAuth } = useAuth();
+  const { login, currentUser, isLoadingAuth, currentUserProfile } = useAuth();
   const { toast } = useToast();
 
   useEffect(() => {
     // This will only run on the client side
     setHostname(window.location.hostname);
     if (!isLoadingAuth && currentUser) {
-      // Default redirect - will be updated by AutoRedirectOnLogin based on user role
-      router.replace('/dashboard');
+      const target =
+        currentUserProfile?.role === 'lojistik_sorumlusu'
+          ? '/siparisler'
+          : '/dashboard';
+      router.replace(target);
     }
-  }, [isLoadingAuth, currentUser, router]);
+  }, [isLoadingAuth, currentUser, currentUserProfile?.role, router]);
 
   useEffect(() => {
     function onPrefill(e: any) {
@@ -61,7 +64,6 @@ export default function LoginPage() {
     try {
       await login(email, password);
       toast({ title: "Giriş Başarılı", description: "Panele yönlendiriliyorsunuz..." });
-      router.push('/dashboard');
     } catch (error: any) {
       console.error("Login failed:", error);
       const errorMessage = error.code === 'auth/invalid-credential' || error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-email'

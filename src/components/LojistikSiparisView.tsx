@@ -16,7 +16,7 @@ import {
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
-import type { Order, Hospital, ProductCode, DepoStokItem, PeripheralFulfillmentItem } from '@/lib/types';
+import type { Order, Hospital, ProductCode, DepoStokItem, PeripheralFulfillmentItem, Depot } from '@/lib/types';
 import { format as formatDate, compareAsc, parse as parseDate } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
@@ -48,6 +48,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Progress } from '@/components/ui/progress';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toDateFromAny } from '@/lib/date';
 import OrderConfirmAnimation from '@/components/lojistik-terminal/order-confirm-animation';
 import DeliveryHistory, { type PartialDelivery } from '@/components/lojistik-terminal/delivery-history';
@@ -98,7 +100,9 @@ export default function LojistikSiparisView() {
   const [peripheralOrders, setPeripheralOrders] = useState<Order[]>([]);
   const [completedOrders, setCompletedOrders] = useState<Order[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
+  const [depots, setDepots] = useState<Depot[]>([]);
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
+  const [maxByStokKodu, setMaxByStokKodu] = useState<Map<string, number>>(new Map());
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [filter, setFilter] = useState<LojFilter>('all');
   const [search, setSearch] = useState('');
@@ -107,8 +111,12 @@ export default function LojistikSiparisView() {
 
   const [rows, setRows] = useState<RowState[]>([]);
   const [labStock, setLabStock] = useState<DepoStokItem[]>([]);
+  const [isLabStockLoading, setIsLabStockLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [showSaveFx, setShowSaveFx] = useState(false);
+  const [isRouteDialogOpen, setIsRouteDialogOpen] = useState(false);
+  const [routeDepotId, setRouteDepotId] = useState<string>('');
+  const [isRouting, setIsRouting] = useState(false);
 
   const assignedLabIds = useMemo(() => {
     const s = new Set<string>();
@@ -121,12 +129,14 @@ export default function LojistikSiparisView() {
   // Fetch hospitals & products
   useEffect(() => {
     (async () => {
-      const [hSnap, pSnap] = await Promise.all([
+      const [hSnap, pSnap, dSnap] = await Promise.all([
         getDocs(collection(db, 'hospitals')),
         getDocs(collection(db, 'productCodes')),
+        getDocs(collection(db, 'depots')),
       ]);
       setHospitals(hSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Hospital)));
       setProductCodes(pSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ProductCode)));
+      setDepots(dSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Depot)));
     })();
   }, []);
 
@@ -174,6 +184,7 @@ export default function LojistikSiparisView() {
     if (!selectedOrder) {
       setRows([]);
       setLabStock([]);
+      setIsLabStockLoading(false);
       return;
     }
 
@@ -197,12 +208,22 @@ export default function LojistikSiparisView() {
     setRows(newRows);
 
     // Fetch lab stock (shipped items to this hospital)
+    let cancelled = false;
     (async () => {
+      setIsLabStockLoading(true);
       const hospital =
         hospitals.find((h) => h.id === selectedOrder.labId) ||
         hospitals.find((h) => h.name === selectedOrder.kurumAdi || h.ad === selectedOrder.kurumAdi);
 
-      if (hospital) {
+      if (!hospital) {
+        if (!cancelled) {
+          setLabStock([]);
+          setIsLabStockLoading(false);
+        }
+        return;
+      }
+
+      try {
         const q = query(
           collection(db, 'depoStok'),
           where('isShipped', '==', true)
@@ -214,10 +235,37 @@ export default function LojistikSiparisView() {
           if (!st.hedefKurumId && st.hedefKurum && (hospital.name === st.hedefKurum || hospital.ad === st.hedefKurum)) return true;
           return false;
         });
-        setLabStock(filtered);
+        if (!cancelled) setLabStock(filtered);
+      } finally {
+        if (!cancelled) setIsLabStockLoading(false);
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [selectedOrderId, hospitals]); // Only depend on selectedOrderId and hospitals list
+
+  useEffect(() => {
+    if (!selectedOrder?.labId) {
+      setMaxByStokKodu(new Map());
+      return;
+    }
+    (async () => {
+      try {
+        const rulesSnap = await getDocs(collection(db, 'hospitals', selectedOrder.labId!, 'minMaxRules'));
+        const next = new Map<string, number>();
+        rulesSnap.docs.forEach((d) => {
+          const data = d.data() as { stokKodu?: string; max?: number };
+          const code = data.stokKodu || d.id;
+          const max = Number(data.max);
+          if (code && Number.isFinite(max) && max > 0) next.set(code, max);
+        });
+        setMaxByStokKodu(next);
+      } catch {
+        setMaxByStokKodu(new Map());
+      }
+    })();
+  }, [selectedOrder?.id, selectedOrder?.labId]);
 
   const labStockByStokKodu = useMemo(() => {
     const groups = new Map<string, DepoStokItem[]>();
@@ -316,8 +364,23 @@ export default function LojistikSiparisView() {
 
   const handleApprove = async () => {
     if (!selectedOrder?.id) return;
+    if (rows.length === 0) {
+      toast({
+        title: 'Eksik Kalem',
+        description: 'Siparişte en az bir kalem olmalıdır.',
+        variant: 'destructive',
+      });
+      return;
+    }
     setIsSaving(true);
     try {
+      const updatedOrderItems = rows.map((r) => ({
+        id: r.itemId,
+        stokKodu: r.stokKodu,
+        stokAdi: r.stokAdi,
+        adet: r.requestedAdet,
+      }));
+
       const fulfillmentItems: PeripheralFulfillmentItem[] = rows.map((r) => ({
         itemId: r.itemId,
         stokKodu: r.stokKodu,
@@ -334,6 +397,7 @@ export default function LojistikSiparisView() {
           updatedById: currentUser?.uid || null,
           updatedBy: currentUserProfile?.name || currentUser?.email || null,
         },
+        items: updatedOrderItems,
         // Approval is *preparation*, not delivery. Fully approved orders
         // move into "Hazırlanan" (toplaniyor); they only graduate to
         // "completed" when an irsaliye-based lab acceptance reconciles
@@ -362,6 +426,33 @@ export default function LojistikSiparisView() {
     }
   };
 
+  const handleRouteToDepot = async () => {
+    if (!selectedOrder?.id || !routeDepotId) return;
+    const depot = depots.find((d) => d.id === routeDepotId);
+    if (!depot) return;
+    setIsRouting(true);
+    try {
+      await updateDoc(doc(db, 'orders', selectedOrder.id), {
+        depotId: depot.id,
+        depotName: depot.name ?? null,
+        status: 'pending',
+        routedToDepotAt: serverTimestamp(),
+        routedToDepotById: currentUser?.uid || null,
+        routedToDepotBy: currentUserProfile?.name || currentUser?.email || null,
+      });
+      toast({
+        title: 'Depoya Yönlendirildi',
+        description: `Sipariş ${depot.name} deposuna yönlendirildi.`,
+      });
+      setIsRouteDialogOpen(false);
+      setRouteDepotId('');
+    } catch {
+      toast({ title: 'Hata', description: 'Sipariş depoya yönlendirilemedi.', variant: 'destructive' });
+    } finally {
+      setIsRouting(false);
+    }
+  };
+
   const toggleRowFulfilled = (itemId: string) => {
     setRows((prev) =>
       prev.map((r) => (r.itemId === itemId ? { ...r, fulfilled: !r.fulfilled } : r))
@@ -372,6 +463,10 @@ export default function LojistikSiparisView() {
     const n = parseInt(val, 10);
     const safe = isNaN(n) ? 0 : Math.max(0, n);
     setRows((prev) => (prev.map((r) => (r.itemId === itemId ? { ...r, sentAdet: safe } : r))));
+  };
+
+  const removeRow = (itemId: string) => {
+    setRows((prev) => prev.filter((r) => r.itemId !== itemId));
   };
 
   const getStatusInfo = (order: Order) => {
@@ -493,10 +588,10 @@ export default function LojistikSiparisView() {
             >
               <History className="h-4 w-4" style={{ color: 'var(--loj-muted)' }} /> Geçmiş
             </button>
-            <button
-              onClick={() => {
-                exportOrdersToExcel(
-                  [...peripheralOrders, ...completedOrders],
+              <button
+                onClick={() => {
+                  exportOrdersToExcel(
+                    [...peripheralOrders, ...completedOrders],
                   {
                     fileBaseName: 'aktif_siparisler',
                     productNameByStokKodu: productNameMap,
@@ -508,6 +603,21 @@ export default function LojistikSiparisView() {
               className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Download className="h-4 w-4" style={{ color: 'var(--loj-muted)' }} /> Excel İndir
+            </button>
+            <button
+              onClick={() => {
+                if (!selectedOrder) return;
+                const orderNo = ((selectedOrder.id ?? '').slice(-6) || '').toUpperCase();
+                exportOrdersToExcel([selectedOrder], {
+                  fileBaseName: orderNo ? `siparis_${orderNo}` : 'siparis_detayi',
+                  productNameByStokKodu: productNameMap,
+                });
+                setMoreMenuOpen(false);
+              }}
+              disabled={!selectedOrder}
+              className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Download className="h-4 w-4" style={{ color: 'var(--loj-muted)' }} /> Seçili Sipariş Excel
             </button>
           </PopoverContent>
         </Popover>
@@ -686,11 +796,14 @@ export default function LojistikSiparisView() {
                         {status.label}
                       </span>
                     </div>
-                    <div className="text-right shrink-0">
+                    <div className="text-right shrink-0 w-14 sm:w-16">
                       <p className="text-base font-extrabold" style={{ color: 'var(--loj-accent)' }}>
                         {totalAdet}
                       </p>
-                      <p className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--loj-muted)' }}>
+                      <p
+                        className="text-[10px] uppercase tracking-wide whitespace-nowrap"
+                        style={{ color: 'var(--loj-muted)' }}
+                      >
                         adet
                       </p>
                     </div>
@@ -758,6 +871,25 @@ export default function LojistikSiparisView() {
                     <span className={headerStatus.cls}>
                       <HeaderStatusIcon className="h-3 w-3" /> {headerStatus.label}
                     </span>
+                    {order.depotId && (
+                      <p className="text-[11px] mt-1 font-medium" style={{ color: 'var(--loj-muted)' }}>
+                        Depo: {order.depotName || order.depotId}
+                      </p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const orderNo = ((order.id ?? '').slice(-6) || '').toUpperCase();
+                        exportOrdersToExcel([order], {
+                          fileBaseName: orderNo ? `siparis_${orderNo}` : 'siparis_detayi',
+                          productNameByStokKodu: productNameMap,
+                        });
+                      }}
+                      className="loj-btn-outline mt-2 ml-auto"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      Excel
+                    </button>
                     <p
                       className="text-2xl sm:text-3xl font-extrabold mt-1.5"
                       style={{ color: 'var(--loj-accent)' }}
@@ -857,6 +989,7 @@ export default function LojistikSiparisView() {
                     {rows.map((row, idx) => {
                       const pName = productNameMap.get(row.stokKodu) || row.stokAdi || row.stokKodu;
                       const info = computeLabInfo(row.stokKodu);
+                      const productMax = maxByStokKodu.get(row.stokKodu);
                       return (
                         <div
                           key={row.itemId ?? idx}
@@ -885,6 +1018,11 @@ export default function LojistikSiparisView() {
                                 >
                                   {row.stokKodu}
                                 </p>
+                                {typeof productMax === 'number' && productMax > 0 && (
+                                  <span className="inline-flex mt-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border border-emerald-400/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+                                    Max: {productMax}
+                                  </span>
+                                )}
                               </div>
                             </div>
                             <div className="flex items-center gap-2">
@@ -903,33 +1041,75 @@ export default function LojistikSiparisView() {
                                   style={{ background: 'var(--loj-surface-2)', color: 'var(--loj-text)' }}
                                 />
                               </div>
+                              <button
+                                type="button"
+                                onClick={() => removeRow(row.itemId)}
+                                className="loj-btn-outline h-8 px-2"
+                                title="Kalemi siparişten sil"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
                             </div>
                           </div>
 
                           {/* Extra Stock Info */}
-                          <div className="grid grid-cols-3 gap-2 pt-3 border-t border-black/5 dark:border-white/5">
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-3 border-t border-black/5 dark:border-white/5">
                             <div className="flex flex-col">
                               <span className="text-[9px] text-[var(--loj-muted)] uppercase tracking-tight">Son Transfer</span>
-                              <p className="text-[11px] font-semibold truncate" style={{ color: 'var(--loj-text)' }}>
-                                {info.lastTransfer ? (
-                                  <span className="inline-flex items-center gap-1">
-                                    <Truck className="h-3 w-3" />
-                                    {formatDate(info.lastTransfer.date, 'dd.MM.yyyy')}
-                                  </span>
-                                ) : '-'}
-                              </p>
+                              {isLabStockLoading ? (
+                                <p className="text-[11px] font-semibold inline-flex items-center gap-1.5 animate-pulse" style={{ color: 'var(--loj-muted)' }}>
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                  Yükleniyor...
+                                </p>
+                              ) : (
+                                <p className="text-[11px] font-semibold truncate" style={{ color: 'var(--loj-text)' }}>
+                                  {info.lastTransfer ? (
+                                    <span className="inline-flex items-center gap-1">
+                                      <Truck className="h-3 w-3" />
+                                      {formatDate(info.lastTransfer.date, 'dd.MM.yyyy')}
+                                    </span>
+                                  ) : '-'}
+                                </p>
+                              )}
                             </div>
                             <div className="flex flex-col">
                               <span className="text-[9px] text-[var(--loj-muted)] uppercase tracking-tight">E.Y. Miadlı Lot</span>
-                              <p className="text-[11px] font-semibold truncate" style={{ color: 'var(--loj-text)' }}>
-                                {info.closestLot?.lotNumarasi ?? '-'} ({info.closestLot?.miad ?? '-'})
-                              </p>
+                              {isLabStockLoading ? (
+                                <p className="text-[11px] font-semibold inline-flex items-center gap-1.5 animate-pulse" style={{ color: 'var(--loj-muted)' }}>
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                  Yükleniyor...
+                                </p>
+                              ) : (
+                                <p className="text-[11px] font-semibold truncate" style={{ color: 'var(--loj-text)' }}>
+                                  {info.closestLot?.lotNumarasi ?? '-'} ({info.closestLot?.miad ?? '-'})
+                                </p>
+                              )}
                             </div>
                             <div className="flex flex-col">
                               <span className="text-[9px] text-[var(--loj-muted)] uppercase tracking-tight">Lot Adedi</span>
-                              <p className="text-[11px] font-semibold" style={{ color: 'var(--loj-text)' }}>
-                                {info.closestLot?.adet ?? 0} adet
-                              </p>
+                              {isLabStockLoading ? (
+                                <p className="text-[11px] font-semibold inline-flex items-center gap-1.5 animate-pulse" style={{ color: 'var(--loj-muted)' }}>
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                  Yükleniyor...
+                                </p>
+                              ) : (
+                                <p className="text-[11px] font-semibold" style={{ color: 'var(--loj-text)' }}>
+                                  {info.closestLot?.adet ?? 0} adet
+                                </p>
+                              )}
+                            </div>
+                            <div className="flex flex-col">
+                              <span className="text-[9px] text-[var(--loj-muted)] uppercase tracking-tight">Toplam Ürün</span>
+                              {isLabStockLoading ? (
+                                <p className="text-[11px] font-semibold inline-flex items-center gap-1.5 animate-pulse" style={{ color: 'var(--loj-muted)' }}>
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                  Yükleniyor...
+                                </p>
+                              ) : (
+                                <p className="text-[11px] font-semibold" style={{ color: 'var(--loj-text)' }}>
+                                  {info.totalAdet} adet
+                                </p>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -999,6 +1179,19 @@ export default function LojistikSiparisView() {
                     Satırları işaretleyin ve &quot;Siparişi Kaydet&quot; butonuna basın.
                   </div>
                   <button
+                    onClick={() => {
+                      if (order.depotId) return;
+                      setRouteDepotId('');
+                      setIsRouteDialogOpen(true);
+                    }}
+                    disabled={!!order.depotId}
+                    className="loj-btn-outline"
+                    title={order.depotId ? 'Sipariş zaten depoya yönlendirildi' : 'Siparişi depoya yönlendir'}
+                  >
+                    <Truck className="h-4 w-4" />
+                    {order.depotId ? 'Yönlendirildi' : 'Depoya Yönlendir'}
+                  </button>
+                  <button
                     onClick={() => handleDelete(order.id ?? '')}
                     className="loj-btn-outline"
                     title="Siparişi Sil"
@@ -1030,6 +1223,37 @@ export default function LojistikSiparisView() {
         </div>
       </div>
       </div>
+      <Dialog open={isRouteDialogOpen} onOpenChange={setIsRouteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Siparişi Depoya Yönlendir</DialogTitle>
+            <DialogDescription>
+              Sipariş depoya yönlendirildiğinde depo toplama/okutma akışına geçer. Tamamlandığında sipariş otomatik olarak tamamlananlara taşınır.
+            </DialogDescription>
+          </DialogHeader>
+          <Select value={routeDepotId} onValueChange={setRouteDepotId}>
+            <SelectTrigger>
+              <SelectValue placeholder="Depo seçin..." />
+            </SelectTrigger>
+            <SelectContent>
+              {depots.map((d) => (
+                <SelectItem key={d.id} value={d.id ?? ''}>
+                  {d.name || d.id}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <DialogFooter>
+            <button type="button" className="loj-btn-outline" onClick={() => setIsRouteDialogOpen(false)}>
+              İptal
+            </button>
+            <button type="button" className="loj-btn-primary" onClick={handleRouteToDepot} disabled={!routeDepotId || isRouting}>
+              {isRouting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Truck className="h-4 w-4" />}
+              Yönlendir
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <OrderConfirmAnimation
         open={showSaveFx}
         label="Sipariş Kaydedildi"
