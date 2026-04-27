@@ -111,6 +111,7 @@ export default function LojistikSiparisView() {
 
   const [rows, setRows] = useState<RowState[]>([]);
   const [labStock, setLabStock] = useState<DepoStokItem[]>([]);
+  const [isLabStockLoading, setIsLabStockLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [showSaveFx, setShowSaveFx] = useState(false);
   const [isRouteDialogOpen, setIsRouteDialogOpen] = useState(false);
@@ -183,6 +184,7 @@ export default function LojistikSiparisView() {
     if (!selectedOrder) {
       setRows([]);
       setLabStock([]);
+      setIsLabStockLoading(false);
       return;
     }
 
@@ -206,12 +208,22 @@ export default function LojistikSiparisView() {
     setRows(newRows);
 
     // Fetch lab stock (shipped items to this hospital)
+    let cancelled = false;
     (async () => {
+      setIsLabStockLoading(true);
       const hospital =
         hospitals.find((h) => h.id === selectedOrder.labId) ||
         hospitals.find((h) => h.name === selectedOrder.kurumAdi || h.ad === selectedOrder.kurumAdi);
 
-      if (hospital) {
+      if (!hospital) {
+        if (!cancelled) {
+          setLabStock([]);
+          setIsLabStockLoading(false);
+        }
+        return;
+      }
+
+      try {
         const q = query(
           collection(db, 'depoStok'),
           where('isShipped', '==', true)
@@ -223,9 +235,14 @@ export default function LojistikSiparisView() {
           if (!st.hedefKurumId && st.hedefKurum && (hospital.name === st.hedefKurum || hospital.ad === st.hedefKurum)) return true;
           return false;
         });
-        setLabStock(filtered);
+        if (!cancelled) setLabStock(filtered);
+      } finally {
+        if (!cancelled) setIsLabStockLoading(false);
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [selectedOrderId, hospitals]); // Only depend on selectedOrderId and hospitals list
 
   useEffect(() => {
@@ -1039,26 +1056,60 @@ export default function LojistikSiparisView() {
                           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-3 border-t border-black/5 dark:border-white/5">
                             <div className="flex flex-col">
                               <span className="text-[9px] text-[var(--loj-muted)] uppercase tracking-tight">Son Transfer</span>
-                              <p className="text-[11px] font-semibold truncate" style={{ color: 'var(--loj-text)' }}>
-                                {info.lastTransfer ? (
-                                  <span className="inline-flex items-center gap-1">
-                                    <Truck className="h-3 w-3" />
-                                    {formatDate(info.lastTransfer.date, 'dd.MM.yyyy')}
-                                  </span>
-                                ) : '-'}
-                              </p>
+                              {isLabStockLoading ? (
+                                <p className="text-[11px] font-semibold inline-flex items-center gap-1.5 animate-pulse" style={{ color: 'var(--loj-muted)' }}>
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                  Yükleniyor...
+                                </p>
+                              ) : (
+                                <p className="text-[11px] font-semibold truncate" style={{ color: 'var(--loj-text)' }}>
+                                  {info.lastTransfer ? (
+                                    <span className="inline-flex items-center gap-1">
+                                      <Truck className="h-3 w-3" />
+                                      {formatDate(info.lastTransfer.date, 'dd.MM.yyyy')}
+                                    </span>
+                                  ) : '-'}
+                                </p>
+                              )}
                             </div>
                             <div className="flex flex-col">
                               <span className="text-[9px] text-[var(--loj-muted)] uppercase tracking-tight">E.Y. Miadlı Lot</span>
-                              <p className="text-[11px] font-semibold truncate" style={{ color: 'var(--loj-text)' }}>
-                                {info.closestLot?.lotNumarasi ?? '-'} ({info.closestLot?.miad ?? '-'})
-                              </p>
+                              {isLabStockLoading ? (
+                                <p className="text-[11px] font-semibold inline-flex items-center gap-1.5 animate-pulse" style={{ color: 'var(--loj-muted)' }}>
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                  Yükleniyor...
+                                </p>
+                              ) : (
+                                <p className="text-[11px] font-semibold truncate" style={{ color: 'var(--loj-text)' }}>
+                                  {info.closestLot?.lotNumarasi ?? '-'} ({info.closestLot?.miad ?? '-'})
+                                </p>
+                              )}
                             </div>
                             <div className="flex flex-col">
                               <span className="text-[9px] text-[var(--loj-muted)] uppercase tracking-tight">Lot Adedi</span>
-                              <p className="text-[11px] font-semibold" style={{ color: 'var(--loj-text)' }}>
-                                {info.closestLot?.adet ?? 0} adet
-                              </p>
+                              {isLabStockLoading ? (
+                                <p className="text-[11px] font-semibold inline-flex items-center gap-1.5 animate-pulse" style={{ color: 'var(--loj-muted)' }}>
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                  Yükleniyor...
+                                </p>
+                              ) : (
+                                <p className="text-[11px] font-semibold" style={{ color: 'var(--loj-text)' }}>
+                                  {info.closestLot?.adet ?? 0} adet
+                                </p>
+                              )}
+                            </div>
+                            <div className="flex flex-col">
+                              <span className="text-[9px] text-[var(--loj-muted)] uppercase tracking-tight">Toplam Ürün</span>
+                              {isLabStockLoading ? (
+                                <p className="text-[11px] font-semibold inline-flex items-center gap-1.5 animate-pulse" style={{ color: 'var(--loj-muted)' }}>
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                  Yükleniyor...
+                                </p>
+                              ) : (
+                                <p className="text-[11px] font-semibold" style={{ color: 'var(--loj-text)' }}>
+                                  {info.totalAdet} adet
+                                </p>
+                              )}
                             </div>
                             <div className="flex flex-col">
                               <span className="text-[9px] text-[var(--loj-muted)] uppercase tracking-tight">Toplam Ürün</span>
