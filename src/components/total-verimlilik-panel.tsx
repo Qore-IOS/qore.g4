@@ -156,38 +156,37 @@ interface ColDef {
 }
 
 const COLS: ColDef[] = [
-  { id: 'lab',                       num: 1,  label: 'Laboratuvar',                          w: 200, frozen: 1, type: 'info' },
-  { id: 'stokKodu',                  num: 2,  label: 'Stok Kodu',                            w: 116, frozen: 2, type: 'info' },
-  { id: 'stokAdi',                   num: 3,  label: 'Ürün Adı',                             w: 196, frozen: 3, type: 'info' },
-  { id: 'testAdi',                   num: 4,  label: 'Test Adı',                             w: 110, type: 'info' },
-  { id: 'ambalajDegeri',             num: 5,  label: 'Ambalaj',                              w: 80,  type: 'info' },
-  { id: 'cihazGrubu',                num: 6,  label: 'Cihaz Grubu',                          w: 110, type: 'info' },
-  { id: 'baslangicStokuKutu',        num: 7,  label: 'Baş. Stoğu',          sub: '(Kutu)',   w: 92,  type: 'manual' },
-  { id: 'ayBasiCihazUstuTest',       num: 8,  label: 'Ay Üstü',             sub: '(Test)',   w: 92,  type: 'manual' },
-  { id: 'totalAyBasiStok',           num: 9,  label: 'Total Ay Başı',       sub: '(Test)',   w: 100, type: 'calc' },
-  { id: 'ayBasiSevkiyatKutu',        num: 10, label: 'Ay Başı Sevk.',       sub: '(Kutu)',   w: 96,  type: 'manual' },
-  { id: 'goztepeSevkiyat',           num: 11, label: 'Göztepe Sevk.',       sub: '(Kutu)',   w: 96,  type: 'manual' },
-  { id: 'kurumlarArasiSevk',         num: 12, label: 'K.Arası Sevk',        sub: '(Kutu)',   w: 100, type: 'manual' },
-  { id: 'lojistikAraTransfer',       num: 13, label: 'Loj. Transfer',       sub: '(Kutu)',   w: 100, type: 'manual' },
-  { id: 'sevkiyatlarSonrasiTotalTest', num: 14, label: 'Sevk. Sonrası',     sub: '(Test)',   w: 108, type: 'calc' },
-  { id: 'kumulatifTotal',            num: 15, label: 'Küm. Total',          sub: '(Test)',   w: 100, type: 'manual' },
-  { id: 'donemSonuStokKutu',         num: 16, label: 'D.Sonu Stok',         sub: '(Kutu)',   w: 100, type: 'manual' },
-  { id: 'donemSonuCihazUstuTest',    num: 17, label: 'D.Sonu Cihaz',        sub: '(Test)',   w: 104, type: 'manual' },
-  { id: 'donemSonuToplamTest',       num: 18, label: 'D.Sonu Toplam',       sub: '(Test)',   w: 108, type: 'calc' },
-  { id: 'hakEdis',                   num: 19, label: 'Hak Ediş',            sub: '(Test)',   w: 96,  type: 'manual' },
-  { id: 'stokDogrulukFark',          num: 20, label: 'Stok Doğruluk',                        w: 144, type: 'result' },
-  { id: 'kitVerimlilikFark',         num: 21, label: 'Kit Verimlilik',                       w: 144, type: 'result' },
-  { id: 'kutuKayip',                 num: 22, label: 'Kutu Kayıp',                           w: 120, type: 'result' },
-  { id: 'sarfiyatMaliyeti',          num: 23, label: 'Sarfiyat Maliyeti',                    w: 124, type: 'result', cost: true },
-  { id: 'hakEdisKarsiligi',          num: 24, label: 'Hak Ediş Karş.',                       w: 124, type: 'result', cost: true },
-  { id: 'kar',                       num: 25, label: 'Kâr',                                  w: 110, type: 'result', cost: true },
-  { id: 'zararMaliyeti',             num: 26, label: 'Zarar Maliyeti',                       w: 124, type: 'result' },
-  { id: 'merkezeGonderilen',         num: 27, label: 'Merkeze Gön.',        sub: '(Test)',   w: 110, type: 'result', centerOnly: true },
+  { id: 'stokKodu',                  num: 1,  label: 'Stok Kodu',                            w: 100, frozen: 1, type: 'info' },
+  { id: 'stokAdi',                   num: 2,  label: 'Ürün Adı',                             w: 184, frozen: 2, type: 'info' },
+  { id: 'testAdi',                   num: 3,  label: 'Test Adı',                             w: 86,  type: 'info' },
+  { id: 'ambalajDegeri',             num: 4,  label: 'Ambalaj',                              w: 64,  type: 'info' },
+  { id: 'cihazGrubu',                num: 5,  label: 'Cihaz Grubu',                          w: 76,  type: 'info' },
+  { id: 'baslangicStokuKutu',        num: 6,  label: 'Baş. Stoğu',          sub: '(Kutu)',   w: 76,  type: 'manual' },
+  { id: 'ayBasiCihazUstuTest',       num: 7,  label: 'Ay Üstü',             sub: '(Test)',   w: 66,  type: 'manual' },
+  { id: 'totalAyBasiStok',           num: 8,  label: 'Total Ay Başı',       sub: '(Test)',   w: 80,  type: 'calc' },
+  { id: 'ayBasiSevkiyatKutu',        num: 9,  label: 'Ay Başı Sevk.',       sub: '(Kutu)',   w: 80,  type: 'manual' },
+  { id: 'goztepeSevkiyat',           num: 10, label: 'Göztepe Sevk.',       sub: '(Kutu)',   w: 80,  type: 'manual' },
+  { id: 'kurumlarArasiSevk',         num: 11, label: 'K.Arası Sevk',        sub: '(Kutu)',   w: 80,  type: 'manual' },
+  { id: 'lojistikAraTransfer',       num: 12, label: 'Loj. Transfer',       sub: '(Kutu)',   w: 80,  type: 'manual' },
+  { id: 'sevkiyatlarSonrasiTotalTest', num: 13, label: 'Sevk. Sonrası',     sub: '(Test)',   w: 84,  type: 'calc' },
+  { id: 'kumulatifTotal',            num: 14, label: 'Küm. Total',          sub: '(Test)',   w: 78,  type: 'manual' },
+  { id: 'donemSonuStokKutu',         num: 15, label: 'D.Sonu Stok',         sub: '(Kutu)',   w: 78,  type: 'manual' },
+  { id: 'donemSonuCihazUstuTest',    num: 16, label: 'D.Sonu Cihaz',        sub: '(Test)',   w: 82,  type: 'manual' },
+  { id: 'donemSonuToplamTest',       num: 17, label: 'D.Sonu Toplam',       sub: '(Test)',   w: 82,  type: 'calc' },
+  { id: 'hakEdis',                   num: 18, label: 'Hak Ediş',            sub: '(Test)',   w: 74,  type: 'manual' },
+  { id: 'stokDogrulukFark',          num: 19, label: 'Stok Doğruluk',                        w: 124, type: 'result' },
+  { id: 'kitVerimlilikFark',         num: 20, label: 'Kit Verimlilik',                       w: 124, type: 'result' },
+  { id: 'kutuKayip',                 num: 21, label: 'Kutu Kayıp',                           w: 96,  type: 'result' },
+  { id: 'sarfiyatMaliyeti',          num: 22, label: 'Sarfiyat Maliyeti',                    w: 110, type: 'result', cost: true },
+  { id: 'hakEdisKarsiligi',          num: 23, label: 'Hak Ediş Karş.',                       w: 110, type: 'result', cost: true },
+  { id: 'kar',                       num: 24, label: 'Kâr',                                  w: 96,  type: 'result', cost: true },
+  { id: 'zararMaliyeti',             num: 25, label: 'Zarar Maliyeti',                       w: 110, type: 'result' },
+  { id: 'merkezeGonderilen',         num: 26, label: 'Merkeze Gön.',        sub: '(Test)',   w: 96,  type: 'result', centerOnly: true },
 ];
 
 const COLS_BY_ID: Record<string, ColDef> = COLS.reduce((m, c) => { m[c.id] = c; return m; }, {} as Record<string, ColDef>);
 
-const FROZEN_LEFT: Record<number, number> = { 1: 0, 2: 200, 3: 316 };
+const FROZEN_LEFT: Record<number, number> = { 1: 0, 2: 100 };
 
 // ─── FORMAT PALETTES ──────────────────────────────────────────────────────
 // Palettes ordered by hue (warm → cool) so visual flow is predictable
@@ -2563,35 +2562,57 @@ export default function TotalVerimlilikPanel({
   }, []);
   const clearSel = useCallback(() => { setSelRows(new Set()); setSelCols(new Set()); setSelCells(new Set()); cellAnchor.current = null; }, []);
 
-  // Cell-level click selection (Excel-style). Shift = extend, Ctrl = toggle individual.
-  const selectCell = useCallback((rowId: string, colId: string, e: React.MouseEvent) => {
+  // Drag-to-select state (Excel: hold mouse down + drag across cells)
+  const isDraggingCells = useRef(false);
+
+  // Build a rectangular selection between two cells
+  const rangeSelect = useCallback((aRow: string, aCol: string, bRow: string, bCol: string): Set<string> => {
+    const r1 = visibleRowIds.indexOf(aRow);
+    const r2 = visibleRowIds.indexOf(bRow);
+    const c1 = visibleCols.findIndex(c => c.id === aCol);
+    const c2 = visibleCols.findIndex(c => c.id === bCol);
+    if (r1 < 0 || r2 < 0 || c1 < 0 || c2 < 0) return new Set([`${bRow}-${bCol}`]);
+    const [rA, rB] = [Math.min(r1, r2), Math.max(r1, r2)];
+    const [cA, cB] = [Math.min(c1, c2), Math.max(c1, c2)];
+    const next = new Set<string>();
+    for (let i = rA; i <= rB; i++) {
+      for (let j = cA; j <= cB; j++) next.add(`${visibleRowIds[i]}-${visibleCols[j].id}`);
+    }
+    return next;
+  }, [visibleRowIds, visibleCols]);
+
+  // MouseDown: start a drag-select. Shift extends, Ctrl toggles, plain replaces.
+  const onCellMouseDown = useCallback((rowId: string, colId: string, e: React.MouseEvent) => {
+    if (e.button !== 0) return; // left-click only
     const key = `${rowId}-${colId}`;
     if (e.shiftKey && cellAnchor.current) {
-      // Range select between anchor and current
-      const anchor = cellAnchor.current;
-      const r1 = visibleRowIds.indexOf(anchor.rowId);
-      const r2 = visibleRowIds.indexOf(rowId);
-      const c1 = visibleCols.findIndex(c => c.id === anchor.colId);
-      const c2 = visibleCols.findIndex(c => c.id === colId);
-      if (r1 < 0 || r2 < 0 || c1 < 0 || c2 < 0) { setSelCells(new Set([key])); return; }
-      const [rA, rB] = [Math.min(r1, r2), Math.max(r1, r2)];
-      const [cA, cB] = [Math.min(c1, c2), Math.max(c1, c2)];
-      const next = new Set<string>();
-      for (let i = rA; i <= rB; i++) {
-        for (let j = cA; j <= cB; j++) next.add(`${visibleRowIds[i]}-${visibleCols[j].id}`);
-      }
-      setSelCells(next);
+      const a = cellAnchor.current;
+      setSelCells(rangeSelect(a.rowId, a.colId, rowId, colId));
     } else if (e.ctrlKey || e.metaKey) {
       setSelCells(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
       cellAnchor.current = { rowId, colId };
     } else {
       setSelCells(new Set([key]));
       cellAnchor.current = { rowId, colId };
-      // Clear row/col selection so toolbar reflects only this cell
       setSelRows(new Set());
       setSelCols(new Set());
     }
-  }, [visibleRowIds, visibleCols]);
+    isDraggingCells.current = true;
+  }, [rangeSelect]);
+
+  // MouseEnter while dragging: extend selection from anchor to current cell
+  const onCellMouseEnter = useCallback((rowId: string, colId: string) => {
+    if (!isDraggingCells.current || !cellAnchor.current) return;
+    const a = cellAnchor.current;
+    setSelCells(rangeSelect(a.rowId, a.colId, rowId, colId));
+  }, [rangeSelect]);
+
+  // Global mouseup ends drag-select
+  useEffect(() => {
+    const onUp = () => { isDraggingCells.current = false; };
+    window.addEventListener('mouseup', onUp);
+    return () => window.removeEventListener('mouseup', onUp);
+  }, []);
 
   // Apply format to current selection (cells + rows + cols)
   const applyToSelection = useCallback(<K extends keyof FmtRec>(key: K, value: FmtRec[K]) => {
@@ -3299,14 +3320,13 @@ export default function TotalVerimlilikPanel({
                                   return (
                                     <td
                                       key={col.id}
-                                      onClick={(e) => selectCell(row.id, col.id, e)}
+                                      onMouseDown={(e) => onCellMouseDown(row.id, col.id, e)}
+                                      onMouseEnter={() => onCellMouseEnter(row.id, col.id)}
                                       onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, rowId: row.id, colId: col.id }); }}
                                       className={`tv-cell border-b border-r border-zinc-200 dark:border-zinc-800 ${rowHeightCls} ${isManual ? 'p-0' : 'px-2'} align-middle ${baseBg} ${col.frozen ? 'sticky z-10 bg-white dark:bg-zinc-900' : ''} ${isColSel ? 'outline outline-1 outline-blue-300 -outline-offset-1' : ''} ${isRowSel ? '!bg-blue-50 dark:!bg-blue-950/40' : ''} ${isCellSel ? 'tv-cell-selected' : ''}`}
                                       style={{ width: col.w, minWidth: col.w, left: stickyLeft, ...cellStyle }}
                                     >
-                                      {col.id === 'lab' ? (
-                                        <span className="font-medium text-[11px]">{row.labName}</span>
-                                      ) : renderCellValue(col, row)}
+                                      {renderCellValue(col, row)}
                                     </td>
                                   );
                                 })}
