@@ -15,6 +15,7 @@ import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { cn, readExcelData, exportDataToExcel } from '@/lib/utils';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 
 // ============================================================================
 // TYPES
@@ -41,7 +42,7 @@ type ModalView = 'list' | 'create' | 'edit';
 
 export default function DeviceBrandModelModal({ open, onOpenChange }: DeviceBrandModelModalProps) {
   const { toast } = useToast();
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [isLoading, setIsLoading] = useState(false);
@@ -74,14 +75,15 @@ export default function DeviceBrandModelModal({ open, onOpenChange }: DeviceBran
     setIsLoading(true);
     try {
       const snap = await getDocs(collection(db, 'deviceBrandModels'));
-      setItems(snap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceBrandModel)));
+      const all = snap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceBrandModel));
+      setItems(filterByCompanyScope(all, currentCompanyId, isSuperAdmin));
     } catch (err) {
       console.error('Error fetching brand models:', err);
       toast({ title: 'Hata', description: 'Marka/model verileri yüklenemedi.', variant: 'destructive' });
     } finally {
       setIsLoading(false);
     }
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
     if (open) {
@@ -134,14 +136,14 @@ export default function DeviceBrandModelModal({ open, onOpenChange }: DeviceBran
         });
         toast({ title: 'Güncellendi', description: 'Marka/model güncellendi.' });
       } else {
-        await addDoc(collection(db, 'deviceBrandModels'), {
+        await addDoc(collection(db, 'deviceBrandModels'), withCompanyScope({
           brand: formBrand.trim(),
           model: formModel.trim(),
           imageUrl: formImageUrl.trim() || null,
           createdAt: serverTimestamp(),
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || '',
-        });
+        }, currentCompanyId));
         toast({ title: 'Oluşturuldu', description: 'Yeni marka/model eklendi.' });
       }
       fetchItems();
@@ -190,14 +192,14 @@ export default function DeviceBrandModelModal({ open, onOpenChange }: DeviceBran
         const key = `${brand.toLocaleLowerCase('tr')}::${model.toLocaleLowerCase('tr')}`;
         if (existingKeys.has(key) || seenInFile.has(key)) continue;
 
-        await addDoc(collection(db, 'deviceBrandModels'), {
+        await addDoc(collection(db, 'deviceBrandModels'), withCompanyScope({
           brand,
           model,
           imageUrl: imageUrl || null,
           createdAt: serverTimestamp(),
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || '',
-        });
+        }, currentCompanyId));
         seenInFile.add(key);
         imported++;
       }
