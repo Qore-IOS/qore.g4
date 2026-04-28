@@ -124,7 +124,7 @@ type TimePeriod = 'latest' | '3m' | '6m' | '12m' | 'all';
 
 export default function CostDashboardPanel({ productCodes }: CostDashboardPanelProps) {
   const router = useRouter();
-  const { currentCompanyId, isSuperAdmin } = useAuth();
+  const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
   const { toast } = useToast();
   const [isLoading, setLoading] = useState(false);
   const [rates, setRates] = useState<Record<Currency, number> | null>(null);
@@ -135,6 +135,11 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
   const authCtx = useAuth();
   const companyId = authCtx.currentCompanyId;
   const superAdmin = authCtx.isSuperAdmin;
+  const isAdminRole = ['admin', 'admin_developer', 'super_admin'].includes(currentUserProfile?.role ?? '');
+  const assignedLabs = useMemo(
+    () => currentUserProfile?.assignedLaboratories ?? [],
+    [currentUserProfile?.assignedLaboratories]
+  );
 
   useEffect(() => {
     const load = async () => {
@@ -146,7 +151,16 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
         ]);
         setRates(rateData);
         const allSessions = sessionSnap.docs.map(d => ({ id: d.id, ...d.data() } as SayimSession));
-        setSessions(filterByCompanyScope(allSessions, companyId, superAdmin));
+        const companyScoped = filterByCompanyScope(allSessions, companyId, superAdmin);
+        // Restrict lab sessions to the user's assigned laboratories. Depot
+        // sessions stay visible (they aren't lab-scoped). Admins / super
+        // admins keep full visibility within their company.
+        const labScoped = (superAdmin || isAdminRole || assignedLabs.length === 0)
+          ? companyScoped
+          : companyScoped.filter(s =>
+              s.locationType !== 'lab' || assignedLabs.includes(s.locationId)
+            );
+        setSessions(labScoped);
       } catch (err) {
         console.error('Error loading cost dashboard:', err);
         try {
@@ -159,7 +173,7 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
     };
 
     load();
-  }, [companyId, superAdmin]);
+  }, [companyId, superAdmin, isAdminRole, assignedLabs]);
 
   const productMap = useMemo(() => {
     const map = new Map<string, ProductCode>();

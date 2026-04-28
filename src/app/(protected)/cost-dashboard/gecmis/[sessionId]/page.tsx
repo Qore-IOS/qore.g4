@@ -167,7 +167,8 @@ export default function MaliyetSayimDetayPage() {
   const sessionId = Array.isArray(params?.sessionId) ? params.sessionId[0] : params?.sessionId;
   const router = useRouter();
   const { productCodes } = useFirebaseQueries();
-  const { currentCompanyId, isSuperAdmin } = useAuth();
+  const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
+  const isAdminRole = ['admin', 'admin_developer', 'super_admin'].includes(currentUserProfile?.role ?? '');
 
   const [session, setSession] = useState<SayimSession | null>(null);
   const [loading, setLoading] = useState(true);
@@ -194,6 +195,19 @@ export default function MaliyetSayimDetayPage() {
             router.push('/cost-dashboard/gecmis');
             return;
           }
+          // Lab-scoped users cannot view sessions for labs they aren't
+          // assigned to. Depot sessions remain accessible.
+          const assignedLabs = currentUserProfile?.assignedLaboratories ?? [];
+          if (
+            !isSuperAdmin &&
+            !isAdminRole &&
+            assignedLabs.length > 0 &&
+            sessionData.locationType === 'lab' &&
+            !assignedLabs.includes(sessionData.locationId)
+          ) {
+            router.push('/cost-dashboard/gecmis');
+            return;
+          }
           setSession(sessionData);
         }
       } catch (err) {
@@ -203,7 +217,7 @@ export default function MaliyetSayimDetayPage() {
       }
     };
     load();
-  }, [sessionId]);
+  }, [sessionId, currentCompanyId, isSuperAdmin, isAdminRole, currentUserProfile?.assignedLaboratories]);
 
   // Product map for cost lookup
   const productMap = useMemo(() => {
