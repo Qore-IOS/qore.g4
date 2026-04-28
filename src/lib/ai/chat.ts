@@ -2,6 +2,7 @@ import { MAX_TOKENS, ERROR_MESSAGES } from './config';
 import { executeSmartQuery, SmartQueryResult } from './smartQueryEngine';
 import { generateWithGemini } from './geminiClient';
 import { aiLogger } from '@/lib/logger';
+import { TOTAL_VERIMLILIK_ANALIZ_RAPORU } from './efficiencyReportContext';
 
 export interface ChatMessage {
   role: 'user' | 'assistant';
@@ -40,7 +41,12 @@ const ENHANCED_SYSTEM_PROMPT = `Sen Qore sisteminin yapay zeka asistanisin. Turk
 - Listeler icin madde isaretleri kullan
 - Sayisal karsilastirmalar icin tablo formati tercih et
 - Kritik bilgileri **kalin** yap
-- Tarih formati: GG.AA.YYYY`;
+- Tarih formati: GG.AA.YYYY
+
+## VERIMLILIK ANALIZ REFERANSI
+Yapay zeka asistani olarak sana sunulan verimlilik analiz paneli algoritmasini ve analiz yonergelerini kullanarak tespitler yapmalisin. Eger sana tablo, satir veya hucre bilgisi gelirse bu rapor kurallarina gore analiz et:
+
+${TOTAL_VERIMLILIK_ANALIZ_RAPORU}`;
 
 function addHallucinationGuard(context: string, hasData: boolean): string {
   if (!hasData) {
