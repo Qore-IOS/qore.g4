@@ -53,7 +53,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
-import { Loader2, BarChart3, FileSpreadsheet, Save, Download, ChevronRight, ChevronDown, Upload, Eye, EyeOff, History, Filter, ArrowUp, ArrowDown, Search, X, Crown, RotateCcw, Clock, Bold, Italic, AlignLeft, AlignCenter, AlignRight, PaintBucket, Plus, SlidersHorizontal, Columns3, Trash2, Maximize2, Minimize2 } from 'lucide-react';
+import { Loader2, BarChart3, FileSpreadsheet, Save, Download, ChevronRight, ChevronDown, Upload, Eye, EyeOff, History, Filter, ArrowUp, ArrowDown, Search, X, Crown, RotateCcw, Clock, Bold, Italic, AlignLeft, AlignCenter, AlignRight, PaintBucket, Plus, SlidersHorizontal, Columns3, Trash2, Maximize2, Minimize2, Bot } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -83,6 +83,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { totalVerimlilikLogger } from '@/lib/logger';
 import { exportDataToExcel } from '@/lib/utils';
 import { getExchangeRates } from '@/lib/exchange-rates';
+import { generateWithGemini } from '@/lib/ai/geminiClient';
 import Link from 'next/link';
 
 interface TotalVerimlilikPanelProps {
@@ -125,12 +126,27 @@ interface TableRow {
   kitVerimlilikYuzde: number; // Sütun 21 - Fark/15 * 100 = Sapma %
 }
 
+type EditableField = 'baslangicStokuKutu' | 'ayBasiCihazUstuTest' | 'ayBasiSevkiyatKutu' | 'goztepeSevkiyat' | 'kurumlarArasiSevk' | 'lojistikAraTransfer' | 'kumulatifTotal' | 'donemSonuStokKutu' | 'donemSonuCihazUstuTest' | 'hakEdis';
+
 interface HakEdisDefinition {
   id: string;
   sutKodu: string;
   sutTestAdi: string;
   linkedStokKodu: string;
   hakEdisMiktari: number; // TL cinsinden
+}
+
+interface FormulaColumnDef {
+  id: string;
+  name: string;
+  expr: string;
+}
+
+interface SnapshotMetrics {
+  monthKey: string;
+  label: string;
+  verimlilik: number;
+  hakEdisToplam: number;
 }
 
 
@@ -156,8 +172,8 @@ interface ColDef {
 }
 
 const COLS: ColDef[] = [
-  { id: 'stokKodu',                  num: 1,  label: 'Stok Kodu',                            w: 100, frozen: 1, type: 'info' },
-  { id: 'stokAdi',                   num: 2,  label: 'Ürün Adı',                             w: 184, frozen: 2, type: 'info' },
+  { id: 'stokKodu',                  num: 1,  label: 'Stok Kodu',                            w: 96,  type: 'info' },
+  { id: 'stokAdi',                   num: 2,  label: 'Ürün Adı',                             w: 230, frozen: 1, type: 'info' },
   { id: 'testAdi',                   num: 3,  label: 'Test Adı',                             w: 86,  type: 'info' },
   { id: 'ambalajDegeri',             num: 4,  label: 'Ambalaj',                              w: 64,  type: 'info' },
   { id: 'cihazGrubu',                num: 5,  label: 'Cihaz Grubu',                          w: 76,  type: 'info' },
@@ -186,8 +202,6 @@ const COLS: ColDef[] = [
 
 const COLS_BY_ID: Record<string, ColDef> = COLS.reduce((m, c) => { m[c.id] = c; return m; }, {} as Record<string, ColDef>);
 
-const FROZEN_LEFT: Record<number, number> = { 1: 0, 2: 100 };
-
 // ─── FORMAT PALETTES ──────────────────────────────────────────────────────
 // Palettes ordered by hue (warm → cool) so visual flow is predictable
 const FILL_PALETTE = [
@@ -200,7 +214,7 @@ const FILL_PALETTE = [
 const TEXT_PALETTE = ['#111111', '#6b7280', '#b91c1c', '#c2410c', '#15803d', '#1d4ed8', '#7c3aed', '#be185d'];
 
 // ─── ADVANCED FILTER OPERATORS ────────────────────────────────────────────
-type AdvOp = '=' | '!=' | '>' | '<' | '>=' | '<=' | 'contains' | 'startsWith';
+type AdvOp = '=' | '!=' | '>' | '<' | '>=' | '<=' | 'between' | 'topN' | 'topPct' | 'aboveAvg' | 'belowAvg' | 'contains' | 'startsWith';
 const ADV_OPS: { value: AdvOp; label: string; numeric?: boolean }[] = [
   { value: '=',          label: 'eşit' },
   { value: '!=',         label: 'eşit değil' },
@@ -208,18 +222,21 @@ const ADV_OPS: { value: AdvOp; label: string; numeric?: boolean }[] = [
   { value: '<',          label: '<',  numeric: true },
   { value: '>=',         label: '≥',  numeric: true },
   { value: '<=',         label: '≤',  numeric: true },
+  { value: 'between',    label: 'aralık', numeric: true },
+  { value: 'topN',       label: 'Top N', numeric: true },
+  { value: 'topPct',     label: 'Top %', numeric: true },
+  { value: 'aboveAvg',   label: 'Ort. Üstü', numeric: true },
+  { value: 'belowAvg',   label: 'Ort. Altı', numeric: true },
   { value: 'contains',   label: 'içerir' },
   { value: 'startsWith', label: 'başlar' },
 ];
 
 interface AdvFilter { id: string; col: string; op: AdvOp; val: string }
 
-function evalAdvFilter(row: TableRow, f: AdvFilter): boolean {
+function evalAdvFilterRaw(raw: unknown, f: AdvFilter): boolean {
   // Empty filter value = passive (matches everything) — important UX:
   // when user adds a rule but hasn't typed anything yet, all rows stay visible.
   if (f.val === '' || f.val == null) return true;
-
-  const raw = (row as unknown as Record<string, unknown>)[f.col];
 
   // Try numeric comparison if filter value parses as a number AND the cell value is numeric-ish.
   const numV = parseFloat(f.val);
@@ -235,7 +252,7 @@ function evalAdvFilter(row: TableRow, f: AdvFilter): boolean {
   }
 
   // For ordering ops without numeric values → row fails (no meaningful comparison).
-  if (f.op === '>' || f.op === '<' || f.op === '>=' || f.op === '<=') return false;
+  if (f.op === '>' || f.op === '<' || f.op === '>=' || f.op === '<=' || f.op === 'between' || f.op === 'topN' || f.op === 'topPct' || f.op === 'aboveAvg' || f.op === 'belowAvg') return false;
 
   // String-mode comparison for =, !=, contains, startsWith (case-insensitive).
   // Treat missing/null as empty string so '!=' works correctly for absent values.
@@ -258,6 +275,21 @@ function loadLS<T>(key: string, fallback: T): T {
 function saveLS(key: string, value: unknown) {
   if (typeof window === 'undefined') return;
   try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* ignore */ }
+}
+
+function evalFormula(expr: string, scope: Record<string, number>): number {
+  const safeExpr = expr.replace(/[^0-9+\-*/()._% a-zA-Z]/g, '');
+  const normalized = safeExpr.replace(/%/g, '/100');
+  const names = Object.keys(scope);
+  const values = names.map(k => Number(scope[k] || 0));
+  try {
+    // eslint-disable-next-line no-new-func
+    const fn = new Function(...names, `return (${normalized});`) as (...args: number[]) => number;
+    const result = fn(...values);
+    return Number.isFinite(result) ? result : 0;
+  } catch {
+    return 0;
+  }
 }
 
 // Optimizasyon için Debounced Input bileşeni
@@ -444,6 +476,7 @@ export default function TotalVerimlilikPanel({
   hospitals = [],
   productCodes = [],
 }: TotalVerimlilikPanelProps) {
+  const REQUIRED_VISIBLE_COLS = useMemo(() => new Set(['stokAdi', 'testAdi', 'ambalajDegeri']), []);
   const { toast } = useToast();
   const { currentUser } = useAuth();
 
@@ -585,6 +618,22 @@ export default function TotalVerimlilikPanel({
   const [advFilterOpen, setAdvFilterOpen] = useState(false);
   const [advFilters, setAdvFilters] = useState<AdvFilter[]>(() => loadLS('totalVerim_advFilters', []));
   const [advMode, setAdvMode] = useState<'AND' | 'OR'>(() => loadLS('totalVerim_advMode', 'AND'));
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set(loadLS<string[]>('totalVerim_collapsedGroups', [])));
+  const [bulkFillValue, setBulkFillValue] = useState('');
+  const [biPanelOpen, setBiPanelOpen] = useState(false);
+  const [pivotRowsBy, setPivotRowsBy] = useState<string>('labName');
+  const [pivotColsBy, setPivotColsBy] = useState<string>('testAdi');
+  const [pivotValueBy, setPivotValueBy] = useState<string>('hakEdis');
+  const [pivotDrillOpen, setPivotDrillOpen] = useState(false);
+  const [pivotDrillRows, setPivotDrillRows] = useState<TableRow[]>([]);
+  const [formulaCols, setFormulaCols] = useState<FormulaColumnDef[]>(() => loadLS('totalVerim_formulaCols', []));
+  const [newFormulaName, setNewFormulaName] = useState('');
+  const [newFormulaExpr, setNewFormulaExpr] = useState('');
+  const [snapshots, setSnapshots] = useState<Record<string, SnapshotMetrics>>(() => loadLS('totalVerim_snapshots', {}));
+  const [aiAnalysisOpen, setAiAnalysisOpen] = useState(false);
+  const [aiAnalyzing, setAiAnalyzing] = useState(false);
+  const [aiAnalysisText, setAiAnalysisText] = useState('');
+  const [aiTargetLabel, setAiTargetLabel] = useState<string>('Tablo Geneli');
   // Edge-scroll glow refs (green)
   const greenGlowLeftRef = useRef<HTMLDivElement>(null);
   const greenGlowRightRef = useRef<HTMLDivElement>(null);
@@ -600,6 +649,9 @@ export default function TotalVerimlilikPanel({
   useEffect(() => { saveLS('totalVerim_colValFilters', colValFilters); }, [colValFilters]);
   useEffect(() => { saveLS('totalVerim_advFilters', advFilters); }, [advFilters]);
   useEffect(() => { saveLS('totalVerim_advMode', advMode); }, [advMode]);
+  useEffect(() => { saveLS('totalVerim_collapsedGroups', Array.from(collapsedGroups)); }, [collapsedGroups]);
+  useEffect(() => { saveLS('totalVerim_formulaCols', formulaCols); }, [formulaCols]);
+  useEffect(() => { saveLS('totalVerim_snapshots', snapshots); }, [snapshots]);
 
   // ─── DROPDOWN / CONTEXT MENU GLOBAL CLOSE ─────────────────────────────
   useEffect(() => {
@@ -1127,8 +1179,6 @@ export default function TotalVerimlilikPanel({
   }, [computeRow]);
 
   // Değer değişikliği handler'ı
-  type EditableField = 'baslangicStokuKutu' | 'ayBasiCihazUstuTest' | 'ayBasiSevkiyatKutu' | 'goztepeSevkiyat' | 'kurumlarArasiSevk' | 'lojistikAraTransfer' | 'kumulatifTotal' | 'donemSonuStokKutu' | 'donemSonuCihazUstuTest' | 'hakEdis';
-
   const handleValueChange = useCallback((rowId: string, field: EditableField, value: string) => {
     const numValue = value === '' ? 0 : parseFloat(value);
     if (isNaN(numValue)) return;
@@ -2490,22 +2540,173 @@ export default function TotalVerimlilikPanel({
   }, []);
 
   // ─── REDESIGNED UI: HELPERS ──────────────────────────────────────────
+  const COLUMN_GROUPS: Record<string, string[]> = {
+    sevkiyat: ['ayBasiSevkiyatKutu', 'goztepeSevkiyat', 'kurumlarArasiSevk', 'lojistikAraTransfer'],
+  };
+  const EDITABLE_FIELDS = new Set<EditableField>(['baslangicStokuKutu', 'ayBasiCihazUstuTest', 'ayBasiSevkiyatKutu', 'goztepeSevkiyat', 'kurumlarArasiSevk', 'lojistikAraTransfer', 'kumulatifTotal', 'donemSonuStokKutu', 'donemSonuCihazUstuTest', 'hakEdis']);
+  const dynamicFormulaCols = useMemo<ColDef[]>(() => formulaCols.map((f, idx) => ({
+    id: `fx_${f.id}`,
+    num: 100 + idx + 1,
+    label: f.name || `Formül ${idx + 1}`,
+    sub: 'ƒx',
+    w: 110,
+    type: 'result',
+  })), [formulaCols]);
+  const allCols = useMemo(() => [...COLS, ...dynamicFormulaCols], [dynamicFormulaCols]);
+
+  const applyBulkValue = useCallback((mode: 'set' | 'increasePct') => {
+    const base = parseFloat(bulkFillValue);
+    if (Number.isNaN(base)) return;
+    setRows(prevRows => {
+      const selectedIds = selRows.size > 0 ? selRows : new Set(prevRows.map(r => r.id));
+      const selectedCellMap = new Set(selCells);
+      const updatedRows = prevRows.map(row => {
+        if (!selectedIds.has(row.id)) return row;
+        const next = { ...row } as TableRow;
+        EDITABLE_FIELDS.forEach((field) => {
+          const canApplyByCells = selectedCellMap.size === 0 || selectedCellMap.has(`${row.id}-${field}`);
+          if (!canApplyByCells) return;
+          const current = Number((next as unknown as Record<string, number>)[field] || 0);
+          const updated = mode === 'set' ? base : current * (1 + (base / 100));
+          (next as unknown as Record<string, number>)[field] = Number.isFinite(updated) ? updated : current;
+        });
+        return next;
+      });
+      return recomputeAllRows(updatedRows, interLabTransfers);
+    });
+  }, [bulkFillValue, selRows, selCells, recomputeAllRows, interLabTransfers]);
+
+  const toggleColumnGroup = useCallback((groupId: string) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(groupId)) next.delete(groupId); else next.add(groupId);
+      return next;
+    });
+  }, []);
+
   // Visible columns honor: hidden set + cost flag + center flag
-  const visibleCols = useMemo(() => COLS.filter(c => {
-    if (hiddenCols.has(c.id)) return false;
+  const visibleCols = useMemo(() => allCols.filter(c => {
+    if (hiddenCols.has(c.id) && !REQUIRED_VISIBLE_COLS.has(c.id)) return false;
+    const isCollapsedByGroup = Object.entries(COLUMN_GROUPS).some(([gid, ids]) => collapsedGroups.has(gid) && ids.includes(c.id));
+    if (isCollapsedByGroup) return false;
     if (showResultsOnly && c.type === 'manual') return false; // hide manual inputs in results-only
     if (c.cost && !showCostColumns) return false;
     if (c.centerOnly && !centerHakEdisMode) return false;
     return true;
-  }), [hiddenCols, showResultsOnly, showCostColumns, centerHakEdisMode]);
+  }), [allCols, hiddenCols, showResultsOnly, showCostColumns, centerHakEdisMode, REQUIRED_VISIBLE_COLS, collapsedGroups]);
+
+  useEffect(() => {
+    setHiddenCols(prev => {
+      if (![...REQUIRED_VISIBLE_COLS].some(id => prev.has(id))) return prev;
+      const next = new Set(prev);
+      REQUIRED_VISIBLE_COLS.forEach(id => next.delete(id));
+      return next;
+    });
+  }, [REQUIRED_VISIBLE_COLS]);
+
+  const stickyLeftByColId = useMemo(() => {
+    let currentLeft = 36; // row selection column width
+    const map: Record<string, number> = {};
+    visibleCols.forEach(col => {
+      if (!col.frozen) return;
+      map[col.id] = currentLeft;
+      currentLeft += col.w;
+    });
+    return map;
+  }, [visibleCols]);
+
+  const resolveFilterValue = useCallback((row: TableRow, colId: string): unknown => {
+    if (colId.startsWith('fx_')) {
+      const fxId = colId.replace('fx_', '');
+      const fx = formulaCols.find(f => f.id === fxId);
+      if (!fx) return 0;
+      return evalFormula(fx.expr, {
+        hakEdis: row.hakEdis,
+        total: row.totalAyBasiStok,
+        kumulatifTotal: row.kumulatifTotal,
+        sevkiyatSonrasi: row.sevkiyatlarSonrasiTotalTest,
+        donemSonu: row.donemSonuToplamTest,
+      });
+    }
+    switch (colId) {
+      case 'kutuKayip': {
+        const sentCount = testsSentToCenter[row.id] || 0;
+        const effHak = centerHakEdisMode ? Math.max(0, row.hakEdis - sentCount) : row.hakEdis;
+        const testFark = column22Mode === 'kumulatif'
+          ? row.stokDogrulukFark
+          : (row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest) - effHak;
+        const ambalaj = row.ambalajDegeri || 1;
+        return testFark / ambalaj;
+      }
+      case 'sarfiyatMaliyeti':
+        return calculateRowCost(row).cost;
+      case 'hakEdisKarsiligi':
+        return calculateHakEdisKarsiligi(row, centerHakEdisMode).amount;
+      case 'kar':
+        return calculateKar(row, centerHakEdisMode).kar;
+      case 'zararMaliyeti':
+        return calculateZararMaliyeti(row).zarar;
+      case 'merkezeGonderilen':
+        return testsSentToCenter[row.id] || 0;
+      default:
+        return (row as unknown as Record<string, unknown>)[colId];
+    }
+  }, [
+    centerHakEdisMode,
+    column22Mode,
+    calculateRowCost,
+    calculateHakEdisKarsiligi,
+    calculateKar,
+    calculateZararMaliyeti,
+    testsSentToCenter,
+    formulaCols,
+  ]);
 
   // Group rows by lab (after primary filtering)
   const groupedRows = useMemo(() => {
     // Apply advanced filters on top of existing deferredRows (which already has search+colFilters+sort)
     let result = deferredRows;
     if (advFilters.length > 0) {
+      const metricCache = new Map<string, number[]>();
+      const getMetricValues = (colId: string) => {
+        if (metricCache.has(colId)) return metricCache.get(colId)!;
+        const vals = result
+          .map(r => Number(resolveFilterValue(r, colId)))
+          .filter(v => Number.isFinite(v))
+          .sort((a, b) => b - a);
+        metricCache.set(colId, vals);
+        return vals;
+      };
       result = result.filter(r => {
-        const matches = advFilters.map(f => evalAdvFilter(r, f));
+        const matches = advFilters.map(f => {
+          const raw = resolveFilterValue(r, f.col);
+          if (f.op === 'between') {
+            const [a, b] = f.val.split(/[;,]/).map(v => parseFloat(v.trim()));
+            const numRaw = Number(raw);
+            if (!Number.isFinite(numRaw) || !Number.isFinite(a) || !Number.isFinite(b)) return false;
+            return numRaw >= Math.min(a, b) && numRaw <= Math.max(a, b);
+          }
+          if (f.op === 'aboveAvg' || f.op === 'belowAvg') {
+            const values = getMetricValues(f.col);
+            if (values.length === 0) return false;
+            const avg = values.reduce((s, n) => s + n, 0) / values.length;
+            const numRaw = Number(raw);
+            if (!Number.isFinite(numRaw)) return false;
+            return f.op === 'aboveAvg' ? numRaw > avg : numRaw < avg;
+          }
+          if (f.op === 'topN' || f.op === 'topPct') {
+            const values = getMetricValues(f.col);
+            if (values.length === 0) return false;
+            const numRaw = Number(raw);
+            if (!Number.isFinite(numRaw)) return false;
+            const rankCount = f.op === 'topN'
+              ? Math.max(1, Math.floor(parseFloat(f.val || '0')))
+              : Math.max(1, Math.floor(values.length * (Math.min(100, Math.max(1, parseFloat(f.val || '0'))) / 100)));
+            const threshold = values[Math.min(values.length - 1, rankCount - 1)];
+            return numRaw >= threshold;
+          }
+          return evalAdvFilterRaw(raw, f);
+        });
         return advMode === 'AND' ? matches.every(Boolean) : matches.some(Boolean);
       });
     }
@@ -2513,7 +2714,7 @@ export default function TotalVerimlilikPanel({
     const valEntries = Object.entries(colValFilters).filter(([, v]) => v && v.length > 0);
     if (valEntries.length > 0) {
       result = result.filter(r => valEntries.every(([cid, vals]) => {
-        const v = String((r as unknown as Record<string, unknown>)[cid] ?? '');
+        const v = String(resolveFilterValue(r, cid) ?? '');
         return (vals as string[]).includes(v);
       }));
     }
@@ -2530,9 +2731,83 @@ export default function TotalVerimlilikPanel({
       g.rows.push(r);
     });
     return groups;
-  }, [deferredRows, advFilters, advMode, colValFilters]);
+  }, [deferredRows, advFilters, advMode, colValFilters, resolveFilterValue]);
 
   const totalVisibleRows = useMemo(() => groupedRows.reduce((s, g) => s + g.rows.length, 0), [groupedRows]);
+  const flatVisibleRows = useMemo(() => groupedRows.flatMap(g => g.rows), [groupedRows]);
+  const footerAgg = useMemo(() => {
+    const nums = (colId: string) => flatVisibleRows.map(r => Number(resolveFilterValue(r, colId))).filter(v => Number.isFinite(v));
+    const sum = (list: number[]) => list.reduce((s, n) => s + n, 0);
+    const avg = (list: number[]) => list.length > 0 ? sum(list) / list.length : 0;
+    const hakList = nums('hakEdis');
+    const kitPerfList = flatVisibleRows.map(r => Math.max(0, Math.min(100, 100 - Math.abs(r.kitVerimlilikYuzde))));
+    const costList = nums('sarfiyatMaliyeti');
+    return {
+      hakSum: sum(hakList),
+      kitAvg: avg(kitPerfList),
+      costSum: sum(costList),
+      minKit: kitPerfList.length ? Math.min(...kitPerfList) : 0,
+      maxKit: kitPerfList.length ? Math.max(...kitPerfList) : 0,
+    };
+  }, [flatVisibleRows, resolveFilterValue]);
+  const pivotData = useMemo(() => {
+    const rowKeys = Array.from(new Set(flatVisibleRows.map(r => String(resolveFilterValue(r, pivotRowsBy) || '—'))));
+    const colKeys = Array.from(new Set(flatVisibleRows.map(r => String(resolveFilterValue(r, pivotColsBy) || '—'))));
+    const matrix: Record<string, Record<string, number>> = {};
+    rowKeys.forEach(rk => { matrix[rk] = {}; colKeys.forEach(ck => { matrix[rk][ck] = 0; }); });
+    flatVisibleRows.forEach(r => {
+      const rk = String(resolveFilterValue(r, pivotRowsBy) || '—');
+      const ck = String(resolveFilterValue(r, pivotColsBy) || '—');
+      const vv = Number(resolveFilterValue(r, pivotValueBy) || 0);
+      if (!matrix[rk]) matrix[rk] = {};
+      matrix[rk][ck] = (matrix[rk][ck] || 0) + (Number.isFinite(vv) ? vv : 0);
+    });
+    return { rowKeys, colKeys, matrix };
+  }, [flatVisibleRows, resolveFilterValue, pivotRowsBy, pivotColsBy, pivotValueBy]);
+  const currentSnapshotMetrics = useMemo<SnapshotMetrics>(() => ({
+    monthKey: `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}`,
+    label: `${MONTHS[selectedMonth]?.label} ${selectedYear}`,
+    verimlilik: efficiencyMetrics.genelVerimlilik,
+    hakEdisToplam: efficiencyMetrics.toplamHakEdis,
+  }), [selectedYear, selectedMonth, efficiencyMetrics.genelVerimlilik, efficiencyMetrics.toplamHakEdis]);
+  const plannedSnapshot = snapshots[`planned-${currentSnapshotMetrics.monthKey}`];
+  const actualSnapshot = snapshots[`actual-${currentSnapshotMetrics.monthKey}`];
+  const AI_ANALYZABLE_COLS = useMemo(() => ['stokDogrulukFark', 'kitVerimlilikFark', 'kutuKayip', 'sarfiyatMaliyeti'], []);
+
+  const runAiAnalysis = useCallback(async (mode: 'table' | 'column' | 'cell', payload?: { colId?: string; rowId?: string }) => {
+    try {
+      setAiAnalyzing(true);
+      setAiAnalysisOpen(true);
+      const subset = flatVisibleRows.slice(0, 300).map(r => ({
+        lab: r.labName,
+        stok: r.stokAdi,
+        stokKodu: r.stokKodu,
+        stokDogrulukFark: r.stokDogrulukFark,
+        kitVerimlilikFark: r.kitVerimlilikFark,
+        kutuKayip: Number(resolveFilterValue(r, 'kutuKayip') || 0),
+        sarfiyatMaliyeti: Number(resolveFilterValue(r, 'sarfiyatMaliyeti') || 0),
+      }));
+      const targetRow = payload?.rowId ? flatVisibleRows.find(r => r.id === payload.rowId) : null;
+      const targetCol = payload?.colId || '';
+      const prompt = mode === 'table'
+        ? `Aşağıdaki total verimlilik verisini analiz et. Smart alertler, auto insights, anomaly detection ve gelecek ay tahmini verimlilik üret. Kısa ve madde madde yaz.\nVeri:${JSON.stringify(subset)}`
+        : mode === 'column'
+          ? `Sadece ${targetCol} sütununu analiz et. Düşük performans, anomali, trend ve aksiyon önerisi ver.\nVeri:${JSON.stringify(subset.map(r => ({ lab: r.lab, stok: r.stok, value: (r as Record<string, unknown>)[targetCol] })))}`
+          : `Tek hücre analizi yap. Sütun:${targetCol}. Satır:${JSON.stringify(targetRow)}. Bu değeri anomali açısından değerlendir ve kısa öneri ver.`;
+      setAiTargetLabel(mode === 'table' ? 'Tablo Geneli' : mode === 'column' ? `Sütun: ${targetCol}` : `Hücre: ${targetCol}`);
+      const res = await generateWithGemini({
+        systemPrompt: 'Sen sağlık operasyon verimlilik danışmanısın. Cevabı Türkçe, kısa, maddeli ve aksiyon odaklı ver.',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.2,
+        maxOutputTokens: 1200,
+      });
+      setAiAnalysisText(res.text || 'AI analiz çıktısı boş döndü.');
+    } catch (e) {
+      setAiAnalysisText(`AI analiz hatası: ${e instanceof Error ? e.message : 'Bilinmeyen hata'}`);
+    } finally {
+      setAiAnalyzing(false);
+    }
+  }, [flatVisibleRows, resolveFilterValue]);
   // Flat ordered row IDs across visible (expanded) groups - used for shift-range selection
   const visibleRowIds = useMemo(() => {
     const ids: string[] = [];
@@ -2736,9 +3011,21 @@ export default function TotalVerimlilikPanel({
 
   // Render value for a column×row cell
   const renderCellValue = (col: ColDef, row: TableRow): React.ReactNode => {
+    if (col.id.startsWith('fx_')) {
+      const fx = formulaCols.find(f => `fx_${f.id}` === col.id);
+      if (!fx) return null;
+      const v = evalFormula(fx.expr, {
+        hakEdis: row.hakEdis,
+        total: row.totalAyBasiStok,
+        kumulatifTotal: row.kumulatifTotal,
+        sevkiyatSonrasi: row.sevkiyatlarSonrasiTotalTest,
+        donemSonu: row.donemSonuToplamTest,
+      });
+      return <span className="font-mono text-[11px]">{Number(v).toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</span>;
+    }
     switch (col.id) {
       case 'lab': return null; // handled separately
-      case 'stokKodu': return <span className="font-mono text-[11px]">{row.stokKodu}</span>;
+      case 'stokKodu': return <span className="font-mono text-[11px] block text-left">{row.stokKodu}</span>;
       case 'stokAdi': return <span className="text-[11.5px]">{row.stokAdi}</span>;
       case 'testAdi': return <span className="text-muted-foreground text-[11px]">{row.testAdi || '—'}</span>;
       case 'ambalajDegeri': return <span className="text-[11px]">{row.ambalajDegeri || '—'}</span>;
@@ -2778,7 +3065,7 @@ export default function TotalVerimlilikPanel({
             )}
           </>
         );
-      case 'totalAyBasiStok': return <span className="font-mono text-[11px] font-semibold">{fmtN(row.totalAyBasiStok)}</span>;
+      case 'totalAyBasiStok': return <span title="(Baş. Stoğu × Ambalaj) + Ay Üstü" className="font-mono text-[11px] font-semibold underline decoration-dotted cursor-help">{fmtN(row.totalAyBasiStok)}</span>;
       case 'sevkiyatlarSonrasiTotalTest': return <span className="font-mono text-[11px] font-semibold">{fmtN(row.sevkiyatlarSonrasiTotalTest)}</span>;
       case 'donemSonuToplamTest': return <span className="font-mono text-[11px] font-semibold">{fmtN(row.donemSonuToplamTest)}</span>;
       case 'stokDogrulukFark': {
@@ -2787,20 +3074,27 @@ export default function TotalVerimlilikPanel({
                   : row.stokDogrulukFark < 0 ? 'bg-green-100 text-green-700 border-green-200'
                   : 'bg-muted text-muted-foreground border-muted';
         return (
-          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold border ${cls}`}>
-            {sign}{Math.abs(row.stokDogrulukFark).toLocaleString('tr-TR')} · %{Math.abs(row.stokDogrulukYuzde).toFixed(1)}
-          </span>
+          <div className="flex items-center gap-1">
+            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold border ${cls}`}>
+              {sign}{Math.abs(row.stokDogrulukFark).toLocaleString('tr-TR')} · %{Math.abs(row.stokDogrulukYuzde).toFixed(1)}
+            </span>
+            <button onClick={() => runAiAnalysis('cell', { rowId: row.id, colId: 'stokDogrulukFark' })} className="text-indigo-500 hover:text-indigo-700"><Bot className="h-3 w-3" /></button>
+          </div>
         );
       }
       case 'kitVerimlilikFark': {
+        const efficiencyScore = Math.max(0, Math.min(100, 100 - Math.abs(row.kitVerimlilikYuzde)));
         const sign = row.kitVerimlilikFark > 0 ? '-' : (row.kitVerimlilikFark < 0 ? '+' : '');
-        const cls = row.kitVerimlilikFark > 0 ? 'bg-orange-100 text-orange-700 border-orange-200'
-                  : row.kitVerimlilikFark < 0 ? 'bg-green-100 text-green-700 border-green-200'
-                  : 'bg-muted text-muted-foreground border-muted';
+        const cls = efficiencyScore < 70 ? 'bg-red-100 text-red-700 border-red-200'
+                  : efficiencyScore <= 90 ? 'bg-yellow-100 text-yellow-700 border-yellow-200'
+                  : 'bg-green-100 text-green-700 border-green-200';
         return (
-          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold border ${cls}`}>
-            {sign}{Math.abs(row.kitVerimlilikFark).toLocaleString('tr-TR')} · %{Math.abs(row.kitVerimlilikYuzde).toFixed(1)}
-          </span>
+          <div className="flex items-center gap-1">
+            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold border ${cls}`}>
+              {sign}{Math.abs(row.kitVerimlilikFark).toLocaleString('tr-TR')} · %{Math.abs(row.kitVerimlilikYuzde).toFixed(1)} · Verim %{efficiencyScore.toFixed(0)}
+            </span>
+            <button onClick={() => runAiAnalysis('cell', { rowId: row.id, colId: 'kitVerimlilikFark' })} className="text-indigo-500 hover:text-indigo-700"><Bot className="h-3 w-3" /></button>
+          </div>
         );
       }
       case 'kutuKayip': {
@@ -2811,13 +3105,13 @@ export default function TotalVerimlilikPanel({
         const abs = Math.abs(kutuFark);
         if (abs < 1) return <span className="text-muted-foreground text-[11px]">0 kutu</span>;
         const cls = abs >= 2 ? 'text-red-600 font-bold' : 'text-yellow-600 font-semibold';
-        return <span className={`font-mono text-[11px] ${cls}`}>{kutuFark > 0 ? '+' : '-'}{abs.toLocaleString('tr-TR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} kutu</span>;
+        return <div className="flex items-center gap-1"><span className={`font-mono text-[11px] ${cls}`}>{kutuFark > 0 ? '+' : '-'}{abs.toLocaleString('tr-TR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} kutu</span><button onClick={() => runAiAnalysis('cell', { rowId: row.id, colId: 'kutuKayip' })} className="text-indigo-500 hover:text-indigo-700"><Bot className="h-3 w-3" /></button></div>;
       }
       case 'sarfiyatMaliyeti': {
         const { cost, hasData } = calculateRowCost(row);
         if (!hasData) return <span className="text-muted-foreground text-[10px]">—</span>;
         if (cost === 0) return <span className="text-muted-foreground">—</span>;
-        return <span className="font-mono text-[11px] font-semibold text-emerald-700">{cur}{cost.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>;
+        return <div className="flex items-center gap-1"><span className="font-mono text-[11px] font-semibold text-emerald-700">{cur}{cost.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span><button onClick={() => runAiAnalysis('cell', { rowId: row.id, colId: 'sarfiyatMaliyeti' })} className="text-indigo-500 hover:text-indigo-700"><Bot className="h-3 w-3" /></button></div>;
       }
       case 'hakEdisKarsiligi': {
         const { amount, hasData } = calculateHakEdisKarsiligi(row, centerHakEdisMode);
@@ -2845,6 +3139,23 @@ export default function TotalVerimlilikPanel({
         return <span className="font-mono text-[11px] font-semibold text-orange-600">{sentCount.toLocaleString('tr-TR')}</span>;
       }
       default: return null;
+    }
+  };
+
+  const renderFooterValue = (col: ColDef): React.ReactNode => {
+    switch (col.id) {
+      case 'stokAdi':
+        return <span className="font-semibold text-[11px]">Toplam Hak Ediş: {fmtN(footerAgg.hakSum)}</span>;
+      case 'kitVerimlilikFark':
+        return <span className="font-semibold text-[10.5px]">Ort. Verimlilik: %{footerAgg.kitAvg.toFixed(1)}</span>;
+      case 'hakEdis':
+        return <span className="font-mono text-[10.5px]">SUM: {fmtN(footerAgg.hakSum)}</span>;
+      case 'sarfiyatMaliyeti':
+        return <span className="font-mono text-[10.5px]">SUM: {cur}{footerAgg.costSum.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</span>;
+      case 'stokDogrulukFark':
+        return <span className="font-mono text-[10.5px]">MIN/MAX Verim: %{footerAgg.minKit.toFixed(0)} / %{footerAgg.maxKit.toFixed(0)}</span>;
+      default:
+        return null;
     }
   };
 
@@ -2899,41 +3210,6 @@ export default function TotalVerimlilikPanel({
   return (
     <div className="relative flex flex-col h-full w-full bg-[#f3f3f1] dark:bg-zinc-950 text-[13px]" role="main" aria-label="Total Verimlilik Paneli">
 
-      {/* ─── TOP BAR ─────────────────────────────────────────────────── */}
-      <div className="bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 px-3 h-11 flex items-center gap-2 flex-shrink-0">
-        <div className="flex items-center gap-1.5">
-          <BarChart3 className="h-4 w-4 text-orange-500" />
-          <span className="font-bold tracking-tight text-[13px]">Total Verimlilik</span>
-        </div>
-        <div className="w-px h-4 bg-zinc-200 dark:bg-zinc-700 mx-1" />
-        <div className="flex items-center gap-0.5">
-          <button className="px-2.5 py-1 rounded text-[11px] font-medium bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900">Total Dashboard</button>
-          <Link href="/total-verimlilik/gecmis"><button className="px-2.5 py-1 rounded text-[11px] font-medium text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800">Geçmiş</button></Link>
-        </div>
-        <div className="flex-1" />
-        {/* KPI chips */}
-        {rows.length > 0 && (
-          <div className="flex items-center gap-1.5">
-            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10.5px] border border-emerald-200 bg-emerald-50 text-emerald-800">
-              <span>Verimlilik</span>
-              <span className="font-bold font-mono text-[11px]">%{efficiencyMetrics.genelVerimlilik.toFixed(0)}</span>
-            </div>
-            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10.5px] border border-blue-200 bg-blue-50 text-blue-800">
-              <span>Sarfiyat</span>
-              <span className="font-bold font-mono text-[11px]">{cur}{Math.round(totalCost).toLocaleString('tr-TR')}</span>
-            </div>
-            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10.5px] border border-amber-200 bg-amber-50 text-amber-800">
-              <span>Hak Ediş</span>
-              <span className="font-bold font-mono text-[11px]">{cur}{Math.round(totalHakEdisKarsiligi).toLocaleString('tr-TR')}</span>
-            </div>
-            <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10.5px] border ${totalKar >= 0 ? 'border-violet-200 bg-violet-50 text-violet-800' : 'border-rose-200 bg-rose-50 text-rose-800'}`}>
-              <span>Kâr</span>
-              <span className="font-bold font-mono text-[11px]">{cur}{Math.abs(Math.round(totalKar)).toLocaleString('tr-TR')}</span>
-            </div>
-          </div>
-        )}
-      </div>
-
       {/* ─── MAIN TOOLBAR (RIBBON) ──────────────────────────────────── */}
       <div className="bg-white dark:bg-zinc-900 border-b border-zinc-300 dark:border-zinc-700 px-3 h-9 flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
         {/* Save dropdown */}
@@ -2959,6 +3235,12 @@ export default function TotalVerimlilikPanel({
             </div>
           )}
         </div>
+        <Link href="/total-dashboard">
+          <button className="flex items-center gap-1 px-2 h-7 rounded text-[11px] font-medium border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 whitespace-nowrap">
+            <BarChart3 className="h-3 w-3" />
+            Total Dashboard
+          </button>
+        </Link>
         {/* Excel dropdown */}
         <div className="tv-drop-wrap relative inline-flex">
           <button
@@ -3191,6 +3473,12 @@ export default function TotalVerimlilikPanel({
           <span className="font-bold">{cur}</span>
           Maliyet
         </button>
+        <button
+          onClick={() => runAiAnalysis('table')}
+          className="flex items-center gap-1 px-2 h-7 rounded text-[11px] font-medium border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+        >
+          <Bot className="h-3 w-3" />Analiz Et
+        </button>
         {(Object.keys(colValFilters).length > 0 || advFilters.length > 0 || hasActiveFilters) && (
           <button onClick={() => { setColValFilters({}); clearAllFilters(); clearAdvFilters(); }} className="flex items-center gap-1 px-2 h-7 rounded text-[11px] font-medium bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900">
             <X className="h-3 w-3" />
@@ -3221,10 +3509,48 @@ export default function TotalVerimlilikPanel({
             </button>
           ))}
         </div>
+        <div className="w-px h-5 bg-zinc-200 dark:bg-zinc-700" />
+        <button
+          onClick={() => toggleColumnGroup('sevkiyat')}
+          className="flex items-center gap-1 px-2 h-7 rounded text-[11px] font-medium border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+          title="Sevkiyat kolon grubunu aç/kapat"
+        >
+          {collapsedGroups.has('sevkiyat') ? '[ + ]' : '[ - ]'} Sevkiyat
+        </button>
+        <div className="flex items-center gap-1 border border-zinc-200 dark:border-zinc-700 rounded px-1.5 h-7">
+          <Input
+            value={bulkFillValue}
+            onChange={e => setBulkFillValue(e.target.value)}
+            placeholder="Toplu değer"
+            className="h-6 w-20 text-[11px] border-0 px-1 shadow-none"
+          />
+          <button onClick={() => applyBulkValue('set')} className="px-2 h-5 rounded bg-zinc-100 hover:bg-zinc-200 text-[10px] font-semibold whitespace-nowrap">Hepsine</button>
+          <button onClick={() => applyBulkValue('increasePct')} className="px-2 h-5 min-w-[56px] rounded bg-blue-100 hover:bg-blue-200 text-[10px] font-semibold text-blue-700 whitespace-nowrap">% Artır</button>
+        </div>
+        <button onClick={() => setBiPanelOpen(v => !v)} className={`flex items-center gap-1 px-2.5 h-7 min-w-[74px] rounded text-[10.5px] font-medium border whitespace-nowrap ${biPanelOpen ? 'bg-blue-600 text-white border-blue-600' : 'border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>
+          BI Panel
+        </button>
+        <button
+          onClick={() => setSnapshots(prev => ({ ...prev, [`planned-${currentSnapshotMetrics.monthKey}`]: currentSnapshotMetrics }))}
+          className="px-2.5 h-7 min-w-[102px] rounded text-[10px] font-medium border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 whitespace-nowrap"
+        >
+          Planlanan Kaydet
+        </button>
+        <button
+          onClick={() => setSnapshots(prev => ({ ...prev, [`actual-${currentSnapshotMetrics.monthKey}`]: currentSnapshotMetrics }))}
+          className="px-2.5 h-7 min-w-[108px] rounded text-[10px] font-medium border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 whitespace-nowrap"
+        >
+          Gerçekleşen Kaydet
+        </button>
         <div className="flex-1" />
         <span className="text-[10.5px] text-zinc-400 font-mono">
           {groupedRows.length} lab · {totalVisibleRows} satır · {visibleCols.length} sütun
         </span>
+        {plannedSnapshot && actualSnapshot && (
+          <span className="ml-2 text-[10px] font-semibold text-emerald-700">
+            Δ Verimlilik %{(actualSnapshot.verimlilik - plannedSnapshot.verimlilik).toFixed(1)} · Δ HakEdiş {(actualSnapshot.hakEdisToplam - plannedSnapshot.hakEdisToplam).toLocaleString('tr-TR')}
+          </span>
+        )}
       </div>
 
       {/* ─── DATA TABLE ─────────────────────────────────────────────── */}
@@ -3269,7 +3595,7 @@ export default function TotalVerimlilikPanel({
                         <span className="text-[9px] text-zinc-400">#</span>
                       </th>
                       {visibleCols.map(col => {
-                        const stickyLeft = col.frozen ? FROZEN_LEFT[col.frozen] + 36 : undefined;
+                        const stickyLeft = col.frozen ? stickyLeftByColId[col.id] : undefined;
                         const isSel = selCols.has(col.id);
                         const colFmt = colFmts[col.id] || {};
                         const hasFilter = !!colValFilters[col.id];
@@ -3278,13 +3604,22 @@ export default function TotalVerimlilikPanel({
                             key={col.id}
                             onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, rowId: null, colId: col.id }); }}
                             className={`group sticky top-0 ${col.frozen ? 'z-40' : 'z-30'} border-b-2 border-r border-zinc-300 dark:border-zinc-700 ${headerBgClass(col.type)} ${isSel ? 'outline outline-2 outline-blue-500 -outline-offset-2' : ''} h-8 px-1.5 text-left text-[9.5px] font-semibold text-zinc-600 dark:text-zinc-300 align-bottom`}
-                            style={{ width: col.w, minWidth: col.w, left: stickyLeft, ...(colFmt.bg ? { background: colFmt.bg } : {}) }}
+                            style={{ width: col.w, minWidth: col.w, left: stickyLeft, position: col.frozen ? 'sticky' : undefined, ...(colFmt.bg ? { background: colFmt.bg } : {}) }}
                           >
                             <div className="flex flex-col items-stretch gap-0">
                               <div className="flex items-center gap-1 cursor-pointer" onClick={(e) => toggleSelCol(col.id, e)}>
                                 <span className="text-[8px] text-zinc-400 font-normal">{col.num}.</span>
                                 <span className="flex-1 truncate">{col.label}</span>
                                 {sortConfig.column === col.id && (sortConfig.direction === 'asc' ? <ArrowUp className="h-2.5 w-2.5 text-blue-600" /> : <ArrowDown className="h-2.5 w-2.5 text-blue-600" />)}
+                                {AI_ANALYZABLE_COLS.includes(col.id) && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); runAiAnalysis('column', { colId: col.id }); }}
+                                    className="opacity-0 group-hover:opacity-70 hover:!opacity-100 w-3.5 h-3.5 rounded-sm flex items-center justify-center hover:bg-indigo-100 text-indigo-600"
+                                    title="Sütun AI analizi"
+                                  >
+                                    <Bot className="h-2.5 w-2.5" />
+                                  </button>
+                                )}
                                 <button
                                   onClick={(e) => openColFilter(col, e)}
                                   className={`opacity-0 group-hover:opacity-70 hover:!opacity-100 w-3.5 h-3.5 rounded-sm flex items-center justify-center ${hasFilter ? 'opacity-100 bg-blue-600 text-white' : 'hover:bg-zinc-300/50'}`}
@@ -3314,7 +3649,7 @@ export default function TotalVerimlilikPanel({
                         <React.Fragment key={group.labId}>
                           {/* Group row */}
                           <tr onClick={() => toggleLabExpand(group.labId)} className="cursor-pointer select-none">
-                            <td colSpan={1 + visibleCols.length} className="sticky left-0 z-20 bg-zinc-900 dark:bg-zinc-800 text-white border-b border-zinc-950 h-8 px-2">
+                            <td colSpan={1 + visibleCols.length} className="sticky top-8 left-0 z-20 bg-zinc-900 dark:bg-zinc-800 text-white border-b border-zinc-950 h-8 px-2">
                               <div className="flex items-center gap-2">
                                 <ChevronRight className={`h-3 w-3 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
                                 <span className="font-semibold text-[11.5px]">{group.labName}</span>
@@ -3345,7 +3680,7 @@ export default function TotalVerimlilikPanel({
                                   </div>
                                 </td>
                                 {visibleCols.map(col => {
-                                  const stickyLeft = col.frozen ? FROZEN_LEFT[col.frozen] + 36 : undefined;
+                                  const stickyLeft = col.frozen ? stickyLeftByColId[col.id] : undefined;
                                   const isColSel = selCols.has(col.id);
                                   const isCellSel = selCells.has(`${row.id}-${col.id}`);
                                   const cellFmt = getMergedFmt(row.id, col.id);
@@ -3359,7 +3694,7 @@ export default function TotalVerimlilikPanel({
                                       onMouseEnter={() => onCellMouseEnter(row.id, col.id)}
                                       onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ x: e.clientX, y: e.clientY, rowId: row.id, colId: col.id }); }}
                                       className={`tv-cell border-b border-r border-zinc-200 dark:border-zinc-800 ${rowHeightCls} ${isManual ? 'p-0' : 'px-2'} align-middle ${baseBg} ${col.frozen ? 'sticky z-10 bg-white dark:bg-zinc-900' : ''} ${isColSel ? 'outline outline-1 outline-blue-300 -outline-offset-1' : ''} ${isRowSel ? '!bg-blue-50 dark:!bg-blue-950/40' : ''} ${isCellSel ? 'tv-cell-selected' : ''}`}
-                                      style={{ width: col.w, minWidth: col.w, left: stickyLeft, ...cellStyle }}
+                                      style={{ width: col.w, minWidth: col.w, left: stickyLeft, position: col.frozen ? 'sticky' : undefined, ...cellStyle }}
                                     >
                                       {renderCellValue(col, row)}
                                     </td>
@@ -3372,6 +3707,23 @@ export default function TotalVerimlilikPanel({
                       );
                     })}
                   </tbody>
+                  <tfoot>
+                    <tr>
+                      <td className="sticky bottom-0 left-0 z-20 bg-zinc-900 text-white border-t border-r border-zinc-800 h-8 w-9 px-1 text-[9px]">Σ</td>
+                      {visibleCols.map(col => {
+                        const stickyLeft = col.frozen ? stickyLeftByColId[col.id] : undefined;
+                        return (
+                          <td
+                            key={`footer-${col.id}`}
+                            className={`sticky bottom-0 ${col.frozen ? 'z-20' : 'z-10'} bg-zinc-100 dark:bg-zinc-800 border-t border-r border-zinc-300 dark:border-zinc-700 h-8 px-2 text-[10px] text-zinc-700 dark:text-zinc-200`}
+                            style={{ width: col.w, minWidth: col.w, left: stickyLeft, position: col.frozen ? 'sticky' : undefined }}
+                          >
+                            {renderFooterValue(col)}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
               <ScrollBar orientation="horizontal" />
@@ -3393,7 +3745,7 @@ export default function TotalVerimlilikPanel({
             </div>
             <div className="flex-1 overflow-y-auto py-1">
               {(['info', 'manual', 'calc', 'result'] as ColType[]).map(t => {
-                const cols = COLS.filter(c => c.type === t && !c.frozen);
+                const cols = allCols.filter(c => c.type === t && !c.frozen);
                 if (cols.length === 0) return null;
                 const tlabel = t === 'info' ? 'Sabit' : t === 'manual' ? 'Manuel Giriş' : t === 'calc' ? 'Hesaplanan' : 'Sonuç';
                 const dot = t === 'info' ? 'bg-zinc-300' : t === 'manual' ? 'bg-blue-300' : t === 'calc' ? 'bg-emerald-300' : 'bg-violet-300';
@@ -3479,7 +3831,7 @@ export default function TotalVerimlilikPanel({
                   <Select value={f.col} onValueChange={v => updateAdvFilter(f.id, { col: v })}>
                     <SelectTrigger className="h-8 flex-1 text-[11.5px]"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {COLS.filter(c => c.id !== 'lab').map(c => <SelectItem key={c.id} value={c.id}>{c.num}. {c.label}</SelectItem>)}
+                      {allCols.filter(c => c.id !== 'lab').map(c => <SelectItem key={c.id} value={c.id}>{c.num}. {c.label}</SelectItem>)}
                     </SelectContent>
                   </Select>
                   <Select value={f.op} onValueChange={v => updateAdvFilter(f.id, { op: v as AdvOp })}>
@@ -3488,7 +3840,13 @@ export default function TotalVerimlilikPanel({
                       {ADV_OPS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
                     </SelectContent>
                   </Select>
-                  <Input value={f.val} onChange={e => updateAdvFilter(f.id, { val: e.target.value })} placeholder="değer" className="h-8 w-24 text-[11.5px]" />
+                  <Input
+                    value={f.val}
+                    onChange={e => updateAdvFilter(f.id, { val: e.target.value })}
+                    placeholder={f.op === 'between' ? 'min,max' : f.op === 'topPct' ? '10' : f.op === 'topN' ? '5' : (f.op === 'aboveAvg' || f.op === 'belowAvg') ? '—' : 'değer'}
+                    disabled={f.op === 'aboveAvg' || f.op === 'belowAvg'}
+                    className="h-8 w-24 text-[11.5px]"
+                  />
                   <button onClick={() => removeAdvFilter(f.id)} className="w-7 h-7 rounded flex items-center justify-center text-zinc-400 hover:text-rose-500 hover:bg-rose-50" title="Kaldır">
                     <X className="h-3.5 w-3.5" />
                   </button>
@@ -3511,6 +3869,128 @@ export default function TotalVerimlilikPanel({
           </aside>
         </div>
       )}
+
+      {biPanelOpen && (
+        <div className="absolute right-0 top-0 bottom-0 w-[520px] max-w-full bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-700 z-40 shadow-2xl flex flex-col">
+          <div className="h-11 px-3 border-b border-zinc-200 dark:border-zinc-700 flex items-center justify-between">
+            <div className="font-semibold text-[12px]">Mini BI / Pivot / Formül</div>
+            <button onClick={() => setBiPanelOpen(false)} className="w-7 h-7 rounded hover:bg-zinc-100"><X className="h-4 w-4 mx-auto" /></button>
+          </div>
+          <div className="p-3 space-y-4 overflow-y-auto text-[11px]">
+            <div className="space-y-2">
+              <div className="font-semibold">Pivot Builder</div>
+              <div className="grid grid-cols-3 gap-2">
+                <Select value={pivotRowsBy} onValueChange={setPivotRowsBy}>
+                  <SelectTrigger className="h-8"><SelectValue placeholder="Rows" /></SelectTrigger>
+                  <SelectContent>{allCols.map(c => <SelectItem key={`pr-${c.id}`} value={c.id}>{c.label}</SelectItem>)}</SelectContent>
+                </Select>
+                <Select value={pivotColsBy} onValueChange={setPivotColsBy}>
+                  <SelectTrigger className="h-8"><SelectValue placeholder="Columns" /></SelectTrigger>
+                  <SelectContent>{allCols.map(c => <SelectItem key={`pc-${c.id}`} value={c.id}>{c.label}</SelectItem>)}</SelectContent>
+                </Select>
+                <Select value={pivotValueBy} onValueChange={setPivotValueBy}>
+                  <SelectTrigger className="h-8"><SelectValue placeholder="Values" /></SelectTrigger>
+                  <SelectContent>{allCols.map(c => <SelectItem key={`pv-${c.id}`} value={c.id}>{c.label}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div className="overflow-auto border rounded">
+                <table className="w-full text-[10.5px]">
+                  <thead><tr><th className="px-2 py-1 text-left border-b">{pivotRowsBy}</th>{pivotData.colKeys.map(k => <th key={k} className="px-2 py-1 text-left border-b">{k}</th>)}</tr></thead>
+                  <tbody>
+                    {pivotData.rowKeys.map(rk => (
+                      <tr key={rk}>
+                        <td className="px-2 py-1 border-b font-semibold">{rk}</td>
+                        {pivotData.colKeys.map(ck => (
+                          <td key={`${rk}-${ck}`} className="px-2 py-1 border-b cursor-pointer hover:bg-blue-50" onClick={() => {
+                            const matched = flatVisibleRows.filter(r => String(resolveFilterValue(r, pivotRowsBy) || '—') === rk && String(resolveFilterValue(r, pivotColsBy) || '—') === ck);
+                            setPivotDrillRows(matched);
+                            setPivotDrillOpen(true);
+                          }}>
+                            {(pivotData.matrix[rk]?.[ck] || 0).toLocaleString('tr-TR', { maximumFractionDigits: 2 })}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="font-semibold">Formula Engine</div>
+              <div className="flex gap-2">
+                <Input value={newFormulaName} onChange={e => setNewFormulaName(e.target.value)} placeholder="Kolon adı" className="h-8" />
+                <Input value={newFormulaExpr} onChange={e => setNewFormulaExpr(e.target.value)} placeholder="(hakEdis / total) * 100" className="h-8" />
+                <Button type="button" className="h-8" onClick={() => {
+                  if (!newFormulaName.trim() || !newFormulaExpr.trim()) return;
+                  setFormulaCols(prev => [...prev, { id: String(Date.now()), name: newFormulaName.trim(), expr: newFormulaExpr.trim() }]);
+                  setNewFormulaName(''); setNewFormulaExpr('');
+                }}>Ekle</Button>
+              </div>
+              <div className="space-y-1">
+                {formulaCols.map(fx => (
+                  <div key={fx.id} className="flex items-center justify-between border rounded px-2 py-1">
+                    <span>{fx.name}: <span className="font-mono">{fx.expr}</span></span>
+                    <button onClick={() => setFormulaCols(prev => prev.filter(p => p.id !== fx.id))} className="text-rose-600">Sil</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="font-semibold">Time Dimension / Trend</div>
+              <div className="space-y-1">
+                {Object.values(snapshots).sort((a, b) => a.monthKey.localeCompare(b.monthKey)).map(s => (
+                  <div key={`${s.monthKey}-${s.label}`} className="flex items-center justify-between border rounded px-2 py-1">
+                    <span>{s.label}</span>
+                    <span>Verim %{s.verimlilik.toFixed(1)} · HakEdiş {s.hakEdisToplam.toLocaleString('tr-TR')}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <Dialog open={pivotDrillOpen} onOpenChange={setPivotDrillOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Drill-through</DialogTitle>
+            <DialogDescription>Hastane → Ürün → Seri (stok kodu) → İşlem (satır id)</DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[60vh] overflow-auto text-[12px]">
+            <table className="w-full">
+              <thead><tr className="text-left border-b"><th className="py-1">Hastane</th><th>Ürün</th><th>Seri</th><th>İşlem</th></tr></thead>
+              <tbody>
+                {pivotDrillRows.map(r => (
+                  <tr key={r.id} className="border-b">
+                    <td className="py-1">{r.labName}</td>
+                    <td>{r.stokAdi}</td>
+                    <td className="font-mono">{r.stokKodu}</td>
+                    <td className="font-mono">{r.id}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={aiAnalysisOpen} onOpenChange={setAiAnalysisOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>AI Analiz — {aiTargetLabel}</DialogTitle>
+            <DialogDescription>
+              Gemini destekli içgörü motoru: smart alert, anomaly ve forecast çıktıları.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded border bg-zinc-50 p-3 min-h-[220px] max-h-[60vh] overflow-auto text-[12px] whitespace-pre-wrap">
+            {aiAnalyzing ? (
+              <div className="flex items-center gap-2 text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" />AI analiz hazırlanıyor...</div>
+            ) : aiAnalysisText || 'Henüz analiz yok.'}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Sevkiyat Bilgisi Modal - Sütun 11 */}
       <Dialog open={showSevkiyatBilgisiModal} onOpenChange={setShowSevkiyatBilgisiModal}>
