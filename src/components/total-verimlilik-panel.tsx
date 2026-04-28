@@ -3163,41 +3163,6 @@ export default function TotalVerimlilikPanel({
   return (
     <div className="relative flex flex-col h-full w-full bg-[#f3f3f1] dark:bg-zinc-950 text-[13px]" role="main" aria-label="Total Verimlilik Paneli">
 
-      {/* ─── TOP BAR ─────────────────────────────────────────────────── */}
-      <div className="bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 px-3 h-11 flex items-center gap-2 flex-shrink-0">
-        <div className="flex items-center gap-1.5">
-          <BarChart3 className="h-4 w-4 text-orange-500" />
-          <span className="font-bold tracking-tight text-[13px]">Total Verimlilik</span>
-        </div>
-        <div className="w-px h-4 bg-zinc-200 dark:bg-zinc-700 mx-1" />
-        <div className="flex items-center gap-0.5">
-          <button className="px-2.5 py-1 rounded text-[11px] font-medium bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900">Total Dashboard</button>
-          <Link href="/total-verimlilik/gecmis"><button className="px-2.5 py-1 rounded text-[11px] font-medium text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800">Geçmiş</button></Link>
-        </div>
-        <div className="flex-1" />
-        {/* KPI chips */}
-        {rows.length > 0 && (
-          <div className="flex items-center gap-1.5">
-            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10.5px] border border-emerald-200 bg-emerald-50 text-emerald-800">
-              <span>Verimlilik</span>
-              <span className="font-bold font-mono text-[11px]">%{efficiencyMetrics.genelVerimlilik.toFixed(0)}</span>
-            </div>
-            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10.5px] border border-blue-200 bg-blue-50 text-blue-800">
-              <span>Sarfiyat</span>
-              <span className="font-bold font-mono text-[11px]">{cur}{Math.round(totalCost).toLocaleString('tr-TR')}</span>
-            </div>
-            <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10.5px] border border-amber-200 bg-amber-50 text-amber-800">
-              <span>Hak Ediş</span>
-              <span className="font-bold font-mono text-[11px]">{cur}{Math.round(totalHakEdisKarsiligi).toLocaleString('tr-TR')}</span>
-            </div>
-            <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10.5px] border ${totalKar >= 0 ? 'border-violet-200 bg-violet-50 text-violet-800' : 'border-rose-200 bg-rose-50 text-rose-800'}`}>
-              <span>Kâr</span>
-              <span className="font-bold font-mono text-[11px]">{cur}{Math.abs(Math.round(totalKar)).toLocaleString('tr-TR')}</span>
-            </div>
-          </div>
-        )}
-      </div>
-
       {/* ─── MAIN TOOLBAR (RIBBON) ──────────────────────────────────── */}
       <div className="bg-white dark:bg-zinc-900 border-b border-zinc-300 dark:border-zinc-700 px-3 h-9 flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
         {/* Save dropdown */}
@@ -3223,6 +3188,12 @@ export default function TotalVerimlilikPanel({
             </div>
           )}
         </div>
+        <Link href="/total-dashboard">
+          <button className="flex items-center gap-1 px-2 h-7 rounded text-[11px] font-medium border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 whitespace-nowrap">
+            <BarChart3 className="h-3 w-3" />
+            Total Dashboard
+          </button>
+        </Link>
         {/* Excel dropdown */}
         <div className="tv-drop-wrap relative inline-flex">
           <button
@@ -3500,21 +3471,21 @@ export default function TotalVerimlilikPanel({
             placeholder="Toplu değer"
             className="h-6 w-20 text-[11px] border-0 px-1 shadow-none"
           />
-          <button onClick={() => applyBulkValue('set')} className="px-1.5 h-5 rounded bg-zinc-100 hover:bg-zinc-200 text-[10px] font-semibold">Hepsine</button>
-          <button onClick={() => applyBulkValue('increasePct')} className="px-1.5 h-5 rounded bg-blue-100 hover:bg-blue-200 text-[10px] font-semibold text-blue-700">% Artır</button>
+          <button onClick={() => applyBulkValue('set')} className="px-2 h-5 rounded bg-zinc-100 hover:bg-zinc-200 text-[10px] font-semibold whitespace-nowrap">Hepsine</button>
+          <button onClick={() => applyBulkValue('increasePct')} className="px-2 h-5 min-w-[56px] rounded bg-blue-100 hover:bg-blue-200 text-[10px] font-semibold text-blue-700 whitespace-nowrap">% Artır</button>
         </div>
-        <button onClick={() => setBiPanelOpen(v => !v)} className={`flex items-center gap-1 px-2 h-7 rounded text-[11px] font-medium border ${biPanelOpen ? 'bg-blue-600 text-white border-blue-600' : 'border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>
+        <button onClick={() => setBiPanelOpen(v => !v)} className={`flex items-center gap-1 px-2.5 h-7 min-w-[74px] rounded text-[10.5px] font-medium border whitespace-nowrap ${biPanelOpen ? 'bg-blue-600 text-white border-blue-600' : 'border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>
           BI Panel
         </button>
         <button
           onClick={() => setSnapshots(prev => ({ ...prev, [`planned-${currentSnapshotMetrics.monthKey}`]: currentSnapshotMetrics }))}
-          className="px-2 h-7 rounded text-[10.5px] font-medium border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100"
+          className="px-2.5 h-7 min-w-[102px] rounded text-[10px] font-medium border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 whitespace-nowrap"
         >
           Planlanan Kaydet
         </button>
         <button
           onClick={() => setSnapshots(prev => ({ ...prev, [`actual-${currentSnapshotMetrics.monthKey}`]: currentSnapshotMetrics }))}
-          className="px-2 h-7 rounded text-[10.5px] font-medium border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100"
+          className="px-2.5 h-7 min-w-[108px] rounded text-[10px] font-medium border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 whitespace-nowrap"
         >
           Gerçekleşen Kaydet
         </button>
