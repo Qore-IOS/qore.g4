@@ -66,6 +66,11 @@ export async function GET(request: NextRequest) {
     const opener = searchParams.get('opener') || 'all';
     const companyId = searchParams.get('companyId') || undefined;
     const isSuperAdmin = searchParams.get('isSuperAdmin') === '1';
+    const isAdmin = searchParams.get('isAdmin') === '1';
+    const assignedLabsParam = searchParams.get('assignedLabs') || '';
+    const assignedLabIds = assignedLabsParam
+      ? assignedLabsParam.split(',').map(s => s.trim()).filter(Boolean)
+      : [];
 
     // Pagination
     const page = parseInt(searchParams.get('page') || '1', 10);
@@ -83,9 +88,19 @@ export async function GET(request: NextRequest) {
       .map(doc => serializeFaultReport(doc))
       .filter(Boolean);
 
-    const scopedReports = allReports.filter((r: any) =>
+    const companyScopedReports = allReports.filter((r: any) =>
       matchesCompanyScope(r, companyId, isSuperAdmin)
     );
+
+    // Lab-level filter: super admins and admins see everything within their
+    // company; everyone else only sees reports for their assigned labs.
+    const allowedLabs = new Set(assignedLabIds);
+    const scopedReports = (isSuperAdmin || isAdmin || allowedLabs.size === 0)
+      ? companyScopedReports
+      : companyScopedReports.filter((r: any) => {
+          const candidate = r.hospitalId || r.labId || '';
+          return candidate ? allowedLabs.has(candidate) : true;
+        });
 
     // Keep newest reports first using openedAt, then createdAt fallback.
     scopedReports.sort((a: any, b: any) => {

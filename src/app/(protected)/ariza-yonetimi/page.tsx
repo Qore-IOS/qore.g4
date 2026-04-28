@@ -144,7 +144,8 @@ export default function ArizaYonetimiPage() {
   const { toast } = useToast();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { isAdmin, currentCompanyId, isSuperAdmin } = useAuth();
+  const { isAdmin, currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
+  const assignedLabs = currentUserProfile?.assignedLaboratories;
 
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
@@ -203,7 +204,11 @@ export default function ArizaYonetimiPage() {
         limit: rowsPerPage.toString(),
         companyId: currentCompanyId,
         isSuperAdmin: isSuperAdmin ? '1' : '0',
+        isAdmin: isAdmin ? '1' : '0',
       });
+      if (assignedLabs && assignedLabs.length > 0) {
+        params.set('assignedLabs', assignedLabs.join(','));
+      }
 
       const response = await fetch(`/api/ariza-yonetimi?${params}`);
       const result = await response.json();
@@ -238,7 +243,7 @@ export default function ArizaYonetimiPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [statusTab, labFilter, deviceFilter, openerFilter, currentPage, rowsPerPage, toast, currentCompanyId, isSuperAdmin]);
+  }, [statusTab, labFilter, deviceFilter, openerFilter, currentPage, rowsPerPage, toast, currentCompanyId, isSuperAdmin, isAdmin, assignedLabs]);
 
   // İlk yükleme ve filtre değişikliklerinde veri çek
   useEffect(() => {
