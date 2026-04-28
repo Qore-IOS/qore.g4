@@ -28,6 +28,7 @@ const admin = __importStar(require("firebase-admin"));
 const functions = __importStar(require("firebase-functions"));
 const firebase_functions_1 = require("firebase-functions");
 const nodemailer = __importStar(require("nodemailer"));
+const exceljs = __importStar(require("exceljs"));
 if (!admin.apps.length)
     admin.initializeApp();
 const db = admin.firestore();
@@ -47,55 +48,164 @@ function getTransporter() {
         auth: { user: smtpUser, pass: smtpPass },
     });
 }
-function esc(v) {
-    return String(v !== null && v !== void 0 ? v : '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&apos;');
-}
-function buildExcelXml(orderId, order) {
-    var _a, _b;
-    const createdAt = ((_b = (_a = order.createdAt) === null || _a === void 0 ? void 0 : _a.toDate) === null || _b === void 0 ? void 0 : _b.call(_a)) || new Date();
-    const createdAtText = createdAt.toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' });
+async function buildExcelBuffer(orderId, order) {
+    var _a, _b, _c;
+    const labId = order.labId;
+    // 1. Fetch minMaxRules
+    const rulesMap = {};
+    if (labId) {
+        try {
+            const rulesSnap = await db.collection('hospitals').doc(labId).collection('minMaxRules').get();
+            rulesSnap.forEach(doc => {
+                const data = doc.data();
+                if (data.stokKodu && data.max !== undefined) {
+                    rulesMap[data.stokKodu] = Number(data.max);
+                }
+            });
+        }
+        catch (err) {
+            firebase_functions_1.logger.error(`Error fetching minMaxRules for lab ${labId}:`, err);
+        }
+    }
+    // 2. Fetch depoStok for lab stock and closest miad
+    const labStokMap = {};
+    const closestMiadLotMap = {};
+    if (labId) {
+        try {
+            // isShipped == true and hedefKurumId == labId gives the lab's current stock based on QR codes
+            const depoStokSnap = await db.collection('depoStok')
+                .where('isShipped', '==', true)
+                .where('hedefKurumId', '==', labId)
+                .get();
+            const items = depoStokSnap.docs.map(d => d.data());
+            const groupedByStok = {};
+            items.forEach(item => {
+                if (!item.stokKodu)
+                    return;
+                if (!groupedByStok[item.stokKodu])
+                    groupedByStok[item.stokKodu] = [];
+                groupedByStok[item.stokKodu].push(item);
+            });
+            for (const [stokKodu, groupItems] of Object.entries(groupedByStok)) {
+                labStokMap[stokKodu] = groupItems.length; // Count of items = Lab Stok
+                const itemsWithMiad = groupItems.filter(i => i.miad);
+                if (itemsWithMiad.length > 0) {
+                    // Find the earliest miad
+                    itemsWithMiad.sort((a, b) => {
+                        var _a, _b;
+                        const miadA = ((_a = a.miad) === null || _a === void 0 ? void 0 : _a.toDate) ? a.miad.toDate().getTime() : new Date(a.miad).getTime();
+                        const miadB = ((_b = b.miad) === null || _b === void 0 ? void 0 : _b.toDate) ? b.miad.toDate().getTime() : new Date(b.miad).getTime();
+                        return miadA - miadB;
+                    });
+                    const earliestTime = ((_a = itemsWithMiad[0].miad) === null || _a === void 0 ? void 0 : _a.toDate) ? itemsWithMiad[0].miad.toDate().getTime() : new Date(itemsWithMiad[0].miad).getTime();
+                    // Count items that have this exact earliest miad
+                    const count = itemsWithMiad.filter(i => {
+                        var _a;
+                        const time = ((_a = i.miad) === null || _a === void 0 ? void 0 : _a.toDate) ? i.miad.toDate().getTime() : new Date(i.miad).getTime();
+                        return time === earliestTime;
+                    }).length;
+                    closestMiadLotMap[stokKodu] = count;
+                }
+                else {
+                    closestMiadLotMap[stokKodu] = 0;
+                }
+            }
+        }
+        catch (err) {
+            firebase_functions_1.logger.error(`Error fetching depoStok for lab ${labId}:`, err);
+        }
+    }
+    // 3. Create Excel
+    const workbook = new exceljs.Workbook();
+    const sheet = workbook.addWorksheet('Siparis', { views: [{ state: 'frozen', ySplit: 7 }] });
+    // Top Info
+    const createdAtText = ((_c = (_b = order.createdAt) === null || _b === void 0 ? void 0 : _b.toDate) === null || _c === void 0 ? void 0 : _c.call(_b)) ? order.createdAt.toDate().toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' }) : new Date().toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' });
     const labName = order.kurumAdi || '-';
-    const labId = order.labId || '-';
     const createdBy = order.createdBy || '-';
-    const rows = (order.items || []).map((item, idx) => `
-      <Row>
-        <Cell><Data ss:Type="Number">${idx + 1}</Data></Cell>
-        <Cell><Data ss:Type="String">${esc(item.stokKodu || '-')}</Data></Cell>
-        <Cell><Data ss:Type="String">${esc(item.stokAdi || '-')}</Data></Cell>
-        <Cell><Data ss:Type="Number">${Number(item.adet || 0)}</Data></Cell>
-      </Row>`).join('');
-    return `<?xml version="1.0"?>
-<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
- xmlns:o="urn:schemas-microsoft-com:office:office"
- xmlns:x="urn:schemas-microsoft-com:office:excel"
- xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
- xmlns:html="http://www.w3.org/TR/REC-html40">
-  <Worksheet ss:Name="Siparis">
-    <Table>
-      <Row><Cell><Data ss:Type="String">Sipariş ID</Data></Cell><Cell><Data ss:Type="String">${esc(orderId)}</Data></Cell></Row>
-      <Row><Cell><Data ss:Type="String">Laboratuvar</Data></Cell><Cell><Data ss:Type="String">${esc(labName)}</Data></Cell></Row>
-      <Row><Cell><Data ss:Type="String">Laboratuvar ID</Data></Cell><Cell><Data ss:Type="String">${esc(labId)}</Data></Cell></Row>
-      <Row><Cell><Data ss:Type="String">Oluşturan</Data></Cell><Cell><Data ss:Type="String">${esc(createdBy)}</Data></Cell></Row>
-      <Row><Cell><Data ss:Type="String">Tarih</Data></Cell><Cell><Data ss:Type="String">${esc(createdAtText)}</Data></Cell></Row>
-      <Row></Row>
-      <Row>
-        <Cell><Data ss:Type="String">#</Data></Cell>
-        <Cell><Data ss:Type="String">Stok Kodu</Data></Cell>
-        <Cell><Data ss:Type="String">Stok Adı</Data></Cell>
-        <Cell><Data ss:Type="String">Adet</Data></Cell>
-      </Row>${rows}
-    </Table>
-  </Worksheet>
-</Workbook>`;
+    sheet.addRow(['Sipariş ID:', orderId]);
+    sheet.addRow(['Laboratuvar:', labName]);
+    sheet.addRow(['Laboratuvar ID:', labId || '-']);
+    sheet.addRow(['Oluşturan:', createdBy]);
+    sheet.addRow(['Tarih:', createdAtText]);
+    sheet.addRow([]); // empty line
+    // Header Row
+    const headerRow = sheet.addRow([
+        '#',
+        'Stok Kodu',
+        'Stok Adı',
+        'Lab Stok',
+        '30 Günlük Max',
+        'Yakın Miad Lot Adedi',
+        'Talep Adedi'
+    ]);
+    headerRow.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    headerRow.eachCell((cell) => {
+        cell.fill = {
+            type: 'pattern',
+            pattern: 'solid',
+            fgColor: { argb: 'FF4F46E5' } // Indigo color
+        };
+        cell.border = {
+            top: { style: 'thin' }, left: { style: 'thin' },
+            bottom: { style: 'thin' }, right: { style: 'thin' }
+        };
+        cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    });
+    // Data Rows
+    const borderStyle = {
+        top: { style: 'thin' }, left: { style: 'thin' },
+        bottom: { style: 'thin' }, right: { style: 'thin' }
+    };
+    (order.items || []).forEach((item, idx) => {
+        var _a, _b, _c;
+        const sKodu = item.stokKodu || '-';
+        const labStok = (_a = labStokMap[sKodu]) !== null && _a !== void 0 ? _a : 0;
+        const maxAdet = (_b = rulesMap[sKodu]) !== null && _b !== void 0 ? _b : 0;
+        const yakinMiad = (_c = closestMiadLotMap[sKodu]) !== null && _c !== void 0 ? _c : 0;
+        const talep = Number(item.adet || 0);
+        const row = sheet.addRow([
+            idx + 1,
+            sKodu,
+            item.stokAdi || '-',
+            labStok,
+            maxAdet,
+            yakinMiad,
+            talep
+        ]);
+        row.eachCell((cell, colNumber) => {
+            cell.border = borderStyle;
+            cell.alignment = { vertical: 'middle', horizontal: colNumber === 3 ? 'left' : 'center' };
+            // Styling specifically for "Talep Adedi"
+            if (colNumber === 7) {
+                cell.font = { bold: true, size: 13, color: { argb: 'FF000000' } };
+                cell.fill = {
+                    type: 'pattern',
+                    pattern: 'solid',
+                    fgColor: { argb: 'FFECFCCB' } // Light green tint
+                };
+            }
+        });
+    });
+    // Auto-fit columns
+    sheet.columns.forEach((column, index) => {
+        var _a;
+        let maxLength = 0;
+        (_a = column.eachCell) === null || _a === void 0 ? void 0 : _a.call(column, { includeEmpty: false }, (cell, rowNumber) => {
+            if (rowNumber > 5) { // Skip the top info rows for width calculation
+                const columnLength = cell.value ? cell.value.toString().length : 10;
+                if (columnLength > maxLength)
+                    maxLength = columnLength;
+            }
+        });
+        // Add some padding and set min/max width
+        column.width = Math.min(Math.max(maxLength + 2, 10), 60);
+    });
+    const buffer = await workbook.xlsx.writeBuffer();
+    return buffer;
 }
 exports.onPeripheralOrderCreatedSendMail = functions
     .region('europe-west1')
-    .runWith({ timeoutSeconds: 60, memory: '256MB' })
+    .runWith({ timeoutSeconds: 60, memory: '512MB' }) // Increased memory slightly for excel generation
     .firestore.document('orders/{orderId}')
     .onCreate(async (snap, context) => {
     const orderId = context.params.orderId;
@@ -137,8 +247,7 @@ exports.onPeripheralOrderCreatedSendMail = functions
         const labName = order.kurumAdi || 'Bilinmeyen Laboratuvar';
         const itemsCount = (order.items || []).length;
         const totalQty = (order.items || []).reduce((sum, item) => sum + Number(item.adet || 0), 0);
-        const xmlContent = buildExcelXml(orderId, order);
-        const attachment = Buffer.from(xmlContent, 'utf-8');
+        const excelBuffer = await buildExcelBuffer(orderId, order);
         await transporter.sendMail({
             from: senderEmail,
             to: emails.join(','),
@@ -146,17 +255,17 @@ exports.onPeripheralOrderCreatedSendMail = functions
             text: `Perifer laboratuvardan yeni sipariş talebi açıldı.\nSipariş ID: ${orderId}\nLaboratuvar: ${labName}\nKalem: ${itemsCount}\nToplam Adet: ${totalQty}`,
             html: `<p>Perifer laboratuvardan yeni sipariş talebi açıldı.</p>
                <ul>
-                 <li><b>Sipariş ID:</b> ${esc(orderId)}</li>
-                 <li><b>Laboratuvar:</b> ${esc(labName)}</li>
+                 <li><b>Sipariş ID:</b> ${orderId}</li>
+                 <li><b>Laboratuvar:</b> ${labName}</li>
                  <li><b>Kalem Sayısı:</b> ${itemsCount}</li>
                  <li><b>Toplam Adet:</b> ${totalQty}</li>
                </ul>
-               <p>Sipariş detayları Excel dosyasında ektedir.</p>`,
+               <p>Sipariş detayları ve lojistik verileri Excel dosyasında ektedir.</p>`,
             attachments: [
                 {
-                    filename: `perifer_siparis_${orderId}.xls`,
-                    content: attachment,
-                    contentType: 'application/vnd.ms-excel',
+                    filename: `perifer_siparis_${orderId}.xlsx`,
+                    content: excelBuffer,
+                    contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                 },
             ],
         });

@@ -611,7 +611,7 @@ export default function UrunTalepPanel() {
       await setDoc(doc(db, 'orders', orderId), newOrder);
 
       await emitOrderCreatedFromRequest({
-        actor: { uid: currentUserProfile?.uid || '', name: currentUserProfile?.name || ''},
+        actor: { uid: currentUserProfile?.uid || '', name: currentUserProfile?.name || '' },
         orderId: orderId,
         labId: selectedLabId,
         depotId: isPeripheralFlow ? '' : selectedDepotId,
@@ -980,83 +980,82 @@ export default function UrunTalepPanel() {
                   const itemBirim = meta?.anaBirim || '';
                   const itemTotalUnits = itemAmbalaj > 0 ? itemAmbalaj * (item.adet ?? 0) : 0;
                   return (
-                  <div key={item.id} className="border-b border-[var(--dashboard-stroke)] last:border-b-0">
-                    {/* Desktop row */}
-                    <div className="hidden sm:grid grid-cols-[1fr_80px_40px] gap-1 items-center px-4 sm:px-5 py-2.5">
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{item.stokAdi}</p>
-                        <p className="text-[10px] text-[var(--dashboard-muted)]">
-                          {item.stokKodu}
-                          {itemBirim && itemTotalUnits > 0 && (
-                            <span className="ml-1.5 font-medium">
-                              · {item.adet} {itemBirim} ({itemTotalUnits.toLocaleString('tr-TR')} adet)
-                            </span>
-                          )}
-                        </p>
-                      </div>
-                      <div className="flex items-center justify-center">
-                        <div className="flex items-center gap-0.5">
-                          <button
-                            onClick={() => {
-                              const newQty = Math.max(1, (item.adet ?? 1) - 1);
-                              setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: newQty } : i));
-                            }}
-                            className="w-6 h-6 rounded-md bg-[var(--dashboard-surface-2)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors"
-                          >
-                            <Minus className="h-3 w-3" />
-                          </button>
-                          <span className="text-center text-sm font-bold text-[var(--dashboard-text)] min-w-[32px]">{item.adet}</span>
-                          <button
-                            onClick={() => {
-                              setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: (i.adet ?? 1) + 1 } : i));
-                            }}
-                            className="w-6 h-6 rounded-md bg-[var(--dashboard-surface-2)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors"
-                          >
-                            <Plus className="h-3 w-3" />
-                          </button>
-                        </div>
-                      </div>
-                      <div className="flex justify-center">
-                        <button
-                          onClick={() => removeOrderItem(item.id)}
-                          className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-100 transition-colors"
-                        >
-                          <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                        </button>
-                      </div>
-                    </div>
-                    {/* Mobile row */}
-                    <div className="sm:hidden px-3 py-2.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex-1 min-w-0">
+                    <div key={item.id} className="border-b border-[var(--dashboard-stroke)] last:border-b-0">
+                      {/* Desktop row */}
+                      <div className="hidden sm:grid grid-cols-[1fr_80px_40px] gap-1 items-center px-4 sm:px-5 py-2.5">
+                        <div className="min-w-0">
                           <p className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{item.stokAdi}</p>
-                          <p className="text-[11px] text-[var(--dashboard-muted)]">
+                          <p className="text-[10px] text-[var(--dashboard-muted)]">
                             {item.stokKodu}
                             {itemBirim && itemTotalUnits > 0 && (
-                              <span className="ml-1 font-medium">
+                              <span className="ml-1.5 font-medium">
                                 · {item.adet} {itemBirim} ({itemTotalUnits.toLocaleString('tr-TR')} adet)
                               </span>
                             )}
                           </p>
                         </div>
-                        <div className="flex items-center gap-1">
-                          <button onClick={() => { const newQty = Math.max(1, (item.adet ?? 1) - 1); setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: newQty } : i)); }} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
-                            <Minus className="h-3 w-3" />
-                          </button>
-                          <span className="text-center text-sm font-bold min-w-[28px]">{item.adet}</span>
-                          <button onClick={() => { setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: (i.adet ?? 1) + 1 } : i)); }} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
-                            <Plus className="h-3 w-3" />
-                          </button>
-                          <button onClick={() => removeOrderItem(item.id)} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-100 ml-1">
+                        <div className="flex items-center justify-center">
+                          <div className="flex items-center gap-0.5">
+                            <button
+                              onClick={() => {
+                                const newQty = Math.max(1, (item.adet ?? 1) - 1);
+                                setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: newQty } : i));
+                              }}
+                              className="w-6 h-6 rounded-md bg-[var(--dashboard-surface-2)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors"
+                            >
+                              <Minus className="h-3 w-3" />
+                            </button>
+                            <span className="text-center text-sm font-bold text-[var(--dashboard-text)] min-w-[32px]">{item.adet}</span>
+                            <button
+                              onClick={() => {
+                                setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: (i.adet ?? 1) + 1 } : i));
+                              }}
+                              className="w-6 h-6 rounded-md bg-[var(--dashboard-surface-2)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors"
+                            >
+                              <Plus className="h-3 w-3" />
+                            </button>
+                          </div>
+                        </div>
+                        <div className="flex justify-center">
+                          <button
+                            onClick={() => removeOrderItem(item.id)}
+                            className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-100 transition-colors"
+                          >
                             <Trash2 className="h-3.5 w-3.5 text-red-500" />
                           </button>
                         </div>
                       </div>
+                      {/* Mobile row */}
+                      <div className="sm:hidden px-3 py-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{item.stokAdi}</p>
+                            <p className="text-[11px] text-[var(--dashboard-muted)]">
+                              {item.stokKodu}
+                              {itemBirim && itemTotalUnits > 0 && (
+                                <span className="ml-1 font-medium">
+                                  · {item.adet} {itemBirim} ({itemTotalUnits.toLocaleString('tr-TR')} adet)
+                                </span>
+                              )}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <button onClick={() => { const newQty = Math.max(1, (item.adet ?? 1) - 1); setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: newQty } : i)); }} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
+                              <Minus className="h-3 w-3" />
+                            </button>
+                            <span className="text-center text-sm font-bold min-w-[28px]">{item.adet}</span>
+                            <button onClick={() => { setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: (i.adet ?? 1) + 1 } : i)); }} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
+                              <Plus className="h-3 w-3" />
+                            </button>
+                            <button onClick={() => removeOrderItem(item.id)} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-100 ml-1">
+                              <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                  </div>
                   );
-                })
-              )}
+                })}
             </div>
 
             {/* Sticky CTA bar */}
@@ -1120,6 +1119,24 @@ export default function UrunTalepPanel() {
         existingQty={qtyDialogProduct ? (orderItems.find(i => i.stokKodu === qtyDialogProduct.stokKodu)?.adet ?? 0) : 0}
         onConfirm={handleQtyConfirm}
       />
-    </div>
+      Build Error
+      Failed to compile
+
+      Next.js (14.2.35) is outdated (learn more)
+      ./src/components/urun-talep-panel.tsx
+      Error:
+      x Unexpected token `div`. Expected jsx identifier
+      ,-[/home/user/studio/src/components/urun-talep-panel.tsx:652:1]
+      652 |   // -- Render --
+      653 |
+      654 |   return (
+      655 |     <div:      ^^^
+      656 |       className="cihaz-shell px-3 py-4 sm:px-5 sm:py-6 space-y-4 sm:space-y-5 min-h-screen"
+      657 |       role="main"
+      658 |       aria-label="Urun talep paneli"
+      `----
+
+      Caused by:
+      Syntax Error    </div>
   );
 }
