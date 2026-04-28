@@ -363,7 +363,7 @@ export default function YedekParcaTransferPage() {
       return { id: d.id, ...data, timestamp, sourceCollection: 'yedekParcaDepoLog' as const };
     }), currentCompanyId, isSuperAdmin);
 
-    const logs = [...transferLogsData, ...depotLogsData];
+    const logs: any[] = [...transferLogsData, ...depotLogsData];
     logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
     const runningStockByCode = new Map<string, number>();
@@ -1965,7 +1965,7 @@ export default function YedekParcaTransferPage() {
         serialNumber: item.serialNumber || '',
         fromUid: item.ownerUid,
         fromName: item.ownerName,
-        quantity: item.quantity || 1,
+        quantity: (item as any).quantity || 1,
         returnedToDepot: isActiveStock,
         notes: isActiveStock
           ? `${isAdmin ? 'Admin' : 'Teknik Lojistik'} personel stok silme - ürün depoya iade edildi (PersonalStockID: ${item.id})`
@@ -3332,13 +3332,13 @@ export default function YedekParcaTransferPage() {
 
   const handleOpenStockCardSync = useCallback(() => {
     const existingCodes = new Set(productCodes.map(p => (p.stokKodu || '').trim().toUpperCase()).filter(Boolean));
-    const missingMap = new Map<string, { stokKodu: string; stokAdi: string }>();
+    const missingMap = new Map<string, { stokKodu: string; stokAdi: string; anaBirim?: string }>();
 
     for (const item of depoStokProducts) {
       const code = (item.stokKodu || '').trim().toUpperCase();
       if (!code || existingCodes.has(code)) continue;
       if (!missingMap.has(code)) {
-        missingMap.set(code, { stokKodu: code, stokAdi: item.stokAdi || code });
+        missingMap.set(code, { stokKodu: code, stokAdi: item.stokAdi || code, anaBirim: item.anaBirim });
       }
     }
 
@@ -3763,7 +3763,7 @@ export default function YedekParcaTransferPage() {
                         </td>
                         <td className="px-4 py-3 text-center">
                           {isUsed && item.usedOnFormId && item.usedOnFormType && item.usedOnDeviceId ? (
-                            <SparePartFormPDFButton formId={item.usedOnFormId} formType={item.usedOnFormType} deviceId={item.usedOnDeviceId} />
+                            <SparePartFormPDFButton formId={item.usedOnFormId} formType={item.usedOnFormType as 'teknik_servis' | 'aplikasyon'} deviceId={item.usedOnDeviceId} />
                           ) : (
                             <span className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>—</span>
                           )}
@@ -3893,7 +3893,7 @@ export default function YedekParcaTransferPage() {
                     </div>
                     {isUsed && item.usedOnFormId && item.usedOnFormType && item.usedOnDeviceId && (
                       <div className="mt-2 pt-2" style={{ borderTop: '1px solid var(--dashboard-stroke)' }}>
-                        <SparePartFormPDFButton formId={item.usedOnFormId} formType={item.usedOnFormType} deviceId={item.usedOnDeviceId} />
+                        <SparePartFormPDFButton formId={item.usedOnFormId} formType={item.usedOnFormType as 'teknik_servis' | 'aplikasyon'} deviceId={item.usedOnDeviceId} />
                       </div>
                     )}
                   </article>
@@ -4278,7 +4278,7 @@ export default function YedekParcaTransferPage() {
       return acc;
     }, {} as Record<string, { poolWarehouseId: string; poolWarehouseName: string; items: PoolWarehouseStockItem[] }>);
 
-    const poolList = Object.values(groupedByPool);
+    const poolList = Object.values(groupedByPool) as Array<{ poolWarehouseId: string; poolWarehouseName: string; items: PoolWarehouseStockItem[] }>;
     poolList.sort((a, b) => b.items.length - a.items.length);
 
     const totalEverywhere = allPersonnelStock.length + allPoolStockAggregate.length;

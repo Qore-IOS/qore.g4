@@ -681,7 +681,7 @@ export interface PeriodicPartChangeStatus {
 export type PersonalStockSource = 'depot' | 'device';
 
 // Şahsi stoktaki yedek parça durumu
-export type PersonalStockStatus = 'in_stock' | 'used' | 'pending_return';
+export type PersonalStockStatus = 'in_stock' | 'used' | 'pending_return' | 'pending_approval';
 
 // Transfer log aksiyonları
 export type SparePartTransferAction =
@@ -801,7 +801,8 @@ export interface PendingReturn {
   sourceDeviceId?: string;
   sourceDeviceName?: string;
   returnType: 'return_to_depot' | 'submit_to_depot'; // return_to_depot = iade (yeni parça), submit_to_depot = teslim (cihazdan çıkan)
-  returnCondition?: 'iyi' | 'miad_gecmis' | 'arizali'; // Parçanın iade durumu
+  returnCondition?: 'iyi' | 'miad_gecmis' | 'arizali' | 'diger'; // Parçanın iade durumu
+  returnConditionNote?: string;
   returnNote?: string;           // Açıklama (arızalı/miadı geçmiş için zorunlu, iyi için opsiyonel)
   status: 'pending' | 'confirmed';
   requestedAt: Date;
@@ -811,8 +812,18 @@ export interface PendingReturn {
   confirmedByUid?: string;
   confirmedByName?: string;
   imageUrl?: string;           // Cihazdan çıkan parça fotoğrafı URL
-  returnCondition?: 'iyi' | 'arizali' | 'miadi_gecmis' | 'diger';
-  returnConditionNote?: string;
+}
+
+// Cihaz Laboratuvar Havuzu
+export interface DeviceLabPool {
+  id: string;
+  name: string;
+  memberIds: string[];
+  active: boolean;
+  createdAt: any;
+  createdByUid: string;
+  createdByName: string;
+  companyId?: string;
 }
 
 // Transfer row for spare part transfer panel
