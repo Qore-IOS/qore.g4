@@ -239,6 +239,7 @@ export default function YedekParcaTransferPage() {
   const [personnelStockLoading, setPersonnelStockLoading] = useState(false);
   const [personnelStockPage, setPersonnelStockPage] = useState(0);
   const [personnelStockFilter, setPersonnelStockFilter] = useState<'all' | 'used' | 'unused' | 'pending_approval'>('all');
+  const [personnelStockSortKey, setPersonnelStockSortKey] = useState<'createdAt' | 'usedAt' | 'movement'>('movement');
   const [personnelStockSortOrder, setPersonnelStockSortOrder] = useState<'asc' | 'desc'>('desc');
   const ITEMS_PER_PAGE = 20;
 
@@ -265,6 +266,8 @@ export default function YedekParcaTransferPage() {
   const [poolStock, setPoolStock] = useState<PoolWarehouseStockItem[]>([]);
   const [poolStockLoading, setPoolStockLoading] = useState(false);
   const [poolStockFilter, setPoolStockFilter] = useState<'all' | 'used' | 'unused'>('all');
+  const [poolStockSortKey, setPoolStockSortKey] = useState<'createdAt' | 'usedAt' | 'movement'>('movement');
+  const [poolStockSortOrder, setPoolStockSortOrder] = useState<'asc' | 'desc'>('desc');
   const [poolStockPage, setPoolStockPage] = useState(0);
 
   // Return to depot modal state
@@ -939,11 +942,23 @@ export default function YedekParcaTransferPage() {
     }
 
     return items.sort((a, b) => {
-      const dateA = new Date(a.usedAt || a.createdAt).getTime();
-      const dateB = new Date(b.usedAt || b.createdAt).getTime();
+      let dateA: number;
+      let dateB: number;
+
+      if (personnelStockSortKey === 'movement') {
+        dateA = new Date(a.usedAt || a.createdAt).getTime();
+        dateB = new Date(b.usedAt || b.createdAt).getTime();
+      } else if (personnelStockSortKey === 'usedAt') {
+        dateA = a.usedAt ? new Date(a.usedAt).getTime() : 0;
+        dateB = b.usedAt ? new Date(b.usedAt).getTime() : 0;
+      } else {
+        dateA = new Date(a.createdAt).getTime();
+        dateB = new Date(b.createdAt).getTime();
+      }
+
       return personnelStockSortOrder === 'desc' ? dateB - dateA : dateA - dateB;
     });
-  }, [personnelStock, personnelStockFilter, personnelStockSortOrder]);
+  }, [personnelStock, personnelStockFilter, personnelStockSortKey, personnelStockSortOrder]);
 
   // Paginated personnel stock
   const paginatedPersonnelStock = useMemo(() => {
@@ -955,14 +970,31 @@ export default function YedekParcaTransferPage() {
 
   // Pool stock filtering and pagination
   const filteredPoolStock = useMemo(() => {
+    let items = [...poolStock];
     if (poolStockFilter === 'used') {
-      return poolStock.filter(s => s.status === 'used');
+      items = items.filter(s => s.status === 'used');
+    } else if (poolStockFilter === 'unused') {
+      items = items.filter(s => s.status === 'in_stock');
     }
-    if (poolStockFilter === 'unused') {
-      return poolStock.filter(s => s.status === 'in_stock');
-    }
-    return poolStock;
-  }, [poolStock, poolStockFilter]);
+
+    return items.sort((a, b) => {
+      let dateA: number;
+      let dateB: number;
+
+      if (poolStockSortKey === 'movement') {
+        dateA = new Date(a.usedAt || a.createdAt).getTime();
+        dateB = new Date(b.usedAt || b.createdAt).getTime();
+      } else if (poolStockSortKey === 'usedAt') {
+        dateA = a.usedAt ? new Date(a.usedAt).getTime() : 0;
+        dateB = b.usedAt ? new Date(b.usedAt).getTime() : 0;
+      } else {
+        dateA = new Date(a.createdAt).getTime();
+        dateB = new Date(b.createdAt).getTime();
+      }
+
+      return poolStockSortOrder === 'desc' ? dateB - dateA : dateA - dateB;
+    });
+  }, [poolStock, poolStockFilter, poolStockSortKey, poolStockSortOrder]);
 
   const paginatedPoolStock = useMemo(() => {
     const start = poolStockPage * ITEMS_PER_PAGE;
@@ -3516,13 +3548,40 @@ export default function YedekParcaTransferPage() {
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Ürün Adı</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Seri No</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Durum</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer group" style={{ color: 'var(--dashboard-muted)' }} onClick={() => setPersonnelStockSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}>
+                    <th
+                      className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer group"
+                      style={{ color: personnelStockSortKey === 'createdAt' ? 'var(--dashboard-accent)' : 'var(--dashboard-muted)' }}
+                      onClick={() => {
+                        if (personnelStockSortKey === 'createdAt') {
+                          setPersonnelStockSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+                        } else {
+                          setPersonnelStockSortKey('createdAt');
+                          setPersonnelStockSortOrder('desc');
+                        }
+                      }}
+                    >
                       <div className="flex items-center gap-1">
-                        Transfer / Hareket
-                        <ArrowUpDown className={cn("w-3 h-3 transition-colors", personnelStockSortOrder === 'desc' ? "text-[var(--dashboard-accent)]" : "text-[var(--dashboard-muted)]")} />
+                        Transfer
+                        <ArrowUpDown className={cn("w-3 h-3 transition-colors", personnelStockSortKey === 'createdAt' ? "opacity-100" : "opacity-20 group-hover:opacity-100")} />
                       </div>
                     </th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Kullanım</th>
+                    <th
+                      className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer group"
+                      style={{ color: personnelStockSortKey === 'usedAt' ? 'var(--dashboard-accent)' : 'var(--dashboard-muted)' }}
+                      onClick={() => {
+                        if (personnelStockSortKey === 'usedAt') {
+                          setPersonnelStockSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+                        } else {
+                          setPersonnelStockSortKey('usedAt');
+                          setPersonnelStockSortOrder('desc');
+                        }
+                      }}
+                    >
+                      <div className="flex items-center gap-1">
+                        Kullanım
+                        <ArrowUpDown className={cn("w-3 h-3 transition-colors", personnelStockSortKey === 'usedAt' ? "opacity-100" : "opacity-20 group-hover:opacity-100")} />
+                      </div>
+                    </th>
                     <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Gözlem</th>
                     <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>İşlem</th>
                     <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Form</th>
@@ -3902,8 +3961,40 @@ export default function YedekParcaTransferPage() {
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Ürün Adı</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Seri No</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Durum</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Transfer</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Kullanım</th>
+                    <th
+                      className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer group"
+                      style={{ color: poolStockSortKey === 'createdAt' ? 'var(--dashboard-accent)' : 'var(--dashboard-muted)' }}
+                      onClick={() => {
+                        if (poolStockSortKey === 'createdAt') {
+                          setPoolStockSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+                        } else {
+                          setPoolStockSortKey('createdAt');
+                          setPoolStockSortOrder('desc');
+                        }
+                      }}
+                    >
+                      <div className="flex items-center gap-1">
+                        Transfer
+                        <ArrowUpDown className={cn("w-3 h-3 transition-colors", poolStockSortKey === 'createdAt' ? "opacity-100" : "opacity-20 group-hover:opacity-100")} />
+                      </div>
+                    </th>
+                    <th
+                      className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer group"
+                      style={{ color: poolStockSortKey === 'usedAt' ? 'var(--dashboard-accent)' : 'var(--dashboard-muted)' }}
+                      onClick={() => {
+                        if (poolStockSortKey === 'usedAt') {
+                          setPoolStockSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+                        } else {
+                          setPoolStockSortKey('usedAt');
+                          setPoolStockSortOrder('desc');
+                        }
+                      }}
+                    >
+                      <div className="flex items-center gap-1">
+                        Kullanım
+                        <ArrowUpDown className={cn("w-3 h-3 transition-colors", poolStockSortKey === 'usedAt' ? "opacity-100" : "opacity-20 group-hover:opacity-100")} />
+                      </div>
+                    </th>
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Kullanan</th>
                     <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Gözlem</th>
                     <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>İşlem</th>
