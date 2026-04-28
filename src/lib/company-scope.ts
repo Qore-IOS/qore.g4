@@ -10,20 +10,29 @@ export function normalizeCompanyId(companyId?: string | null): string {
   return trimmed || LEGACY_COMPANY_ID;
 }
 
+function readRecordCompanyId(record: ScopedRecord | null | undefined): string {
+  if (!record) return LEGACY_COMPANY_ID;
+  const raw = record.companyId ?? record.company ?? null;
+  return normalizeCompanyId(raw);
+}
+
 export function matchesCompanyScope(
-  _record: ScopedRecord | null | undefined,
-  _currentCompanyId?: string | null,
-  _isSuperAdmin?: boolean
+  record: ScopedRecord | null | undefined,
+  currentCompanyId?: string | null,
+  isSuperAdmin?: boolean
 ): boolean {
-  return true;
+  if (isSuperAdmin) return true;
+  return readRecordCompanyId(record) === normalizeCompanyId(currentCompanyId);
 }
 
 export function filterByCompanyScope<T>(
   records: T[],
-  _currentCompanyId?: string | null,
-  _isSuperAdmin?: boolean
+  currentCompanyId?: string | null,
+  isSuperAdmin?: boolean
 ): T[] {
-  return records;
+  if (isSuperAdmin) return records;
+  const target = normalizeCompanyId(currentCompanyId);
+  return records.filter(r => readRecordCompanyId(r as ScopedRecord) === target);
 }
 
 export function withCompanyScope<T extends Record<string, any>>(
@@ -34,4 +43,34 @@ export function withCompanyScope<T extends Record<string, any>>(
     ...payload,
     companyId: normalizeCompanyId(currentCompanyId),
   };
+}
+
+/**
+ * Filters records by user's assigned laboratory IDs. Records without a lab
+ * field are kept (they aren't lab-scoped). Super admins and users without lab
+ * restrictions see everything.
+ */
+export function filterByAssignedLabs<T extends Record<string, any>>(
+  records: T[],
+  assignedLabIds: string[] | undefined | null,
+  options?: {
+    labIdFields?: string[];
+    isSuperAdmin?: boolean;
+  }
+): T[] {
+  if (options?.isSuperAdmin) return records;
+  const labs = assignedLabIds ?? [];
+  if (labs.length === 0) return records;
+  const fields = options?.labIdFields ?? ['labId', 'hospitalId', 'laboratoryId'];
+  const allowed = new Set(labs);
+  return records.filter(r => {
+    for (const f of fields) {
+      const v = r?.[f];
+      if (typeof v === 'string' && v) {
+        return allowed.has(v);
+      }
+    }
+    // No lab field on the record — not lab-scoped; keep it.
+    return true;
+  });
 }

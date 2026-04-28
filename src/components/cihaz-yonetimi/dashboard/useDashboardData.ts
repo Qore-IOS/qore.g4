@@ -19,7 +19,7 @@ import type {
 } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
-import { filterByCompanyScope } from '@/lib/company-scope';
+import { filterByCompanyScope, filterByAssignedLabs } from '@/lib/company-scope';
 
 const processTimestamp = (docData: any) => {
   const data = { ...docData };
@@ -51,7 +51,8 @@ export function useDashboardData() {
   });
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
-  const { currentCompanyId, isSuperAdmin } = useAuth();
+  const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
+  const assignedLabs = currentUserProfile?.assignedLaboratories;
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -109,24 +110,62 @@ export function useDashboardData() {
       }, {} as Record<string, MinMaxRule[]>);
 
 
+      const hospitalsScoped = filterByCompanyScope(hospitalsData, currentCompanyId, isSuperAdmin);
+      const hospitalsForUser = filterByAssignedLabs(hospitalsScoped, assignedLabs, {
+        labIdFields: ['id'],
+        isSuperAdmin,
+      });
+      const devicesAll = devicesSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Device));
+      const devicesScoped = filterByCompanyScope(devicesAll, currentCompanyId, isSuperAdmin);
+      const devicesForUser = filterByAssignedLabs(devicesScoped, assignedLabs, { isSuperAdmin });
+
+      const assignmentsAll = assignmentsSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as AssignedDevice));
+      const assignmentsScoped = filterByCompanyScope(assignmentsAll, currentCompanyId, isSuperAdmin);
+      const assignmentsForUser = filterByAssignedLabs(assignmentsScoped, assignedLabs, { isSuperAdmin });
+
+      const tuketimAll = tuketimKayitlariSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as ConsumptionRecord));
+      const tuketimScoped = filterByCompanyScope(tuketimAll, currentCompanyId, isSuperAdmin);
+      const tuketimForUser = filterByAssignedLabs(tuketimScoped, assignedLabs, { isSuperAdmin });
+
+      const efficiencyAll = efficiencyHistorySnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+      const efficiencyScoped = filterByCompanyScope(efficiencyAll, currentCompanyId, isSuperAdmin);
+      const efficiencyForUser = filterByAssignedLabs(efficiencyScoped, assignedLabs, { isSuperAdmin });
+
+      const cihazUstuAll = cihazUstuSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+      const cihazUstuScoped = filterByCompanyScope(cihazUstuAll, currentCompanyId, isSuperAdmin);
+      const cihazUstuForUser = filterByAssignedLabs(cihazUstuScoped, assignedLabs, { isSuperAdmin });
+
+      const kumulatifAll = kumulatifSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+      const kumulatifScoped = filterByCompanyScope(kumulatifAll, currentCompanyId, isSuperAdmin);
+      const kumulatifForUser = filterByAssignedLabs(kumulatifScoped, assignedLabs, { isSuperAdmin });
+
+      const shipmentsAll = shipmentsSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Shipment));
+      const shipmentsScoped = filterByCompanyScope(shipmentsAll, currentCompanyId, isSuperAdmin);
+
+      const depotsAll = depotsSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Depot));
+      const depotsScoped = filterByCompanyScope(depotsAll, currentCompanyId, isSuperAdmin);
+
+      const labPoolsAll = labPoolsSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as LabPool));
+      const labPoolsScoped = filterByCompanyScope(labPoolsAll, currentCompanyId, isSuperAdmin);
+
       setData({
-        hospitals: hospitalsData,
-        devices: devicesSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Device)),
-        hospitalDeviceAssignments: assignmentsSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as AssignedDevice)),
+        hospitals: hospitalsForUser,
+        devices: devicesForUser,
+        hospitalDeviceAssignments: assignmentsForUser,
         productCodes: productCodesSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as ProductCode)),
         depoStok: filterByCompanyScope(
           depoStokSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem)),
           currentCompanyId,
           isSuperAdmin,
         ),
-        tuketimKayitlari: tuketimKayitlariSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as ConsumptionRecord)),
-        efficiencyDataRecords: efficiencyHistorySnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) })),
-        cihazUstuGecmisi: cihazUstuSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) })),
-        kumulatifRaporlar: kumulatifSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) })),
-        shipments: shipmentsSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Shipment)),
-        depots: depotsSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Depot)),
+        tuketimKayitlari: tuketimForUser,
+        efficiencyDataRecords: efficiencyForUser,
+        cihazUstuGecmisi: cihazUstuForUser,
+        kumulatifRaporlar: kumulatifForUser,
+        shipments: shipmentsScoped,
+        depots: depotsScoped,
         minMaxRulesByLab: minMaxRulesByLabLegacy,
-        labPools: labPoolsSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as LabPool)),
+        labPools: labPoolsScoped,
         allMinMaxRules
       });
 
@@ -136,7 +175,7 @@ export function useDashboardData() {
     } finally {
       setIsLoading(false);
     }
-  }, [toast, currentCompanyId, isSuperAdmin]);
+  }, [toast, currentCompanyId, isSuperAdmin, assignedLabs]);
 
   useEffect(() => {
     fetchData();

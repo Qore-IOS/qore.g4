@@ -24,7 +24,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
 import { nanoid } from 'nanoid';
 import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
-import { filterByCompanyScope } from '@/lib/company-scope';
+import { filterByCompanyScope, filterByAssignedLabs, matchesCompanyScope } from '@/lib/company-scope';
 import { emitExternalStockUsage } from '@/lib/notifications';
 
 type ModuleType = 'teknik-servis' | 'aplikasyon-paneli';
@@ -130,7 +130,12 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
         ...teknikSnap.docs.map((d) => ({ id: d.id, ...d.data(), moduleType: 'teknik-servis' } as ActionRecord)),
         ...aplikasyonSnap.docs.map((d) => ({ id: d.id, ...d.data(), moduleType: 'aplikasyon-paneli' } as ActionRecord)),
       ];
-      setForms(filterByCompanyScope(merged, currentCompanyId, isSuperAdmin));
+      const isAdminRole = currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'super_admin';
+      const scoped = filterByCompanyScope(merged, currentCompanyId, isSuperAdmin);
+      const labScoped = filterByAssignedLabs(scoped, currentUserProfile?.assignedLaboratories, {
+        isSuperAdmin: isSuperAdmin || isAdminRole,
+      });
+      setForms(labScoped);
       setLoading(false);
     };
 
@@ -138,7 +143,7 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
       console.error('Form list fetch error', error);
       setLoading(false);
     });
-  }, [moduleType, currentCompanyId, isSuperAdmin]);
+  }, [moduleType, currentCompanyId, isSuperAdmin, currentUserProfile?.assignedLaboratories, currentUserProfile?.role]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -317,7 +322,7 @@ function prettifyActionText(value?: string) {
 
 export function ActionFormDetailView({ moduleType, formId }: { moduleType: ModuleType; formId: string }) {
   const router = useRouter();
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<ActionRecord | null>(null);
@@ -381,7 +386,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         const candidates = devicesSnap.docs
           .map((item) => ({ id: item.id, ...item.data() } as Device))
           .filter((item) => item.id !== nextForm.deviceId);
-        setLabDevices(candidates);
+        setLabDevices(filterByCompanyScope(candidates, currentCompanyId, isSuperAdmin));
       } else {
         setLabDevices([]);
       }
@@ -393,7 +398,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
       console.error('Form detail fetch error', error);
       setLoading(false);
     });
-  }, [moduleType, formId]);
+  }, [moduleType, formId, currentCompanyId, isSuperAdmin]);
 
   const pdfSection = useMemo(() => {
     if (!form) return null;
@@ -430,8 +435,9 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
     (async () => {
       try {
         const poolsSnap = await getDocs(collection(db, 'deviceLabPools'));
-        const matchingPoolIds = poolsSnap.docs
-          .map((d) => ({ id: d.id, ...d.data() } as DeviceLabPool))
+        const allPools = poolsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as DeviceLabPool));
+        const scopedPools = filterByCompanyScope(allPools, currentCompanyId, isSuperAdmin);
+        const matchingPoolIds = scopedPools
           .filter((pool) => pool.memberIds?.includes(form.hospitalId || ''))
           .map((pool) => pool.id);
 
@@ -441,8 +447,9 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         }
 
         const depotsSnap = await getDocs(collection(db, 'depots'));
-        const poolWarehouseIds = depotsSnap.docs
-          .map((d) => ({ id: d.id, ...d.data() } as Depot))
+        const allDepots = depotsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Depot));
+        const scopedDepots = filterByCompanyScope(allDepots, currentCompanyId, isSuperAdmin);
+        const poolWarehouseIds = scopedDepots
           .filter((depot) => depot.isPoolWarehouse && depot.linkedDeviceLabPoolIds?.some((id) => matchingPoolIds.includes(id)))
           .map((depot) => depot.id);
 
@@ -459,14 +466,19 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
             where('status', '==', 'in_stock')
           );
           const stockSnap = await getDocs(stockQ);
-          stockSnap.docs.forEach((d) => allPoolStock.push({ id: d.id, ...d.data() } as PoolWarehouseStockItem));
+          stockSnap.docs.forEach((d) => {
+            const data = { id: d.id, ...d.data() } as PoolWarehouseStockItem;
+            if (matchesCompanyScope(data as any, currentCompanyId, isSuperAdmin)) {
+              allPoolStock.push(data);
+            }
+          });
         }
         setPoolStockItems(allPoolStock);
       } catch (error) {
         console.error('Error fetching pool stock:', error);
       }
     })();
-  }, [form?.hospitalId]);
+  }, [form?.hospitalId, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
     (async () => {
