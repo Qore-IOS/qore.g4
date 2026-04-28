@@ -10,10 +10,18 @@ export function normalizeCompanyId(companyId?: string | null): string {
   return trimmed || LEGACY_COMPANY_ID;
 }
 
-function readRecordCompanyId(record: ScopedRecord | null | undefined): string {
-  if (!record) return LEGACY_COMPANY_ID;
-  const raw = record.companyId ?? record.company ?? null;
-  return normalizeCompanyId(raw);
+/**
+ * Reads a record's company tag. Returns `null` for legacy records (missing
+ * or blank companyId, or explicitly marked as the legacy bucket) so callers
+ * can treat them as company-agnostic.
+ */
+function readRecordCompanyTag(record: ScopedRecord | null | undefined): string | null {
+  if (!record) return null;
+  const raw = record.companyId ?? record.company;
+  if (raw === undefined || raw === null) return null;
+  const trimmed = String(raw).trim();
+  if (!trimmed || trimmed === LEGACY_COMPANY_ID) return null;
+  return trimmed;
 }
 
 export function matchesCompanyScope(
@@ -22,7 +30,12 @@ export function matchesCompanyScope(
   isSuperAdmin?: boolean
 ): boolean {
   if (isSuperAdmin) return true;
-  return readRecordCompanyId(record) === normalizeCompanyId(currentCompanyId);
+  const recordCompany = readRecordCompanyTag(record);
+  // Legacy / untagged records are visible to every user as a backward
+  // compatibility fallback. Once a record carries an explicit companyId,
+  // it's only visible to members of that company.
+  if (recordCompany === null) return true;
+  return recordCompany === normalizeCompanyId(currentCompanyId);
 }
 
 export function filterByCompanyScope<T>(
@@ -32,7 +45,11 @@ export function filterByCompanyScope<T>(
 ): T[] {
   if (isSuperAdmin) return records;
   const target = normalizeCompanyId(currentCompanyId);
-  return records.filter(r => readRecordCompanyId(r as ScopedRecord) === target);
+  return records.filter(r => {
+    const recordCompany = readRecordCompanyTag(r as ScopedRecord);
+    if (recordCompany === null) return true; // legacy fallback
+    return recordCompany === target;
+  });
 }
 
 export function withCompanyScope<T extends Record<string, any>>(
