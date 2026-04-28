@@ -1055,7 +1055,7 @@ export default function UrunTalepPanel() {
                       </div>
                     </div>
                   );
-                })}
+                }))}
             </div>
 
             {/* Sticky CTA bar */}
@@ -1119,24 +1119,6 @@ export default function UrunTalepPanel() {
         existingQty={qtyDialogProduct ? (orderItems.find(i => i.stokKodu === qtyDialogProduct.stokKodu)?.adet ?? 0) : 0}
         onConfirm={handleQtyConfirm}
       />
-      Build Error
-      Failed to compile
-
-      Next.js (14.2.35) is outdated (learn more)
-      ./src/components/urun-talep-panel.tsx
-      Error:
-      x Unexpected token `div`. Expected jsx identifier
-      ,-[/home/user/studio/src/components/urun-talep-panel.tsx:652:1]
-      652 |   // -- Render --
-      653 |
-      654 |   return (
-      655 |     <div:      ^^^
-      656 |       className="cihaz-shell px-3 py-4 sm:px-5 sm:py-6 space-y-4 sm:space-y-5 min-h-screen"
-      657 |       role="main"
-      658 |       aria-label="Urun talep paneli"
-      `----
-
-      Caused by:
-      Syntax Error    </div>
+    </div>
   );
 }
