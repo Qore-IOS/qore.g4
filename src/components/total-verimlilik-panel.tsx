@@ -2762,9 +2762,9 @@ export default function TotalVerimlilikPanel({
   const currentSnapshotMetrics = useMemo<SnapshotMetrics>(() => ({
     monthKey: `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}`,
     label: `${MONTHS[selectedMonth]?.label} ${selectedYear}`,
-    verimlilik: summary.genelVerimlilik,
-    hakEdisToplam: summary.toplamHakEdis,
-  }), [selectedYear, selectedMonth, summary.genelVerimlilik, summary.toplamHakEdis]);
+    verimlilik: efficiencyMetrics.genelVerimlilik,
+    hakEdisToplam: efficiencyMetrics.toplamHakEdis,
+  }), [selectedYear, selectedMonth, efficiencyMetrics.genelVerimlilik, efficiencyMetrics.toplamHakEdis]);
   const plannedSnapshot = snapshots[`planned-${currentSnapshotMetrics.monthKey}`];
   const actualSnapshot = snapshots[`actual-${currentSnapshotMetrics.monthKey}`];
   // Flat ordered row IDs across visible (expanded) groups - used for shift-range selection
