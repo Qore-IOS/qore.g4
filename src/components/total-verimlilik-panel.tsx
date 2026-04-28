@@ -53,7 +53,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
-import { Loader2, BarChart3, FileSpreadsheet, Save, Download, ChevronRight, ChevronDown, Upload, Eye, EyeOff, History, Filter, ArrowUp, ArrowDown, Search, X, Crown, RotateCcw, Clock, Bold, Italic, AlignLeft, AlignCenter, AlignRight, PaintBucket, Plus, SlidersHorizontal, Columns3, Trash2, Maximize2, Minimize2 } from 'lucide-react';
+import { Loader2, BarChart3, FileSpreadsheet, Save, Download, ChevronRight, ChevronDown, Upload, Eye, EyeOff, History, Filter, ArrowUp, ArrowDown, Search, X, Crown, RotateCcw, Clock, Bold, Italic, AlignLeft, AlignCenter, AlignRight, PaintBucket, Plus, SlidersHorizontal, Columns3, Trash2, Maximize2, Minimize2, Bot } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -83,6 +83,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { totalVerimlilikLogger } from '@/lib/logger';
 import { exportDataToExcel } from '@/lib/utils';
 import { getExchangeRates } from '@/lib/exchange-rates';
+import { generateWithGemini } from '@/lib/ai/geminiClient';
 import Link from 'next/link';
 
 interface TotalVerimlilikPanelProps {
@@ -629,6 +630,10 @@ export default function TotalVerimlilikPanel({
   const [newFormulaName, setNewFormulaName] = useState('');
   const [newFormulaExpr, setNewFormulaExpr] = useState('');
   const [snapshots, setSnapshots] = useState<Record<string, SnapshotMetrics>>(() => loadLS('totalVerim_snapshots', {}));
+  const [aiAnalysisOpen, setAiAnalysisOpen] = useState(false);
+  const [aiAnalyzing, setAiAnalyzing] = useState(false);
+  const [aiAnalysisText, setAiAnalysisText] = useState('');
+  const [aiTargetLabel, setAiTargetLabel] = useState<string>('Tablo Geneli');
   // Edge-scroll glow refs (green)
   const greenGlowLeftRef = useRef<HTMLDivElement>(null);
   const greenGlowRightRef = useRef<HTMLDivElement>(null);
@@ -2767,6 +2772,42 @@ export default function TotalVerimlilikPanel({
   }), [selectedYear, selectedMonth, efficiencyMetrics.genelVerimlilik, efficiencyMetrics.toplamHakEdis]);
   const plannedSnapshot = snapshots[`planned-${currentSnapshotMetrics.monthKey}`];
   const actualSnapshot = snapshots[`actual-${currentSnapshotMetrics.monthKey}`];
+  const AI_ANALYZABLE_COLS = useMemo(() => ['stokDogrulukFark', 'kitVerimlilikFark', 'kutuKayip', 'sarfiyatMaliyeti'], []);
+
+  const runAiAnalysis = useCallback(async (mode: 'table' | 'column' | 'cell', payload?: { colId?: string; rowId?: string }) => {
+    try {
+      setAiAnalyzing(true);
+      setAiAnalysisOpen(true);
+      const subset = flatVisibleRows.slice(0, 300).map(r => ({
+        lab: r.labName,
+        stok: r.stokAdi,
+        stokKodu: r.stokKodu,
+        stokDogrulukFark: r.stokDogrulukFark,
+        kitVerimlilikFark: r.kitVerimlilikFark,
+        kutuKayip: Number(resolveFilterValue(r, 'kutuKayip') || 0),
+        sarfiyatMaliyeti: Number(resolveFilterValue(r, 'sarfiyatMaliyeti') || 0),
+      }));
+      const targetRow = payload?.rowId ? flatVisibleRows.find(r => r.id === payload.rowId) : null;
+      const targetCol = payload?.colId || '';
+      const prompt = mode === 'table'
+        ? `Aşağıdaki total verimlilik verisini analiz et. Smart alertler, auto insights, anomaly detection ve gelecek ay tahmini verimlilik üret. Kısa ve madde madde yaz.\nVeri:${JSON.stringify(subset)}`
+        : mode === 'column'
+          ? `Sadece ${targetCol} sütununu analiz et. Düşük performans, anomali, trend ve aksiyon önerisi ver.\nVeri:${JSON.stringify(subset.map(r => ({ lab: r.lab, stok: r.stok, value: (r as Record<string, unknown>)[targetCol] })))}`
+          : `Tek hücre analizi yap. Sütun:${targetCol}. Satır:${JSON.stringify(targetRow)}. Bu değeri anomali açısından değerlendir ve kısa öneri ver.`;
+      setAiTargetLabel(mode === 'table' ? 'Tablo Geneli' : mode === 'column' ? `Sütun: ${targetCol}` : `Hücre: ${targetCol}`);
+      const res = await generateWithGemini({
+        systemPrompt: 'Sen sağlık operasyon verimlilik danışmanısın. Cevabı Türkçe, kısa, maddeli ve aksiyon odaklı ver.',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.2,
+        maxOutputTokens: 1200,
+      });
+      setAiAnalysisText(res.text || 'AI analiz çıktısı boş döndü.');
+    } catch (e) {
+      setAiAnalysisText(`AI analiz hatası: ${e instanceof Error ? e.message : 'Bilinmeyen hata'}`);
+    } finally {
+      setAiAnalyzing(false);
+    }
+  }, [flatVisibleRows, resolveFilterValue]);
   // Flat ordered row IDs across visible (expanded) groups - used for shift-range selection
   const visibleRowIds = useMemo(() => {
     const ids: string[] = [];
@@ -3033,9 +3074,12 @@ export default function TotalVerimlilikPanel({
                   : row.stokDogrulukFark < 0 ? 'bg-green-100 text-green-700 border-green-200'
                   : 'bg-muted text-muted-foreground border-muted';
         return (
-          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold border ${cls}`}>
-            {sign}{Math.abs(row.stokDogrulukFark).toLocaleString('tr-TR')} · %{Math.abs(row.stokDogrulukYuzde).toFixed(1)}
-          </span>
+          <div className="flex items-center gap-1">
+            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold border ${cls}`}>
+              {sign}{Math.abs(row.stokDogrulukFark).toLocaleString('tr-TR')} · %{Math.abs(row.stokDogrulukYuzde).toFixed(1)}
+            </span>
+            <button onClick={() => runAiAnalysis('cell', { rowId: row.id, colId: 'stokDogrulukFark' })} className="text-indigo-500 hover:text-indigo-700"><Bot className="h-3 w-3" /></button>
+          </div>
         );
       }
       case 'kitVerimlilikFark': {
@@ -3045,9 +3089,12 @@ export default function TotalVerimlilikPanel({
                   : efficiencyScore <= 90 ? 'bg-yellow-100 text-yellow-700 border-yellow-200'
                   : 'bg-green-100 text-green-700 border-green-200';
         return (
-          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold border ${cls}`}>
-            {sign}{Math.abs(row.kitVerimlilikFark).toLocaleString('tr-TR')} · %{Math.abs(row.kitVerimlilikYuzde).toFixed(1)} · Verim %{efficiencyScore.toFixed(0)}
-          </span>
+          <div className="flex items-center gap-1">
+            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold border ${cls}`}>
+              {sign}{Math.abs(row.kitVerimlilikFark).toLocaleString('tr-TR')} · %{Math.abs(row.kitVerimlilikYuzde).toFixed(1)} · Verim %{efficiencyScore.toFixed(0)}
+            </span>
+            <button onClick={() => runAiAnalysis('cell', { rowId: row.id, colId: 'kitVerimlilikFark' })} className="text-indigo-500 hover:text-indigo-700"><Bot className="h-3 w-3" /></button>
+          </div>
         );
       }
       case 'kutuKayip': {
@@ -3058,13 +3105,13 @@ export default function TotalVerimlilikPanel({
         const abs = Math.abs(kutuFark);
         if (abs < 1) return <span className="text-muted-foreground text-[11px]">0 kutu</span>;
         const cls = abs >= 2 ? 'text-red-600 font-bold' : 'text-yellow-600 font-semibold';
-        return <span className={`font-mono text-[11px] ${cls}`}>{kutuFark > 0 ? '+' : '-'}{abs.toLocaleString('tr-TR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} kutu</span>;
+        return <div className="flex items-center gap-1"><span className={`font-mono text-[11px] ${cls}`}>{kutuFark > 0 ? '+' : '-'}{abs.toLocaleString('tr-TR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} kutu</span><button onClick={() => runAiAnalysis('cell', { rowId: row.id, colId: 'kutuKayip' })} className="text-indigo-500 hover:text-indigo-700"><Bot className="h-3 w-3" /></button></div>;
       }
       case 'sarfiyatMaliyeti': {
         const { cost, hasData } = calculateRowCost(row);
         if (!hasData) return <span className="text-muted-foreground text-[10px]">—</span>;
         if (cost === 0) return <span className="text-muted-foreground">—</span>;
-        return <span className="font-mono text-[11px] font-semibold text-emerald-700">{cur}{cost.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>;
+        return <div className="flex items-center gap-1"><span className="font-mono text-[11px] font-semibold text-emerald-700">{cur}{cost.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span><button onClick={() => runAiAnalysis('cell', { rowId: row.id, colId: 'sarfiyatMaliyeti' })} className="text-indigo-500 hover:text-indigo-700"><Bot className="h-3 w-3" /></button></div>;
       }
       case 'hakEdisKarsiligi': {
         const { amount, hasData } = calculateHakEdisKarsiligi(row, centerHakEdisMode);
@@ -3426,6 +3473,12 @@ export default function TotalVerimlilikPanel({
           <span className="font-bold">{cur}</span>
           Maliyet
         </button>
+        <button
+          onClick={() => runAiAnalysis('table')}
+          className="flex items-center gap-1 px-2 h-7 rounded text-[11px] font-medium border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+        >
+          <Bot className="h-3 w-3" />Analiz Et
+        </button>
         {(Object.keys(colValFilters).length > 0 || advFilters.length > 0 || hasActiveFilters) && (
           <button onClick={() => { setColValFilters({}); clearAllFilters(); clearAdvFilters(); }} className="flex items-center gap-1 px-2 h-7 rounded text-[11px] font-medium bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900">
             <X className="h-3 w-3" />
@@ -3558,6 +3611,15 @@ export default function TotalVerimlilikPanel({
                                 <span className="text-[8px] text-zinc-400 font-normal">{col.num}.</span>
                                 <span className="flex-1 truncate">{col.label}</span>
                                 {sortConfig.column === col.id && (sortConfig.direction === 'asc' ? <ArrowUp className="h-2.5 w-2.5 text-blue-600" /> : <ArrowDown className="h-2.5 w-2.5 text-blue-600" />)}
+                                {AI_ANALYZABLE_COLS.includes(col.id) && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); runAiAnalysis('column', { colId: col.id }); }}
+                                    className="opacity-0 group-hover:opacity-70 hover:!opacity-100 w-3.5 h-3.5 rounded-sm flex items-center justify-center hover:bg-indigo-100 text-indigo-600"
+                                    title="Sütun AI analizi"
+                                  >
+                                    <Bot className="h-2.5 w-2.5" />
+                                  </button>
+                                )}
                                 <button
                                   onClick={(e) => openColFilter(col, e)}
                                   className={`opacity-0 group-hover:opacity-70 hover:!opacity-100 w-3.5 h-3.5 rounded-sm flex items-center justify-center ${hasFilter ? 'opacity-100 bg-blue-600 text-white' : 'hover:bg-zinc-300/50'}`}
@@ -3910,6 +3972,22 @@ export default function TotalVerimlilikPanel({
                 ))}
               </tbody>
             </table>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={aiAnalysisOpen} onOpenChange={setAiAnalysisOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>AI Analiz — {aiTargetLabel}</DialogTitle>
+            <DialogDescription>
+              Gemini destekli içgörü motoru: smart alert, anomaly ve forecast çıktıları.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded border bg-zinc-50 p-3 min-h-[220px] max-h-[60vh] overflow-auto text-[12px] whitespace-pre-wrap">
+            {aiAnalyzing ? (
+              <div className="flex items-center gap-2 text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" />AI analiz hazırlanıyor...</div>
+            ) : aiAnalysisText || 'Henüz analiz yok.'}
           </div>
         </DialogContent>
       </Dialog>
