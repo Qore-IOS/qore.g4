@@ -52,7 +52,7 @@ import {
   type MaliyetSayimOturum, type SessionParticipant, type PresenceData,
 } from '@/lib/maliyet-session';
 import { emitMaliyetSayimInvitation } from '@/lib/notifications';
-import { normalizeCompanyId, filterByCompanyScope } from '@/lib/company-scope';
+import { normalizeCompanyId, filterByCompanyScope, filterByAssignedLabs } from '@/lib/company-scope';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 
@@ -565,11 +565,19 @@ function ProductCountCard({
 // MAIN PANEL
 // ============================================================================
 
-export default function MaliyetSayimPanel({ hospitals, depots, productCodes }: MaliyetSayimPanelProps) {
+export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, productCodes }: MaliyetSayimPanelProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const canSeeCost = ['admin', 'admin_developer', 'super_admin', 'teknik_lojistik'].includes(currentUserProfile?.role ?? '');
+  const isAdminRole = ['admin', 'admin_developer', 'super_admin'].includes(currentUserProfile?.role ?? '');
+
+  // Restrict the visible hospital list to the user's assigned laboratories.
+  // Admin / super-admin users still see every hospital within their company.
+  const hospitals = useMemo(() => filterByAssignedLabs(hospitalsProp, currentUserProfile?.assignedLaboratories, {
+    labIdFields: ['id'],
+    isSuperAdmin: isSuperAdmin || isAdminRole,
+  }), [hospitalsProp, currentUserProfile?.assignedLaboratories, isSuperAdmin, isAdminRole]);
 
   // Location selection - initialize from URL params
   const [locationType, setLocationType] = useState<LocationType | null>(() => {
