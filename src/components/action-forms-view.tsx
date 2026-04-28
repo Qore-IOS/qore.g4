@@ -17,6 +17,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import type { Depot, Device, DeviceLabPool, Hospital, PersonalStockItem, PoolWarehouseStockItem, YedekParcaDepoStokItem } from '@/lib/types';
 import TeknikServisTutanakPDFButton from '@/components/exports/TeknikServisTutanakPDFButton';
 import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
@@ -328,6 +329,9 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
   const [form, setForm] = useState<ActionRecord | null>(null);
   const [deviceImageUrl, setDeviceImageUrl] = useState<string | null>(null);
   const [labDevices, setLabDevices] = useState<Device[]>([]);
+  const [isEditingDescription, setIsEditingDescription] = useState(false);
+  const [descriptionDraft, setDescriptionDraft] = useState('');
+  const [isSavingDescription, setIsSavingDescription] = useState(false);
   const [partTransferModalOpen, setPartTransferModalOpen] = useState(false);
   const [selectedActionIndex, setSelectedActionIndex] = useState<number | null>(null);
   const [selectedTargetDeviceId, setSelectedTargetDeviceId] = useState<string>('');
@@ -399,6 +403,37 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
       setLoading(false);
     });
   }, [moduleType, formId, currentCompanyId, isSuperAdmin]);
+
+  useEffect(() => {
+    setDescriptionDraft(form?.aciklama || '');
+    if (!form) {
+      setIsEditingDescription(false);
+    }
+  }, [form?.aciklama, form?.id]);
+
+  const canEditDescription = Boolean(
+    form?.createdByUid && currentUserProfile?.uid && form.createdByUid === currentUserProfile.uid
+  );
+
+  const saveDescription = async () => {
+    if (!form) return;
+    try {
+      setIsSavingDescription(true);
+      const formRef = doc(db, getCollectionName(moduleType), form.id);
+      await updateDoc(formRef, {
+        aciklama: descriptionDraft?.trim() || '',
+        updatedAt: serverTimestamp(),
+      });
+      setForm((prev) => (prev ? { ...prev, aciklama: descriptionDraft?.trim() || '' } : prev));
+      setIsEditingDescription(false);
+      toast({ title: 'Açıklama kaydedildi', description: 'Form açıklamanız güncellendi.' });
+    } catch (error) {
+      console.error('Açıklama kaydetme hatası:', error);
+      toast({ title: 'Kayıt hatası', description: 'Açıklama güncellenemedi.', variant: 'destructive' });
+    } finally {
+      setIsSavingDescription(false);
+    }
+  };
 
   const pdfSection = useMemo(() => {
     if (!form) return null;
@@ -1271,10 +1306,52 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
                 </div>
               )}
 
-              {form.aciklama && (
+              {(form.aciklama || canEditDescription) && (
                 <div className="pt-3 border-t border-[var(--dashboard-stroke)]">
-                  <div className="text-sm font-medium mb-1.5">Açıklama</div>
-                  <p className="text-sm text-[var(--dashboard-muted)] whitespace-pre-wrap">{form.aciklama}</p>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="text-sm font-medium mb-1.5">Açıklama</div>
+                    {canEditDescription && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setIsEditingDescription((prev) => !prev)}
+                      >
+                        {isEditingDescription ? 'İptal' : form.aciklama ? 'Açıklamayı Düzenle' : 'Açıklama Ekle'}
+                      </Button>
+                    )}
+                  </div>
+                  {isEditingDescription ? (
+                    <div className="space-y-3">
+                      <Textarea
+                        value={descriptionDraft}
+                        onChange={(e) => setDescriptionDraft(e.target.value)}
+                        placeholder="Bu form için açıklama ekleyin..."
+                        className="min-h-[120px]"
+                      />
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Button
+                          type="button"
+                          onClick={() => {
+                            setIsEditingDescription(false);
+                            setDescriptionDraft(form.aciklama || '');
+                          }}
+                          variant="outline"
+                        >
+                          Vazgeç
+                        </Button>
+                        <Button
+                          type="button"
+                          onClick={saveDescription}
+                          disabled={isSavingDescription}
+                        >
+                          {isSavingDescription ? 'Kaydediliyor...' : 'Kaydet'}
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-[var(--dashboard-muted)] whitespace-pre-wrap">{form.aciklama || 'Bu form için açıklama eklenmemiş.'}</p>
+                  )}
                 </div>
               )}
             </div>
