@@ -2505,7 +2505,7 @@ export default function TotalVerimlilikPanel({
     });
   }, [REQUIRED_VISIBLE_COLS]);
 
-  const frozenLeftByColId = useMemo(() => {
+  const stickyLeftByColId = useMemo(() => {
     let currentLeft = 36; // row selection column width
     const map: Record<string, number> = {};
     visibleCols.forEach(col => {
@@ -2516,52 +2516,7 @@ export default function TotalVerimlilikPanel({
     return map;
   }, [visibleCols]);
 
-  const getFilterRawValue = useCallback((row: TableRow, colId: string): unknown => {
-    switch (colId) {
-      case 'kutuKayip': {
-        const sentCount = testsSentToCenter[row.id] || 0;
-        const effHak = centerHakEdisMode ? Math.max(0, row.hakEdis - sentCount) : row.hakEdis;
-        const testFark = column22Mode === 'kumulatif'
-          ? row.stokDogrulukFark
-          : (row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest) - effHak;
-        const ambalaj = row.ambalajDegeri || 1;
-        return testFark / ambalaj;
-      }
-      case 'sarfiyatMaliyeti':
-        return calculateRowCost(row).cost;
-      case 'hakEdisKarsiligi':
-        return calculateHakEdisKarsiligi(row, centerHakEdisMode).amount;
-      case 'kar':
-        return calculateKar(row, centerHakEdisMode).kar;
-      case 'zararMaliyeti':
-        return calculateZararMaliyeti(row).zarar;
-      case 'merkezeGonderilen':
-        return testsSentToCenter[row.id] || 0;
-      default:
-        return (row as unknown as Record<string, unknown>)[colId];
-    }
-  }, [
-    centerHakEdisMode,
-    column22Mode,
-    calculateRowCost,
-    calculateHakEdisKarsiligi,
-    calculateKar,
-    calculateZararMaliyeti,
-    testsSentToCenter,
-  ]);
-
-  const frozenLeftByColId = useMemo(() => {
-    let currentLeft = 36; // row selection column width
-    const map: Record<string, number> = {};
-    visibleCols.forEach(col => {
-      if (!col.frozen) return;
-      map[col.id] = currentLeft;
-      currentLeft += col.w;
-    });
-    return map;
-  }, [visibleCols]);
-
-  const getFilterRawValue = useCallback((row: TableRow, colId: string): unknown => {
+  const resolveFilterValue = useCallback((row: TableRow, colId: string): unknown => {
     switch (colId) {
       case 'kutuKayip': {
         const sentCount = testsSentToCenter[row.id] || 0;
@@ -2601,7 +2556,7 @@ export default function TotalVerimlilikPanel({
     let result = deferredRows;
     if (advFilters.length > 0) {
       result = result.filter(r => {
-        const matches = advFilters.map(f => evalAdvFilterRaw(getFilterRawValue(r, f.col), f));
+        const matches = advFilters.map(f => evalAdvFilterRaw(resolveFilterValue(r, f.col), f));
         return advMode === 'AND' ? matches.every(Boolean) : matches.some(Boolean);
       });
     }
@@ -2609,7 +2564,7 @@ export default function TotalVerimlilikPanel({
     const valEntries = Object.entries(colValFilters).filter(([, v]) => v && v.length > 0);
     if (valEntries.length > 0) {
       result = result.filter(r => valEntries.every(([cid, vals]) => {
-        const v = String(getFilterRawValue(r, cid) ?? '');
+        const v = String(resolveFilterValue(r, cid) ?? '');
         return (vals as string[]).includes(v);
       }));
     }
@@ -2626,7 +2581,7 @@ export default function TotalVerimlilikPanel({
       g.rows.push(r);
     });
     return groups;
-  }, [deferredRows, advFilters, advMode, colValFilters, getFilterRawValue]);
+  }, [deferredRows, advFilters, advMode, colValFilters, resolveFilterValue]);
 
   const totalVisibleRows = useMemo(() => groupedRows.reduce((s, g) => s + g.rows.length, 0), [groupedRows]);
   // Flat ordered row IDs across visible (expanded) groups - used for shift-range selection
@@ -3365,7 +3320,7 @@ export default function TotalVerimlilikPanel({
                         <span className="text-[9px] text-zinc-400">#</span>
                       </th>
                       {visibleCols.map(col => {
-                        const stickyLeft = col.frozen ? frozenLeftByColId[col.id] : undefined;
+                        const stickyLeft = col.frozen ? stickyLeftByColId[col.id] : undefined;
                         const isSel = selCols.has(col.id);
                         const colFmt = colFmts[col.id] || {};
                         const hasFilter = !!colValFilters[col.id];
@@ -3441,7 +3396,7 @@ export default function TotalVerimlilikPanel({
                                   </div>
                                 </td>
                                 {visibleCols.map(col => {
-                                  const stickyLeft = col.frozen ? frozenLeftByColId[col.id] : undefined;
+                                  const stickyLeft = col.frozen ? stickyLeftByColId[col.id] : undefined;
                                   const isColSel = selCols.has(col.id);
                                   const isCellSel = selCells.has(`${row.id}-${col.id}`);
                                   const cellFmt = getMergedFmt(row.id, col.id);
