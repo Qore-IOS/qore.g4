@@ -2550,6 +2550,51 @@ export default function TotalVerimlilikPanel({
     testsSentToCenter,
   ]);
 
+  const frozenLeftByColId = useMemo(() => {
+    let currentLeft = 36; // row selection column width
+    const map: Record<string, number> = {};
+    visibleCols.forEach(col => {
+      if (!col.frozen) return;
+      map[col.id] = currentLeft;
+      currentLeft += col.w;
+    });
+    return map;
+  }, [visibleCols]);
+
+  const getFilterRawValue = useCallback((row: TableRow, colId: string): unknown => {
+    switch (colId) {
+      case 'kutuKayip': {
+        const sentCount = testsSentToCenter[row.id] || 0;
+        const effHak = centerHakEdisMode ? Math.max(0, row.hakEdis - sentCount) : row.hakEdis;
+        const testFark = column22Mode === 'kumulatif'
+          ? row.stokDogrulukFark
+          : (row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest) - effHak;
+        const ambalaj = row.ambalajDegeri || 1;
+        return testFark / ambalaj;
+      }
+      case 'sarfiyatMaliyeti':
+        return calculateRowCost(row).cost;
+      case 'hakEdisKarsiligi':
+        return calculateHakEdisKarsiligi(row, centerHakEdisMode).amount;
+      case 'kar':
+        return calculateKar(row, centerHakEdisMode).kar;
+      case 'zararMaliyeti':
+        return calculateZararMaliyeti(row).zarar;
+      case 'merkezeGonderilen':
+        return testsSentToCenter[row.id] || 0;
+      default:
+        return (row as unknown as Record<string, unknown>)[colId];
+    }
+  }, [
+    centerHakEdisMode,
+    column22Mode,
+    calculateRowCost,
+    calculateHakEdisKarsiligi,
+    calculateKar,
+    calculateZararMaliyeti,
+    testsSentToCenter,
+  ]);
+
   // Group rows by lab (after primary filtering)
   const groupedRows = useMemo(() => {
     // Apply advanced filters on top of existing deferredRows (which already has search+colFilters+sort)
