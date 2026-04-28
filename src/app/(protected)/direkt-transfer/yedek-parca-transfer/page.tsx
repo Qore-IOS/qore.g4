@@ -57,6 +57,7 @@ import {
   Database,
   SlidersHorizontal,
   ShoppingCart,
+  ArrowUpDown,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { format } from 'date-fns';
@@ -238,6 +239,7 @@ export default function YedekParcaTransferPage() {
   const [personnelStockLoading, setPersonnelStockLoading] = useState(false);
   const [personnelStockPage, setPersonnelStockPage] = useState(0);
   const [personnelStockFilter, setPersonnelStockFilter] = useState<'all' | 'used' | 'unused' | 'pending_approval'>('all');
+  const [personnelStockSortOrder, setPersonnelStockSortOrder] = useState<'asc' | 'desc'>('desc');
   const ITEMS_PER_PAGE = 20;
 
   // All personnel stock for toplam stok view
@@ -927,18 +929,21 @@ export default function YedekParcaTransferPage() {
   }, [allTransferTargets, userSearchQuery]);
 
   const filteredPersonnelStock = useMemo(() => {
+    let items = [...personnelStock];
     if (personnelStockFilter === 'used') {
-      return personnelStock.filter(s => s.status === 'used' || s.status === 'pending_return');
+      items = items.filter(s => s.status === 'used' || s.status === 'pending_return');
+    } else if (personnelStockFilter === 'unused') {
+      items = items.filter(s => s.status === 'in_stock');
+    } else if (personnelStockFilter === 'pending_approval') {
+      items = items.filter(s => s.status === 'pending_approval');
     }
-    if (personnelStockFilter === 'unused') {
-      return personnelStock.filter(s => s.status === 'in_stock');
-    }
-    if (personnelStockFilter === 'pending_approval') {
-      return personnelStock.filter(s => s.status === 'pending_approval');
-    }
-    // 'all' filter: show everything including pending_approval
-    return personnelStock;
-  }, [personnelStock, personnelStockFilter]);
+
+    return items.sort((a, b) => {
+      const dateA = new Date(a.usedAt || a.createdAt).getTime();
+      const dateB = new Date(b.usedAt || b.createdAt).getTime();
+      return personnelStockSortOrder === 'desc' ? dateB - dateA : dateA - dateB;
+    });
+  }, [personnelStock, personnelStockFilter, personnelStockSortOrder]);
 
   // Paginated personnel stock
   const paginatedPersonnelStock = useMemo(() => {
@@ -3511,7 +3516,12 @@ export default function YedekParcaTransferPage() {
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Ürün Adı</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Seri No</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Durum</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Transfer</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer group" style={{ color: 'var(--dashboard-muted)' }} onClick={() => setPersonnelStockSortOrder(prev => prev === 'asc' ? 'desc' : 'asc')}>
+                      <div className="flex items-center gap-1">
+                        Transfer / Hareket
+                        <ArrowUpDown className={cn("w-3 h-3 transition-colors", personnelStockSortOrder === 'desc' ? "text-[var(--dashboard-accent)]" : "text-[var(--dashboard-muted)]")} />
+                      </div>
+                    </th>
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Kullanım</th>
                     <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Gözlem</th>
                     <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>İşlem</th>
