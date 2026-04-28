@@ -215,30 +215,38 @@ const ADV_OPS: { value: AdvOp; label: string; numeric?: boolean }[] = [
 interface AdvFilter { id: string; col: string; op: AdvOp; val: string }
 
 function evalAdvFilter(row: TableRow, f: AdvFilter): boolean {
+  // Empty filter value = passive (matches everything) — important UX:
+  // when user adds a rule but hasn't typed anything yet, all rows stay visible.
+  if (f.val === '' || f.val == null) return true;
+
   const raw = (row as unknown as Record<string, unknown>)[f.col];
-  if (raw == null) return false;
-  if (typeof raw === 'number') {
-    const v = parseFloat(f.val);
-    if (isNaN(v)) return true;
+
+  // Try numeric comparison if filter value parses as a number AND the cell value is numeric-ish.
+  const numV = parseFloat(f.val);
+  const numRaw = typeof raw === 'number' ? raw : (raw != null && raw !== '' ? parseFloat(String(raw)) : NaN);
+  const numericMode = !isNaN(numV) && !isNaN(numRaw) && (f.op === '>' || f.op === '<' || f.op === '>=' || f.op === '<=');
+  if (numericMode) {
     switch (f.op) {
-      case '=': return raw === v;
-      case '!=': return raw !== v;
-      case '>': return raw > v;
-      case '<': return raw < v;
-      case '>=': return raw >= v;
-      case '<=': return raw <= v;
-      case 'contains': return String(raw).includes(f.val);
-      case 'startsWith': return String(raw).startsWith(f.val);
+      case '>':  return numRaw >  numV;
+      case '<':  return numRaw <  numV;
+      case '>=': return numRaw >= numV;
+      case '<=': return numRaw <= numV;
     }
   }
-  const s = String(raw).toLowerCase();
+
+  // For ordering ops without numeric values → row fails (no meaningful comparison).
+  if (f.op === '>' || f.op === '<' || f.op === '>=' || f.op === '<=') return false;
+
+  // String-mode comparison for =, !=, contains, startsWith (case-insensitive).
+  // Treat missing/null as empty string so '!=' works correctly for absent values.
+  const s = (raw == null ? '' : String(raw)).toLowerCase();
   const v = f.val.toLowerCase();
   switch (f.op) {
-    case '=': return s === v;
-    case '!=': return s !== v;
-    case 'contains': return s.includes(v);
+    case '=':          return s === v;
+    case '!=':         return s !== v;
+    case 'contains':   return s.includes(v);
     case 'startsWith': return s.startsWith(v);
-    default: return true;
+    default:           return true;
   }
 }
 
@@ -2534,12 +2542,28 @@ export default function TotalVerimlilikPanel({
     return ids;
   }, [groupedRows, expandedLabs]);
 
-  // Auto-expand the first lab when groups appear so users see data
+  // Track whether we manually changed expansion (so filter auto-expand doesn't override later)
+  const lastFilterSig = useRef<string>('');
+
+  // Auto-expand behavior:
+  // - On first appearance of data: expand first lab (so user sees something)
+  // - When filters become active: expand ALL labs that have matching rows
+  //   (otherwise filtered rows hide inside collapsed groups → user thinks data disappeared)
+  // - When filters cleared: revert to first-lab-only
   useEffect(() => {
-    if (groupedRows.length > 0 && expandedLabs.size === 0) {
+    if (groupedRows.length === 0) return;
+    const hasFilters = advFilters.length > 0 || Object.keys(colValFilters).length > 0 || searchTerm.trim().length > 0;
+    const sig = `${hasFilters ? '1' : '0'}|${advFilters.length}|${Object.keys(colValFilters).join(',')}|${searchTerm}`;
+    if (sig === lastFilterSig.current) return;
+    lastFilterSig.current = sig;
+    if (hasFilters) {
+      // Expand every group that has rows matching current filters
+      setExpandedLabs(new Set(groupedRows.map(g => g.labId)));
+    } else if (expandedLabs.size === 0) {
       setExpandedLabs(new Set([groupedRows[0].labId]));
     }
-  }, [groupedRows, expandedLabs.size]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupedRows, advFilters, colValFilters, searchTerm]);
 
   const toggleLabExpand = useCallback((labId: string) => {
     setExpandedLabs(prev => {
@@ -3219,6 +3243,17 @@ export default function TotalVerimlilikPanel({
           </div>
         ) : rows.length === 0 ? (
           <div className="flex items-center justify-center h-full text-zinc-400 text-[13px]">Bu havuz için min-max tanımlı ürün bulunamadı.</div>
+        ) : totalVisibleRows === 0 ? (
+          <div className="flex items-center justify-center h-full text-zinc-400 text-[13px]">
+            <div className="text-center">
+              <SlidersHorizontal className="h-10 w-10 mx-auto mb-3 opacity-30" />
+              <div className="font-medium mb-1 text-zinc-600">Filtreye uyan veri yok</div>
+              <div className="text-[11px] mb-3">{rows.length} satırın hiçbiri aktif filtrelerle eşleşmiyor</div>
+              <button onClick={() => { clearAdvFilters(); setColValFilters({}); setSearchTerm(''); }} className="px-3 py-1.5 rounded bg-blue-600 text-white text-[11px] font-semibold hover:bg-blue-700">
+                Tüm Filtreleri Temizle
+              </button>
+            </div>
+          </div>
         ) : (
           <>
             {/* Edge glow (green spotlight) */}
