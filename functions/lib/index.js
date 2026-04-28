@@ -24,7 +24,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cleanupExpiredIrsaliyeDosyalari = exports.onNotificationCreated = exports.onAplikasyonFormCreated = exports.onTeknikServisFormCreated = exports.nfcLoginWithSerial = exports.mirrorPresenceToFirestore = exports.createCustomTokenForNfcUser = exports.revokeUserSessions = void 0;
+exports.cleanupExpiredIrsaliyeDosyalari = exports.maintenanceUpcomingReminder = exports.faultInterventionReminder = exports.onNotificationCreated = exports.onPeripheralOrderCreatedSendMail = exports.onAplikasyonFormCreated = exports.onTeknikServisFormCreated = exports.nfcLoginWithSerial = exports.mirrorPresenceToFirestore = exports.createCustomTokenForNfcUser = exports.revokeUserSessions = void 0;
 const admin = __importStar(require("firebase-admin"));
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firebase_functions_1 = require("firebase-functions");
@@ -43,6 +43,8 @@ Object.defineProperty(exports, "nfcLoginWithSerial", { enumerable: true, get: fu
 var actionFormEmailNotification_1 = require("./actionFormEmailNotification");
 Object.defineProperty(exports, "onTeknikServisFormCreated", { enumerable: true, get: function () { return actionFormEmailNotification_1.onTeknikServisFormCreated; } });
 Object.defineProperty(exports, "onAplikasyonFormCreated", { enumerable: true, get: function () { return actionFormEmailNotification_1.onAplikasyonFormCreated; } });
+var orderCreatedPeripheralEmail_1 = require("./orderCreatedPeripheralEmail");
+Object.defineProperty(exports, "onPeripheralOrderCreatedSendMail", { enumerable: true, get: function () { return orderCreatedPeripheralEmail_1.onPeripheralOrderCreatedSendMail; } });
 function chunk(arr, size = 500) {
     const out = [];
     for (let i = 0; i < arr.length; i += size)
@@ -82,7 +84,7 @@ exports.onNotificationCreated = functions
     .runWith({ timeoutSeconds: 60, memory: '256MB' })
     .firestore.document('notifications/{id}')
     .onCreate(async (snap, context) => {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l;
     const notificationId = context.params.id;
     const data = snap.data();
     // Prepare log entry
@@ -201,6 +203,12 @@ exports.onNotificationCreated = functions
             firebase_functions_1.logger.warn(`[fanOut] No tokens matched for ${notificationId}`);
             return;
         }
+        // Collect user-specific targets (user:uid) — these are direct messages that
+        // must be delivered regardless of the recipient's preference settings.
+        const directTargetUids = new Set(data.targets
+            .filter((t) => t.startsWith('user:'))
+            .map((t) => t.split(':')[1])
+            .filter(Boolean));
         // --- 2. Filter tokens by user notification preferences ---
         // Fetch user profiles for preference-based filtering
         const uniqueUids = new Set(tokens.map(t => t.uid).filter((uid) => !!uid));
@@ -232,6 +240,11 @@ exports.onNotificationCreated = functions
             // User explicitly disabled all notifications
             if (!prefs.enabled)
                 return false;
+            // Direct user-specific notifications (user:uid target) bypass preference filtering.
+            // These are personal messages (e.g. spare_part_transfer, maliyet_sayim_davet) that
+            // should always reach the intended recipient as long as notifications are enabled.
+            if (directTargetUids.has(t.uid))
+                return true;
             // If user has specific preferences set, check if this type is included
             // Empty prefs array = no preferences configured yet = allow all (backwards compat)
             if (prefs.prefs.length > 0 && notificationType !== 'custom' && !prefs.prefs.includes(notificationType)) {
@@ -296,7 +309,13 @@ exports.onNotificationCreated = functions
         const fcmMessage = {
             tokens: filteredTokens.map(t => t.token),
             notification: Object.assign({ title: data.title, body: data.message }, (isFaultOpened && deviceImageUrl ? { imageUrl: deviceImageUrl } : {})),
-            data: Object.assign(Object.assign({ notificationId, title: data.title || '', body: data.message || '', type: data.type || '', href: data.href || '/', link: data.href ? `${baseUrl}${data.href}` : baseUrl }, (faultReportId ? { faultReportId } : {})), (((_f = data.meta) === null || _f === void 0 ? void 0 : _f.faultType) ? { faultType: data.meta.faultType } : {})),
+            data: Object.assign(Object.assign(Object.assign({ notificationId, title: data.title || '', body: data.message || '', type: data.type || '', href: data.href || '/', link: data.href ? `${baseUrl}${data.href}` : baseUrl }, (faultReportId ? { faultReportId } : {})), (((_f = data.meta) === null || _f === void 0 ? void 0 : _f.faultType) ? { faultType: data.meta.faultType } : {})), (data.type === 'external_stock_usage' ? {
+                sourceType: ((_g = data.meta) === null || _g === void 0 ? void 0 : _g.sourceType) || '',
+                sourceName: ((_h = data.meta) === null || _h === void 0 ? void 0 : _h.sourceName) || '',
+                stokKodu: ((_j = data.meta) === null || _j === void 0 ? void 0 : _j.stokKodu) || '',
+                stokAdi: ((_k = data.meta) === null || _k === void 0 ? void 0 : _k.stokAdi) || '',
+                quantity: String(((_l = data.meta) === null || _l === void 0 ? void 0 : _l.quantity) || ''),
+            } : {})),
             webpush: {
                 notification: webpushNotification,
                 fcmOptions: {
@@ -365,6 +384,269 @@ exports.onNotificationCreated = functions
     }
     catch (logError) {
         firebase_functions_1.logger.error(`[fanOut] Failed to write log for ${notificationId}:`, logError);
+    }
+});
+// --- ARIZA HATIRLATICI (4 saat+ müdahale bekleyen arızalar) ---
+// Her saat çalışır, mudahale_bekliyor veya mudahale_ediliyor durumunda 4+ saat kalan
+// arızalar için üzerine alan personele bildirim gönderir.
+exports.faultInterventionReminder = (0, scheduler_1.onSchedule)({
+    schedule: 'every 1 hours',
+    timeZone: 'Europe/Istanbul',
+    region: 'europe-west1',
+    timeoutSeconds: 120,
+    memory: '256MiB',
+}, async () => {
+    var _a, _b;
+    const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;
+    const now = Date.now();
+    const fourHoursAgo = admin.firestore.Timestamp.fromMillis(now - FOUR_HOURS_MS);
+    try {
+        // Query faults that are in mudahale_bekliyor or mudahale_ediliyor status
+        // and have been assigned more than 4 hours ago
+        const [bekleyenSnap, ediliyorSnap] = await Promise.all([
+            db.collection('deviceFaultReports')
+                .where('status', '==', 'mudahale_bekliyor')
+                .where('assignedAt', '<=', fourHoursAgo)
+                .get(),
+            db.collection('deviceFaultReports')
+                .where('status', '==', 'mudahale_ediliyor')
+                .where('assignedAt', '<=', fourHoursAgo)
+                .get(),
+        ]);
+        const allDocs = [...bekleyenSnap.docs, ...ediliyorSnap.docs];
+        if (allDocs.length === 0) {
+            firebase_functions_1.logger.info('[faultReminder] No faults awaiting intervention for 4+ hours.');
+            return;
+        }
+        firebase_functions_1.logger.info(`[faultReminder] Found ${allDocs.length} faults awaiting intervention for 4+ hours.`);
+        // Check which faults have already been reminded recently (within last 4 hours)
+        // to avoid spamming the same person every hour
+        const REMINDER_COOLDOWN_MS = 4 * 60 * 60 * 1000;
+        const cooldownThreshold = admin.firestore.Timestamp.fromMillis(now - REMINDER_COOLDOWN_MS);
+        for (const faultDoc of allDocs) {
+            const data = faultDoc.data();
+            const assignedToUid = data.assignedToUid;
+            const assignedToName = data.assignedToName || 'Personel';
+            if (!assignedToUid) {
+                firebase_functions_1.logger.warn(`[faultReminder] Fault ${faultDoc.id} has no assignedToUid, skipping.`);
+                continue;
+            }
+            // Check cooldown - skip if reminder was sent recently
+            const lastReminderAt = data.lastFaultReminderAt;
+            if (lastReminderAt && lastReminderAt.toMillis() > cooldownThreshold.toMillis()) {
+                firebase_functions_1.logger.info(`[faultReminder] Fault ${faultDoc.id} already reminded recently, skipping.`);
+                continue;
+            }
+            // Calculate how long the fault has been waiting
+            const assignedAtMs = ((_b = (_a = data.assignedAt) === null || _a === void 0 ? void 0 : _a.toMillis) === null || _b === void 0 ? void 0 : _b.call(_a)) || now;
+            const waitingHours = Math.floor((now - assignedAtMs) / (60 * 60 * 1000));
+            const statusLabel = data.status === 'mudahale_bekliyor'
+                ? 'müdahale bekliyor'
+                : 'müdahale ediliyor';
+            const deviceName = data.model || data.deviceName || 'Bilinmeyen Cihaz';
+            const labName = data.labName || '';
+            const faultId = faultDoc.id;
+            // Create notification for the assigned personnel
+            const notificationData = {
+                type: 'fault_reminder',
+                title: `Arıza Hatırlatma: ${deviceName}`,
+                message: `${labName ? labName + ' - ' : ''}${deviceName} cihazı için açılan arıza ${waitingHours} saattir "${statusLabel}" durumunda bekliyor. Lütfen arızayı kontrol ediniz.`,
+                href: `/ariza-yonetimi/${faultId}`,
+                resource: { type: 'device', id: data.deviceId || '' },
+                actor: { uid: 'system', name: 'Sistem' },
+                targets: [`user:${assignedToUid}`],
+                meta: {
+                    faultReportId: faultId,
+                    assignedToUid,
+                    assignedToName,
+                    deviceName,
+                    labName,
+                    waitingHours,
+                    status: data.status,
+                },
+                channel: 'push',
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                readBy: [],
+            };
+            await db.collection('notifications').add(notificationData);
+            // Update the fault document to track last reminder time
+            await faultDoc.ref.update({
+                lastFaultReminderAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            firebase_functions_1.logger.info(`[faultReminder] Sent reminder for fault ${faultId} to ${assignedToName} (${assignedToUid}), waiting ${waitingHours}h in "${statusLabel}".`);
+        }
+        firebase_functions_1.logger.info(`[faultReminder] Completed. Processed ${allDocs.length} faults.`);
+    }
+    catch (error) {
+        firebase_functions_1.logger.error('[faultReminder] Error processing fault reminders:', error);
+    }
+});
+// --- PERİYODİK BAKIM HATIRLATICI (7 gün kala) ---
+// Her gün sabah 08:00 çalışır. Bir cihaza tanımlı bakım planının bir sonraki
+// planlanan tarihine 7 gün veya daha az kalmışsa, plan.type (teknik_servis /
+// aplikasyon) rolündeki ve cihazın bulunduğu laboratuvara atanmış personellere
+// hem sistem içi hem de push bildirim gönderir. Tek bir bakım için tekrar
+// bildirim göndermemek üzere her plan dokümanına lastMaintenanceReminderAt
+// yazılır ve bu alanı 6 gün içinde güncellenmiş planlar atlanır.
+exports.maintenanceUpcomingReminder = (0, scheduler_1.onSchedule)({
+    schedule: 'every day 08:00',
+    timeZone: 'Europe/Istanbul',
+    region: 'europe-west1',
+    timeoutSeconds: 300,
+    memory: '256MiB',
+}, async () => {
+    var _a, _b, _c, _d, _e, _f, _g, _h;
+    const MS_PER_DAY = 24 * 60 * 60 * 1000;
+    const SIX_DAYS_MS = 6 * MS_PER_DAY;
+    const now = Date.now();
+    const cooldownCutoff = admin.firestore.Timestamp.fromMillis(now - SIX_DAYS_MS);
+    try {
+        const plansSnap = await db.collection('maintenancePlans').get();
+        if (plansSnap.empty) {
+            firebase_functions_1.logger.info('[maintReminder] No maintenance plans found.');
+            return;
+        }
+        // Preload all maintenance logs and bucket latest per planId
+        const logsSnap = await db.collection('maintenanceLogs').get();
+        const latestLogByPlanId = new Map();
+        for (const logDoc of logsSnap.docs) {
+            const ld = logDoc.data();
+            if (!ld.planId || !ld.nextDueDate)
+                continue;
+            const current = latestLogByPlanId.get(ld.planId);
+            const thisCompleted = ((_b = (_a = ld.completedAt) === null || _a === void 0 ? void 0 : _a.toMillis) === null || _b === void 0 ? void 0 : _b.call(_a)) || 0;
+            const curCompleted = ((_d = (_c = current === null || current === void 0 ? void 0 : current.completedAt) === null || _c === void 0 ? void 0 : _c.toMillis) === null || _d === void 0 ? void 0 : _d.call(_c)) || 0;
+            if (!current || thisCompleted > curCompleted) {
+                latestLogByPlanId.set(ld.planId, ld);
+            }
+        }
+        // Caches
+        const usersByRole = new Map();
+        const loadUsersByRole = async (role) => {
+            if (usersByRole.has(role))
+                return usersByRole.get(role);
+            const usersSnap = await db.collection('users').where('role', '==', role).get();
+            const list = usersSnap.docs.map((d) => {
+                const ud = d.data();
+                return {
+                    uid: d.id,
+                    assignedLaboratories: ud.assignedLaboratories || [],
+                    name: ud.displayName || ud.name || ud.email || d.id,
+                };
+            });
+            usersByRole.set(role, list);
+            return list;
+        };
+        const deviceCache = new Map();
+        const loadDevice = async (deviceId) => {
+            if (deviceCache.has(deviceId))
+                return deviceCache.get(deviceId);
+            const snap = await db.collection('devices').doc(deviceId).get();
+            const data = snap.exists ? snap.data() : null;
+            deviceCache.set(deviceId, data);
+            return data;
+        };
+        let processed = 0;
+        let notified = 0;
+        for (const planDoc of plansSnap.docs) {
+            processed++;
+            const plan = planDoc.data();
+            const planId = planDoc.id;
+            if (!plan.deviceId)
+                continue;
+            const role = plan.type;
+            if (role !== 'teknik_servis' && role !== 'aplikasyon')
+                continue;
+            // Cooldown: skip plans already reminded within the last 6 days
+            const lastReminderAt = plan.lastMaintenanceReminderAt;
+            if (lastReminderAt && typeof lastReminderAt.toMillis === 'function' &&
+                lastReminderAt.toMillis() > cooldownCutoff.toMillis()) {
+                continue;
+            }
+            // Determine next due date
+            const latestLog = latestLogByPlanId.get(planId);
+            let nextDue = null;
+            if (latestLog === null || latestLog === void 0 ? void 0 : latestLog.nextDueDate) {
+                nextDue = ((_f = (_e = latestLog.nextDueDate).toDate) === null || _f === void 0 ? void 0 : _f.call(_e)) ||
+                    (typeof latestLog.nextDueDate === 'string' ? new Date(latestLog.nextDueDate) : null);
+            }
+            else if (plan.createdAt) {
+                const created = ((_h = (_g = plan.createdAt).toDate) === null || _h === void 0 ? void 0 : _h.call(_g)) ||
+                    (typeof plan.createdAt === 'string' ? new Date(plan.createdAt) : null);
+                if (created) {
+                    nextDue = new Date(created);
+                    const pv = Number(plan.periodValue) || 0;
+                    if (pv > 0) {
+                        if (plan.periodUnit === 'hafta')
+                            nextDue.setDate(nextDue.getDate() + pv * 7);
+                        else if (plan.periodUnit === 'ay')
+                            nextDue.setMonth(nextDue.getMonth() + pv);
+                        else if (plan.periodUnit === 'yil')
+                            nextDue.setFullYear(nextDue.getFullYear() + pv);
+                    }
+                }
+            }
+            if (!nextDue || isNaN(nextDue.getTime()))
+                continue;
+            const daysUntilDue = Math.ceil((nextDue.getTime() - now) / MS_PER_DAY);
+            // Only remind when maintenance is due within the next 7 days (and not overdue)
+            if (daysUntilDue > 7 || daysUntilDue <= 0)
+                continue;
+            // Resolve device → hospitalId
+            const device = await loadDevice(plan.deviceId);
+            const hospitalId = device === null || device === void 0 ? void 0 : device.hospitalId;
+            // Find personnel with matching role assigned to the device's lab
+            const users = await loadUsersByRole(role);
+            const targets = [];
+            for (const u of users) {
+                // If we don't know the device's hospital, notify everyone with the matching role
+                if (!hospitalId || u.assignedLaboratories.includes(hospitalId)) {
+                    targets.push(`user:${u.uid}`);
+                }
+            }
+            if (targets.length === 0) {
+                firebase_functions_1.logger.info(`[maintReminder] Plan ${planId} due in ${daysUntilDue}d but no matching personnel.`);
+                continue;
+            }
+            const deviceName = (device === null || device === void 0 ? void 0 : device.model) || (device === null || device === void 0 ? void 0 : device.deviceName) || (device === null || device === void 0 ? void 0 : device.name) || 'Bilinmeyen Cihaz';
+            const labName = (device === null || device === void 0 ? void 0 : device.labName) || '';
+            const roleLabel = role === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon';
+            const dueDateStr = nextDue.toLocaleDateString('tr-TR', { timeZone: 'Europe/Istanbul' });
+            const taskName = plan.taskName || 'Periyodik bakım';
+            await db.collection('notifications').add({
+                type: 'maintenance_reminder',
+                title: `Bakım Hatırlatma: ${deviceName}`,
+                message: `${labName ? labName + ' - ' : ''}${deviceName} cihazı için "${taskName}" (${roleLabel}) görevi ${daysUntilDue} gün içinde (${dueDateStr}) planlanmış durumda. Lütfen kontrol ediniz.`,
+                href: `/cihaz-tanimlamalari/periyodik-bakim-yonetimi?deviceId=${plan.deviceId}&planId=${planId}`,
+                resource: { type: 'device', id: plan.deviceId },
+                actor: { uid: 'system', name: 'Sistem' },
+                targets,
+                meta: {
+                    planId,
+                    deviceId: plan.deviceId,
+                    deviceName,
+                    hospitalId: hospitalId || null,
+                    labName,
+                    taskName,
+                    role,
+                    roleLabel,
+                    dueAt: admin.firestore.Timestamp.fromMillis(nextDue.getTime()),
+                    daysUntilDue,
+                },
+                channel: 'push',
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                readBy: [],
+            });
+            await planDoc.ref.update({
+                lastMaintenanceReminderAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            notified++;
+            firebase_functions_1.logger.info(`[maintReminder] Plan ${planId} (${taskName}) → ${targets.length} personnel (${roleLabel}). Due in ${daysUntilDue}d (${dueDateStr}).`);
+        }
+        firebase_functions_1.logger.info(`[maintReminder] Completed. Processed ${processed} plans, notified on ${notified}.`);
+    }
+    catch (error) {
+        firebase_functions_1.logger.error('[maintReminder] Error processing maintenance reminders:', error);
     }
 });
 // --- İRSALİYE DOSYA TEMİZLEME (1 hafta sonra otomatik silme) ---
