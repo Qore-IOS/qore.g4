@@ -2195,8 +2195,8 @@ export default function YedekParcaTransferPage() {
 
   // Approve borrowed part
   const approveBorrowedPart = async (borrowed: any) => {
-    if (!isTeknikLojistik) {
-      toast({ title: 'Yetki Hatası', description: 'Borç onayını yalnızca teknik lojistik kullanıcıları yapabilir.', variant: 'destructive' });
+    if (!isAdmin && !isTeknikLojistik) {
+      toast({ title: 'Yetki Hatası', description: 'Borç onayını yalnızca teknik lojistik veya admin kullanıcıları yapabilir.', variant: 'destructive' });
       return;
     }
 
@@ -2263,8 +2263,8 @@ export default function YedekParcaTransferPage() {
 
   // Reject borrowed part
   const rejectBorrowedPart = async (borrowed: any) => {
-    if (!isTeknikLojistik) {
-      toast({ title: 'Yetki Hatası', description: 'Borç reddini yalnızca teknik lojistik kullanıcıları yapabilir.', variant: 'destructive' });
+    if (!isAdmin && !isTeknikLojistik) {
+      toast({ title: 'Yetki Hatası', description: 'Borç reddini yalnızca teknik lojistik veya admin kullanıcıları yapabilir.', variant: 'destructive' });
       return;
     }
 
@@ -2318,6 +2318,43 @@ export default function YedekParcaTransferPage() {
     } catch (err) {
       console.error('Error rejecting borrowed part:', err);
       toast({ title: 'Hata', description: 'İşlem sırasında hata oluştu.', variant: 'destructive' });
+    }
+  };
+
+  // Delete borrowed part (mistake/junk removal)
+  const deleteBorrowedPart = async (borrowed: any) => {
+    if (!isAdmin && !isTeknikLojistik) {
+      toast({ title: 'Yetki Hatası', description: 'Borç kaydını silme yetkiniz bulunmamaktadır.', variant: 'destructive' });
+      return;
+    }
+
+    const shouldDelete = window.confirm(`${borrowed.stokAdi} (${borrowed.serialNumber || 'Seri No Yok'}) borç kaydı silinsin mi?`);
+    if (!shouldDelete) return;
+
+    try {
+      const now = new Date();
+      await deleteDoc(doc(db, 'borrowedSpareParts', borrowed.id));
+
+      await addDoc(collection(db, 'sparePartTransferLogs'), withCompanyScope({
+        action: 'borrowed_deleted_admin',
+        borrowedPartId: borrowed.id,
+        stokKodu: borrowed.stokKodu,
+        stokAdi: borrowed.stokAdi,
+        anaBirim: borrowed.anaBirim || 'Adet',
+        serialNumber: borrowed.serialNumber,
+        borrowedByUid: borrowed.borrowedByUid,
+        borrowedByName: borrowed.borrowedByName,
+        notes: `${isAdmin ? 'Admin' : 'Teknik Lojistik'} borç kaydı silme işlemi`,
+        createdAt: Timestamp.fromDate(now),
+        createdByUid: currentUserProfile?.uid || '',
+        createdByName: currentUserProfile?.name || '',
+      }, currentCompanyId));
+
+      setBorrowedParts(prev => prev.filter(b => b.id !== borrowed.id));
+      toast({ title: 'Borç Kaydı Silindi', description: `${borrowed.stokAdi} kaydı kaldırıldı.` });
+    } catch (err) {
+      console.error('Error deleting borrowed part:', err);
+      toast({ title: 'Hata', description: 'Borç kaydı silinirken hata oluştu.', variant: 'destructive' });
     }
   };
 
@@ -3085,9 +3122,16 @@ export default function YedekParcaTransferPage() {
                 <p className="text-[10px] mt-0.5" style={{ color: 'var(--dashboard-muted)' }}>{item.deviceName} · {item.labName} · {item.borrowedByName}</p>
                 <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>{format(item.borrowedAt, 'dd.MM.yyyy HH:mm', { locale: tr })}</p>
               </div>
-              <div className="flex gap-1.5 flex-shrink-0">
-                {isTeknikLojistik && <button onClick={() => approveBorrowedPart(item)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-semibold text-white" style={{ background: '#16A34A' }}><CheckCircle className="w-3 h-3" /> Onayla</button>}
-                {isTeknikLojistik && <button onClick={() => rejectBorrowedPart(item)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-semibold text-white" style={{ background: '#B91C1C' }}><XCircle className="w-3 h-3" /> Reddet</button>}
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                {(isAdmin || isTeknikLojistik) && (
+                  <>
+                    <button onClick={() => approveBorrowedPart(item)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-semibold text-white transition-all hover:opacity-90 active:scale-95" style={{ background: '#16A34A' }}><CheckCircle className="w-3 h-3" /> Onayla</button>
+                    <button onClick={() => rejectBorrowedPart(item)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-semibold text-white transition-all hover:opacity-90 active:scale-95" style={{ background: '#B91C1C' }}><XCircle className="w-3 h-3" /> Reddet</button>
+                    <button onClick={() => deleteBorrowedPart(item)} className="p-1.5 rounded-lg hover:bg-black/5 transition-all active:scale-95" title="Borç Kaydını Sil">
+                      <Trash2 className="w-3.5 h-3.5" style={{ color: '#B91C1C' }} />
+                    </button>
+                  </>
+                )}
               </div>
             </article>
           ))}
