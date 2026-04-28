@@ -2,6 +2,7 @@ import { MAX_TOKENS } from './config';
 import { AGENT_TOOLS, AgentToolName, pendingPlans } from './tools';
 import { executeTool } from './actions';
 import { generateWithGemini, GeminiMessage } from './geminiClient';
+import { TOTAL_VERIMLILIK_ANALIZ_RAPORU } from './efficiencyReportContext';
 
 const AGENT_SYSTEM_PROMPT = `Sen Qore sisteminin AI ajanısın. Türkçe konuşuyorsun ve sağlık sektörü ERP sisteminde uzmanlaşmış bir asistansın.
 
@@ -10,7 +11,12 @@ const AGENT_SYSTEM_PROMPT = `Sen Qore sisteminin AI ajanısın. Türkçe konuşu
 2. Gerekli olduğunda araçları çağır.
 3. Veri olmadan iddia üretme.
 4. Kritik aksiyonlarda kullanıcı onayı iste.
-5. Kısa, net ve doğru cevap ver.`;
+5. Kısa, net ve doğru cevap ver.
+
+## VERIMLILIK ANALIZ REFERANSI
+Yapay zeka ajanı olarak sana sunulan verimlilik analiz paneli algoritmasını ve analiz yönergelerini kullanarak tespitler yapmalısın. Eğer sana tablo, satır veya hücre bilgisi gelirse bu rapor kurallarına göre analiz et:
+
+${TOTAL_VERIMLILIK_ANALIZ_RAPORU}`;
 
 export interface AgentMessage {
   role: 'user' | 'assistant';
