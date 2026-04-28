@@ -38,10 +38,20 @@ export interface StockSummary {
   birim: string;
 }
 
+export interface ProductMatch {
+  stokKodu: string;
+  stokAdi: string;
+  anaBirim?: string;
+}
+
 export interface SearchResult {
   ledgerRows: LedgerRow[];
   stockSummary: StockSummary[];
   searchType: 'product' | 'lot' | 'serial';
+  /** When set, the UI must let the user pick one of these products before loading details. */
+  productMatches?: ProductMatch[];
+  /** True when the result is just a list of products to choose from (no ledger fetched yet). */
+  needsProductSelection?: boolean;
 }
 
 // --- Helpers ---
@@ -205,6 +215,7 @@ export async function searchProductLedger(
   q: string,
   companyId?: string | null,
   isSuperAdmin?: boolean,
+  selectedStokKodu?: string | null,
 ): Promise<SearchResult> {
   if (!q || q.trim().length < 2) {
     return { ledgerRows: [], stockSummary: [], searchType: 'product' };
@@ -284,7 +295,33 @@ export async function searchProductLedger(
       p.stokKodu?.toLowerCase().includes(needle) ||
       p.stokAdi?.toLowerCase().includes(needle)
     );
-    matchingProducts.forEach(p => p.stokKodu && stockCodesToSearch.push(p.stokKodu));
+
+    // If a specific product was picked from the disambiguation list, restrict to it.
+    if (selectedStokKodu) {
+      const picked = matchingProducts.find(p => p.stokKodu === selectedStokKodu)
+        || productCodes.find(p => p.stokKodu === selectedStokKodu);
+      if (picked?.stokKodu) {
+        stockCodesToSearch.push(picked.stokKodu);
+      }
+    } else if (matchingProducts.length > 1) {
+      // Multiple matches: ask the UI to disambiguate first. Don't load mixed data.
+      return {
+        ledgerRows: [],
+        stockSummary: [],
+        searchType: 'product',
+        productMatches: matchingProducts
+          .filter(p => !!p.stokKodu)
+          .map(p => ({
+            stokKodu: p.stokKodu!,
+            stokAdi: p.stokAdi || p.stokKodu!,
+            anaBirim: p.anaBirim,
+          }))
+          .sort((a, b) => a.stokAdi.localeCompare(b.stokAdi, 'tr')),
+        needsProductSelection: true,
+      };
+    } else {
+      matchingProducts.forEach(p => p.stokKodu && stockCodesToSearch.push(p.stokKodu));
+    }
   }
 
   const uniqueStockCodes = Array.from(new Set(stockCodesToSearch));
@@ -372,12 +409,23 @@ export async function searchProductLedger(
     corePromises.push(Promise.resolve({ docs: [] }));
   }
 
+  // [5] Serial history (only for serial search) - canonical event log per serial.
+  // Used to recover Mal Kabul / Transfer rows when depoStok was deleted on consumption.
+  if (searchType === 'serial') {
+    corePromises.push(
+      adminDb.collection('serialHistory').doc(needleOriginal).collection('events').get()
+    );
+  } else {
+    corePromises.push(Promise.resolve({ docs: [] }));
+  }
+
   const [
     depoStokSnap,
     verifSnap,
     ,
     consumptionSnap,
     destroyedKitsSnap,
+    serialHistorySnap,
   ] = await withTimeout(Promise.all(corePromises), QUERY_TIMEOUT);
 
   // Process core data
@@ -390,12 +438,50 @@ export async function searchProductLedger(
     .filter((r: any) => r.raporTipi === 'mal_kabul');
   const consumptionRecords: ConsumptionRecord[] = consumptionSnap?.docs?.map((d: any) => ({ id: d.id, ...d.data() })) || [];
   const destroyedKits: any[] = destroyedKitsSnap?.docs?.map((d: any) => ({ id: d.id, ...d.data() })) || [];
+  const serialHistoryEvents: any[] = serialHistorySnap?.docs?.map((d: any) => ({ id: d.id, ...d.data() })) || [];
+
+  // For serial search: if depoStok is empty (item was fully consumed and the doc deleted),
+  // fetch other items in the same lot to recover depotIds. Use stokKodu/lot from history
+  // events or consumption records as the source of truth.
+  let auxLotDepoStok: DepoStokItem[] = [];
+  if (searchType === 'serial' && depoStok.length === 0) {
+    let lotForLookup = (serialHistoryEvents.find(e => e?.details?.lotNumarasi)?.details?.lotNumarasi)
+      || (consumptionRecords.find(c => c.lotNumarasi)?.lotNumarasi)
+      || null;
+    let stokForLookup = uniqueStockCodes[0]
+      || (serialHistoryEvents.find(e => e?.details?.stokKodu)?.details?.stokKodu)
+      || (consumptionRecords.find(c => c.stokKodu)?.stokKodu)
+      || null;
+    if (lotForLookup && stokForLookup) {
+      try {
+        const auxSnap = await adminDb.collection('depoStok')
+          .where('stokKodu', '==', stokForLookup)
+          .where('lotNumarasi', '==', lotForLookup)
+          .get();
+        auxLotDepoStok = filterByCompanyScope(
+          auxSnap.docs.map((d: any) => ({ id: d.id, ...d.data() })) as DepoStokItem[],
+          companyId,
+          isSuperAdmin,
+        );
+      } catch (err) {
+        // Best-effort recovery; ignore failures here.
+        auxLotDepoStok = [];
+      }
+    }
+  }
 
   // --- Phase 3: Fetch shipments (filtered by depotId) + referenced transfers ---
   const phase3Promises: Promise<any>[] = [];
 
-  // Extract depotIds from depoStok for shipment filtering
-  const depotIds = Array.from(new Set(depoStok.map(d => d.depotId).filter(Boolean)));
+  // Extract depotIds from depoStok (and recovery sources for serial search) for shipment filtering.
+  const depotIdsFromHistory: string[] = serialHistoryEvents
+    .map((e: any) => e?.details?.depotId || e?.details?.sourceDepotId)
+    .filter((x: any): x is string => typeof x === 'string' && x.length > 0);
+  const depotIds = Array.from(new Set([
+    ...depoStok.map(d => d.depotId).filter(Boolean) as string[],
+    ...auxLotDepoStok.map(d => d.depotId).filter(Boolean) as string[],
+    ...depotIdsFromHistory,
+  ]));
 
   // [0] Shipments - filtered by depotId instead of fetching ALL
   if (depotIds.length > 0 && depotIds.length <= 30) {
@@ -478,7 +564,7 @@ export async function searchProductLedger(
     buildSerialLedger(
       ledgerRows, depoStok, verificationReports, filteredShipments,
       filteredTransferItems, transferMap, consumptionRecords, destroyedKits,
-      needle, usersMap
+      needle, usersMap, serialHistoryEvents
     );
   } else {
     buildGroupedLedger(
@@ -513,7 +599,8 @@ function buildSerialLedger(
   consumptions: ConsumptionRecord[],
   destroyedKits: any[],
   needle: string,
-  usersMap: Record<string, User>
+  usersMap: Record<string, User>,
+  serialHistoryEvents: any[] = []
 ) {
   const stockByLocationLot: Record<string, number> = {};
   const getKey = (konum: string, stokKodu: string, lotNumarasi?: string) =>
@@ -567,6 +654,34 @@ function buildSerialLedger(
       events.push({ tarih: normDate(kit.resolvedAt || kit.timestamp || kit.createdAt), type: 'destroyed', data: kit });
     }
   });
+
+  // Recover events from serialHistory for actions whose primary records were deleted
+  // (e.g. depoStok deleted on consumption, leaving the Mal Kabul row missing).
+  if (serialHistoryEvents && serialHistoryEvents.length > 0) {
+    const hasDepoStokIntake = depoStok.length > 0;
+    const hasVerifIntake = verificationReports.some(r => (r.seriNumarasi || '').toLowerCase() === needle);
+    const knownTransferIds = new Set<string>(
+      [
+        ...transferItems.map(it => it.transferId),
+        ...shipments.map(sh => sh.id),
+      ].filter(Boolean) as string[]
+    );
+
+    serialHistoryEvents.forEach((he: any) => {
+      const heType = he?.type;
+      if (heType === 'intake') {
+        if (!hasDepoStokIntake && !hasVerifIntake) {
+          events.push({ tarih: normDate(he.timestamp), type: 'historyIntake', data: he });
+        }
+      } else if (heType === 'transfer' || heType === 'depot_to_lab_transfer' || heType === 'inter_lab_transfer') {
+        const txId = he.transferId;
+        const alreadyKnown = txId ? knownTransferIds.has(txId) : false;
+        if (!alreadyKnown) {
+          events.push({ tarih: normDate(he.timestamp), type: 'historyTransfer', data: he });
+        }
+      }
+    });
+  }
 
   // Sort chronologically
   events.sort((a, b) => a.tarih.getTime() - b.tarih.getTime());
@@ -696,6 +811,66 @@ function buildSerialLedger(
         seriNolar: kit.seriNumarasi ? [kit.seriNumarasi] : [],
         konum: kit.laboratoryName || 'Laboratuvar',
         postAdetHedef: Math.max(0, stockByLocationLot[labKey] || 0),
+      });
+    } else if (ev.type === 'historyIntake') {
+      // Synthetic Mal Kabul row reconstructed from serialHistory event
+      // (used when the original depoStok doc was deleted on consumption).
+      const he = ev.data;
+      const det = he.details || {};
+      const stokKodu = det.stokKodu || consumptions.find(c => c.stokKodu)?.stokKodu || '';
+      const stokAdi = det.stokAdi || consumptions.find(c => c.stokAdi)?.stokAdi || stokKodu;
+      const lotNumarasi = det.lotNumarasi || consumptions.find(c => c.lotNumarasi)?.lotNumarasi;
+      const miad = det.miad || consumptions.find(c => c.miad)?.miad;
+      const depotName = det.depotName || 'Depo';
+      const key = getKey(depotName, stokKodu, lotNumarasi);
+      stockByLocationLot[key] = (stockByLocationLot[key] || 0) + 1;
+
+      ledgerRows.push({
+        id: `mk_hist_${he.id}`,
+        stokKodu,
+        stokAdi,
+        lotNumarasi,
+        miad: formatMiad(miad),
+        islemTipi: 'Mal Kabul',
+        actor: det.userName || det.createdByName || '-',
+        tarih: ev.tarih,
+        adet: 1,
+        seriNolar: [needle],
+        konum: depotName,
+        postAdetDepo: stockByLocationLot[key],
+      });
+    } else if (ev.type === 'historyTransfer') {
+      // Synthetic Transfer / Karşılanan Sipariş row from serialHistory event.
+      const he = ev.data;
+      const det = he.details || {};
+      const stokKodu = det.stokKodu || consumptions.find(c => c.stokKodu)?.stokKodu || '';
+      const stokAdi = det.stokAdi || consumptions.find(c => c.stokAdi)?.stokAdi || stokKodu;
+      const lotNumarasi = det.lotNumarasi || consumptions.find(c => c.lotNumarasi)?.lotNumarasi;
+      const miad = det.miad || consumptions.find(c => c.miad)?.miad;
+      const sourceName = det.sourceDepotName || det.sourceLabName || 'Depo';
+      const targetName = det.targetName || det.targetLabName || 'Laboratuvar';
+      const islemTipi: IslemTipi = he.orderId ? 'Karşılanan Sipariş' : 'Direkt Transfer';
+
+      const sourceKey = getKey(sourceName, stokKodu, lotNumarasi);
+      const targetKey = getKey(targetName, stokKodu, lotNumarasi);
+      stockByLocationLot[sourceKey] = (stockByLocationLot[sourceKey] || 0) - 1;
+      stockByLocationLot[targetKey] = (stockByLocationLot[targetKey] || 0) + 1;
+
+      ledgerRows.push({
+        id: `tr_hist_${he.id}`,
+        stokKodu,
+        stokAdi,
+        lotNumarasi,
+        miad: formatMiad(miad),
+        islemTipi,
+        actor: det.userName || '-',
+        tarih: ev.tarih,
+        adet: 1,
+        seriNolar: [needle],
+        konum: sourceName,
+        hedefKonum: targetName,
+        postAdetDepo: Math.max(0, stockByLocationLot[sourceKey] || 0),
+        postAdetHedef: stockByLocationLot[targetKey] || 0,
       });
     }
   });
