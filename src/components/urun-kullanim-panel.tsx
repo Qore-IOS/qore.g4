@@ -1231,6 +1231,21 @@ export default function UrunKullanimPanel() {
     setConfirmFaultOpen(true);
   }, []);
 
+  const handleFaultOpened = useCallback(async (faultType: 'teknik_servis' | 'aplikasyon') => {
+    if (selectedLab?.perifer && selectedLabId) {
+      try {
+        const q = query(collection(db, 'users'), where('primaryLaboratories', 'array-contains', selectedLabId));
+        const snap = await getDocs(q);
+        const allResponsible = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
+        const filtered = allResponsible.filter((u: any) => u.role === faultType);
+        setPeripheralResponsibleUsers(filtered);
+        setIsPeripheralModalOpen(true);
+      } catch (err) {
+        urunKullanimLogger.error('Sorumlu personel getirilemedi', err);
+      }
+    }
+  }, [selectedLab, selectedLabId, selectedLabName]);
+
   const handleConfirmFaultReport = useCallback(async () => {
     if (!selectedFaultToConfirm || !selectedDevice) return;
     setIsSavingFault(true);
@@ -1265,18 +1280,7 @@ export default function UrunKullanimPanel() {
       setSelectedFaultToConfirm(null);
 
       // Peripheral check
-      if (selectedLab?.perifer && selectedLabId) {
-        try {
-          const q = query(collection(db, 'users'), where('primaryLaboratories', 'array-contains', selectedLabId));
-          const snap = await getDocs(q);
-          const allResponsible = snap.docs.map(d => ({uid: d.id, ...d.data()}));
-          const filtered = allResponsible.filter((u: any) => u.role === 'teknik_servis' || u.role === 'aplikasyon');
-          setPeripheralResponsibleUsers(filtered);
-          setIsPeripheralModalOpen(true);
-        } catch (err) {
-          urunKullanimLogger.error('Sorumlu personel getirilemedi', err);
-        }
-      }
+      handleFaultOpened(selectedFaultToConfirm.type);
     } catch (err) {
       urunKullanimLogger.error('Arıza kaydı oluşturulamadı', err, {
         deviceId: selectedDevice?.id,
@@ -1333,18 +1337,7 @@ export default function UrunKullanimPanel() {
       setSelectedDevice(null);
 
       // Peripheral check
-      if (selectedLab?.perifer && selectedLabId) {
-        try {
-          const q = query(collection(db, 'users'), where('primaryLaboratories', 'array-contains', selectedLabId));
-          const snap = await getDocs(q);
-          const allResponsible = snap.docs.map(d => ({uid: d.id, ...d.data()}));
-          const filtered = allResponsible.filter((u: any) => u.role === 'teknik_servis' || u.role === 'aplikasyon');
-          setPeripheralResponsibleUsers(filtered);
-          setIsPeripheralModalOpen(true);
-        } catch (err) {
-          urunKullanimLogger.error('Sorumlu personel getirilemedi', err);
-        }
-      }
+      handleFaultOpened(customFaultType);
     } catch (err) {
       urunKullanimLogger.error('Özel arıza kaydı oluşturulamadı', err, {
         deviceId: selectedDevice?.id,
@@ -1403,18 +1396,7 @@ export default function UrunKullanimPanel() {
       setFaultTargetMode('single');
 
       // Peripheral check
-      if (selectedLab?.perifer && selectedLabId) {
-        try {
-          const q = query(collection(db, 'users'), where('primaryLaboratories', 'array-contains', selectedLabId));
-          const snap = await getDocs(q);
-          const allResponsible = snap.docs.map(d => ({uid: d.id, ...d.data()}));
-          const filtered = allResponsible.filter((u: any) => u.role === 'teknik_servis' || u.role === 'aplikasyon');
-          setPeripheralResponsibleUsers(filtered);
-          setIsPeripheralModalOpen(true);
-        } catch (err) {
-          urunKullanimLogger.error('Sorumlu personel getirilemedi', err);
-        }
-      }
+      handleFaultOpened('teknik_servis');
     } catch (err) {
       urunKullanimLogger.error('STOP arıza kaydı oluşturulamadı', err, { stopLevel, mode: faultTargetMode });
       toast({ title: 'Hata', description: 'STOP arıza kaydı oluşturulamadı.', variant: 'destructive' });
