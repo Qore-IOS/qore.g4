@@ -22,7 +22,7 @@ import { db } from '@/lib/firebase';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import QoreAIPanel from '@/components/QoreAIPanel';
-import { QoreTechnicBrandMark, QoreTechnicProfileButton } from '@/components/qore-technic-shell';
+import { QoreTechnicBrandMark, QoreTechnicProfileButton, QoreTechnicNotificationsButton } from '@/components/qore-technic-shell';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -488,7 +488,7 @@ export default function CihazYonetimiHost() {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+        <div className="qt-status-row">
           <button type="button" className="qt-status-btn" onClick={() => openAvailabilityDialog('office')}>
             <Building className="h-4 w-4" />
             Ofisteyim
@@ -497,13 +497,11 @@ export default function CihazYonetimiHost() {
             <School className="h-4 w-4" />
             Eğitimdeyim
           </button>
+          <QoreTechnicNotificationsButton />
           {(() => {
             const role = currentUserProfile?.role;
             const isFieldUser = role === 'teknik_servis' || role === 'aplikasyon';
             if (isFieldUser) {
-              // Field users (teknik_servis / aplikasyon) don't get Qore AI access
-              // on any surface — only a Profil button (shown on mobile; desktop
-              // has the sidebar profile entry).
               return <QoreTechnicProfileButton className="md:hidden" />;
             }
             return (
