@@ -1,40 +1,327 @@
-
 // File: /app/(protected)/laboratuvar/sayim/[labId]/page.tsx
 'use client';
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import {
   collection, doc, getDocs, where, query, Timestamp, writeBatch, getDoc,
 } from 'firebase/firestore';
-import { Card, CardHeader, CardTitle, CardContent, CardFooter, CardDescription } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { useToast } from '@/hooks/use-toast';
-import { Check, X, Loader2, ListFilter } from 'lucide-react';
-import { cn, playFeedback } from '@/lib/utils';
-import BackButton from '@/components/BackButton';
-import { useLabCountMissingStock } from '@/hooks/useLabCountMissingStock';
-import type { ProductCode, DepoStokItem, ConsumptionRecord, LabPool, Laboratory } from '@/lib/types';
-import type { BarcodeFormat } from '@/lib/barcode';
-import { Progress } from '@/components/ui/progress';
-import { TrackingMode, resolveDefaultTrackingMode } from '@/lib/tracking';
+import {
+  Check,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Circle,
+  Loader2,
+  Save,
+  Search,
+  TestTube,
+  X,
+  PackageX,
+  ArrowRight,
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import type { ProductCode, DepoStokItem, ConsumptionRecord, MinMaxRule } from '@/lib/types';
 import { saveLabCountSession } from '@/lib/labCount';
+import { formatMiad } from '@/lib/date';
+import { differenceInDays, parse, isValid } from 'date-fns';
 
-interface StockGroup {
-  id: string;
+// ============================================================================
+// TYPES
+// ============================================================================
+
+type FilterMode = 'marka' | 'urunGrubu';
+
+interface ExistingLot {
+  lot: string;
+  miad: string;
+  count: number;
+  itemIds: string[]; // depoStok doc ids in this group
+}
+
+interface ProductCountEntry {
   stokKodu: string;
   stokAdi: string;
-  lotNumarasi: string;
-  miad: string;
-  expectedQty: number;
-  serials: string[];
-  trackingMode: TrackingMode; // Added tracking mode
-  countedQty: number; // Added for non-serial items
+  marka: string;
+  urunGrubu: string;
+  laboratuvarGrubu: string;
+  existingTotal: number;
+  existingLots: ExistingLot[];
+  /** Manual override quantity (string to allow empty input) */
+  enteredQty: string;
+  /** True if user confirmed the existing/entered count */
+  counted: boolean;
 }
+
+interface GroupProgress {
+  key: string;
+  total: number;
+  completed: number;
+  status: 'idle' | 'in_progress' | 'completed';
+}
+
+// ============================================================================
+// HELPERS
+// ============================================================================
+
+type MiadSeverity = 'normal' | 'notice' | 'caution' | 'warning' | 'critical' | 'expired';
+
+function getMiadInfo(miadStr: string): { days: number; severity: MiadSeverity } {
+  if (!miadStr) return { days: Infinity, severity: 'normal' };
+  const miadDate = parse(miadStr, 'dd.MM.yyyy', new Date());
+  if (!isValid(miadDate)) return { days: Infinity, severity: 'normal' };
+  const days = differenceInDays(miadDate, new Date());
+  if (days < 0) return { days, severity: 'expired' };
+  if (days <= 3) return { days, severity: 'critical' };
+  if (days <= 10) return { days, severity: 'warning' };
+  if (days < 45) return { days, severity: 'caution' };
+  if (days < 60) return { days, severity: 'notice' };
+  return { days, severity: 'normal' };
+}
+
+function miadBadgeClass(severity: MiadSeverity): string {
+  if (severity === 'expired' || severity === 'critical') return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300';
+  if (severity === 'warning') return 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300';
+  if (severity === 'caution') return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300';
+  if (severity === 'notice') return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300';
+  return '';
+}
+
+function formatUrunGrubu(g?: string): string {
+  if (!g) return '';
+  if (g === 'kit') return 'Kit';
+  if (g === 'sarf') return 'Sarf';
+  if (g === 'yedek_parca') return 'Yedek Parça';
+  return g;
+}
+
+// ============================================================================
+// SUB-COMPONENTS
+// ============================================================================
+
+interface SidebarChecklistItemProps {
+  label: string;
+  group: GroupProgress;
+  isActive: boolean;
+  onClick: () => void;
+}
+
+function SidebarChecklistItem({ label, group, isActive, onClick }: SidebarChecklistItemProps) {
+  const pct = group.total > 0 ? Math.round((group.completed / group.total) * 100) : 0;
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'w-full flex items-center gap-3 px-3 py-3 rounded-2xl text-left transition-all duration-200',
+        isActive
+          ? 'bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] border-l-[3px] border-l-[var(--dashboard-accent)]'
+          : 'hover:bg-[var(--dashboard-surface-2)]/50',
+      )}
+    >
+      <span className="shrink-0">
+        {group.status === 'completed' ? (
+          <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+        ) : group.status === 'in_progress' ? (
+          <div className="w-5 h-5 rounded-full border-2 border-amber-500 flex items-center justify-center">
+            <div className="w-2 h-2 rounded-full bg-amber-500" />
+          </div>
+        ) : (
+          <Circle className="w-5 h-5 text-[var(--dashboard-muted)]" />
+        )}
+      </span>
+      <div className="flex-1 min-w-0">
+        <span className={cn('text-sm font-medium block truncate', isActive ? 'text-[var(--dashboard-text)]' : 'text-[var(--dashboard-text)]/80')}>
+          {label}
+        </span>
+        <span className="text-xs text-[var(--dashboard-muted)]">
+          {group.completed} / {group.total} ürün
+        </span>
+      </div>
+      <div className="shrink-0 w-10 h-10 relative">
+        <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
+          <circle cx="18" cy="18" r="14" fill="none" stroke="var(--dashboard-stroke)" strokeWidth="3" />
+          <circle
+            cx="18" cy="18" r="14" fill="none"
+            stroke={group.status === 'completed' ? '#10b981' : group.status === 'in_progress' ? '#f59e0b' : 'var(--dashboard-stroke)'}
+            strokeWidth="3"
+            strokeDasharray={`${pct * 0.88} 88`}
+            strokeLinecap="round"
+            className="transition-all duration-500"
+          />
+        </svg>
+        <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-[var(--dashboard-muted)]">
+          {pct}
+        </span>
+      </div>
+    </button>
+  );
+}
+
+interface ProductRowProps {
+  product: ProductCode;
+  entry: ProductCountEntry;
+  isOutOfStock: boolean;
+  onEnteredChange: (val: string) => void;
+  onConfirmExisting: () => void;
+  onToggleCounted: () => void;
+}
+
+function ProductRow({ product, entry, isOutOfStock, onEnteredChange, onConfirmExisting, onToggleCounted }: ProductRowProps) {
+  const enteredNum = entry.enteredQty.trim() === '' ? null : parseInt(entry.enteredQty, 10);
+  const effectiveCount = enteredNum != null && !isNaN(enteredNum) ? enteredNum : entry.existingTotal;
+  const delta = effectiveCount - entry.existingTotal;
+
+  return (
+    <div
+      className={cn(
+        'w-full px-4 sm:px-5 py-3 border-b border-[var(--dashboard-stroke)] last:border-b-0 transition-all',
+        entry.counted && 'bg-emerald-500/5',
+        isOutOfStock && !entry.counted && 'bg-slate-500/5',
+      )}
+    >
+      <div className="flex items-start gap-3">
+        {/* Product info */}
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-[var(--dashboard-text)] truncate">
+            {product.stokAdi}
+          </p>
+          <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
+            <span className="text-[11px] text-[var(--dashboard-muted)]">{product.stokKodu}</span>
+            {product.urunGrubu && (
+              <span className="text-[9px] font-semibold uppercase tracking-wide text-[var(--dashboard-muted)] bg-[var(--dashboard-surface-2)] px-1.5 py-0.5 rounded">
+                {formatUrunGrubu(product.urunGrubu)}
+              </span>
+            )}
+            {product.marka && (
+              <span className="text-[9px] font-semibold uppercase tracking-wide text-[var(--dashboard-muted)] bg-[var(--dashboard-surface-2)] px-1.5 py-0.5 rounded">
+                {product.marka}
+              </span>
+            )}
+            {isOutOfStock && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+                <PackageX className="w-2.5 h-2.5" />
+                Stokta Yok
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Counted tick */}
+        <button
+          onClick={onToggleCounted}
+          title={entry.counted ? 'Onayı kaldır' : 'Sayımı onayla'}
+          className={cn(
+            'shrink-0 w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-200',
+            entry.counted
+              ? 'bg-emerald-500 text-white shadow-md'
+              : 'bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-accent)]',
+          )}
+        >
+          <Check className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* Existing lots */}
+      {!isOutOfStock && entry.existingLots.length > 0 && (
+        <div className="mt-2 space-y-1">
+          {entry.existingLots.map((lot, i) => {
+            const info = getMiadInfo(lot.miad);
+            return (
+              <div
+                key={`${lot.lot}-${lot.miad}-${i}`}
+                className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-[var(--dashboard-surface)] border border-[var(--dashboard-stroke)] text-xs"
+              >
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <span className="font-mono text-[var(--dashboard-text)] truncate">
+                    {lot.lot ? `Lot: ${lot.lot}` : 'Lot: —'}
+                  </span>
+                  {lot.miad && (
+                    <span className="text-[var(--dashboard-muted)]">{lot.miad}</span>
+                  )}
+                  {lot.miad && info.severity !== 'normal' && info.days !== Infinity && (
+                    <span className={cn('px-1.5 py-0.5 rounded text-[9px] font-semibold', miadBadgeClass(info.severity))}>
+                      {info.days < 0 ? 'geçmiş' : `${info.days}g`}
+                    </span>
+                  )}
+                </div>
+                <span className="font-bold text-[var(--dashboard-text)] shrink-0">
+                  {lot.count}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Inputs row */}
+      <div className="mt-2 flex items-center gap-2">
+        {/* Existing total + confirm button */}
+        <div className="flex items-center gap-1.5">
+          <span
+            className={cn(
+              'text-[11px] font-semibold px-2 py-1 rounded-md',
+              isOutOfStock
+                ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+                : 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+            )}
+            title="Mevcut lab stoğu"
+          >
+            Stok: {entry.existingTotal}
+          </span>
+          {!isOutOfStock && (
+            <button
+              type="button"
+              onClick={onConfirmExisting}
+              className="h-7 px-2 rounded-md text-[10px] font-semibold bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/40 dark:text-blue-200 transition-colors flex items-center gap-1"
+              title="Stoktaki adedi sayım olarak onayla"
+            >
+              <Check className="w-3 h-3" />
+              Stoğu Onayla
+            </button>
+          )}
+        </div>
+
+        {/* Manual entry input */}
+        <div className="flex-1 flex items-center gap-1.5">
+          <label className="text-[10px] font-medium text-[var(--dashboard-muted)] uppercase tracking-wider shrink-0">
+            Sayım
+          </label>
+          <Input
+            type="number"
+            min="0"
+            inputMode="numeric"
+            placeholder={String(entry.existingTotal)}
+            value={entry.enteredQty}
+            onChange={(e) => onEnteredChange(e.target.value)}
+            className="h-8 text-sm w-24"
+          />
+          {enteredNum != null && !isNaN(enteredNum) && delta !== 0 && (
+            <span
+              className={cn(
+                'text-[10px] font-semibold px-1.5 py-0.5 rounded',
+                delta > 0
+                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
+                  : 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300',
+              )}
+            >
+              {delta > 0 ? `+${delta}` : delta}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
+// MAIN PAGE
+// ============================================================================
 
 export default function LaboratuvarSayimPage() {
   const params = useParams();
@@ -45,547 +332,705 @@ export default function LaboratuvarSayimPage() {
 
   const [labName, setLabName] = useState<string>('');
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
-  const [barcodeFormats, setBarcodeFormats] = useState<BarcodeFormat[]>([]);
   const [rawStock, setRawStock] = useState<DepoStokItem[]>([]);
-  const [rows, setRows] = useState<StockGroup[]>([]);
-  const [scanned, setScanned] = useState<Record<string, Set<string>>>({});
-  const [countedQuantities, setCountedQuantities] = useState<Record<string, number>>({});
-  const [isLoading, setIsLoading] = useState(false);
-  const [showOnlyUnverified, setShowOnlyUnverified] = useState(false);
-  const [labPools, setLabPools] = useState<LabPool[]>([]);
-  const [laboratories, setLaboratories] = useState<Laboratory[]>([]);
+  const [minMaxRules, setMinMaxRules] = useState<MinMaxRule[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
 
+  const [filterMode, setFilterMode] = useState<FilterMode>('marka');
+  const [activeGroup, setActiveGroup] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showOnlyUncounted, setShowOnlyUncounted] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
-  const saveSession = async () => {
-    if (!labId || !currentUserProfile) return;
-    setIsLoading(true);
+  // Per-product count state
+  const [countData, setCountData] = useState<Record<string, { enteredQty: string; counted: boolean }>>({});
 
-    try {
-        // 0. First, commit any new items that were staged but not yet persisted (from unknown products)
-        const newItemsCommitted = await commitNewItems();
-        if (newItemsCommitted > 0) {
-            console.log(`Committed ${newItemsCommitted} new items from counting`);
-        }
-
-        const batch = writeBatch(db);
-
-        // 1. Build a set of all scanned serial numbers
-        const scannedSerialsSet = new Set(Object.values(scanned).flatMap(s => Array.from(s)));
-
-        // 2. Process each group to identify items to remove AND items to add
-        const itemsToRemove: DepoStokItem[] = [];
-        let itemsToAdd = 0;
-        let itemsRemoved = 0;
-
-        allItemsForCount.forEach(group => {
-            const isSerialTracked = group.trackingMode === 'serial';
-
-            if (isSerialTracked) {
-                // For serial-tracked items: remove items with unscanned serials
-                // CRITICAL FIX: Normalize null/undefined to empty string for comparison
-                const groupItems = rawStock.filter(item =>
-                    item.stokKodu === group.stokKodu &&
-                    (item.lotNumarasi || '') === group.lotNumarasi &&
-                    (item.miad || '') === group.miad
-                );
-
-                groupItems.forEach(item => {
-                    if (item.seriNumarasi && !scannedSerialsSet.has(item.seriNumarasi)) {
-                        itemsToRemove.push(item);
-                    }
-                });
-            } else {
-                // For lot/qty tracked items: calculate how many to remove or add based on count
-                // CRITICAL FIX: Normalize null/undefined to empty string for comparison
-                const groupItems = rawStock.filter(item =>
-                    item.stokKodu === group.stokKodu &&
-                    (item.lotNumarasi || '') === group.lotNumarasi &&
-                    (item.miad || '') === group.miad
-                );
-
-                // Use the latest counted quantity from state
-                const countedQty = countedQuantities[group.id] || 0;
-                const expectedQty = group.expectedQty;
-                const qtyDifference = expectedQty - countedQty;
-
-                if (qtyDifference > 0) {
-                    // Remove the excess items (items that weren't counted = consumed/missing)
-                    const itemsToDelete = groupItems.slice(0, qtyDifference);
-                    itemsToRemove.push(...itemsToDelete);
-                } else if (qtyDifference < 0) {
-                    // STOCK INCREASE: Add new items for the surplus count
-                    const qtyToAdd = Math.abs(qtyDifference);
-                    const templateItem = groupItems[0] || {
-                        stokKodu: group.stokKodu,
-                        stokAdi: group.stokAdi,
-                        lotNumarasi: group.lotNumarasi,
-                        miad: group.miad,
-                    };
-
-                    for (let i = 0; i < qtyToAdd; i++) {
-                        const newStockRef = doc(collection(db, 'depoStok'));
-                        batch.set(newStockRef, withCompanyScope({
-                            stokKodu: templateItem.stokKodu,
-                            stokAdi: templateItem.stokAdi || group.stokAdi,
-                            lotNumarasi: templateItem.lotNumarasi || group.lotNumarasi,
-                            miad: templateItem.miad || group.miad,
-                            seriNumarasi: '', // No serial for lot/qty tracked items
-                            isShipped: true,
-                            hedefKurumId: labId,
-                            hedefKurum: labName,
-                            eklenmeTarihi: new Date(),
-                            ekleyenKullanici: currentUserProfile.name || currentUserProfile.email || 'System',
-                            eklemeSebebi: 'sayim_fazlasi', // Added from inventory count surplus
-                        }, currentCompanyId));
-                        itemsToAdd++;
-                    }
-                }
-            }
-        });
-
-        // 3. Delete unverified items from stock and create consumption records
-        itemsToRemove.forEach(item => {
-            // Delete from depoStok
-            if (!item.id) return; // Skip items without id
-            const stockDocRef = doc(db, 'depoStok', item.id);
-            batch.delete(stockDocRef);
-            itemsRemoved++;
-
-            // Create a consumption record for the discrepancy
-            const consumptionRecord: Omit<ConsumptionRecord, 'id'> = {
-                stokKodu: item.stokKodu,
-                stokAdi: item.stokAdi,
-                lotNumarasi: item.lotNumarasi || '',
-                miad: item.miad as string || '',
-                seriNumarasi: item.seriNumarasi || '',
-                laboratoryId: labId,
-                laboratoryName: labName,
-                consumptionTimestamp: new Date(),
-                consumptionType: 'sayimdan_dusum', // Type for count discrepancy
-                userId: currentUserProfile.uid,
-                userName: currentUserProfile.name || 'System',
-            };
-            const consumptionDocRef = doc(collection(db, 'tuketimKayitlari'));
-            batch.set(consumptionDocRef, consumptionRecord);
-        });
-
-        // 4. Save the history record of the count session
-        await saveLabCountSession({
-            laboratoryId: labId,
-            laboratoryName: labName,
-            user: { id: currentUserProfile.uid || '', name: currentUserProfile.name || currentUserProfile.email || 'Bilinmeyen' },
-            stockItemsForLab: rawStock.filter(item => item.id).map(item => ({
-                id: item.id!,
-                stokKodu: item.stokKodu || '',
-                stokAdi: item.stokAdi || '',
-                lotNumarasi: item.lotNumarasi || '',
-                miad: (item.miad as string) || '',
-                seriNumarasi: item.seriNumarasi || '',
-                hedefKurum: item.hedefKurum,
-                marka: (item.marka as string | undefined),
-            })),
-            scannedSerials: scannedSerialsSet,
-        });
-
-        // 5. Commit all database operations
-        await batch.commit();
-
-        // Build result message
-        const messages: string[] = [];
-        if (itemsRemoved > 0) messages.push(`${itemsRemoved} eksik ürün stoktan düşüldü`);
-        if (itemsToAdd > 0) messages.push(`${itemsToAdd} fazla ürün stoğa eklendi`);
-        const resultMsg = messages.length > 0 ? messages.join(', ') : 'Stok değişikliği yok';
-
-        toast({ title: 'Başarılı', description: `Sayım kaydedildi. ${resultMsg}.` });
-        router.push(`/laboratuvar/sayim/${labId}/history`);
-
-    } catch(err) {
-        console.error('Save session error:', err);
-        toast({ title: 'Hata', description: 'Sayım kaydedilirken hata oluştu.', variant: 'destructive' });
-    } finally {
-        setIsLoading(false);
-    }
-  };
-
-
-  useEffect(() => {
-    getDocs(collection(db, 'productCodes')).then(snap => {
-      setProductCodes(snap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
-    });
-    getDocs(collection(db, 'barcodeFormats')).then(snap => {
-      setBarcodeFormats(snap.docs.map(d => ({ id: d.id, ...d.data() } as BarcodeFormat)));
-    });
-    getDocs(collection(db, 'labPools')).then(snap => {
-      setLabPools(snap.docs.map(d => ({ id: d.id, ...d.data() } as LabPool)));
-    });
-    getDocs(collection(db, 'hospitals')).then(snap => {
-      setLaboratories(snap.docs.map(d => ({ id: d.id, ...d.data() } as Laboratory)));
-    });
-  }, []);
-
+  // ------------------------------------------------------------------
+  // Data loading
+  // ------------------------------------------------------------------
   useEffect(() => {
     if (!labId) return;
+    let cancelled = false;
     setIsLoading(true);
     (async () => {
       try {
         const labRef = doc(db, 'hospitals', labId as string);
-        const labSnap = await getDoc(labRef);
+        const [labSnap, productsSnap, rulesSnap] = await Promise.all([
+          getDoc(labRef),
+          getDocs(collection(db, 'productCodes')),
+          getDocs(collection(db, 'hospitals', labId as string, 'minMaxRules')),
+        ]);
+
         if (!labSnap.exists()) {
-          toast({ title: 'Hata', description: 'Laboratuvar bulunamadı.', variant: 'destructive' });
+          if (!cancelled) toast({ title: 'Hata', description: 'Laboratuvar bulunamadı.', variant: 'destructive' });
           return;
         }
+
         const { name } = labSnap.data() as any;
-        setLabName(name);
+        if (!cancelled) {
+          setLabName(name);
+          setProductCodes(productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
+          setMinMaxRules(rulesSnap.docs.map(d => d.data() as MinMaxRule));
+        }
 
+        // Load lab stock — match by hedefKurumId, plus legacy by name
         const stockRef = collection(db, 'depoStok');
-        // CRITICAL FIX: Only load items that are shipped AND belong to this lab
-        // Use hedefKurumId for accurate filtering, fallback to hedefKurum for legacy records
-        const stockQuery = query(
-          stockRef,
-          where('isShipped', '==', true),
-          where('hedefKurumId', '==', labId)
-        );
-        const snap = await getDocs(stockQuery);
-        let docs = snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+        const [byIdSnap, legacySnap] = await Promise.all([
+          getDocs(query(stockRef, where('isShipped', '==', true), where('hedefKurumId', '==', labId))),
+          getDocs(query(stockRef, where('isShipped', '==', true), where('hedefKurum', '==', name))),
+        ]);
 
-        // Also fetch legacy records that might only have hedefKurum (name) set
-        const legacyQuery = query(
-          stockRef,
-          where('isShipped', '==', true),
-          where('hedefKurum', '==', name)
-        );
-        const legacySnap = await getDocs(legacyQuery);
-        const legacyDocs = legacySnap.docs
+        const byId = byIdSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+        const legacy = legacySnap.docs
           .map(d => ({ id: d.id, ...d.data() } as DepoStokItem))
-          .filter(item => !item.hedefKurumId); // Only include items without hedefKurumId to avoid duplicates
+          .filter(item => !item.hedefKurumId);
+        const all = filterByCompanyScope([...byId, ...legacy], currentCompanyId, isSuperAdmin);
 
-        docs = [...docs, ...legacyDocs];
-        setRawStock(filterByCompanyScope(docs, currentCompanyId, isSuperAdmin));
-      } catch (error) {
-        console.error('Error loading lab stock:', error);
-        toast({ title: 'Veri Hatası', description: 'Sayım verileri yüklenemedi.', variant: 'destructive' });
+        if (!cancelled) setRawStock(all);
+      } catch (err) {
+        console.error('Error loading lab counting data:', err);
+        if (!cancelled) toast({ title: 'Veri Hatası', description: 'Sayım verileri yüklenemedi.', variant: 'destructive' });
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     })();
-  }, [labId, toast, currentCompanyId, isSuperAdmin]);
+    return () => {
+      cancelled = true;
+    };
+  }, [labId, currentCompanyId, isSuperAdmin, toast]);
 
-  const existingLabSerials = useMemo(() => new Set(rawStock.map(s => s.seriNumarasi || '').filter(Boolean)), [rawStock]);
+  // ------------------------------------------------------------------
+  // Derived data
+  // ------------------------------------------------------------------
 
-  // Compute pool member IDs and names for inter-lab transfers
-  const { poolMemberIds, poolMemberNames } = useMemo(() => {
-    const pool = labPools.find(p => p.memberIds?.includes(labId));
-    if (!pool) return { poolMemberIds: [], poolMemberNames: [] };
+  // All stokKodu values that are part of the count scope (have min/max rules OR have stock)
+  const scopeStokKodus = useMemo(() => {
+    const set = new Set<string>();
+    minMaxRules.forEach(r => set.add(r.stokKodu));
+    rawStock.forEach(s => set.add(s.stokKodu));
+    return set;
+  }, [minMaxRules, rawStock]);
 
-    const ids = pool.memberIds.filter(id => id !== labId); // Exclude current lab
-    const names = ids.map(id => laboratories.find(l => l.id === id)?.name).filter((n): n is string => !!n);
-    return { poolMemberIds: ids, poolMemberNames: names };
-  }, [labPools, labId, laboratories]);
+  // Product list within the scope (only known products)
+  const scopeProducts = useMemo(() => {
+    return productCodes.filter(p => scopeStokKodus.has(p.stokKodu));
+  }, [productCodes, scopeStokKodus]);
 
-  const {
-    onScanAndStageIfMissing,
-    commitNewItems,
-    groupRowClass,
-    serialTextClass,
-    newFromCount,
-    isNewSerial,
-    isPoolTransferSerial,
-  } = useLabCountMissingStock({
-    labId,
-    labName,
-    existingLabSerials,
-    productCodes,
-    barcodeFormats,
-    toast,
-    poolMemberIds,
-    poolMemberNames,
-  });
+  // Build per-product entries (existing lots + total)
+  const productEntries = useMemo<Record<string, ProductCountEntry>>(() => {
+    const map: Record<string, ProductCountEntry> = {};
 
-  const allItemsForCount = useMemo(() => {
-    const raw = rawStock.map(s => ({
-      stokKodu: s.stokKodu,
-      stokAdi: s.stokAdi,
-      lotNumarasi: s.lotNumarasi,
-      miad: s.miad,
-      seriNumarasi: s.seriNumarasi || '',
-    }));
-
-    // Build sets for checking existing items
-    const rawSerials = new Set(raw.filter(r => r.seriNumarasi).map(r => r.seriNumarasi));
-    const rawLotKeys = new Set(raw.filter(r => !r.seriNumarasi).map(r => `${r.stokKodu}-${r.lotNumarasi || ''}-${r.miad || ''}`));
-
-    // Filter staged items that are not yet in raw stock
-    const stagedButNotPersisted = newFromCount.filter(n => {
-      // For serial-tracked items, check if serial exists in rawSerials
-      if (n.seriNumarasi) {
-        return !rawSerials.has(n.seriNumarasi);
-      }
-      // For lot-tracked items, check if stokKodu+lot+miad combination exists
-      const lotKey = `${n.stokKodu}-${n.lotNumarasi || ''}-${n.miad || ''}`;
-      return !rawLotKeys.has(lotKey);
+    // Initialize entries for all in-scope products
+    scopeProducts.forEach(p => {
+      map[p.stokKodu] = {
+        stokKodu: p.stokKodu,
+        stokAdi: p.stokAdi,
+        marka: p.marka || '',
+        urunGrubu: formatUrunGrubu(p.urunGrubu),
+        laboratuvarGrubu: p.laboratuvarGrubu || '',
+        existingTotal: 0,
+        existingLots: [],
+        enteredQty: countData[p.stokKodu]?.enteredQty ?? '',
+        counted: countData[p.stokKodu]?.counted ?? false,
+      };
     });
 
-    const all = [...raw, ...stagedButNotPersisted];
-
-    const grouped = all.reduce((acc: Record<string, StockGroup>, item: any) => {
-      // CRITICAL FIX: Ensure consistent key format by handling undefined/null values
-      const key = `${item.stokKodu}-${item.lotNumarasi || ''}-${item.miad || ''}`;
-      if (!acc[key]) {
-         const product = productCodes.find(p => p.stokKodu === item.stokKodu);
-        acc[key] = {
-          id: key,
+    // Group raw stock by stokKodu / lot / miad
+    const lotMap = new Map<string, ExistingLot>();
+    rawStock.forEach(item => {
+      if (!map[item.stokKodu]) {
+        // Stock for an unknown product (no productCode + no min/max rule).
+        // Add a synthetic entry so it still shows up.
+        map[item.stokKodu] = {
           stokKodu: item.stokKodu,
-          stokAdi: item.stokAdi,
-          lotNumarasi: item.lotNumarasi || '',
-          miad: item.miad || '',
-          expectedQty: 0,
-          serials: [],
-          trackingMode: product ? resolveDefaultTrackingMode(product as any) : 'serial',
-          countedQty: countedQuantities[key] || 0,
+          stokAdi: item.stokAdi || item.stokKodu,
+          marka: (item as any).marka || '',
+          urunGrubu: '',
+          laboratuvarGrubu: '',
+          existingTotal: 0,
+          existingLots: [],
+          enteredQty: countData[item.stokKodu]?.enteredQty ?? '',
+          counted: countData[item.stokKodu]?.counted ?? false,
         };
       }
-      acc[key].expectedQty++;
-      if (item.seriNumarasi) {
-        acc[key].serials.push(item.seriNumarasi);
+      const lotKey = `${item.stokKodu}|${item.lotNumarasi || ''}|${formatMiad(item.miad as any) || ''}`;
+      let lot = lotMap.get(lotKey);
+      if (!lot) {
+        lot = {
+          lot: item.lotNumarasi || '',
+          miad: formatMiad(item.miad as any) || '',
+          count: 0,
+          itemIds: [],
+        };
+        lotMap.set(lotKey, lot);
+        map[item.stokKodu].existingLots.push(lot);
       }
-      return acc;
-    }, {});
-    return Object.values(grouped);
-  }, [rawStock, newFromCount, productCodes, countedQuantities]);
-  
-  const displayedItems = useMemo(() => {
-    if (!showOnlyUnverified) return allItemsForCount;
-    return allItemsForCount.filter(group => {
-      const isSerialTracked = group.trackingMode === 'serial';
-      const count = isSerialTracked ? (scanned[group.id] || new Set()).size : group.countedQty;
-      return count < group.expectedQty;
+      lot.count++;
+      if (item.id) lot.itemIds.push(item.id);
+      map[item.stokKodu].existingTotal++;
     });
-  }, [allItemsForCount, showOnlyUnverified, scanned]);
 
+    // Sort lots within each product (closest miad first)
+    Object.values(map).forEach(entry => {
+      entry.existingLots.sort((a, b) => {
+        const ai = getMiadInfo(a.miad).days;
+        const bi = getMiadInfo(b.miad).days;
+        return ai - bi;
+      });
+    });
 
-  const buffer = useRef('');
-  const timeout = useRef<NodeJS.Timeout>();
+    return map;
+  }, [scopeProducts, rawStock, countData]);
 
-  const handleScan = useCallback(async (code: string) => {
-    const res = await onScanAndStageIfMissing(code);
-    const parsed = res?.parsed;
-    if (!parsed?.stokKodu) {
-        playFeedback(true);
-        return;
-    }
-    
-    if (res?.createdLabDoc) {
-      setRawStock(prev => [...prev, res.createdLabDoc]);
-    }
-    
-    const serial = parsed.seriNumarasi || '';
-    let foundAndUpdated = false;
+  // Available filter values (markas or product groups)
+  const filterValues = useMemo<string[]>(() => {
+    const set = new Set<string>();
+    scopeProducts.forEach(p => {
+      if (filterMode === 'marka') {
+        if (p.marka) set.add(p.marka);
+      } else {
+        if (p.urunGrubu) set.add(p.urunGrubu);
+      }
+    });
+    const list = Array.from(set);
+    list.sort((a, b) => a.localeCompare(b, 'tr'));
+    return list;
+  }, [scopeProducts, filterMode]);
 
-    for (const group of allItemsForCount) {
-        const isSerialTracked = group.trackingMode === 'serial';
-        // CRITICAL FIX: Match lot number for ALL tracking types, not just serial
-        const matchesGroup = group.stokKodu === parsed.stokKodu &&
-                           (group.lotNumarasi || '') === (parsed.lotNumarasi || '');
+  // Build a label for a filter key (turn 'kit' -> 'Kit' etc.)
+  const filterLabel = useCallback(
+    (key: string) => (filterMode === 'urunGrubu' ? formatUrunGrubu(key) : key),
+    [filterMode],
+  );
 
-        if (matchesGroup) {
-            if (isSerialTracked) {
-                if (group.serials.includes(serial)) {
-                    const alreadyScanned = (scanned[group.id] || new Set()).has(serial);
-                    if (alreadyScanned) {
-                        toast({ title: 'Tekrar', description: `Seri no ${serial} zaten okutuldu.` });
-                        playFeedback(true);
-                        return;
-                    }
-                    setScanned(prev => {
-                        const setFor = new Set(prev[group.id] || []);
-                        setFor.add(serial);
-                        return { ...prev, [group.id]: setFor };
-                    });
-                    toast({ title: 'Doğrulandı', description: `${group.stokAdi} - ${serial}` });
-                    playFeedback();
-                    foundAndUpdated = true;
-                    break;
-                }
-            } else { // Not serial tracked (lot/qty tracking)
-                // CRITICAL FIX: Allow counting beyond expected quantity for stock increases
-                // Get current count from state (use functional update pattern for accuracy)
-                const currentCount = countedQuantities[group.id] || 0;
+  // Group progress per filter value
+  const groupProgress = useMemo<GroupProgress[]>(() => {
+    return filterValues.map(key => {
+      const products = scopeProducts.filter(p =>
+        filterMode === 'marka' ? p.marka === key : p.urunGrubu === key,
+      );
+      const completed = products.filter(p => productEntries[p.stokKodu]?.counted).length;
+      let status: GroupProgress['status'] = 'idle';
+      if (completed > 0 && completed < products.length) status = 'in_progress';
+      if (completed === products.length && products.length > 0) status = 'completed';
+      return { key, total: products.length, completed, status };
+    });
+  }, [filterValues, scopeProducts, productEntries, filterMode]);
 
-                setCountedQuantities(prev => ({
-                    ...prev,
-                    [group.id]: (prev[group.id] || 0) + 1
-                }));
-
-                const newCount = currentCount + 1;
-                if (newCount <= group.expectedQty) {
-                    toast({ title: 'Adet Artırıldı', description: `${group.stokAdi} (${group.lotNumarasi}): ${newCount}/${group.expectedQty}` });
-                } else {
-                    // Stock increase scenario - scanned more than expected
-                    toast({ title: 'Stok Artışı', description: `${group.stokAdi} (${group.lotNumarasi}): ${newCount}/${group.expectedQty} - Fazla ürün tespit edildi` });
-                }
-                playFeedback();
-                foundAndUpdated = true;
-                break;
-            }
-        }
-    }
-    
-    // CRITICAL FIX: Handle newly transferred items (both serial and lot/qty tracked)
-    if (!foundAndUpdated && res?.stagedNew) {
-        const groupKey = `${parsed.stokKodu}-${parsed.lotNumarasi || ''}-${parsed.miadFormatted || ''}`;
-
-        if (serial) {
-            // Serial tracked - add to scanned serials
-            setScanned(prev => {
-                const setFor = new Set(prev[groupKey] || []);
-                setFor.add(serial);
-                return { ...prev, [groupKey]: setFor };
-            });
-            toast({ title: 'Yeni Ürün Doğrulandı', description: `${parsed.stokKodu} - ${serial}` });
-        } else {
-            // Lot/qty tracked - increment count
-            setCountedQuantities(prev => ({
-                ...prev,
-                [groupKey]: (prev[groupKey] || 0) + 1
-            }));
-            toast({ title: 'Yeni Ürün Sayıldı', description: `${parsed.stokKodu} ${parsed.lotNumarasi ? `(Lot: ${parsed.lotNumarasi})` : ''}` });
-        }
-        playFeedback();
-        foundAndUpdated = true;
-    }
-
-    if (!foundAndUpdated) {
-        toast({ title: 'Bulunamadı', description: `Okutulan ürün listede bulunamadı veya eşleşmedi.` });
-        playFeedback(true);
-    }
-  }, [allItemsForCount, onScanAndStageIfMissing, scanned, toast]);
-
+  // Auto-select first group on load / filter change
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Enter') {
-        handleScan(buffer.current);
-        buffer.current = '';
-        if (timeout.current) clearTimeout(timeout.current);
-      } else if (e.key.length === 1 && !['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) {
-        buffer.current += e.key;
-        if (timeout.current) clearTimeout(timeout.current);
-        timeout.current = setTimeout(() => { buffer.current = ''; }, 100);
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [handleScan]);
-  
-  const { totalItems, verifiedItems, progress } = useMemo(() => {
-    let total = 0;
-    let verified = 0;
-    allItemsForCount.forEach(group => {
-      total += group.expectedQty;
-      const isSerialTracked = group.trackingMode === 'serial';
-      verified += isSerialTracked ? (scanned[group.id] || new Set()).size : group.countedQty;
+    if (!activeGroup && filterValues.length > 0) {
+      setActiveGroup(filterValues[0]);
+    } else if (activeGroup && !filterValues.includes(activeGroup)) {
+      setActiveGroup(filterValues[0] ?? null);
+    }
+  }, [filterValues, activeGroup]);
+
+  // Reset active group when filter mode changes
+  useEffect(() => {
+    setActiveGroup(filterValues[0] ?? null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterMode]);
+
+  // Products in the active group, with stockless ones at the bottom
+  const activeProducts = useMemo<ProductCode[]>(() => {
+    if (!activeGroup) return [];
+    const list = scopeProducts.filter(p =>
+      filterMode === 'marka' ? p.marka === activeGroup : p.urunGrubu === activeGroup,
+    );
+
+    let filtered = list;
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      filtered = list.filter(p =>
+        p.stokAdi.toLowerCase().includes(q) ||
+        p.stokKodu.toLowerCase().includes(q),
+      );
+    }
+    if (showOnlyUncounted) {
+      filtered = filtered.filter(p => !productEntries[p.stokKodu]?.counted);
+    }
+
+    return filtered.sort((a, b) => {
+      const aOos = (productEntries[a.stokKodu]?.existingTotal ?? 0) === 0;
+      const bOos = (productEntries[b.stokKodu]?.existingTotal ?? 0) === 0;
+      if (aOos !== bOos) return aOos ? 1 : -1; // out-of-stock at the bottom
+      const aDone = productEntries[a.stokKodu]?.counted ? 1 : 0;
+      const bDone = productEntries[b.stokKodu]?.counted ? 1 : 0;
+      if (aDone !== bDone) return aDone - bDone; // uncounted first
+      return a.stokAdi.localeCompare(b.stokAdi, 'tr');
     });
-    const progressPercentage = total > 0 ? (verified / total) * 100 : 0;
-    return {
-      totalItems: total,
-      verifiedItems: verified,
-      progress: progressPercentage
-    };
-  }, [allItemsForCount, scanned]);
+  }, [activeGroup, scopeProducts, filterMode, searchQuery, showOnlyUncounted, productEntries]);
+
+  // Overall progress
+  const { totalProducts, totalCounted, overallPct } = useMemo(() => {
+    const total = scopeProducts.length;
+    const done = scopeProducts.filter(p => productEntries[p.stokKodu]?.counted).length;
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+    return { totalProducts: total, totalCounted: done, overallPct: pct };
+  }, [scopeProducts, productEntries]);
+
+  // ------------------------------------------------------------------
+  // Handlers
+  // ------------------------------------------------------------------
+  const setEntry = useCallback((stokKodu: string, patch: Partial<{ enteredQty: string; counted: boolean }>) => {
+    setCountData(prev => {
+      const cur = prev[stokKodu] ?? { enteredQty: '', counted: false };
+      return { ...prev, [stokKodu]: { ...cur, ...patch } };
+    });
+  }, []);
+
+  const handleEnteredChange = useCallback((stokKodu: string, val: string) => {
+    setEntry(stokKodu, { enteredQty: val, counted: true });
+  }, [setEntry]);
+
+  const handleConfirmExisting = useCallback((stokKodu: string) => {
+    const existing = productEntries[stokKodu]?.existingTotal ?? 0;
+    setEntry(stokKodu, { enteredQty: String(existing), counted: true });
+  }, [productEntries, setEntry]);
+
+  const handleToggleCounted = useCallback((stokKodu: string) => {
+    setCountData(prev => {
+      const cur = prev[stokKodu] ?? { enteredQty: '', counted: false };
+      const nextCounted = !cur.counted;
+      // If user is confirming an out-of-stock product, default the entered qty to 0
+      const existing = productEntries[stokKodu]?.existingTotal ?? 0;
+      const nextEntered =
+        nextCounted && cur.enteredQty.trim() === ''
+          ? String(existing)
+          : cur.enteredQty;
+      return { ...prev, [stokKodu]: { enteredQty: nextEntered, counted: nextCounted } };
+    });
+  }, [productEntries]);
+
+  const handleCompleteGroup = useCallback(() => {
+    if (!activeGroup) return;
+    setCountData(prev => {
+      const next = { ...prev };
+      activeProducts.forEach(p => {
+        const existing = productEntries[p.stokKodu]?.existingTotal ?? 0;
+        const cur = next[p.stokKodu] ?? { enteredQty: '', counted: false };
+        next[p.stokKodu] = {
+          enteredQty: cur.enteredQty.trim() === '' ? String(existing) : cur.enteredQty,
+          counted: true,
+        };
+      });
+      return next;
+    });
+  }, [activeGroup, activeProducts, productEntries]);
+
+  const handleNextGroup = useCallback(() => {
+    const next = groupProgress.find(g => g.status !== 'completed' && g.key !== activeGroup);
+    if (next) setActiveGroup(next.key);
+  }, [groupProgress, activeGroup]);
+
+  // ------------------------------------------------------------------
+  // Save: update lab stock based on counts + persist count session
+  // ------------------------------------------------------------------
+  const handleSave = useCallback(async () => {
+    if (!labId || !currentUserProfile || isSaving) return;
+
+    const allCountedEntries = Object.values(productEntries).filter(e => e.counted);
+    if (allCountedEntries.length === 0) {
+      toast({ title: 'Sayım yok', description: 'Kaydedilecek onaylı ürün bulunamadı.' });
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const batch = writeBatch(db);
+      let itemsRemoved = 0;
+      let itemsAdded = 0;
+
+      for (const entry of allCountedEntries) {
+        const enteredNum = entry.enteredQty.trim() === '' ? null : parseInt(entry.enteredQty, 10);
+        const counted = enteredNum != null && !isNaN(enteredNum) ? enteredNum : entry.existingTotal;
+        const diff = counted - entry.existingTotal;
+
+        if (diff === 0) continue;
+
+        if (diff < 0) {
+          // Stock decreased: remove |diff| items, write consumption records
+          const toRemove = Math.abs(diff);
+          // Flatten lots into individual stock items, prefer earliest expiry first
+          const flat: { id: string; lot: string; miad: string }[] = [];
+          entry.existingLots.forEach(lot => {
+            lot.itemIds.forEach(id => flat.push({ id, lot: lot.lot, miad: lot.miad }));
+          });
+          flat.sort((a, b) => getMiadInfo(a.miad).days - getMiadInfo(b.miad).days);
+
+          const slice = flat.slice(0, toRemove);
+          for (const it of slice) {
+            const stockRef = doc(db, 'depoStok', it.id);
+            batch.delete(stockRef);
+            itemsRemoved++;
+
+            const consRef = doc(collection(db, 'tuketimKayitlari'));
+            const consumption: Omit<ConsumptionRecord, 'id'> = {
+              stokKodu: entry.stokKodu,
+              stokAdi: entry.stokAdi,
+              lotNumarasi: it.lot || '',
+              miad: it.miad || '',
+              seriNumarasi: '',
+              laboratoryId: labId,
+              laboratoryName: labName,
+              consumptionTimestamp: new Date(),
+              consumptionType: 'sayimdan_dusum',
+              userId: currentUserProfile.uid,
+              userName: currentUserProfile.name || currentUserProfile.email || 'System',
+            };
+            batch.set(consRef, consumption);
+          }
+        } else {
+          // Stock increased: add |diff| items
+          const template = entry.existingLots[0] ?? { lot: '', miad: '' };
+          for (let i = 0; i < diff; i++) {
+            const newRef = doc(collection(db, 'depoStok'));
+            batch.set(newRef, withCompanyScope({
+              stokKodu: entry.stokKodu,
+              stokAdi: entry.stokAdi,
+              lotNumarasi: template.lot || '',
+              miad: template.miad || '',
+              seriNumarasi: '',
+              isShipped: true,
+              hedefKurumId: labId,
+              hedefKurum: labName,
+              eklenmeTarihi: Timestamp.now(),
+              ekleyenKullanici: currentUserProfile.name || currentUserProfile.email || 'System',
+              eklemeSebebi: 'sayim_fazlasi',
+            }, currentCompanyId));
+            itemsAdded++;
+          }
+        }
+      }
+
+      // Persist a count history record
+      await saveLabCountSession({
+        laboratoryId: labId,
+        laboratoryName: labName,
+        user: { id: currentUserProfile.uid || '', name: currentUserProfile.name || currentUserProfile.email || 'Bilinmeyen' },
+        items: allCountedEntries.map(entry => {
+          const enteredNum = entry.enteredQty.trim() === '' ? null : parseInt(entry.enteredQty, 10);
+          const counted = enteredNum != null && !isNaN(enteredNum) ? enteredNum : entry.existingTotal;
+          return {
+            stokKodu: entry.stokKodu,
+            stokAdi: entry.stokAdi,
+            lotNumarasi: entry.existingLots[0]?.lot ?? '',
+            miad: entry.existingLots[0]?.miad ?? '',
+            marka: entry.marka || null,
+            expected: entry.existingTotal,
+            counted,
+            verifiedSerials: [],
+            unscannedSerials: [],
+          };
+        }),
+      });
+
+      await batch.commit();
+
+      const messages: string[] = [];
+      if (itemsRemoved > 0) messages.push(`${itemsRemoved} ürün düşüldü`);
+      if (itemsAdded > 0) messages.push(`${itemsAdded} ürün eklendi`);
+      const result = messages.length > 0 ? messages.join(', ') : 'Stok değişikliği yok';
+
+      toast({ title: 'Sayım Kaydedildi', description: `${labName} — ${result}.` });
+      router.push(`/laboratuvar/sayim/${labId}/history`);
+    } catch (err) {
+      console.error('Save lab count error:', err);
+      toast({ title: 'Hata', description: 'Sayım kaydedilirken hata oluştu.', variant: 'destructive' });
+    } finally {
+      setIsSaving(false);
+    }
+  }, [labId, labName, currentUserProfile, currentCompanyId, productEntries, isSaving, router, toast]);
+
+  // ------------------------------------------------------------------
+  // Render
+  // ------------------------------------------------------------------
+  if (isLoading) {
+    return (
+      <div className="flex h-full w-full items-center justify-center min-h-screen">
+        <Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)]" />
+      </div>
+    );
+  }
+
+  const activeGroupProgress = groupProgress.find(g => g.key === activeGroup);
+  const activePct =
+    activeGroupProgress && activeGroupProgress.total > 0
+      ? Math.round((activeGroupProgress.completed / activeGroupProgress.total) * 100)
+      : 0;
 
   return (
-    <div className="p-4 space-y-4">
-      <BackButton fallback="/laboratuvar-yonetimi" />
-      <Card>
-        <CardHeader>
-            <div className="flex justify-between items-start">
-              <div>
-                <CardTitle>Sayım Oturumu: {labName}</CardTitle>
-                <CardDescription>
-                  Okutulan yeşil, okutulmayan kırmızı. Depodan eklenenler mavi, havuzdan eklenenler mor renkte gösterilir.
-                </CardDescription>
+    <div className="cihaz-shell min-h-screen flex flex-col">
+      {/* TOP STATUS BAR */}
+      <div className="sticky top-0 z-[var(--z-sticky)] bg-[var(--dashboard-bg)]/95 backdrop-blur-md border-b border-[var(--dashboard-stroke)]">
+        <div className="px-4 sm:px-6 py-3 flex items-center gap-4 flex-wrap">
+          <button
+            onClick={() => router.push('/laboratuvar-yonetimi')}
+            className="shrink-0 flex items-center gap-2 text-sm text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-colors"
+          >
+            <ChevronLeft className="w-4 h-4" />
+            <span className="hidden sm:inline">Geri</span>
+          </button>
+
+          <div className="flex items-center gap-2">
+            <TestTube className="w-4 h-4 text-[var(--dashboard-accent)]" />
+            <span className="text-sm font-semibold text-[var(--dashboard-text)]">{labName}</span>
+          </div>
+
+          {/* Filter mode toggle */}
+          <div className="flex items-center gap-1 ml-2 cihaz-pressed rounded-xl p-1">
+            <button
+              onClick={() => setFilterMode('marka')}
+              className={cn(
+                'px-3 py-1 rounded-lg text-xs font-semibold transition-colors',
+                filterMode === 'marka'
+                  ? 'bg-[var(--dashboard-accent)] text-white shadow-md'
+                  : 'text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]',
+              )}
+            >
+              Marka
+            </button>
+            <button
+              onClick={() => setFilterMode('urunGrubu')}
+              className={cn(
+                'px-3 py-1 rounded-lg text-xs font-semibold transition-colors',
+                filterMode === 'urunGrubu'
+                  ? 'bg-[var(--dashboard-accent)] text-white shadow-md'
+                  : 'text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]',
+              )}
+            >
+              Ürün Grubu
+            </button>
+          </div>
+
+          {/* Progress summary */}
+          <div className="flex items-center gap-4 ml-auto text-xs text-[var(--dashboard-muted)]">
+            <span>{totalCounted} / {totalProducts} ürün</span>
+            <div className="hidden sm:flex items-center gap-2">
+              <div className="w-24 h-2 rounded-full bg-[var(--dashboard-surface-2)] overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-[var(--dashboard-accent)] transition-all duration-500"
+                  style={{ width: `${overallPct}%` }}
+                />
               </div>
-              <Button onClick={() => setShowOnlyUnverified(v => !v)} variant="outline">
-                <ListFilter className="mr-2 h-4 w-4"/>
-                {showOnlyUnverified ? 'Tümünü Göster' : 'Doğrulanmayanları Göster'}
-              </Button>
+              <span className="font-semibold text-[var(--dashboard-text)]">%{overallPct}</span>
             </div>
-            <div className="pt-4 space-y-2">
-                <Progress value={progress} className="h-3" indicatorClassName={progress === 100 ? 'bg-green-500' : 'bg-primary'} />
-                <div className="flex justify-between text-sm font-medium">
-                    <span className="text-muted-foreground">Toplam Ürün: {totalItems}</span>
-                    <span className="text-primary">Doğrulanan: {verifiedItems}</span>
-                </div>
-            </div>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="flex justify-center py-8"><Loader2 className="h-8 w-8 animate-spin" /></div>
-          ) : (
-            <ScrollArea className="h-[60vh] border rounded p-2">
-              <Accordion type="multiple" defaultValue={displayedItems.map(i => i.id)}>
-                {displayedItems.map(group => {
-                  const isSerialTracked = group.trackingMode === 'serial';
-                  const count = isSerialTracked ? (scanned[group.id] || new Set()).size : group.countedQty;
-                  const complete = count === group.expectedQty;
+          </div>
+        </div>
+      </div>
 
-                  const triggerContent = (
-                    <div className="flex-1 text-left flex justify-between items-center w-full">
-                        <div className="flex-1 text-left">{group.stokAdi} ({group.stokKodu})</div>
-                        <div className="flex-1 text-left">Lot: {group.lotNumarasi}</div>
-                        <div className="flex-1 text-left">Miad: {group.miad}</div>
-                        <div className="font-bold">{count}/{group.expectedQty}</div>
-                    </div>
-                  );
-                  
-                  if (!isSerialTracked) {
-                    return (
-                        <div key={group.id} className={cn('p-2 rounded-lg flex items-center', complete ? 'bg-green-100 dark:bg-green-900/30' : 'bg-background', groupRowClass(group.stokKodu, group.lotNumarasi, group.miad))}>
-                            {triggerContent}
-                        </div>
-                    );
-                  }
-
-                  return (
-                    <AccordionItem
-                      key={group.id}
-                      value={group.id}
-                      className={cn(groupRowClass(group.stokKodu, group.lotNumarasi, group.miad))}
-                    >
-                      <AccordionTrigger className={cn('p-2 rounded-lg', complete && 'bg-green-100 dark:bg-green-900/30')}>
-                        {triggerContent}
-                      </AccordionTrigger>
-                      <AccordionContent>
-                        <ul className="grid grid-cols-2 md:grid-cols-3 gap-2 p-2 font-mono text-xs">
-                          {group.serials.map(s => (
-                            <li key={s}
-                              className={cn(
-                                'p-1 rounded flex items-center gap-2',
-                                (scanned[group.id] || new Set()).has(s) ? 'bg-green-200' : 'bg-red-200',
-                                isPoolTransferSerial(s) && 'bg-purple-200 dark:bg-purple-700',
-                                isNewSerial(s) && !isPoolTransferSerial(s) && 'bg-blue-200'
-                              )}
-                            >
-                              {(scanned[group.id] || new Set()).has(s) || isNewSerial(s) ? <Check className="h-4 w-4" /> : <X className="h-4 w-4" />}
-                              <span className={cn(serialTextClass(s))}>{s || '(no-serial)'}</span>
-                            </li>
-                          ))}
-                        </ul>
-                      </AccordionContent>
-                    </AccordionItem>
-                  );
-                })}
-              </Accordion>
-            </ScrollArea>
+      {/* MAIN CONTENT */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* LEFT SIDEBAR */}
+        <aside
+          className={cn(
+            'shrink-0 border-r border-[var(--dashboard-stroke)] bg-[var(--dashboard-bg)] transition-all duration-300 flex flex-col',
+            sidebarOpen ? 'w-[280px] sm:w-[320px]' : 'w-0 overflow-hidden',
           )}
-        </CardContent>
-        <CardFooter className="justify-end">
-          <Button onClick={saveSession} disabled={isLoading || allItemsForCount.length === 0}>
-            {isLoading && <Loader2 className="animate-spin mr-2" />} Sayımı Tamamla ve Kaydet
-          </Button>
-        </CardFooter>
-      </Card>
+        >
+          <div className="px-4 py-3 border-b border-[var(--dashboard-stroke)]">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider">
+                {filterMode === 'marka' ? 'Markalar' : 'Ürün Grupları'}
+              </span>
+              <span className="text-xs text-[var(--dashboard-muted)]">
+                {groupProgress.filter(g => g.status === 'completed').length} / {groupProgress.length}
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="cihaz-pressed px-2 py-1.5 text-center rounded-lg">
+                <div className="text-sm font-bold text-[var(--dashboard-text)]">{groupProgress.length}</div>
+                <div className="text-[10px] text-[var(--dashboard-muted)]">Toplam</div>
+              </div>
+              <div className="cihaz-pressed px-2 py-1.5 text-center rounded-lg">
+                <div className="text-sm font-bold text-emerald-500">
+                  {groupProgress.filter(g => g.status === 'completed').length}
+                </div>
+                <div className="text-[10px] text-[var(--dashboard-muted)]">Tamam</div>
+              </div>
+              <div className="cihaz-pressed px-2 py-1.5 text-center rounded-lg">
+                <div className="text-sm font-bold text-amber-500">
+                  {groupProgress.length - groupProgress.filter(g => g.status === 'completed').length}
+                </div>
+                <div className="text-[10px] text-[var(--dashboard-muted)]">Bekleyen</div>
+              </div>
+            </div>
+          </div>
+
+          <ScrollArea className="flex-1">
+            <div className="p-2 space-y-1">
+              {groupProgress.length === 0 ? (
+                <div className="text-center py-6 text-xs text-[var(--dashboard-muted)]">
+                  Bu laboratuvarda tanımlı ürün yok.
+                </div>
+              ) : (
+                groupProgress.map(g => (
+                  <SidebarChecklistItem
+                    key={g.key}
+                    label={filterLabel(g.key)}
+                    group={g}
+                    isActive={g.key === activeGroup}
+                    onClick={() => setActiveGroup(g.key)}
+                  />
+                ))
+              )}
+            </div>
+          </ScrollArea>
+        </aside>
+
+        <button
+          onClick={() => setSidebarOpen(!sidebarOpen)}
+          className="sm:hidden shrink-0 w-6 flex items-center justify-center border-r border-[var(--dashboard-stroke)] bg-[var(--dashboard-bg)] text-[var(--dashboard-muted)]"
+        >
+          {sidebarOpen ? <ChevronLeft className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+        </button>
+
+        {/* RIGHT PANEL */}
+        <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+          {activeGroup ? (
+            <>
+              {/* Group header */}
+              <div className="px-4 sm:px-6 py-4 border-b border-[var(--dashboard-stroke)] bg-[var(--dashboard-bg)]">
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div>
+                    <h2 className="text-lg font-bold text-[var(--dashboard-text)]">{filterLabel(activeGroup)}</h2>
+                    <p className="text-xs text-[var(--dashboard-muted)] mt-0.5">
+                      {activeGroupProgress?.total ?? 0} ürün
+                      {' · '}
+                      <span className="text-emerald-500">{activeGroupProgress?.completed ?? 0} tamamlandı</span>
+                      {' · '}
+                      <span className="text-amber-500">
+                        {(activeGroupProgress?.total ?? 0) - (activeGroupProgress?.completed ?? 0)} bekliyor
+                      </span>
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-3">
+                    <div className="w-32 h-2 rounded-full bg-[var(--dashboard-surface-2)] overflow-hidden">
+                      <div
+                        className={cn(
+                          'h-full rounded-full transition-all duration-500',
+                          activePct === 100 ? 'bg-emerald-500' : 'bg-[var(--dashboard-accent)]',
+                        )}
+                        style={{ width: `${activePct}%` }}
+                      />
+                    </div>
+                    <span className="text-sm font-bold text-[var(--dashboard-text)]">%{activePct}</span>
+                  </div>
+                </div>
+
+                {/* Search + filters */}
+                <div className="flex items-center gap-2 mt-3 flex-wrap">
+                  <div className="relative flex-1 min-w-[120px] max-w-[280px]">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--dashboard-muted)]" />
+                    <Input
+                      type="text"
+                      placeholder="Ürün ara..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="pl-9 h-9 text-sm"
+                    />
+                    {searchQuery && (
+                      <button
+                        onClick={() => setSearchQuery('')}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  <Button
+                    size="sm"
+                    variant={showOnlyUncounted ? 'default' : 'outline'}
+                    onClick={() => setShowOnlyUncounted(v => !v)}
+                    className="h-9 text-xs"
+                  >
+                    Sadece Sayılmayanlar
+                  </Button>
+
+                  <div className="ml-auto flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleCompleteGroup}
+                      className="h-9 text-xs"
+                    >
+                      <Check className="w-3.5 h-3.5 mr-1" />
+                      Grubu Tamamla
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Product list */}
+              <ScrollArea className="flex-1">
+                <div className="cihaz-card-strong m-4 sm:m-6 overflow-hidden">
+                  {activeProducts.length > 0 ? (
+                    activeProducts.map(product => {
+                      const entry = productEntries[product.stokKodu];
+                      if (!entry) return null;
+                      const isOutOfStock = entry.existingTotal === 0;
+                      return (
+                        <ProductRow
+                          key={product.stokKodu}
+                          product={product}
+                          entry={entry}
+                          isOutOfStock={isOutOfStock}
+                          onEnteredChange={(val) => handleEnteredChange(product.stokKodu, val)}
+                          onConfirmExisting={() => handleConfirmExisting(product.stokKodu)}
+                          onToggleCounted={() => handleToggleCounted(product.stokKodu)}
+                        />
+                      );
+                    })
+                  ) : (
+                    <div className="text-center py-12 text-sm text-[var(--dashboard-muted)]">
+                      {searchQuery ? 'Aramayla eşleşen ürün bulunamadı.' : 'Bu grupta ürün bulunamadı.'}
+                    </div>
+                  )}
+                </div>
+              </ScrollArea>
+
+              {/* Bottom action bar */}
+              <div className="sticky bottom-0 z-[var(--z-sticky)] border-t border-[var(--dashboard-stroke)] bg-[var(--dashboard-bg)]/95 backdrop-blur-md px-4 sm:px-6 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-xs text-[var(--dashboard-muted)]">
+                    <span className="font-medium text-[var(--dashboard-text)]">
+                      {activeGroupProgress?.completed ?? 0}
+                    </span>{' '}
+                    / {activeGroupProgress?.total ?? 0} ürün sayıldı
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      onClick={handleSave}
+                      disabled={isSaving || totalCounted === 0}
+                      className="h-9 text-xs"
+                    >
+                      {isSaving ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Save className="w-3.5 h-3.5 mr-1" />}
+                      Sayımı Kaydet
+                    </Button>
+
+                    {activePct === 100 && groupProgress.some(g => g.status !== 'completed') && (
+                      <Button size="sm" variant="outline" onClick={handleNextGroup} className="h-9 text-xs">
+                        Sonraki
+                        <ArrowRight className="w-3.5 h-3.5 ml-1" />
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="flex-1 flex items-center justify-center text-sm text-[var(--dashboard-muted)]">
+              {filterMode === 'marka' ? 'Sol panelden bir marka seçin' : 'Sol panelden bir ürün grubu seçin'}
+            </div>
+          )}
+        </main>
+      </div>
     </div>
   );
 }
