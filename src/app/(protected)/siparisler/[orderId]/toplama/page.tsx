@@ -31,6 +31,7 @@ import { collection, doc, getDoc, writeBatch, serverTimestamp, query, where, get
 import { useToast } from '@/hooks/use-toast';
 import useHidScanner from '@/hooks/useHidScanner';
 import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope, matchesCompanyScope } from '@/lib/company-scope';
 import { useLoading } from '@/contexts/loading-context';
 import { parse as parseDate, compareAsc } from 'date-fns';
 import { useBarcodeParser } from '@/hooks/useBarcodeParser';
@@ -118,7 +119,7 @@ export default function ToplamaPage() {
   const orderId = (params?.orderId as string) ?? '';
   const router = useRouter();
   const { toast } = useToast();
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { parseAnyBarcode, resolveProductFromParsed, parseAndResolveBarcode, formats: barcodeFormats } = useBarcodeParser();
   const { suppressGlobalLoading } = useLoading();
 
@@ -197,7 +198,11 @@ export default function ToplamaPage() {
         ]);
 
         const productsData = productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode));
-        const depoStokData = depoStokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+        const depoStokData = filterByCompanyScope(
+          depoStokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
+          currentCompanyId,
+          isSuperAdmin,
+        );
         const deviceGroupsData = deviceGroupsSnap.docs.map(d => ({id: d.id, ...d.data()} as DeviceGroup));
         const hospitalsData = hospitalsSnap.docs.map(d => ({id: d.id, ...d.data()} as Hospital));
 
@@ -370,7 +375,7 @@ export default function ToplamaPage() {
     };
 
     fetchData();
-  }, [orderId, router, toast]);
+  }, [orderId, router, toast, currentCompanyId, isSuperAdmin]);
 
   const addScannedSerial = useCallback((orderItemStokKodu: string, serialOrIdentifier: string) => {
     setScannedSerials(prev => {
@@ -846,6 +851,10 @@ export default function ToplamaPage() {
           return;
         }
         const verifyData = verifySnap.data();
+        if (!matchesCompanyScope(verifyData as any, currentCompanyId, isSuperAdmin)) {
+          verificationErrors.push(`Kapsam dışı stok kaydı: ${item.stokKodu} (${item.seriNumarasi || item.lotNumarasi || item.id})`);
+          return;
+        }
         if (!verifyData.isShipped) {
           verificationErrors.push(`Kaynak depodan düşülmedi: ${item.stokAdi} (${item.seriNumarasi || item.lotNumarasi || ''})`);
         }
@@ -858,7 +867,9 @@ export default function ToplamaPage() {
       // Step 1b: Verify target stock/consumption reflection
       const transferDocItemsSnap = await getDocs(query(collection(db, 'depoStok'), where('transferId', '==', transferRef.id)));
       if (!trackingDisabled) {
-        const matchedTargetStockCount = transferDocItemsSnap.docs.filter(d => (d.data().hedefKurumId || null) === effectiveLabId).length;
+        const matchedTargetStockCount = transferDocItemsSnap.docs
+          .filter(d => matchesCompanyScope(d.data() as any, currentCompanyId, isSuperAdmin))
+          .filter(d => (d.data().hedefKurumId || null) === effectiveLabId).length;
         if (matchedTargetStockCount !== itemsToShip.length) {
           verificationErrors.push(`Hedef laboratuvar stoğuna yansıyan ürün sayısı uyuşmuyor: beklenen ${itemsToShip.length}, bulunan ${matchedTargetStockCount}`);
         }

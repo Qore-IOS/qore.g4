@@ -49,6 +49,7 @@ type ActionItem = {
   removedHucreNumarasi?: string;
   channelSelections?: ('CH1' | 'CH2')[];
   removedPartSerialNumber?: string;
+  serialNumber?: string;
 };
 
 type ActionFormRecord = {
@@ -56,6 +57,7 @@ type ActionFormRecord = {
     createdAt: { toDate: () => Date };
     createdByUid: string;
     createdByName: string;
+    formNo?: string;
     actions: ActionItem[];
     islemTuru?: IslemTuru;
     aciklama?: string;
@@ -152,7 +154,9 @@ export async function generateAplikasyonTutanakPDF(
       prefetchPdfAssets(),
       resolveLabDisplayName(hospitalId, hospital?.name || ''),
       QRCode.toDataURL(recordUrl, { errorCorrectionLevel: 'M', margin: 0, scale: 4 }),
-      computeFormNo('aplikasyonActionForms', 'createdByUid', actionRecord.createdByUid, actionRecord.id, actionRecord.createdByName, 'A'),
+      actionRecord.formNo
+        ? Promise.resolve(actionRecord.formNo)
+        : computeFormNo('aplikasyonActionForms', 'createdByUid', actionRecord.createdByUid, actionRecord.id, actionRecord.createdByName, 'A'),
     ]);
 
     const pdfDoc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -363,15 +367,18 @@ export async function generateAplikasyonTutanakPDF(
       currentY += 18;
 
       autoTable(pdfDoc, {
-        head: [[txt('Parça', useTurkish), 'Kod', 'Adet', txt('Birim', useTurkish)]],
+        head: [[txt('Parça', useTurkish), 'Kod', txt('Seri No', useTurkish), 'Adet', txt('Birim', useTurkish)]],
         body: parts.map(act => {
           let partName = act.stokAdi || act.action;
           if (act.isManualEntry && act.stokKodu && act.stokAdi) {
             partName = `${act.stokKodu} - ${act.stokAdi}`;
           }
+          const serial = (act.serialNumber || '').trim();
+          const displayPartName = serial ? `${partName} (SN: ${serial})` : partName;
           return [
-            txt(partName, useTurkish),
+            txt(displayPartName, useTurkish),
             txt(act.stokKodu || '-', useTurkish),
+            txt(serial || '-', useTurkish),
             String(act.quantity),
             txt(act.anaBirim ? act.anaBirim.toLocaleLowerCase('tr-TR') : 'adet', useTurkish)
           ];

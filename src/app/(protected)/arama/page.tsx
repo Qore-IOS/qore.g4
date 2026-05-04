@@ -16,7 +16,8 @@ import { exportDataToExcel } from '@/lib/utils';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
-import { searchProductLedger, type LedgerRow, type StockSummary, type SearchResult } from '@/actions/searchActions';
+import { searchProductLedger, type LedgerRow, type StockSummary, type SearchResult, type ProductMatch } from '@/actions/searchActions';
+import { useAuth } from '@/contexts/auth-context';
 
 // -----------------------------------------------------
 // Types & Helper Components
@@ -46,6 +47,7 @@ const SortableHeader: React.FC<{
 
 export default function AramaPanel() {
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   // Search counter to discard stale results from previous searches
   const searchCounterRef = useRef(0);
@@ -59,6 +61,11 @@ export default function AramaPanel() {
   // Results
   const [results, setResults] = useState<LedgerRow[]>([]);
   const [stockSummary, setStockSummary] = useState<StockSummary[]>([]);
+
+  // Product disambiguation: when a name search matches multiple products,
+  // we render a picker first and only load data for the selected product.
+  const [productMatches, setProductMatches] = useState<ProductMatch[]>([]);
+  const [selectedStokKodu, setSelectedStokKodu] = useState<string | null>(null);
 
   // Sort & Filter State
   const [sortKey, setSortKey] = useState<SortKey>('tarih');
@@ -77,16 +84,7 @@ export default function AramaPanel() {
   // ---------------------------------------------------
   // Search Handler - Only fetches data when search is performed
   // ---------------------------------------------------
-  const handleSearch = useCallback(async (q: string) => {
-    if (!q || q.trim().length < 2) {
-      toast({
-        title: 'Arama Çok Kısa',
-        description: 'En az 2 karakter girmeniz gerekiyor.',
-        variant: 'default'
-      });
-      return;
-    }
-
+  const runSearch = useCallback(async (q: string, pickedStokKodu: string | null) => {
     // Increment counter to track this search - discard results from stale searches
     const currentSearch = ++searchCounterRef.current;
 
@@ -96,10 +94,25 @@ export default function AramaPanel() {
     setPage(1);
 
     try {
-      const result: SearchResult = await searchProductLedger(q);
+      const result: SearchResult = await searchProductLedger(q, currentCompanyId, isSuperAdmin, pickedStokKodu);
 
       // Discard result if a newer search was started while this one was running
       if (currentSearch !== searchCounterRef.current) return;
+
+      // If the server says we need product disambiguation, surface the picker
+      // and skip ledger rendering until the user makes a choice.
+      if (result.needsProductSelection && result.productMatches && result.productMatches.length > 0) {
+        setProductMatches(result.productMatches);
+        setResults([]);
+        setStockSummary([]);
+        setSearchType(result.searchType);
+        setSelectedStokKodu(null);
+        toast({
+          title: 'Ürün Seçin',
+          description: `${result.productMatches.length} eşleşen ürün bulundu. Listeden birini seçin.`,
+        });
+        return;
+      }
 
       // Server action returns Date objects as ISO strings - convert them back
       const ledgerRows = result.ledgerRows.map(row => ({
@@ -107,6 +120,7 @@ export default function AramaPanel() {
         tarih: row.tarih instanceof Date ? row.tarih : new Date(row.tarih),
       }));
 
+      setProductMatches([]);
       setResults(ledgerRows);
       setStockSummary(result.stockSummary);
       setSearchType(result.searchType);
@@ -141,7 +155,36 @@ export default function AramaPanel() {
         setIsSearching(false);
       }
     }
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
+
+  const handleSearch = useCallback((q: string) => {
+    if (!q || q.trim().length < 2) {
+      toast({
+        title: 'Arama Çok Kısa',
+        description: 'En az 2 karakter girmeniz gerekiyor.',
+        variant: 'default'
+      });
+      return;
+    }
+    // Reset disambiguation state on a fresh search.
+    setSelectedStokKodu(null);
+    setProductMatches([]);
+    runSearch(q, null);
+  }, [runSearch, toast]);
+
+  const handleSelectProduct = useCallback((match: ProductMatch) => {
+    setSelectedStokKodu(match.stokKodu);
+    setProductMatches([]);
+    runSearch(query, match.stokKodu);
+  }, [runSearch, query]);
+
+  const handleClearProductSelection = useCallback(() => {
+    setSelectedStokKodu(null);
+    setResults([]);
+    setStockSummary([]);
+    // Re-run the original query so the picker reappears.
+    if (query) runSearch(query, null);
+  }, [runSearch, query]);
 
   // ---------------------------------------------------
   // Sorting & Filtering
@@ -289,9 +332,55 @@ export default function AramaPanel() {
               </div>
             )}
 
+            {/* Product picker - shown when a name search matches multiple products */}
+            {hasSearched && !isSearching && productMatches.length > 0 && (
+              <div className="py-4">
+                <div className="mb-3 flex items-center gap-2 text-sm font-medium">
+                  <Package size={18} />
+                  Eşleşen Ürünler ({productMatches.length})
+                  <span className="text-muted-foreground font-normal">
+                    — Detayları yüklemek için bir ürün seçin
+                  </span>
+                </div>
+                <ScrollArea className="h-[60vh] border rounded-md">
+                  <div className="divide-y">
+                    {productMatches.map(m => (
+                      <button
+                        key={m.stokKodu}
+                        type="button"
+                        onClick={() => handleSelectProduct(m)}
+                        className="w-full text-left px-4 py-3 hover:bg-muted/60 transition-colors flex items-center gap-3"
+                      >
+                        <Package className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <div className="font-medium truncate">{m.stokAdi}</div>
+                          <div className="font-mono text-xs text-muted-foreground">
+                            {m.stokKodu}{m.anaBirim ? ` • ${m.anaBirim}` : ''}
+                          </div>
+                        </div>
+                        <ArrowRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                      </button>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </div>
+            )}
+
             {/* Results */}
-            {hasSearched && !isSearching && (
+            {hasSearched && !isSearching && productMatches.length === 0 && (
               <>
+                {selectedStokKodu && (
+                  <div className="mb-3 flex items-center justify-between gap-2 text-sm bg-muted/40 rounded-md px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <Package className="h-4 w-4 text-muted-foreground" />
+                      <span className="font-mono text-xs">{selectedStokKodu}</span>
+                      <span className="text-muted-foreground">için detaylar</span>
+                    </div>
+                    <Button size="sm" variant="ghost" onClick={handleClearProductSelection}>
+                      Listeye Dön
+                    </Button>
+                  </div>
+                )}
                 {/* Stock Summary */}
                 {stockSummary.length > 0 && (
                   <div className="mb-4 p-4 rounded-lg border bg-background/50">

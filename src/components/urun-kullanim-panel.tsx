@@ -14,7 +14,7 @@ import type { Laboratory, DepoStokItem, ConsumptionRecord, Device, ProductCode, 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Barcode, AlertTriangle, CheckCircle, PackageMinus, TrendingUp, Info, Clock, Camera, Loader2, Wrench, XCircle, ClipboardPlus, ChevronsUpDown, Check, Pencil, Play, Trash2, LogOut, FlaskConical, CalendarDays } from 'lucide-react';
+import { Barcode, AlertTriangle, CheckCircle, PackageMinus, TrendingUp, Info, Clock, Camera, Loader2, Wrench, XCircle, ClipboardPlus, ChevronsUpDown, Check, Pencil, Play, Trash2, LogOut, FlaskConical, CalendarDays, X } from 'lucide-react';
 import { playFeedback, sanitizeGS1 } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
@@ -22,6 +22,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
 import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, addDoc, updateDoc, orderBy, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 import { compareAsc, parse as parseDate, format as formatDate } from 'date-fns';
 import { formatMiad } from '@/lib/date';
 import { tr } from 'date-fns/locale';
@@ -37,6 +38,8 @@ import { TrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import { emitFefoOverride } from '@/lib/notifications';
 import { Input } from './ui/input';
 import { openDeviceFaultReport } from '@/lib/faults';
+import QRCode from 'qrcode';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { useLightDashboardData } from './dashboard/useDashboardData';
@@ -150,6 +153,140 @@ function DutyScheduleModal({ open, onOpenChange, selectedLabId }: { open: boolea
 }
 
 /**
+ * PeripheralFaultContactModal - Shows responsible personnel contact info for perifer labs
+ * Displays QR codes for phone calls and a 60-second countdown ring
+ */
+function PeripheralFaultContactModal({ open, onOpenChange, users }: { open: boolean; onOpenChange: (open: boolean) => void; users: any[] }) {
+  const [timeLeft, setTimeLeft] = useState(60);
+  const [qrCodes, setQrCodes] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!open) {
+      setTimeLeft(60);
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          onOpenChange(false);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [open, onOpenChange]);
+
+  useEffect(() => {
+    const generateQRs = async () => {
+      const codes: Record<string, string> = {};
+      for (const user of users) {
+        if (user.phoneNumber) {
+          try {
+            const phone = user.phoneNumber.toString().trim();
+            const formattedPhone = phone.startsWith('+') ? phone : '+90' + phone.replace(/^0/, '');
+            const url = await QRCode.toDataURL(`tel:${formattedPhone}`);
+            codes[user.uid] = url;
+          } catch (e) {
+            console.error('QR generate error', e);
+          }
+        }
+      }
+      setQrCodes(codes);
+    };
+    if (open && users.length > 0) generateQRs();
+  }, [open, users]);
+
+  // SVG for circular progress
+  const radius = 140;
+  const circumference = 2 * Math.PI * radius;
+  const strokeDashoffset = circumference - (timeLeft / 60) * circumference;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="p-0 bg-transparent border-none shadow-none max-w-fit flex items-center justify-center overflow-visible">
+        <div className="relative flex items-center justify-center w-[420px] h-[420px]">
+           {/* Ring Progress */}
+           <svg className="absolute w-full h-full -rotate-90 pointer-events-none">
+             <circle
+               cx="210"
+               cy="210"
+               r={radius}
+               stroke="currentColor"
+               strokeWidth="8"
+               fill="transparent"
+               className="text-white/10"
+             />
+             <motion.circle
+               cx="210"
+               cy="210"
+               r={radius}
+               stroke="currentColor"
+               strokeWidth="8"
+               fill="transparent"
+               strokeDasharray={circumference}
+               initial={{ strokeDashoffset: circumference }}
+               animate={{ strokeDashoffset }}
+               transition={{ duration: 0.5, ease: "linear" }}
+               className="text-primary"
+             />
+           </svg>
+
+           {/* Circular Modal Content */}
+           <div className="bg-background rounded-full w-[340px] h-[340px] flex flex-col items-center justify-center p-6 text-center shadow-2xl border-4 border-primary/20 overflow-hidden relative">
+              <button 
+                onClick={() => onOpenChange(false)}
+                className="absolute top-6 right-6 text-muted-foreground hover:text-foreground z-10"
+              >
+                <X className="h-5 w-5" />
+              </button>
+
+              <div className="mt-4 flex-1 flex flex-col items-center justify-center w-full">
+                <h2 className="text-lg font-bold mb-1">Yetkili Personel</h2>
+                <p className="text-[10px] text-muted-foreground mb-4 leading-tight px-4">
+                  bu QR kodu okutarak yetkili personel ile iletişime geçebilirsiniz
+                </p>
+
+                <ScrollArea className="w-full flex-1">
+                  <div className="flex flex-col gap-6 items-center py-2">
+                    {users.map((user) => (
+                      <div key={user.uid} className="flex flex-col items-center">
+                        <p className="text-sm font-semibold">{user.name}</p>
+                        <p className="text-[9px] uppercase font-bold tracking-widest text-primary mb-2">{user.role?.replace('_', ' ')}</p>
+                        {qrCodes[user.uid] ? (
+                          <div className="p-2 bg-white rounded-xl shadow-inner">
+                            <img src={qrCodes[user.uid]} alt="QR" className="w-24 h-24" />
+                          </div>
+                        ) : (
+                          <div className="w-24 h-24 bg-muted/50 rounded-xl flex items-center justify-center">
+                            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {users.length === 0 && (
+                      <p className="text-xs text-muted-foreground italic">Sorumlu personel bulunamadı.</p>
+                    )}
+                  </div>
+                </ScrollArea>
+
+                <div className="mt-2 mb-4">
+                  <div className="text-xl font-mono font-black text-primary bg-primary/10 px-3 py-1 rounded-full">
+                    00:{timeLeft.toString().padStart(2, '0')}
+                  </div>
+                </div>
+              </div>
+           </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
  * DutyInfo Component - Shows on-duty technician and application personnel
  * Reads from dutyShifts Firestore collection for active shifts
  * Clickable to open 30-day duty schedule modal
@@ -247,7 +384,7 @@ const resolveStockRowUnit = (item: DepoStokItem): number => {
 };
 
 export default function UrunKullanimPanel() {
-  const { currentUser, currentUserProfile, logout, wallpaper } = useAuth();
+  const { currentUser, currentUserProfile, logout, wallpaper, currentCompanyId, isSuperAdmin } = useAuth();
   const { theme } = useTheme();
   const { toast } = useToast();
   const router = useRouter();
@@ -320,6 +457,10 @@ export default function UrunKullanimPanel() {
   const [isSavingFault, setIsSavingFault] = useState(false);
   const [faultDefinitions, setFaultDefinitions] = useState<FaultDefinition[]>([]);
 
+  // Fault confirmation states
+  const [confirmFaultOpen, setConfirmFaultOpen] = useState(false);
+  const [selectedFaultToConfirm, setSelectedFaultToConfirm] = useState<FaultDefinition | null>(null);
+
   // Custom "Diğer" fault modal states
   const [customFaultModalOpen, setCustomFaultModalOpen] = useState(false);
   const [customFaultType, setCustomFaultType] = useState<'teknik_servis' | 'aplikasyon'>('teknik_servis');
@@ -336,6 +477,9 @@ export default function UrunKullanimPanel() {
   const [visualSearchQuery, setVisualSearchQuery] = useState('');
   const [selectedLabGroup, setSelectedLabGroup] = useState<string | null>(null);
   const [visualDeductionQuantities, setVisualDeductionQuantities] = useState<Record<string, number>>({});
+
+  const [isPeripheralModalOpen, setIsPeripheralModalOpen] = useState(false);
+  const [peripheralResponsibleUsers, setPeripheralResponsibleUsers] = useState<any[]>([]);
 
   // Trash bin modal states
   const [isTrashBinModalOpen, setIsTrashBinModalOpen] = useState(false);
@@ -779,19 +923,27 @@ export default function UrunKullanimPanel() {
           return null;
         }
 
-        const items = legacySnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+        const items = filterByCompanyScope(
+          legacySnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
+          currentCompanyId,
+          isSuperAdmin,
+        );
         return seri
           ? items.find(i => i.seriNumarasi === seri) || null
           : pickEarliest(items);
       }
 
-      const items = snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+      const items = filterByCompanyScope(
+        snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
+        currentCompanyId,
+        isSuperAdmin,
+      );
       return seri ? items[0] : pickEarliest(items);
     } catch (error) {
       urunKullanimLogger.error('Firestore stok doğrulama hatası', error, { stokKodu, seri, lot });
       return null;
     }
-  }, [poolMemberIds, poolMemberNames]);
+  }, [poolMemberIds, poolMemberNames, currentCompanyId, isSuperAdmin]);
 
   /**
    * Firestore'dan direkt duplicate kontrolü - cache'e güvenilmez durumlar için
@@ -1074,8 +1226,28 @@ export default function UrunKullanimPanel() {
     setFaultModalOpen(true);
   }, []);
 
-  const handleFaultReport = useCallback(async (faultDefinition: FaultDefinition) => {
-    if (!selectedDevice) return;
+  const handleFaultReport = useCallback((faultDefinition: FaultDefinition) => {
+    setSelectedFaultToConfirm(faultDefinition);
+    setConfirmFaultOpen(true);
+  }, []);
+
+  const handleFaultOpened = useCallback(async (faultType: 'teknik_servis' | 'aplikasyon') => {
+    if (selectedLab?.perifer && selectedLabId) {
+      try {
+        const q = query(collection(db, 'users'), where('primaryLaboratories', 'array-contains', selectedLabId));
+        const snap = await getDocs(q);
+        const allResponsible = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
+        const filtered = allResponsible.filter((u: any) => u.role === faultType);
+        setPeripheralResponsibleUsers(filtered);
+        setIsPeripheralModalOpen(true);
+      } catch (err) {
+        urunKullanimLogger.error('Sorumlu personel getirilemedi', err);
+      }
+    }
+  }, [selectedLab, selectedLabId, selectedLabName]);
+
+  const handleConfirmFaultReport = useCallback(async () => {
+    if (!selectedFaultToConfirm || !selectedDevice) return;
     setIsSavingFault(true);
     try {
       await openDeviceFaultReport({
@@ -1084,12 +1256,12 @@ export default function UrunKullanimPanel() {
         deviceId: selectedDevice.id,
         model: selectedDevice.cihazAdi || selectedDevice.name || '',
         serial: selectedDevice.seriNumarasi || '',
-        faultType: faultDefinition.type,
+        faultType: selectedFaultToConfirm.type,
         openedByUid: currentUser?.uid || '',
         openedByName: currentUserProfile?.name || '',
-        openDescription: faultDescription || faultDefinition.name,
-        faultDefinitionId: faultDefinition.id,
-        faultName: faultDefinition.name,
+        openDescription: faultDescription || selectedFaultToConfirm.name,
+        faultDefinitionId: selectedFaultToConfirm.id,
+        faultName: selectedFaultToConfirm.name,
         deviceImageUrl: selectedDevice.imageUrl || undefined,
         companyId: currentUserProfile?.companyId ?? null,
       });
@@ -1097,24 +1269,29 @@ export default function UrunKullanimPanel() {
       urunKullanimLogger.info('Arıza kaydı oluşturuldu', {
         deviceId: selectedDevice.id,
         deviceName: selectedDevice.cihazAdi,
-        faultType: faultDefinition.type,
-        faultName: faultDefinition.name,
+        faultType: selectedFaultToConfirm.type,
+        faultName: selectedFaultToConfirm.name,
       });
-      toast({ title: 'Arıza Kaydı Oluşturuldu', description: `${selectedDevice.cihazAdi} için "${faultDefinition.name}" arızası bildirildi.` });
+      toast({ title: 'Arıza Kaydı Oluşturuldu', description: `${selectedDevice.cihazAdi} için "${selectedFaultToConfirm.name}" arızası bildirildi.` });
       setFaultModalOpen(false);
       setFaultDescription('');
       setSelectedDevice(null);
+      setConfirmFaultOpen(false);
+      setSelectedFaultToConfirm(null);
+
+      // Peripheral check
+      handleFaultOpened(selectedFaultToConfirm.type);
     } catch (err) {
       urunKullanimLogger.error('Arıza kaydı oluşturulamadı', err, {
         deviceId: selectedDevice?.id,
-        faultType: faultDefinition.type,
-        faultName: faultDefinition.name,
+        faultType: selectedFaultToConfirm.type,
+        faultName: selectedFaultToConfirm.name,
       });
       toast({ title: 'Hata', description: 'Arıza kaydı oluşturulamadı.', variant: 'destructive' });
     } finally {
       setIsSavingFault(false);
     }
-  }, [selectedDevice, faultDescription, currentUser, currentUserProfile, selectedLabId, selectedLabName, toast]);
+  }, [selectedFaultToConfirm, selectedDevice, faultDescription, currentUser, currentUserProfile, selectedLabId, selectedLabName, toast]);
 
   // Handler to open custom fault modal
   const handleOpenCustomFault = useCallback((type: 'teknik_servis' | 'aplikasyon') => {
@@ -1158,6 +1335,9 @@ export default function UrunKullanimPanel() {
       setCustomFaultTitle('');
       setCustomFaultDescription('');
       setSelectedDevice(null);
+
+      // Peripheral check
+      handleFaultOpened(customFaultType);
     } catch (err) {
       urunKullanimLogger.error('Özel arıza kaydı oluşturulamadı', err, {
         deviceId: selectedDevice?.id,
@@ -1214,6 +1394,9 @@ export default function UrunKullanimPanel() {
       setFaultModalOpen(false);
       setSelectedDevice(null);
       setFaultTargetMode('single');
+
+      // Peripheral check
+      handleFaultOpened('teknik_servis');
     } catch (err) {
       urunKullanimLogger.error('STOP arıza kaydı oluşturulamadı', err, { stopLevel, mode: faultTargetMode });
       toast({ title: 'Hata', description: 'STOP arıza kaydı oluşturulamadı.', variant: 'destructive' });
@@ -2674,6 +2857,32 @@ export default function UrunKullanimPanel() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={confirmFaultOpen} onOpenChange={setConfirmFaultOpen}>
+        <DialogContent aria-describedby="confirm-fault-description">
+          <DialogHeader>
+            <DialogTitle>Arıza Kaydı Onayı</DialogTitle>
+            <DialogDescription id="confirm-fault-description">
+              Bu arıza kaydını açmak istediğinizden emin misiniz?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmFaultOpen(false)}>
+              Hayır
+            </Button>
+            <Button onClick={handleConfirmFaultReport} disabled={isSavingFault}>
+              {isSavingFault ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+              Evet
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      
+      <PeripheralFaultContactModal 
+        open={isPeripheralModalOpen} 
+        onOpenChange={setIsPeripheralModalOpen} 
+        users={peripheralResponsibleUsers} 
+      />
     </div>
   );
 }

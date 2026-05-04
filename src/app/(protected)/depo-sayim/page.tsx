@@ -25,6 +25,7 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 
 import { TrackingMode, resolveDefaultTrackingMode } from '@/lib/tracking';
@@ -64,7 +65,7 @@ type PendingNewItem = {
 export default function DepoSayimPage() {
     const { toast } = useToast();
     const router = useRouter();
-    const { currentUserProfile } = useAuth();
+    const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
     const { parseAuto } = useBarcodeParser();
     
     const [isLoading, setIsLoading] = useState(true);
@@ -157,7 +158,11 @@ export default function DepoSayimPage() {
             const filteredDepots = filterOperationalSourceDepots(depotList, currentUserProfile);
             setDepots(filteredDepots);
             setProductCodes(productsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as ProductCode)));
-            setFullDepotStok(stockSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as DepoStokItem)));
+            setFullDepotStok(filterByCompanyScope(
+              stockSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as DepoStokItem)),
+              currentCompanyId,
+              isSuperAdmin,
+            ));
 
             if(filteredDepots.length > 0 && filteredDepots[0].id && !selectedDepotId) {
                 setSelectedDepotId(filteredDepots[0].id);
@@ -167,7 +172,7 @@ export default function DepoSayimPage() {
         } finally {
             setIsLoading(false);
         }
-    }, [toast, selectedDepotId, currentUserProfile]);
+    }, [toast, selectedDepotId, currentUserProfile, currentCompanyId, isSuperAdmin]);
 
     useEffect(() => {
         fetchData();
@@ -599,7 +604,7 @@ Devam edilsin mi?`;
                         consumptionType: 'sayimdan_fazla', userId: currentUserProfile.uid, userName: currentUserProfile.name || '',
                         laboratoryName: depotName, laboratoryId: selectedDepotId,
                     };
-                    operations.push((batch) => batch.set(doc(collection(db, 'depoStok')), newEntry));
+                    operations.push((batch) => batch.set(doc(collection(db, 'depoStok')), withCompanyScope(newEntry, currentCompanyId)));
                     operations.push((batch) => batch.set(doc(collection(db, 'tuketimKayitlari')), additionRecord));
                 }
             }
@@ -651,7 +656,7 @@ Devam edilsin mi?`;
                             irsaliyeNumarasi: malKabulTransactionId,
                             createdByName: currentUserProfile.name,
                         };
-                        operations.push((batch) => batch.set(doc(collection(db, 'depoStok')), stockEntry));
+                        operations.push((batch) => batch.set(doc(collection(db, 'depoStok')), withCompanyScope(stockEntry, currentCompanyId)));
                     }
                 } else {
                     for (let i = 0; i < adet; i++) {
@@ -668,7 +673,7 @@ Devam edilsin mi?`;
                             irsaliyeNumarasi: malKabulTransactionId,
                             createdByName: currentUserProfile.name,
                         };
-                        operations.push((batch) => batch.set(doc(collection(db, 'depoStok')), stockEntry));
+                        operations.push((batch) => batch.set(doc(collection(db, 'depoStok')), withCompanyScope(stockEntry, currentCompanyId)));
                     }
                 }
 

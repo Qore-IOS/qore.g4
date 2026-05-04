@@ -26,6 +26,7 @@ import useHidScanner from '@/hooks/useHidScanner';
 import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
 import BackButton from '@/components/BackButton';
 import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 import { resolveDefaultTrackingMode, TrackingMode } from '@/lib/tracking';
 
 
@@ -36,7 +37,7 @@ type ScanRow = DepoStokItem & {
 
 export default function UrunIadePanel() {
   const { toast } = useToast();
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { parseAndResolveBarcode, formats: barcodeFormats } = useBarcodeParser();
   const router = useRouter();
 
@@ -84,7 +85,11 @@ export default function UrunIadePanel() {
 
     const q = query(collection(db, 'depoStok'));
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
-        const stockItems = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DepoStokItem));
+        const stockItems = filterByCompanyScope(
+          querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DepoStokItem)),
+          currentCompanyId,
+          isSuperAdmin,
+        );
         setShippedStock(stockItems);
     }, (error) => {
         console.error("Error listening to stock:", error);
@@ -92,7 +97,7 @@ export default function UrunIadePanel() {
     });
 
     return () => unsubscribe();
-  }, [fetchData, toast]);
+  }, [fetchData, toast, currentCompanyId, isSuperAdmin]);
 
   const handleScan = useCallback((barcode: string) => {
     if (!barcode) return;

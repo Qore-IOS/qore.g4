@@ -57,6 +57,7 @@ import {
   Database,
   SlidersHorizontal,
   ShoppingCart,
+  ArrowUpDown,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { format } from 'date-fns';
@@ -238,6 +239,8 @@ export default function YedekParcaTransferPage() {
   const [personnelStockLoading, setPersonnelStockLoading] = useState(false);
   const [personnelStockPage, setPersonnelStockPage] = useState(0);
   const [personnelStockFilter, setPersonnelStockFilter] = useState<'all' | 'used' | 'unused' | 'pending_approval'>('all');
+  const [personnelStockSortKey, setPersonnelStockSortKey] = useState<'createdAt' | 'usedAt' | 'movement'>('movement');
+  const [personnelStockSortOrder, setPersonnelStockSortOrder] = useState<'asc' | 'desc'>('desc');
   const ITEMS_PER_PAGE = 20;
 
   // All personnel stock for toplam stok view
@@ -263,6 +266,8 @@ export default function YedekParcaTransferPage() {
   const [poolStock, setPoolStock] = useState<PoolWarehouseStockItem[]>([]);
   const [poolStockLoading, setPoolStockLoading] = useState(false);
   const [poolStockFilter, setPoolStockFilter] = useState<'all' | 'used' | 'unused'>('all');
+  const [poolStockSortKey, setPoolStockSortKey] = useState<'createdAt' | 'usedAt' | 'movement'>('movement');
+  const [poolStockSortOrder, setPoolStockSortOrder] = useState<'asc' | 'desc'>('desc');
   const [poolStockPage, setPoolStockPage] = useState(0);
 
   // Return to depot modal state
@@ -927,18 +932,33 @@ export default function YedekParcaTransferPage() {
   }, [allTransferTargets, userSearchQuery]);
 
   const filteredPersonnelStock = useMemo(() => {
+    let items = [...personnelStock];
     if (personnelStockFilter === 'used') {
-      return personnelStock.filter(s => s.status === 'used' || s.status === 'pending_return');
+      items = items.filter(s => s.status === 'used' || s.status === 'pending_return');
+    } else if (personnelStockFilter === 'unused') {
+      items = items.filter(s => s.status === 'in_stock');
+    } else if (personnelStockFilter === 'pending_approval') {
+      items = items.filter(s => s.status === 'pending_approval');
     }
-    if (personnelStockFilter === 'unused') {
-      return personnelStock.filter(s => s.status === 'in_stock');
-    }
-    if (personnelStockFilter === 'pending_approval') {
-      return personnelStock.filter(s => s.status === 'pending_approval');
-    }
-    // 'all' filter: show everything including pending_approval
-    return personnelStock;
-  }, [personnelStock, personnelStockFilter]);
+
+    return items.sort((a, b) => {
+      let dateA: number;
+      let dateB: number;
+
+      if (personnelStockSortKey === 'movement') {
+        dateA = new Date(a.usedAt || a.createdAt).getTime();
+        dateB = new Date(b.usedAt || b.createdAt).getTime();
+      } else if (personnelStockSortKey === 'usedAt') {
+        dateA = a.usedAt ? new Date(a.usedAt).getTime() : 0;
+        dateB = b.usedAt ? new Date(b.usedAt).getTime() : 0;
+      } else {
+        dateA = new Date(a.createdAt).getTime();
+        dateB = new Date(b.createdAt).getTime();
+      }
+
+      return personnelStockSortOrder === 'desc' ? dateB - dateA : dateA - dateB;
+    });
+  }, [personnelStock, personnelStockFilter, personnelStockSortKey, personnelStockSortOrder]);
 
   // Paginated personnel stock
   const paginatedPersonnelStock = useMemo(() => {
@@ -950,14 +970,31 @@ export default function YedekParcaTransferPage() {
 
   // Pool stock filtering and pagination
   const filteredPoolStock = useMemo(() => {
+    let items = [...poolStock];
     if (poolStockFilter === 'used') {
-      return poolStock.filter(s => s.status === 'used');
+      items = items.filter(s => s.status === 'used');
+    } else if (poolStockFilter === 'unused') {
+      items = items.filter(s => s.status === 'in_stock');
     }
-    if (poolStockFilter === 'unused') {
-      return poolStock.filter(s => s.status === 'in_stock');
-    }
-    return poolStock;
-  }, [poolStock, poolStockFilter]);
+
+    return items.sort((a, b) => {
+      let dateA: number;
+      let dateB: number;
+
+      if (poolStockSortKey === 'movement') {
+        dateA = new Date(a.usedAt || a.createdAt).getTime();
+        dateB = new Date(b.usedAt || b.createdAt).getTime();
+      } else if (poolStockSortKey === 'usedAt') {
+        dateA = a.usedAt ? new Date(a.usedAt).getTime() : 0;
+        dateB = b.usedAt ? new Date(b.usedAt).getTime() : 0;
+      } else {
+        dateA = new Date(a.createdAt).getTime();
+        dateB = new Date(b.createdAt).getTime();
+      }
+
+      return poolStockSortOrder === 'desc' ? dateB - dateA : dateA - dateB;
+    });
+  }, [poolStock, poolStockFilter, poolStockSortKey, poolStockSortOrder]);
 
   const paginatedPoolStock = useMemo(() => {
     const start = poolStockPage * ITEMS_PER_PAGE;
@@ -2158,8 +2195,8 @@ export default function YedekParcaTransferPage() {
 
   // Approve borrowed part
   const approveBorrowedPart = async (borrowed: any) => {
-    if (!isTeknikLojistik) {
-      toast({ title: 'Yetki Hatası', description: 'Borç onayını yalnızca teknik lojistik kullanıcıları yapabilir.', variant: 'destructive' });
+    if (!isAdmin && !isTeknikLojistik) {
+      toast({ title: 'Yetki Hatası', description: 'Borç onayını yalnızca teknik lojistik veya admin kullanıcıları yapabilir.', variant: 'destructive' });
       return;
     }
 
@@ -2226,8 +2263,8 @@ export default function YedekParcaTransferPage() {
 
   // Reject borrowed part
   const rejectBorrowedPart = async (borrowed: any) => {
-    if (!isTeknikLojistik) {
-      toast({ title: 'Yetki Hatası', description: 'Borç reddini yalnızca teknik lojistik kullanıcıları yapabilir.', variant: 'destructive' });
+    if (!isAdmin && !isTeknikLojistik) {
+      toast({ title: 'Yetki Hatası', description: 'Borç reddini yalnızca teknik lojistik veya admin kullanıcıları yapabilir.', variant: 'destructive' });
       return;
     }
 
@@ -2281,6 +2318,43 @@ export default function YedekParcaTransferPage() {
     } catch (err) {
       console.error('Error rejecting borrowed part:', err);
       toast({ title: 'Hata', description: 'İşlem sırasında hata oluştu.', variant: 'destructive' });
+    }
+  };
+
+  // Delete borrowed part (mistake/junk removal)
+  const deleteBorrowedPart = async (borrowed: any) => {
+    if (!isAdmin && !isTeknikLojistik) {
+      toast({ title: 'Yetki Hatası', description: 'Borç kaydını silme yetkiniz bulunmamaktadır.', variant: 'destructive' });
+      return;
+    }
+
+    const shouldDelete = window.confirm(`${borrowed.stokAdi} (${borrowed.serialNumber || 'Seri No Yok'}) borç kaydı silinsin mi?`);
+    if (!shouldDelete) return;
+
+    try {
+      const now = new Date();
+      await deleteDoc(doc(db, 'borrowedSpareParts', borrowed.id));
+
+      await addDoc(collection(db, 'sparePartTransferLogs'), withCompanyScope({
+        action: 'borrowed_deleted_admin',
+        borrowedPartId: borrowed.id,
+        stokKodu: borrowed.stokKodu,
+        stokAdi: borrowed.stokAdi,
+        anaBirim: borrowed.anaBirim || 'Adet',
+        serialNumber: borrowed.serialNumber,
+        borrowedByUid: borrowed.borrowedByUid,
+        borrowedByName: borrowed.borrowedByName,
+        notes: `${isAdmin ? 'Admin' : 'Teknik Lojistik'} borç kaydı silme işlemi`,
+        createdAt: Timestamp.fromDate(now),
+        createdByUid: currentUserProfile?.uid || '',
+        createdByName: currentUserProfile?.name || '',
+      }, currentCompanyId));
+
+      setBorrowedParts(prev => prev.filter(b => b.id !== borrowed.id));
+      toast({ title: 'Borç Kaydı Silindi', description: `${borrowed.stokAdi} kaydı kaldırıldı.` });
+    } catch (err) {
+      console.error('Error deleting borrowed part:', err);
+      toast({ title: 'Hata', description: 'Borç kaydı silinirken hata oluştu.', variant: 'destructive' });
     }
   };
 
@@ -3048,9 +3122,16 @@ export default function YedekParcaTransferPage() {
                 <p className="text-[10px] mt-0.5" style={{ color: 'var(--dashboard-muted)' }}>{item.deviceName} · {item.labName} · {item.borrowedByName}</p>
                 <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>{format(item.borrowedAt, 'dd.MM.yyyy HH:mm', { locale: tr })}</p>
               </div>
-              <div className="flex gap-1.5 flex-shrink-0">
-                {isTeknikLojistik && <button onClick={() => approveBorrowedPart(item)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-semibold text-white" style={{ background: '#16A34A' }}><CheckCircle className="w-3 h-3" /> Onayla</button>}
-                {isTeknikLojistik && <button onClick={() => rejectBorrowedPart(item)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-semibold text-white" style={{ background: '#B91C1C' }}><XCircle className="w-3 h-3" /> Reddet</button>}
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                {(isAdmin || isTeknikLojistik) && (
+                  <>
+                    <button onClick={() => approveBorrowedPart(item)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-semibold text-white transition-all hover:opacity-90 active:scale-95" style={{ background: '#16A34A' }}><CheckCircle className="w-3 h-3" /> Onayla</button>
+                    <button onClick={() => rejectBorrowedPart(item)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-[11px] font-semibold text-white transition-all hover:opacity-90 active:scale-95" style={{ background: '#B91C1C' }}><XCircle className="w-3 h-3" /> Reddet</button>
+                    <button onClick={() => deleteBorrowedPart(item)} className="p-1.5 rounded-lg hover:bg-black/5 transition-all active:scale-95" title="Borç Kaydını Sil">
+                      <Trash2 className="w-3.5 h-3.5" style={{ color: '#B91C1C' }} />
+                    </button>
+                  </>
+                )}
               </div>
             </article>
           ))}
@@ -3511,8 +3592,40 @@ export default function YedekParcaTransferPage() {
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Ürün Adı</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Seri No</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Durum</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Transfer</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Kullanım</th>
+                    <th
+                      className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer group"
+                      style={{ color: personnelStockSortKey === 'createdAt' ? 'var(--dashboard-accent)' : 'var(--dashboard-muted)' }}
+                      onClick={() => {
+                        if (personnelStockSortKey === 'createdAt') {
+                          setPersonnelStockSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+                        } else {
+                          setPersonnelStockSortKey('createdAt');
+                          setPersonnelStockSortOrder('desc');
+                        }
+                      }}
+                    >
+                      <div className="flex items-center gap-1">
+                        Transfer
+                        <ArrowUpDown className={cn("w-3 h-3 transition-colors", personnelStockSortKey === 'createdAt' ? "opacity-100" : "opacity-20 group-hover:opacity-100")} />
+                      </div>
+                    </th>
+                    <th
+                      className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer group"
+                      style={{ color: personnelStockSortKey === 'usedAt' ? 'var(--dashboard-accent)' : 'var(--dashboard-muted)' }}
+                      onClick={() => {
+                        if (personnelStockSortKey === 'usedAt') {
+                          setPersonnelStockSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+                        } else {
+                          setPersonnelStockSortKey('usedAt');
+                          setPersonnelStockSortOrder('desc');
+                        }
+                      }}
+                    >
+                      <div className="flex items-center gap-1">
+                        Kullanım
+                        <ArrowUpDown className={cn("w-3 h-3 transition-colors", personnelStockSortKey === 'usedAt' ? "opacity-100" : "opacity-20 group-hover:opacity-100")} />
+                      </div>
+                    </th>
                     <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Gözlem</th>
                     <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>İşlem</th>
                     <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Form</th>
@@ -3892,8 +4005,40 @@ export default function YedekParcaTransferPage() {
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Ürün Adı</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Seri No</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Durum</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Transfer</th>
-                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Kullanım</th>
+                    <th
+                      className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer group"
+                      style={{ color: poolStockSortKey === 'createdAt' ? 'var(--dashboard-accent)' : 'var(--dashboard-muted)' }}
+                      onClick={() => {
+                        if (poolStockSortKey === 'createdAt') {
+                          setPoolStockSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+                        } else {
+                          setPoolStockSortKey('createdAt');
+                          setPoolStockSortOrder('desc');
+                        }
+                      }}
+                    >
+                      <div className="flex items-center gap-1">
+                        Transfer
+                        <ArrowUpDown className={cn("w-3 h-3 transition-colors", poolStockSortKey === 'createdAt' ? "opacity-100" : "opacity-20 group-hover:opacity-100")} />
+                      </div>
+                    </th>
+                    <th
+                      className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer group"
+                      style={{ color: poolStockSortKey === 'usedAt' ? 'var(--dashboard-accent)' : 'var(--dashboard-muted)' }}
+                      onClick={() => {
+                        if (poolStockSortKey === 'usedAt') {
+                          setPoolStockSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+                        } else {
+                          setPoolStockSortKey('usedAt');
+                          setPoolStockSortOrder('desc');
+                        }
+                      }}
+                    >
+                      <div className="flex items-center gap-1">
+                        Kullanım
+                        <ArrowUpDown className={cn("w-3 h-3 transition-colors", poolStockSortKey === 'usedAt' ? "opacity-100" : "opacity-20 group-hover:opacity-100")} />
+                      </div>
+                    </th>
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Kullanan</th>
                     <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Gözlem</th>
                     <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>İşlem</th>

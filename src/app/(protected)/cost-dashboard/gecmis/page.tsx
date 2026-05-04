@@ -269,7 +269,12 @@ function DateRangeFilter({ startDate, endDate, onStartChange, onEndChange, onCle
 
 export default function MaliyetSayimGecmisPage() {
   const router = useRouter();
-  const { currentCompanyId, isSuperAdmin } = useAuth();
+  const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
+  const isAdminRole = ['admin', 'admin_developer', 'super_admin'].includes(currentUserProfile?.role ?? '');
+  const assignedLabs = useMemo(
+    () => currentUserProfile?.assignedLaboratories ?? [],
+    [currentUserProfile?.assignedLaboratories]
+  );
   const [sessions, setSessions] = useState<SayimSession[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -289,7 +294,15 @@ export default function MaliyetSayimGecmisPage() {
       try {
         const snap = await getDocs(query(collection(db, 'maliyetSayimSessions'), orderBy('createdAt', 'desc')));
         const allSessions = snap.docs.map(d => ({ id: d.id, ...d.data() } as SayimSession));
-        setSessions(filterByCompanyScope(allSessions, currentCompanyId, isSuperAdmin));
+        const companyScoped = filterByCompanyScope(allSessions, currentCompanyId, isSuperAdmin);
+        // Lab sessions are restricted to the user's assigned labs; depot
+        // sessions stay visible. Admins keep full visibility.
+        const labScoped = (isSuperAdmin || isAdminRole || assignedLabs.length === 0)
+          ? companyScoped
+          : companyScoped.filter(s =>
+              s.locationType !== 'lab' || assignedLabs.includes(s.locationId)
+            );
+        setSessions(labScoped);
       } catch (err) {
         console.error('Error loading sessions:', err);
       } finally {
@@ -297,7 +310,7 @@ export default function MaliyetSayimGecmisPage() {
       }
     };
     load();
-  }, [currentCompanyId, isSuperAdmin]);
+  }, [currentCompanyId, isSuperAdmin, isAdminRole, assignedLabs]);
 
   // Extract unique filter options
   const filterOptions = useMemo(() => {

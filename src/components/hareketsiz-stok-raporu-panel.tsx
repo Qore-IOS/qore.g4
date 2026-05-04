@@ -19,6 +19,8 @@ import { CalendarClock, Loader2, FileSpreadsheet, Trash2 } from 'lucide-react';
 import type { DepoStokItem, Shipment, ConsumptionRecord, ProductCode } from '@/lib/types';
 import { Checkbox } from '@/components/ui/checkbox';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { useAuth } from '@/contexts/auth-context';
+import { matchesCompanyScope } from '@/lib/company-scope';
 
 interface ReportRow {
   stokKodu: string;
@@ -29,6 +31,7 @@ interface ReportRow {
 
 export default function HareketsizStokRaporuPanel() {
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [rows, setRows] = useState<ReportRow[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedStockCodes, setSelectedStockCodes] = useState<Set<string>>(new Set());
@@ -51,6 +54,7 @@ export default function HareketsizStokRaporuPanel() {
       // a) Process Receipts from depoStok
       depSnap.docs.forEach(doc => {
         const d = doc.data() as DepoStokItem;
+        if (!matchesCompanyScope(d as any, currentCompanyId, isSuperAdmin)) return;
         const date = (d.eklenmeTarihi as any)?.toDate ? (d.eklenmeTarihi as any).toDate() : new Date();
         if(isValid(date)) {
             transactions.push({ stokKodu: d.stokKodu, date, location: d.depotName || 'Depo' });
@@ -109,7 +113,7 @@ export default function HareketsizStokRaporuPanel() {
     } finally {
       setIsLoading(false);
     }
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
     fetchReport();

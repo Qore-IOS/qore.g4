@@ -46,6 +46,7 @@ import useHidScanner from '@/hooks/useHidScanner';
 import BarcodeFormatSelect, { type FormatValue } from '@/components/BarcodeFormatSelect';
 import { cn, playFeedback, sanitizeGS1, generateId } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope, matchesCompanyScope } from '@/lib/company-scope';
 import { Switch } from '@/components/ui/switch';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { compareAsc, parse as parseDate } from 'date-fns';
@@ -87,7 +88,12 @@ const CameraScanner = dynamic(() => import('@/components/camera-barcode-scanner'
 
 // OPTIMIZED FEFO CHECK:
 // Uses batch queries with Firestore 'in' clause (max 30 values) to reduce round trips
-const checkFefoOptimized = async (itemsToShip: DepoStokItem[], depotId: string): Promise<FefoViolation[]> => {
+const checkFefoOptimized = async (
+  itemsToShip: DepoStokItem[],
+  depotId: string,
+  currentCompanyId?: string | null,
+  isSuperAdmin?: boolean,
+): Promise<FefoViolation[]> => {
   const violations: FefoViolation[] = [];
 
   // Transfer listesindeki benzersiz stok kodlarını bul
@@ -112,7 +118,9 @@ const checkFefoOptimized = async (itemsToShip: DepoStokItem[], depotId: string):
     );
     const snap = await getDocs(q);
     snap.docs.forEach(d => {
-      allProductStock.push({ id: d.id, ...d.data() } as DepoStokItem);
+      const data = d.data();
+      if (!matchesCompanyScope(data as any, currentCompanyId, isSuperAdmin)) return;
+      allProductStock.push({ id: d.id, ...data } as DepoStokItem);
     });
   }
 
@@ -180,7 +188,7 @@ const checkFefoOptimized = async (itemsToShip: DepoStokItem[], depotId: string):
 
 export default function DirektTransferPanel() {
   const { toast } = useToast();
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const router = useRouter();
   const { invalidateDepoStok } = useInvalidateQueries();
 
@@ -613,7 +621,9 @@ export default function DirektTransferPanel() {
       );
       const snap = await getDocs(q);
       snap.docs.forEach(d => {
-        allStock.push({ id: d.id, ...d.data() } as DepoStokItem);
+        const data = d.data();
+        if (!matchesCompanyScope(data as any, currentCompanyId, isSuperAdmin)) return;
+        allStock.push({ id: d.id, ...data } as DepoStokItem);
       });
     }
 
@@ -680,7 +690,7 @@ export default function DirektTransferPanel() {
     }
 
     return { allocations, error: null };
-  }, [directTransferItems, selectedDepotId, productTracking]);
+  }, [directTransferItems, selectedDepotId, productTracking, currentCompanyId, isSuperAdmin]);
 
   // Legacy function kept for compatibility
   const allocateDocsForGroup = useCallback(async (row: TransferRow): Promise<DepoStokItem[] | null> => {
@@ -913,7 +923,7 @@ export default function DirektTransferPanel() {
     }
 
     // OPTIMIZED FEFO CHECK: Sadece ilgili ürünler için FEFO kontrolü yap
-    const violations = await checkFefoOptimized(itemsToShip, selectedDepotId);
+    const violations = await checkFefoOptimized(itemsToShip, selectedDepotId, currentCompanyId, isSuperAdmin);
 
     setShipmentLoading(false);
 
@@ -947,13 +957,17 @@ export default function DirektTransferPanel() {
     if (!selectedDepotId) return;
     const q = query(collection(db, 'depoStok'), where('depotId', '==', selectedDepotId), where('isShipped', '==', false));
     const snap = await getDocs(q);
-    const items = snap.docs.map(d => ({
-        ...d.data(),
-        id: d.id,
-        adet: 1,
-        key: d.id,
-        isGroup: false,
-    } as TransferRow));
+    const items = filterByCompanyScope(
+        snap.docs.map(d => ({
+            ...d.data(),
+            id: d.id,
+            adet: 1,
+            key: d.id,
+            isGroup: false,
+        } as TransferRow)),
+        currentCompanyId,
+        isSuperAdmin,
+    );
 
     setDirectTransferItems(items);
     flashScanFeedback('success', `${items.length} adet ürün transfer listesine eklendi.`);

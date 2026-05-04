@@ -1,4 +1,5 @@
-import { collection, getDocs, doc, getDoc, query, where } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc, query, where, type QueryConstraint } from 'firebase/firestore';
+import { buildPersonnelCode } from '@/lib/form-number';
 import { db } from '@/lib/firebase';
 
 let _fontBase64: string | null = null;
@@ -91,11 +92,12 @@ export async function computeFormNo(
   currentDocId: string,
   personName: string,
   typeChar: string,
-  timestampField: string = 'createdAt'
+  timestampField: string = 'createdAt',
+  extraFilters: QueryConstraint[] = []
 ): Promise<string> {
   try {
-    const initials = personName.trim().split(/\s+/).map(w => w.charAt(0).toUpperCase()).join('');
-    const q = query(collection(db, collectionName), where(uidField, '==', uid));
+    const initials = buildPersonnelCode(personName);
+    const q = query(collection(db, collectionName), where(uidField, '==', uid), ...extraFilters);
     const snap = await getDocs(q);
     const sorted = snap.docs.slice().sort((a, b) => {
       const ta = a.data()[timestampField]?.toMillis?.() || 0;

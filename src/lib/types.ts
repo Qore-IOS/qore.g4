@@ -70,6 +70,7 @@ export interface Hospital {
   visualDeductionEnabled?: boolean; // NEW: For 3D görsel düşüm
   fefoEnabled?: boolean;
   customProductOrder?: string[]; // Özel ürün sıralama - sipariş toplama ekranında kullanılır
+  perifer?: boolean; // Perifer laboratuvar statüsü - ofis tarafından yönetilen, lojistik paneli açan siparişler
   [k: string]: any;
 }
 
@@ -204,6 +205,7 @@ export interface DepoStokItem {
   ambalajDegeri?: number;
   transferId?: string;
   hedefKurumId?: string | null; // NEW
+  companyId?: string; // Şirket ID - multi-tenancy
   [k: string]: any;
 }
 
@@ -214,6 +216,21 @@ export interface OrderItem {
   adet: number;
 }
 
+export interface PeripheralFulfillmentItem {
+  itemId: string;
+  stokKodu: string;
+  requestedAdet: number;
+  sentAdet: number;
+  fulfilled: boolean;
+}
+
+export interface PeripheralFulfillment {
+  items: PeripheralFulfillmentItem[];
+  updatedAt?: TimestampLike;
+  updatedById?: string;
+  updatedBy?: string;
+}
+
 export interface Order {
   id: string; // Firestore document ID
   depotId?: string; // The depot that should fulfill this.
@@ -221,7 +238,7 @@ export interface Order {
   kurumAdi: string;
   items: OrderItem[];
   createdAt: TimestampLike;
-  status: 'pending' | 'toplaniyor' | 'completed' | string;
+  status: 'pending' | 'toplaniyor' | 'completed' | 'eksik' | string;
   transferredAt?: TimestampLike | null;
   olusturmaTarihi?: TimestampLike;
   depotName?: string;
@@ -229,6 +246,8 @@ export interface Order {
   createdBy?: string;
   transferredById?: string;
   transferredBy?: string;
+  isPeripheral?: boolean; // True when the target lab is perifer; orders routed to office logistics flow
+  peripheralFulfillment?: PeripheralFulfillment; // Office-managed fulfillment state for perifer orders
 }
 
 

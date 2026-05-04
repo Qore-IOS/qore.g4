@@ -20,8 +20,10 @@ import type { DepoStokItem, Laboratory, ProductCode, MinMaxRule } from '@/lib/ty
 import { Loader2, Search, ChevronUp, ChevronDown, ListChecks, History, PackageX, FileText } from 'lucide-react';
 import { useMinMaxRules, touchStockMetadata } from '@/hooks/useFirebaseQueries';
 import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { useToast } from '@/hooks/use-toast';
 import LabIrsaliyeOcrModal, { type LabOcrResult } from '@/components/lab/LabIrsaliyeOcrModal';
+import { reconcileIrsaliyeAcceptance } from '@/lib/lojistik/reconcile-irsaliye';
 import { normalizeMiad } from '@/lib/date';
 import { formatMiad } from '@/lib/date';
 import { differenceInDays, parse, isValid } from 'date-fns';
@@ -104,7 +106,7 @@ type GroupedStockItem = {
 
 export default function LaboratuvarYonetimiPanel() {
   const router = useRouter();
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
   const [laboratories, setLaboratories] = useState<Laboratory[]>([]);
   const [selectedLabId, setSelectedLabId] = useState<string>('');
@@ -139,7 +141,11 @@ export default function LaboratuvarYonetimiPanel() {
         getDocs(collection(db, 'productCodes'))
       ]);
       setLaboratories(labsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Laboratory)));
-      setDepoStok(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)));
+      setDepoStok(filterByCompanyScope(
+        stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
+        currentCompanyId,
+        isSuperAdmin,
+      ));
       
       const names: Record<string, string> = {};
       const codes: ProductCode[] = [];
@@ -154,7 +160,7 @@ export default function LaboratuvarYonetimiPanel() {
       setIsLoading(false);
     }
     fetchData();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   const labStocks = useMemo(() => {
     if (!selectedLabId) return [];
@@ -392,7 +398,7 @@ export default function LaboratuvarYonetimiPanel() {
 
         for (const item of chunk) {
           const docRef = doc(collection(db, 'depoStok'));
-          batch.set(docRef, {
+          batch.set(docRef, withCompanyScope({
             stokKodu: item.stokKodu,
             stokAdi: item.stokAdi,
             lotNumarasi: item.lotNumarasi || null,
@@ -404,7 +410,7 @@ export default function LaboratuvarYonetimiPanel() {
             eklenmeTarihi: Timestamp.now(),
             sevkTarihi: Timestamp.now(),
             kaynak: 'excel_import',
-          });
+          }, currentCompanyId));
         }
 
         await batch.commit();
@@ -429,7 +435,7 @@ export default function LaboratuvarYonetimiPanel() {
       setIsImporting(false);
       setImportProgress('');
     }
-  }, [validRows, selectedLabId, selectedLabName, toast, invalidateDepoStok]);
+  }, [validRows, selectedLabId, selectedLabName, currentCompanyId, toast, invalidateDepoStok]);
 
   const handleOcrResults = useCallback(async (
     results: LabOcrResult[],
@@ -451,7 +457,7 @@ export default function LaboratuvarYonetimiPanel() {
         const qty = Math.max(1, item.quantity || 1);
         for (let i = 0; i < qty; i++) {
           const ref = doc(collection(db, 'depoStok'));
-          batch.set(ref, {
+          batch.set(ref, withCompanyScope({
             depotId: '',
             depotName: '',
             stokKodu: item.stokKodu,
@@ -467,13 +473,42 @@ export default function LaboratuvarYonetimiPanel() {
             hedefKurum: labName,
             createdByName: currentUserProfile?.name || currentUser?.email || 'Unknown',
             createdByUid: currentUser?.uid || null,
-          });
+          }, currentCompanyId));
           totalDocs++;
         }
       }
 
       await batch.commit();
       await touchStockMetadata();
+
+      // Reconcile against any "Hazırlanan" peripheral orders for this lab.
+      // Closes orders whose entire item set is covered, or appends a partial
+      // delivery record while keeping the order in 'toplaniyor'. Notifies
+      // lojistik yöneticisi (in-app + push) regardless of outcome.
+      let reconcileSummary: { closedOrderIds: string[]; partialOrderIds: string[] } | null = null;
+      try {
+        const acceptedItems = results
+          .map((r) => ({ stokKodu: r.stokKodu, adet: Math.max(1, Number(r.quantity) || 1) }))
+          .filter((it) => !!it.stokKodu);
+        const summary = await reconcileIrsaliyeAcceptance({
+          hospitalId: selectedLabId,
+          hospitalName: labName,
+          accepted: acceptedItems,
+          irsaliye: { fileId: file.id, fileName: file.fileName },
+          actor: {
+            uid: currentUser?.uid || '',
+            name: currentUserProfile?.name || currentUser?.email || 'Lab',
+          },
+        });
+        reconcileSummary = {
+          closedOrderIds: summary.closedOrderIds,
+          partialOrderIds: summary.partialOrderIds,
+        };
+      } catch (reconcileErr) {
+        // Stock entry already succeeded; log but don't throw so the file
+        // cleanup still runs and the user sees a stock-success toast.
+        console.error('Order reconciliation failed:', reconcileErr);
+      }
 
       // Delete the file from Firestore and storage
       await deleteDoc(doc(db, 'irsaliyeDosyalari', file.id));
@@ -485,11 +520,21 @@ export default function LaboratuvarYonetimiPanel() {
 
       // Refresh local stock data
       const stokSnap = await getDocs(query(collection(db, 'depoStok'), where('isShipped', '==', true)));
-      setDepoStok(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)));
+      setDepoStok(filterByCompanyScope(
+        stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
+        currentCompanyId,
+        isSuperAdmin,
+      ));
+
+      const reconcileNote = reconcileSummary
+        ? (reconcileSummary.closedOrderIds.length > 0 || reconcileSummary.partialOrderIds.length > 0)
+          ? ` ${reconcileSummary.closedOrderIds.length} sipariş tam, ${reconcileSummary.partialOrderIds.length} sipariş kısmi olarak güncellendi.`
+          : ''
+        : '';
 
       toast({
         title: 'Stok girişi tamamlandı',
-        description: `${totalDocs} adet ürün laboratuvar stoğuna eklendi. İrsaliye dosyası (${file.fileName}) silindi.`,
+        description: `${totalDocs} adet ürün laboratuvar stoğuna eklendi. İrsaliye dosyası (${file.fileName}) silindi.${reconcileNote}`,
       });
     } catch (error: any) {
       console.error('Lab OCR stock entry error:', error);
@@ -501,7 +546,7 @@ export default function LaboratuvarYonetimiPanel() {
     } finally {
       setIsOcrProcessing(false);
     }
-  }, [selectedLabId, laboratories, productCodes, currentUser, currentUserProfile, toast]);
+  }, [selectedLabId, laboratories, productCodes, currentUser, currentUserProfile, currentCompanyId, isSuperAdmin, toast]);
 
   return (
     <div className="space-y-6">

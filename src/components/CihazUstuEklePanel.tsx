@@ -14,6 +14,8 @@ import type { Hospital, ProductCode, TestDefinition, MinMaxRule, LabPool } from 
 import BackButton from './BackButton';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { exportDataToExcel, readExcelData } from '@/lib/utils';
+import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope, filterByAssignedLabs, withCompanyScope } from '@/lib/company-scope';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,6 +49,8 @@ const parseLocaleInt = (v: any) => {
 
 export default function CihazUstuEklePanel() {
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
+  const assignedLabs = currentUserProfile?.assignedLaboratories;
   const [loading, setLoading] = useState(true);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
@@ -71,10 +75,16 @@ export default function CihazUstuEklePanel() {
           getDocs(collection(db, 'labPools')),
         ]);
         
-        const fetchedHospitals = hSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital));
+        const allHospitals = hSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital));
+        const scopedHospitals = filterByCompanyScope(allHospitals, currentCompanyId, isSuperAdmin);
+        const fetchedHospitals = filterByAssignedLabs(scopedHospitals, assignedLabs, {
+          labIdFields: ['id'],
+          isSuperAdmin,
+        });
         setHospitals(fetchedHospitals);
         setProductCodes(pSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
-        setLabPools(poolSnap.docs.map(d => ({ id: d.id, ...d.data() } as LabPool)));
+        const allLabPools = poolSnap.docs.map(d => ({ id: d.id, ...d.data() } as LabPool));
+        setLabPools(filterByCompanyScope(allLabPools, currentCompanyId, isSuperAdmin));
 
         const rulesPromises = fetchedHospitals.map(async (h) => {
           const rulesSnap = await getDocs(collection(db, 'hospitals', h.id, 'minMaxRules'));
@@ -93,7 +103,7 @@ export default function CihazUstuEklePanel() {
       }
       setLoading(false);
     })();
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin, assignedLabs]);
 
   useEffect(() => {
     if (!selectedHospitalId) {
@@ -162,7 +172,7 @@ export default function CihazUstuEklePanel() {
         const period = `${String(selectedMonth + 1).padStart(2, '0')}-${selectedYear}`;
         const docId = `${selectedHospitalId}_${period}`;
         
-        const dataToSave = {
+        const dataToSave = withCompanyScope({
             hospitalId: selectedHospitalId,
             hospitalName: hospitals.find(h => h.id === selectedHospitalId)?.name || '',
             period: period,
@@ -170,7 +180,7 @@ export default function CihazUstuEklePanel() {
             year: selectedYear,
             createdAt: Timestamp.now(),
             items: rows.map(r => ({ productId: r.productId, productName: r.productName, value: Number(r.value || 0) })),
-        };
+        }, currentCompanyId);
 
         await setDoc(doc(db, 'cihazUstuGecmisi', docId), dataToSave, { merge: true });
         toast({ title: 'Başarılı', description: 'Cihaz üstü stok verileri kaydedildi.' });

@@ -61,16 +61,37 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { useToast } from '@/hooks/use-toast';
 import { format as formatDate, parse, compareAsc, isValid } from 'date-fns';
 import { tr } from 'date-fns/locale';
-import { Loader2, PlusCircle, Trash2, Check, FileSpreadsheet, History, Calculator, ChevronsUpDown, Undo, ClipboardPlus, ShoppingCart, Package, Plus, Minus, MoreHorizontal, ArrowRight, Search } from 'lucide-react';
+import { Loader2, PlusCircle, Trash2, Check, FileSpreadsheet, History, Calculator, ChevronsUpDown, Undo, ClipboardPlus, ShoppingCart, Package, Plus, Minus, MoreHorizontal, ArrowRight, Search, CheckCircle2, Edit3, Save, Send, Share2 } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 import * as XLSX from 'xlsx';
 import { useRowFocus } from '@/hooks/useRowFocus';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { cn } from '@/lib/utils';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { formatMiad, toDateFromAny } from '@/lib/date';
+
+type LojRowState = {
+  itemId: string;
+  stokKodu: string;
+  stokAdi: string;
+  requestedAdet: number;
+  sentAdet: number;
+  fulfilled: boolean;
+};
+
+type PeripheralFulfillmentItem = {
+  itemId: string;
+  stokKodu: string;
+  requestedAdet: number;
+  sentAdet: number;
+  fulfilled: boolean;
+};
 import { emitOrderCreatedFromRequest } from '@/lib/notifications';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { siparislerLogger } from '@/lib/logger';
+import LojistikSiparisView from '@/components/LojistikSiparisView';
 import { formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
 
 
@@ -83,7 +104,7 @@ import { formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
 export default function SiparislerPanel(): JSX.Element {
   const { toast } = useToast();
   const router = useRouter();
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   useRowFocus('focus');
 
   const [depots, setDepots] = useState<Depot[]>([]);
@@ -91,7 +112,11 @@ export default function SiparislerPanel(): JSX.Element {
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
   const [depoStok, setDepoStok] = useState<DepoStokItem[]>([]);
   const [allOrders, setAllOrders] = useState<Order[]>([]);
-  
+  // Perifer siparişleri (depo atanmamış, ofis tarafından yönlendirilmeyi
+  // bekleyen) deponun seçiminden bağımsız olarak ofis panelinde göstermek
+  // için ayrı bir dinleyiciden geliyor.
+  const [peripheralOrders, setPeripheralOrders] = useState<Order[]>([]);
+
   const [selectedDepotId, setSelectedDepotId] = useState<string>('');
   const [selectedLabId, setSelectedLabId] = useState<string>('');
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
@@ -166,7 +191,41 @@ export default function SiparislerPanel(): JSX.Element {
     startListener();
     return () => { if (unsubscribe) unsubscribe(); };
   }, [selectedDepotId]);
-  
+
+  // Perifer — depo atanmamış siparişleri dinle. Bu liste, seçili depodan
+  // bağımsız olarak ofis lojistik görünümünde her zaman gösterilir.
+  useEffect(() => {
+    const mapSnap = (snap: any) => {
+      const rows = snap.docs
+        .map((d: any) => {
+          const data = d.data();
+          return {
+            ...data,
+            id: d.id,
+            createdAt: (data.createdAt as Timestamp)?.toDate?.() ?? new Date(),
+            transferredAt: data.transferredAt ? (data.transferredAt as Timestamp).toDate() : null,
+          } as Order;
+        })
+        // Only un-routed peripheral orders; routed ones already appear under
+        // their destination depot via the depot-filtered listener above.
+        .filter((o: Order) => !o.depotId);
+      rows.sort((a: Order, b: Order) => {
+        const bTime = b.createdAt instanceof Date ? b.createdAt.getTime() : 0;
+        const aTime = a.createdAt instanceof Date ? a.createdAt.getTime() : 0;
+        return bTime - aTime;
+      });
+      setPeripheralOrders(rows);
+    };
+
+    const qPerif = query(collection(db, 'orders'), where('isPeripheral', '==', true));
+    const unsub = onSnapshot(qPerif, mapSnap, (err) => {
+      siparislerLogger.warn('Perifer sipariş dinleyici hatası', {
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
+    });
+    return () => unsub();
+  }, []);
+
 
   useEffect(() => {
     (async () => {
@@ -183,16 +242,24 @@ export default function SiparislerPanel(): JSX.Element {
         setDepots(filteredDepots);
         setHospitals(hSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
         setProductCodes(pSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
-        setDepoStok(sSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)));
+        setDepoStok(filterByCompanyScope(
+          sSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
+          currentCompanyId,
+          isSuperAdmin,
+        ));
         
-        if (filteredDepots.length > 0) setSelectedDepotId(filteredDepots[0].id);
+        // Lojistik sorumlusu depo seçimine ihtiyaç duymaz; listesini sadece
+        // atanan laboratuvarlara ait perifer siparişlerden oluşturur.
+        if (filteredDepots.length > 0 && currentUserProfile?.role !== 'lojistik_sorumlusu') {
+          setSelectedDepotId(filteredDepots[0].id);
+        }
       } catch (e) {
         toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
       } finally {
         setIsLoading(false);
       }
     })();
-  }, [toast, currentUserProfile]);
+  }, [toast, currentUserProfile, currentCompanyId, isSuperAdmin]);
 
 
   const addManualItem = () => {
@@ -221,7 +288,8 @@ export default function SiparislerPanel(): JSX.Element {
       return;
     }
     const orderId = generateId();
-    const hospitalName = hospitals.find(h => h.id === selectedLabId)?.name || 'Bilinmeyen Kurum';
+    const selectedHospital = hospitals.find(h => h.id === selectedLabId);
+    const hospitalName = selectedHospital?.name || 'Bilinmeyen Kurum';
     const newOrder: Omit<Order, 'id'> = {
       depotId: selectedDepotId,
       labId: selectedLabId,
@@ -229,6 +297,7 @@ export default function SiparislerPanel(): JSX.Element {
       items: orderItems,
       createdAt: new Date(),
       status: 'pending',
+      isPeripheral: selectedHospital?.perifer ?? false,
       createdBy: currentUserProfile?.name || currentUser?.email || 'Bilinmeyen Kullanıcı',
       createdById: currentUser?.uid || 'unknown',
       transferredAt: null,
@@ -445,6 +514,22 @@ export default function SiparislerPanel(): JSX.Element {
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [isProductPopoverOpen, setIsProductPopoverOpen] = useState(false);
 
+  // Lojistik sorumlusu rolü: sipariş oluşturma ve depo seçim akışları gizlenir,
+  // yalnızca kendisine atanan laboratuvarların perifer siparişlerini görür.
+  const isLojistikSorumlusu = currentUserProfile?.role === 'lojistik_sorumlusu';
+
+  const assignedLabIdSet = useMemo(() => {
+    const set = new Set<string>();
+    (currentUserProfile?.assignedLaboratories ?? []).forEach(id => { if (id) set.add(id); });
+    return set;
+  }, [currentUserProfile?.assignedLaboratories]);
+
+  useEffect(() => {
+    if (isLojistikSorumlusu && activeTab !== 'pending') {
+      setActiveTab('pending');
+    }
+  }, [isLojistikSorumlusu, activeTab]);
+
   const selectedLabName = useMemo(
     () => hospitals.find(h => h.id === selectedLabId)?.name ?? '',
     [hospitals, selectedLabId]
@@ -455,10 +540,51 @@ export default function SiparislerPanel(): JSX.Element {
     [depots, selectedDepotId]
   );
 
-  const pendingOrders = useMemo(
-    () => allOrders.filter(o => o.status !== 'completed'),
-    [allOrders]
-  );
+  const pendingOrders = useMemo(() => {
+    const seen = new Set<string>();
+    const merged: Order[] = [];
+    // Lojistik sorumlusu sadece perifer akışını yönetir; depo bazlı
+    // listeden gelen siparişler gösterilmez.
+    const sources = isLojistikSorumlusu ? [peripheralOrders] : [allOrders, peripheralOrders];
+    sources.flat().forEach(o => {
+      if (!o?.id || seen.has(o.id)) return;
+      if (o.status === 'completed') return;
+      if (isLojistikSorumlusu) {
+        // Kullanıcı yönetiminde atanan laboratuvarların dışındaki perifer
+        // siparişleri bu kullanıcıya görünmez.
+        if (!o.labId || !assignedLabIdSet.has(o.labId)) return;
+      }
+      seen.add(o.id);
+      merged.push(o);
+    });
+    merged.sort((a, b) => {
+      const at = a.createdAt instanceof Date ? a.createdAt.getTime() : 0;
+      const bt = b.createdAt instanceof Date ? b.createdAt.getTime() : 0;
+      return bt - at;
+    });
+    return merged;
+  }, [allOrders, peripheralOrders, isLojistikSorumlusu, assignedLabIdSet]);
+
+  const peripheralLabIds = useMemo(() => {
+    const set = new Set<string>();
+    hospitals.forEach(h => { if (h?.perifer && h.id) set.add(h.id); });
+    return set;
+  }, [hospitals]);
+
+  // Bir sipariş "perifer UI" gösterir ancak HENÜZ bir depoya yönlendirilmediyse:
+  // - Ofisin "Siparişi Gör"/"Depoya Yönlendir" akışına uygundur
+  // - Depoya yönlendirildiyse (`depotId` set edilmişse) normal toplama akışına geçer
+  const isOrderPeripheral = useCallback((order: Order) => {
+    if (order.depotId) return false;
+    if (order.isPeripheral === true) return true;
+    if (order.labId && peripheralLabIds.has(order.labId)) return true;
+    return false;
+  }, [peripheralLabIds]);
+
+  const openPeripheralOrder = useCallback((order: Order) => {
+    if (!order.id) return;
+    router.push(`/siparisler/${order.id}/perifer`);
+  }, [router]);
 
   const totalDraftItems = orderItems.length;
   const totalDraftAdet = orderItems.reduce((sum, i) => sum + (Number(i.adet) || 0), 0);
@@ -479,6 +605,11 @@ export default function SiparislerPanel(): JSX.Element {
     hasItems: orderItems.length > 0,
   }), [selectedDepotId, selectedLabId, orderItems]);
 
+  // ── Lojistik Sorumlusu: completely different UI ──
+  if (isLojistikSorumlusu) {
+    return <LojistikSiparisView />;
+  }
+
   return (
     <div
       className="cihaz-shell px-3 py-4 sm:px-5 sm:py-6 space-y-4 sm:space-y-5 min-h-screen"
@@ -493,8 +624,9 @@ export default function SiparislerPanel(): JSX.Element {
             Siparişler
           </h1>
           <p className="text-[11px] sm:text-xs text-[var(--dashboard-muted)] truncate">
-            {depotName || 'Depo seçin'}
-            {selectedLabName ? ` · ${selectedLabName}` : ''}
+            {isLojistikSorumlusu
+              ? `Perifer siparişler · ${pendingOrders.length}`
+              : `${depotName || 'Depo seçin'}${selectedLabName ? ` · ${selectedLabName}` : ''}`}
           </p>
         </div>
         {/* Secondary actions - more menu */}
@@ -522,54 +654,58 @@ export default function SiparislerPanel(): JSX.Element {
       </div>
 
       {/* ══════════════════════ DEPOT SELECTOR ══════════════════════ */}
-      <div className="cihaz-card p-3 sm:p-4">
-        <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1.5">Çalışma Deposu</label>
-        <Select value={selectedDepotId} onValueChange={setSelectedDepotId} disabled={isLoading}>
-          <SelectTrigger className="w-full bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl h-10">
-            <SelectValue placeholder="Depo seçin..." />
-          </SelectTrigger>
-          <SelectContent>
-            {depots.map(d => <SelectItem key={d.id} value={d.id ?? ''}>{d.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
+      {!isLojistikSorumlusu && (
+        <div className="cihaz-card p-3 sm:p-4">
+          <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1.5">Çalışma Deposu</label>
+          <Select value={selectedDepotId} onValueChange={setSelectedDepotId} disabled={isLoading}>
+            <SelectTrigger className="w-full bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl h-10">
+              <SelectValue placeholder="Depo seçin..." />
+            </SelectTrigger>
+            <SelectContent>
+              {depots.map(d => <SelectItem key={d.id} value={d.id ?? ''}>{d.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
 
       {/* ══════════════════════ TAB SWITCHER ══════════════════════ */}
-      <div className="flex rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] p-1 gap-1">
-        <button
-          onClick={() => setActiveTab('create')}
-          className={cn(
-            "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs sm:text-sm font-semibold transition-all",
-            activeTab === 'create'
-              ? "bg-[var(--dashboard-surface)] shadow-[var(--dashboard-raised-soft)] text-[var(--dashboard-text)]"
-              : "text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]"
-          )}
-        >
-          <PlusCircle className="h-4 w-4" />
-          Oluştur
-          {totalDraftItems > 0 && (
-            <span className="ml-1 px-1.5 py-0.5 rounded-md bg-[var(--dashboard-accent)] text-white text-[10px] font-bold">{totalDraftItems}</span>
-          )}
-        </button>
-        <button
-          onClick={() => setActiveTab('pending')}
-          className={cn(
-            "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs sm:text-sm font-semibold transition-all",
-            activeTab === 'pending'
-              ? "bg-[var(--dashboard-surface)] shadow-[var(--dashboard-raised-soft)] text-[var(--dashboard-text)]"
-              : "text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]"
-          )}
-        >
-          <Package className="h-4 w-4" />
-          Bekleyen
-          {pendingOrders.length > 0 && (
-            <span className="ml-1 px-1.5 py-0.5 rounded-md bg-amber-500 text-white text-[10px] font-bold">{pendingOrders.length}</span>
-          )}
-        </button>
-      </div>
+      {!isLojistikSorumlusu && (
+        <div className="flex rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] p-1 gap-1">
+          <button
+            onClick={() => setActiveTab('create')}
+            className={cn(
+              "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs sm:text-sm font-semibold transition-all",
+              activeTab === 'create'
+                ? "bg-[var(--dashboard-surface)] shadow-[var(--dashboard-raised-soft)] text-[var(--dashboard-text)]"
+                : "text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]"
+            )}
+          >
+            <PlusCircle className="h-4 w-4" />
+            Oluştur
+            {totalDraftItems > 0 && (
+              <span className="ml-1 px-1.5 py-0.5 rounded-md bg-[var(--dashboard-accent)] text-white text-[10px] font-bold">{totalDraftItems}</span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab('pending')}
+            className={cn(
+              "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs sm:text-sm font-semibold transition-all",
+              activeTab === 'pending'
+                ? "bg-[var(--dashboard-surface)] shadow-[var(--dashboard-raised-soft)] text-[var(--dashboard-text)]"
+                : "text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]"
+            )}
+          >
+            <Package className="h-4 w-4" />
+            Bekleyen
+            {pendingOrders.length > 0 && (
+              <span className="ml-1 px-1.5 py-0.5 rounded-md bg-amber-500 text-white text-[10px] font-bold">{pendingOrders.length}</span>
+            )}
+          </button>
+        </div>
+      )}
 
       {/* ══════════════════════ CREATE TAB ══════════════════════ */}
-      {activeTab === 'create' && (
+      {!isLojistikSorumlusu && activeTab === 'create' && (
         <div className="space-y-4">
           {/* ── Stepper ── */}
           <div className="flex items-center justify-center gap-0 px-2">
@@ -933,7 +1069,7 @@ export default function SiparislerPanel(): JSX.Element {
       )}
 
       {/* ══════════════════════ PENDING TAB ══════════════════════ */}
-      {activeTab === 'pending' && (
+      {(isLojistikSorumlusu || activeTab === 'pending') && (
         <div className="space-y-3">
           {pendingOrders.length === 0 ? (
             <div className="cihaz-card-strong flex flex-col items-center justify-center py-16 sm:py-20 text-center px-4">
@@ -948,6 +1084,23 @@ export default function SiparislerPanel(): JSX.Element {
               const totalAdet = (order.items ?? []).reduce((sum, it) => sum + (Number(it.adet) || 0), 0);
               const totalKalem = (order.items ?? []).length;
               const isPicking = order.status === 'toplaniyor';
+              const isEksik = order.status === 'eksik';
+              const isPerifer = isOrderPeripheral(order);
+
+              const statusLabel = isEksik
+                ? 'Eksik'
+                : isPicking
+                  ? 'Toplanıyor'
+                  : isPerifer
+                    ? 'Perifer'
+                    : 'Bekliyor';
+              const statusClass = isEksik
+                ? "bg-red-100 text-red-700"
+                : isPicking
+                  ? "bg-blue-100 text-blue-700"
+                  : isPerifer
+                    ? "bg-purple-100 text-purple-700"
+                    : "bg-amber-100 text-amber-700";
 
               return (
                 <article
@@ -967,11 +1120,9 @@ export default function SiparislerPanel(): JSX.Element {
                       {/* Status badge */}
                       <span className={cn(
                         "shrink-0 inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] sm:text-xs font-semibold",
-                        isPicking
-                          ? "bg-blue-100 text-blue-700"
-                          : "bg-amber-100 text-amber-700"
+                        statusClass
                       )}>
-                        {isPicking ? 'Toplanıyor' : 'Bekliyor'}
+                        {statusLabel}
                       </span>
                     </div>
 
@@ -989,19 +1140,35 @@ export default function SiparislerPanel(): JSX.Element {
 
                     {/* Actions */}
                     <div className="flex items-center gap-2 pt-1">
-                      <button
-                        onClick={() => startPickingProcess(order)}
-                        disabled={isProcessing}
-                        className={cn(
-                          "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all",
-                          !isProcessing
-                            ? "bg-[var(--dashboard-accent)] text-white shadow-[var(--dashboard-raised-soft)] hover:-translate-y-0.5 active:translate-y-0 active:shadow-[var(--dashboard-pressed)]"
-                            : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] cursor-not-allowed"
-                        )}
-                      >
-                        {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-                        {isPicking ? 'Toplamaya Devam Et' : 'Toplamayı Başlat'}
-                      </button>
+                      {isPerifer ? (
+                        <button
+                          onClick={() => openPeripheralOrder(order)}
+                          disabled={isProcessing}
+                          className={cn(
+                            "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all",
+                            !isProcessing
+                              ? "bg-purple-600 text-white shadow-[var(--dashboard-raised-soft)] hover:-translate-y-0.5 active:translate-y-0 active:shadow-[var(--dashboard-pressed)]"
+                              : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] cursor-not-allowed"
+                          )}
+                        >
+                          <ArrowRight className="h-4 w-4" />
+                          Siparişi Gör
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => startPickingProcess(order)}
+                          disabled={isProcessing}
+                          className={cn(
+                            "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all",
+                            !isProcessing
+                              ? "bg-[var(--dashboard-accent)] text-white shadow-[var(--dashboard-raised-soft)] hover:-translate-y-0.5 active:translate-y-0 active:shadow-[var(--dashboard-pressed)]"
+                              : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] cursor-not-allowed"
+                          )}
+                        >
+                          {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+                          {isPicking ? 'Toplamaya Devam Et' : 'Toplamayı Başlat'}
+                        </button>
+                      )}
                       <button
                         onClick={() => handleDeleteOrder(order.id ?? '')}
                         disabled={isProcessing}

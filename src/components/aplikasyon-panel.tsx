@@ -10,6 +10,8 @@ import { useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { useAuth } from '@/contexts/auth-context';
+import { matchesCompanyScope } from '@/lib/company-scope';
 
 
 
@@ -57,6 +59,7 @@ export default function AplikasyonPanel({
 }: AplikasyonPanelProps) {
   const router = useRouter();
   const [expandedPoolId, setExpandedPoolId] = useState<string | null>(null);
+  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   // Open fault reports - deviceIds with active faults
   const [faultyDeviceIds, setFaultyDeviceIds] = useState<Set<string>>(new Set());
@@ -70,6 +73,7 @@ export default function AplikasyonPanel({
       const ids = new Set<string>();
       snap.docs.forEach((d) => {
         const data = d.data();
+        if (!matchesCompanyScope(data as any, currentCompanyId, isSuperAdmin)) return;
         if (data.deviceId) ids.add(data.deviceId);
       });
       setFaultyDeviceIds(ids);
@@ -77,7 +81,7 @@ export default function AplikasyonPanel({
       console.error('Error listening open fault reports:', err);
     });
     return () => unsub();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   const getDevicesForHospital = (hospitalId: string): Device[] => {
     return devices

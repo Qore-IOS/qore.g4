@@ -11,6 +11,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
+import { filterByCompanyScope } from '@/lib/company-scope';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -21,7 +22,7 @@ import { compareAsc, parse } from 'date-fns';
 export default function SarfDagilimPage() {
   const { toast } = useToast();
   const router = useRouter();
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const [consumableHospitals, setConsumableHospitals] = useState<Hospital[]>([]);
   const [pendingRequests, setPendingRequests] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
@@ -80,13 +81,17 @@ export default function SarfDagilimPage() {
     }
     const q = query(collection(db, 'depoStok'), where('depotId', '==', selectedDepotId), where('isShipped', '==', false));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      setDepotStock(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)));
+      setDepotStock(filterByCompanyScope(
+        snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
+        currentCompanyId,
+        isSuperAdmin,
+      ));
     }, (err) => {
       console.error(err);
       toast({ title: 'Hata', description: 'Depo stoğu güncellenemedi.', variant: 'destructive'});
     });
     return () => unsubscribe();
-  }, [selectedDepotId, toast]);
+  }, [selectedDepotId, toast, currentCompanyId, isSuperAdmin]);
 
   
   const filteredHospitals = useMemo(() => {

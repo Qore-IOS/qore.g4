@@ -126,28 +126,6 @@ type FaultDoc = DeviceFaultReport;
 type StockSourceTab = 'personal' | 'pool' | 'depot';
 
 
-type AiSuggestion = {
-  summary?: string;
-  probableCauses?: string[];
-  suggestedActions?: string[];
-  chronicInsight?: string;
-  resolutionAssessment?: string;
-  evidenceBasedRecommendation?: string;
-  confidence?: number;
-  debug?: string;
-  similarFaultStats?: {
-    total: number;
-    sameModelCount: number;
-    sameTitleCategoryCount: number;
-    resolvedCount: number;
-  };
-  resolutionStats?: {
-    kalici: number;
-    gecici: number;
-    belirsiz: number;
-  };
-};
-
 type HistoryEvent = {
   id: string;
   type: 'opened' | 'note' | 'status_change' | 'closed';
@@ -248,11 +226,6 @@ export default function FaultDetailPage() {
   const [hucreDegisimiSearchQuery, setHucreDegisimiSearchQuery] = useState('');
   const [isSavingHucre, setIsSavingHucre] = useState(false);
   const [isSavingPart, setIsSavingPart] = useState(false);
-
-  const [aiSuggestion, setAiSuggestion] = useState<AiSuggestion | null>(null);
-  const [isAiLoading, setIsAiLoading] = useState(false);
-  const [aiError, setAiError] = useState<string | null>(null);
-
 
   useEffect(() => {
     if (!params?.id) return;
@@ -1305,32 +1278,6 @@ export default function FaultDetailPage() {
   };
 
 
-  const fetchAiSuggestion = useCallback(async (forceRefresh = false) => {
-    if (!fault?.id) return;
-
-    setIsAiLoading(true);
-    setAiError(null);
-    try {
-      const res = await fetch(`/api/ariza-yonetimi/ai-oneri?reportId=${fault.id}${forceRefresh ? '&force=1' : ''}`);
-      const payload = await res.json();
-      if (!res.ok || !payload?.success) {
-        throw new Error(payload?.error || 'AI önerisi alınamadı.');
-      }
-      setAiSuggestion(payload.data || null);
-    } catch (e: any) {
-      setAiError(e?.message || 'AI önerisi alınamadı.');
-      setAiSuggestion(null);
-    } finally {
-      setIsAiLoading(false);
-    }
-  }, [fault?.id]);
-
-  useEffect(() => {
-    if (!fault?.id) return;
-    fetchAiSuggestion();
-  }, [fault?.id, fetchAiSuggestion]);
-
-
 
   const handleShare = async () => {
     if (!fault) return;
@@ -1372,7 +1319,7 @@ export default function FaultDetailPage() {
       prefetchPdfAssets(),
       resolveLabDisplayName(hospitalId, fault.labName || ''),
       QRCode.toDataURL(recordUrl, { errorCorrectionLevel: 'M', margin: 0, scale: 4 }),
-      computeFormNo('deviceFaultReports', 'openedByUid', fault.openedByUid, fault.id, fault.openedByName || '', typeChar, 'openedAt'),
+      computeFormNo('deviceFaultReports', 'openedByUid', fault.openedByUid, fault.id, fault.openedByName || '', typeChar, 'openedAt', [where('faultType', '==', fault.faultType)]),
     ]);
 
     const pdfDoc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -1535,12 +1482,16 @@ export default function FaultDetailPage() {
 
       autoTable(pdfDoc, {
         head: [[txt('Parça'), 'Kod', txt('Seri No'), 'Adet']],
-        body: faultPartChanges.map(part => [
-          txt(part.stokAdi || '-'),
-          txt(part.stokKodu || '-'),
-          txt(part.serialNumber || '-'),
-          String(part.quantity || 1),
-        ]),
+        body: faultPartChanges.map(part => {
+          const serial = (part.serialNumber || '').trim();
+          const displayPartName = serial ? `${part.stokAdi || '-'} (SN: ${serial})` : (part.stokAdi || '-');
+          return [
+            txt(displayPartName),
+            txt(part.stokKodu || '-'),
+            txt(serial || '-'),
+            String(part.quantity || 1),
+          ];
+        }),
         startY: currentY,
         theme: 'grid',
         styles: { font: FONT, fontSize: 10 },
@@ -1875,59 +1826,6 @@ export default function FaultDetailPage() {
           <div className="space-y-3 pt-4 border-t">
             <p className="font-medium">Açıklama</p>
             <p className="text-sm text-muted-foreground whitespace-pre-wrap">{fault.description || '-'}</p>
-          </div>
-
-          <div className="space-y-3 pt-4 border-t">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-violet-500" />
-                <p className="font-medium">AI Önerisi</p>
-              </div>
-              <Button variant="outline" size="sm" onClick={() => fetchAiSuggestion(true)} disabled={isAiLoading}>
-                {isAiLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Yenile'}
-              </Button>
-            </div>
-
-            {isAiLoading && (
-              <div className="text-sm text-muted-foreground flex items-center gap-2">
-                <Loader2 className="h-4 w-4 animate-spin" /> AI önerisi hazırlanıyor...
-              </div>
-            )}
-
-            {aiError && <p className="text-sm text-red-600">{aiError}</p>}
-
-            {!isAiLoading && !aiError && aiSuggestion && (
-              <div className="rounded-lg border bg-violet-50/40 dark:bg-violet-950/20 p-3 space-y-3 text-sm">
-                {aiSuggestion.summary && <p><span className="font-medium">Özet:</span> {aiSuggestion.summary}</p>}
-                {typeof aiSuggestion.confidence === 'number' && (
-                  <p><span className="font-medium">Güven Skoru:</span> %{Math.max(0, Math.min(100, Math.round(aiSuggestion.confidence)))}</p>
-                )}
-                {!!aiSuggestion.probableCauses?.length && (
-                  <div>
-                    <p className="font-medium mb-1">Olası Nedenler</p>
-                    <ul className="list-disc pl-5 space-y-1">
-                      {aiSuggestion.probableCauses.map((item, idx) => <li key={`cause-${idx}`}>{item}</li>)}
-                    </ul>
-                  </div>
-                )}
-                {!!aiSuggestion.suggestedActions?.length && (
-                  <div>
-                    <p className="font-medium mb-1">Önerilen Aksiyonlar</p>
-                    <ul className="list-disc pl-5 space-y-1">
-                      {aiSuggestion.suggestedActions.map((item, idx) => <li key={`action-${idx}`}>{item}</li>)}
-                    </ul>
-                  </div>
-                )}
-                {aiSuggestion.chronicInsight && <p><span className="font-medium">Kronik Sorun Analizi:</span> {aiSuggestion.chronicInsight}</p>}
-                {aiSuggestion.resolutionAssessment && <p><span className="font-medium">Kalıcı/Geçici Çözüm Yorumu:</span> {aiSuggestion.resolutionAssessment}</p>}
-                {aiSuggestion.evidenceBasedRecommendation && <p><span className="font-medium">Cihaz Geçmişine Dayalı Özel Öneri:</span> {aiSuggestion.evidenceBasedRecommendation}</p>}
-                {aiSuggestion.similarFaultStats && (
-                  <p className="text-xs text-muted-foreground">
-                    Benzer arıza: {aiSuggestion.similarFaultStats.total} • Aynı model: {aiSuggestion.similarFaultStats.sameModelCount} • Aynı başlık+kategori: {aiSuggestion.similarFaultStats.sameTitleCategoryCount} • Çözülen: {aiSuggestion.similarFaultStats.resolvedCount}
-                  </p>
-                )}
-              </div>
-            )}
           </div>
 
           {/* Yeni Arıza Akış Sistemi */}

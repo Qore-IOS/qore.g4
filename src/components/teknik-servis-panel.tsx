@@ -10,6 +10,8 @@ import BackButton from './BackButton';
 import { useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { useAuth } from '@/contexts/auth-context';
+import { matchesCompanyScope } from '@/lib/company-scope';
 
 /* ─── Types ─── */
 
@@ -59,6 +61,7 @@ export default function TeknikServisPanel({
 }: TeknikServisPanelProps) {
   const router = useRouter();
   const [expandedPoolId, setExpandedPoolId] = useState<string | null>(null);
+  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   /* ── Open fault reports ── */
   const [faultyDeviceIds, setFaultyDeviceIds] = useState<Set<string>>(new Set());
@@ -72,6 +75,7 @@ export default function TeknikServisPanel({
       const ids = new Set<string>();
       snap.docs.forEach((d) => {
         const data = d.data();
+        if (!matchesCompanyScope(data as any, currentCompanyId, isSuperAdmin)) return;
         if (data.deviceId) ids.add(data.deviceId);
       });
       setFaultyDeviceIds(ids);
@@ -79,7 +83,7 @@ export default function TeknikServisPanel({
       console.error('Error listening open fault reports:', err);
     });
     return () => unsub();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   /* ── Device helpers ── */
 
