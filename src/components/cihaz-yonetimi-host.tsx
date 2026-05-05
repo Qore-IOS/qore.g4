@@ -1,6 +1,19 @@
 'use client';
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import type { Hospital, Device, AssignedDevice, User, MaintenancePlan, MaintenanceLog } from '@/lib/types';
+import {
+  useHospitals,
+  useDevices,
+  useHospitalDeviceAssignments,
+  useUsers,
+  usePersonnelAvailability,
+  useDeviceFaultReports,
+  useDeviceActionForms,
+  useAplikasyonActionForms,
+  useMaintenancePlans,
+  useMaintenanceLogs,
+} from '@/hooks/useFirebaseQueries';
 import {
   Sparkles,
   Building,
@@ -17,7 +30,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
-import { addDoc, collection, getDocs, serverTimestamp } from 'firebase/firestore';
+import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
@@ -41,7 +54,7 @@ import {
   type PersonnelAvailabilityRecord,
   type PersonnelAvailabilityType,
 } from '@/lib/personnel-availability';
-import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { withCompanyScope } from '@/lib/company-scope';
 
 interface PersonnelRowData {
   user: User;
@@ -141,7 +154,6 @@ function MetricCard({ label, value, unit, footer, icon: Icon, tone = 'default', 
 }
 
 export default function CihazYonetimiHost() {
-  const [isLoading, setIsLoading] = useState(true);
   const [isQoreAIPanelOpen, setIsQoreAIPanelOpen] = useState(false);
   const [isAvailabilityDialogOpen, setIsAvailabilityDialogOpen] = useState(false);
   const [availabilityType, setAvailabilityType] = useState<PersonnelAvailabilityType>('office');
@@ -154,142 +166,145 @@ export default function CihazYonetimiHost() {
 
   const { toast } = useToast();
   const router = useRouter();
-  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
+  const { currentUserProfile } = useAuth();
+  const queryClient = useQueryClient();
 
-  const [hospitals, setHospitals] = useState<Hospital[]>([]);
-  const [devices, setDevices] = useState<Device[]>([]);
-  const [hospitalDeviceAssignments, setHospitalDeviceAssignments] = useState<AssignedDevice[]>([]);
-  const [personnelUsers, setPersonnelUsers] = useState<User[]>([]);
-  const [availabilityRecords, setAvailabilityRecords] = useState<PersonnelAvailabilityRecord[]>([]);
-  const [faultRows, setFaultRows] = useState<FaultLike[]>([]);
-  const [formWindows, setFormWindows] = useState<PersonnelFormWindow[]>([]);
-  const [maintenancePlans, setMaintenancePlans] = useState<MaintenancePlan[]>([]);
-  const [maintenanceLogs, setMaintenanceLogs] = useState<MaintenanceLog[]>([]);
+  // TanStack Query — all data is cached and shared with other panels.
+  // Each query handles its own company scope filtering inside the hook.
+  const hospitalsQuery = useHospitals();
+  const devicesQuery = useDevices();
+  const assignmentsQuery = useHospitalDeviceAssignments();
+  const usersQuery = useUsers();
+  const personnelAvailabilityQuery = usePersonnelAvailability();
+  const faultsQuery = useDeviceFaultReports();
+  const teknikFormsQuery = useDeviceActionForms();
+  const aplikasyonFormsQuery = useAplikasyonActionForms();
+  const maintenancePlansQuery = useMaintenancePlans();
+  const maintenanceLogsQuery = useMaintenanceLogs();
 
-  const fetchAllApplicationData = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const [
-        hospitalsSnap,
-        devicesSnap,
-        assignmentsSnap,
-        usersSnap,
-        availabilitySnap,
-        faultsSnap,
-        teknikFormsSnap,
-        aplikasyonFormsSnap,
-        maintenancePlansSnap,
-        maintenanceLogsSnap,
-      ] = await Promise.all([
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'devices')),
-        getDocs(collection(db, 'hospitalDeviceAssignments')),
-        getDocs(collection(db, 'users')),
-        getDocs(collection(db, 'personnelAvailability')),
-        getDocs(collection(db, 'deviceFaultReports')),
-        getDocs(collection(db, 'deviceActionForms')),
-        getDocs(collection(db, 'aplikasyonActionForms')),
-        getDocs(collection(db, 'maintenancePlans')),
-        getDocs(collection(db, 'maintenanceLogs')),
-      ]);
+  const isLoading =
+    hospitalsQuery.isLoading ||
+    devicesQuery.isLoading ||
+    assignmentsQuery.isLoading ||
+    usersQuery.isLoading ||
+    personnelAvailabilityQuery.isLoading ||
+    faultsQuery.isLoading ||
+    teknikFormsQuery.isLoading ||
+    aplikasyonFormsQuery.isLoading ||
+    maintenancePlansQuery.isLoading ||
+    maintenanceLogsQuery.isLoading;
 
-      setHospitals(filterByCompanyScope(
-        hospitalsSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as Hospital),
-        currentCompanyId, isSuperAdmin,
-      ));
-      setDevices(filterByCompanyScope(
-        devicesSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as Device),
-        currentCompanyId, isSuperAdmin,
-      ));
-      setHospitalDeviceAssignments(filterByCompanyScope(
-        assignmentsSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as AssignedDevice),
-        currentCompanyId, isSuperAdmin,
-      ));
-
-      const users = filterByCompanyScope(
-        usersSnap.docs
-          .map((d) => ({ uid: d.id, ...d.data() }) as User)
-          .filter((u) => u.role === 'teknik_servis' || u.role === 'aplikasyon'),
-        currentCompanyId, isSuperAdmin,
-      );
-      setPersonnelUsers(users);
-
-      const availability = filterByCompanyScope(
-        availabilitySnap.docs.map((d) => {
-          const data = d.data();
-          const startAt = toDateValue(data.startAt);
-          const endAt = toDateValue(data.endAt);
-          if (!startAt || !endAt || !data.uid) return null;
-          return {
-            id: d.id,
-            uid: data.uid,
-            type: data.type === 'training' ? 'training' : 'office',
-            description: data.description || '',
-            startAt, endAt,
-            createdAt: toDateValue(data.createdAt),
-            createdByUid: data.createdByUid || null,
-            companyId: data.companyId,
-          } as PersonnelAvailabilityRecord;
-        }).filter((i): i is PersonnelAvailabilityRecord => Boolean(i)),
-        currentCompanyId, isSuperAdmin,
-      );
-      setAvailabilityRecords(availability);
-
-      const faults = filterByCompanyScope(faultsSnap.docs.map((d) => {
-        const data = d.data();
-        return {
-          assignedToUid: data.assignedToUid || null,
-          status: data.status,
-          interventionStartedAt: toDateValue(data.interventionStartedAt),
-          hospitalId: data.hospitalId || null,
-          openedAt: toDateValue(data.openedAt),
-          companyId: data.companyId,
-        } as FaultLike;
-      }), currentCompanyId, isSuperAdmin);
-      setFaultRows(faults);
-
-      const mapFormsToWindows = (docs: typeof teknikFormsSnap.docs) => docs
-        .map((d) => {
-          const data = d.data();
-          const startDate = String(data.baslangicTarihi || '').trim();
-          const endDate = String(data.bitisTarihi || '').trim();
-          const startTime = String(data.baslangicSaati || '').trim();
-          const endTime = String(data.bitisSaati || '').trim();
-          const uid = data.createdByUid;
-          if (!uid || !startDate || !endDate || !startTime || !endTime) return null;
-          const startAt = new Date(`${startDate}T${startTime}:00`);
-          const endAt = new Date(`${endDate}T${endTime}:00`);
-          if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime())) return null;
-          return { uid, hospitalId: data.hospitalId || null, startAt, endAt } as PersonnelFormWindow;
-        })
-        .filter((i): i is PersonnelFormWindow => Boolean(i));
-
-      setFormWindows([
-        ...mapFormsToWindows(teknikFormsSnap.docs),
-        ...mapFormsToWindows(aplikasyonFormsSnap.docs),
-      ]);
-
-      setMaintenancePlans(maintenancePlansSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as MaintenancePlan));
-      setMaintenanceLogs(maintenanceLogsSnap.docs.map((d) => {
-        const data = d.data();
-        return {
-          id: d.id,
-          ...data,
-          completedAt: data.completedAt?.toDate?.() || null,
-          nextDueDate: data.nextDueDate?.toDate?.() || null,
-        } as MaintenanceLog;
-      }));
-    } catch (error) {
-      console.error('Device management data fetch error:', error);
-      toast({ title: 'Veri Hatası', description: 'Cihaz yönetimi verileri yüklenemedi.', variant: 'destructive' });
-    } finally {
-      setIsLoading(false);
-    }
-  }, [toast, currentCompanyId, isSuperAdmin]);
-
+  // Surface fetch failures via toast (TanStack Query handles retry; we notify on final error).
   useEffect(() => {
-    fetchAllApplicationData();
-  }, [fetchAllApplicationData]);
+    const anyError =
+      hospitalsQuery.isError || devicesQuery.isError || assignmentsQuery.isError ||
+      usersQuery.isError || personnelAvailabilityQuery.isError || faultsQuery.isError ||
+      teknikFormsQuery.isError || aplikasyonFormsQuery.isError ||
+      maintenancePlansQuery.isError || maintenanceLogsQuery.isError;
+    if (anyError) {
+      toast({ title: 'Veri Hatası', description: 'Cihaz yönetimi verileri yüklenemedi.', variant: 'destructive' });
+    }
+  }, [
+    hospitalsQuery.isError, devicesQuery.isError, assignmentsQuery.isError,
+    usersQuery.isError, personnelAvailabilityQuery.isError, faultsQuery.isError,
+    teknikFormsQuery.isError, aplikasyonFormsQuery.isError,
+    maintenancePlansQuery.isError, maintenanceLogsQuery.isError, toast,
+  ]);
+
+  const hospitals = useMemo<Hospital[]>(
+    () => (hospitalsQuery.data ?? []) as Hospital[],
+    [hospitalsQuery.data],
+  );
+  const devices = useMemo<Device[]>(
+    () => (devicesQuery.data ?? []) as Device[],
+    [devicesQuery.data],
+  );
+  const hospitalDeviceAssignments = useMemo<AssignedDevice[]>(
+    () => (assignmentsQuery.data ?? []) as AssignedDevice[],
+    [assignmentsQuery.data],
+  );
+
+  const personnelUsers = useMemo<User[]>(
+    () =>
+      ((usersQuery.data ?? []) as User[]).filter(
+        (u) => u.role === 'teknik_servis' || u.role === 'aplikasyon',
+      ),
+    [usersQuery.data],
+  );
+
+  const availabilityRecords = useMemo<PersonnelAvailabilityRecord[]>(() => {
+    const raw = (personnelAvailabilityQuery.data ?? []) as Array<Record<string, any>>;
+    return raw
+      .map((data) => {
+        const startAt = toDateValue(data.startAt);
+        const endAt = toDateValue(data.endAt);
+        if (!startAt || !endAt || !data.uid) return null;
+        return {
+          id: data.id,
+          uid: data.uid,
+          type: data.type === 'training' ? 'training' : 'office',
+          description: data.description || '',
+          startAt,
+          endAt,
+          createdAt: toDateValue(data.createdAt),
+          createdByUid: data.createdByUid || null,
+          companyId: data.companyId,
+        } as PersonnelAvailabilityRecord;
+      })
+      .filter((i): i is PersonnelAvailabilityRecord => Boolean(i));
+  }, [personnelAvailabilityQuery.data]);
+
+  const faultRows = useMemo<FaultLike[]>(() => {
+    const raw = (faultsQuery.data ?? []) as Array<Record<string, any>>;
+    return raw.map((data) => ({
+      assignedToUid: data.assignedToUid || null,
+      status: data.status,
+      interventionStartedAt: toDateValue(data.interventionStartedAt),
+      hospitalId: data.hospitalId || null,
+      openedAt: toDateValue(data.openedAt),
+      companyId: data.companyId,
+    }));
+  }, [faultsQuery.data]);
+
+  const formWindows = useMemo<PersonnelFormWindow[]>(() => {
+    const buildWindow = (data: Record<string, any>): PersonnelFormWindow | null => {
+      const startDate = String(data.baslangicTarihi || '').trim();
+      const endDate = String(data.bitisTarihi || '').trim();
+      const startTime = String(data.baslangicSaati || '').trim();
+      const endTime = String(data.bitisSaati || '').trim();
+      const uid = data.createdByUid;
+      if (!uid || !startDate || !endDate || !startTime || !endTime) return null;
+      const startAt = new Date(`${startDate}T${startTime}:00`);
+      const endAt = new Date(`${endDate}T${endTime}:00`);
+      if (Number.isNaN(startAt.getTime()) || Number.isNaN(endAt.getTime())) return null;
+      return { uid, hospitalId: data.hospitalId || null, startAt, endAt };
+    };
+    const teknikData = (teknikFormsQuery.data ?? []) as Array<Record<string, any>>;
+    const aplikasyonData = (aplikasyonFormsQuery.data ?? []) as Array<Record<string, any>>;
+    return [
+      ...teknikData.map(buildWindow),
+      ...aplikasyonData.map(buildWindow),
+    ].filter((i): i is PersonnelFormWindow => Boolean(i));
+  }, [teknikFormsQuery.data, aplikasyonFormsQuery.data]);
+
+  const maintenancePlans = useMemo<MaintenancePlan[]>(
+    () => (maintenancePlansQuery.data ?? []) as MaintenancePlan[],
+    [maintenancePlansQuery.data],
+  );
+
+  const maintenanceLogs = useMemo<MaintenanceLog[]>(() => {
+    const raw = (maintenanceLogsQuery.data ?? []) as Array<Record<string, any>>;
+    return raw.map((data) => ({
+      ...data,
+      id: data.id,
+      completedAt: data.completedAt instanceof Date
+        ? data.completedAt
+        : (data.completedAt?.toDate?.() ?? null),
+      nextDueDate: data.nextDueDate instanceof Date
+        ? data.nextDueDate
+        : (data.nextDueDate?.toDate?.() ?? null),
+    } as MaintenanceLog));
+  }, [maintenanceLogsQuery.data]);
 
   const availabilityByUser = useMemo(() => {
     const map = new Map<string, PersonnelAvailabilityRecord[]>();
@@ -428,7 +443,7 @@ export default function CihazYonetimiHost() {
         createdByUid: currentUserProfile.uid,
         createdAt: serverTimestamp(),
       }, currentUserProfile.companyId);
-      const [recordRef] = await Promise.all([
+      await Promise.all([
         addDoc(collection(db, 'personnelAvailability'), payload),
         addDoc(collection(db, 'personnelHistoryLogs'), withCompanyScope({
           uid: currentUserProfile.uid,
@@ -441,15 +456,10 @@ export default function CihazYonetimiHost() {
           metadata: { type: availabilityType },
         }, currentUserProfile.companyId)),
       ]);
-      setAvailabilityRecords((prev) => [...prev, {
-        id: recordRef.id,
-        uid: currentUserProfile.uid,
-        type: availabilityType,
-        description: availabilityDescription.trim(),
-        startAt, endAt,
-        createdAt: new Date(),
-        createdByUid: currentUserProfile.uid,
-      }]);
+      // Invalidate the cached availability records so the new entry shows up
+      // on the next render. TanStack Query refetches automatically when consumers
+      // are mounted, keeping data in sync without manual state mutation.
+      await queryClient.invalidateQueries({ queryKey: ['personnelAvailability'] });
       toast({ title: 'Kaydedildi', description: `${statusLabel} bilgisi personel geçmişine işlendi.` });
       setIsAvailabilityDialogOpen(false);
     } catch (error) {

@@ -197,6 +197,128 @@ export function useUsers() {
   });
 }
 
+/**
+ * Hospital ↔ Device Assignments
+ * Used by device management and maintenance panels.
+ */
+export function useHospitalDeviceAssignments() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['hospitalDeviceAssignments', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const snap = await getDocs(collection(db, 'hospitalDeviceAssignments'));
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+    },
+    staleTime: 30 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+  });
+}
+
+/**
+ * Personnel Availability records (office / training windows)
+ */
+export function usePersonnelAvailability() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['personnelAvailability', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const snap = await getDocs(collection(db, 'personnelAvailability'));
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+}
+
+/**
+ * Device Fault Reports (arıza yönetimi)
+ * Returns the full collection scoped to the user's company.
+ * Cached briefly because faults can be opened/closed frequently throughout the day.
+ */
+export function useDeviceFaultReports() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['deviceFaultReports', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const snap = await getDocs(collection(db, 'deviceFaultReports'));
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+    },
+    staleTime: 60 * 1000, // 1 minute — faults change frequently
+    gcTime: 10 * 60 * 1000,
+  });
+}
+
+/**
+ * Teknik Servis action forms (deviceActionForms collection).
+ */
+export function useDeviceActionForms() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['deviceActionForms', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const snap = await getDocs(collection(db, 'deviceActionForms'));
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+}
+
+/**
+ * Aplikasyon action forms (aplikasyonActionForms collection).
+ */
+export function useAplikasyonActionForms() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['aplikasyonActionForms', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const snap = await getDocs(collection(db, 'aplikasyonActionForms'));
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+}
+
+/**
+ * Maintenance plans
+ */
+export function useMaintenancePlans() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['maintenancePlans', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const snap = await getDocs(collection(db, 'maintenancePlans'));
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+    },
+    staleTime: 30 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+  });
+}
+
+/**
+ * Maintenance logs
+ */
+export function useMaintenanceLogs() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['maintenanceLogs', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const snap = await getDocs(collection(db, 'maintenanceLogs'));
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+}
+
 // ============================================================================
 // DYNAMIC DATA HOOKS - Shorter cache times, more frequent updates
 // ============================================================================
