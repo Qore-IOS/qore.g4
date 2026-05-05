@@ -41,6 +41,58 @@ function normalizeKey(key: string): string {
     .toLowerCase();
 }
 
+type ColumnRole = 'stokKodu' | 'stokAdi' | 'lot' | 'miad' | 'seri' | 'adet';
+
+/**
+ * Inspect a sheet's header row and produce a mapping from each role
+ * (stokKodu, miad, ...) to the original header. Uses keyword matching
+ * against the normalized header so users can use variations like "Miat",
+ * "Barkod Seri", "Lot Numarası", "SKT", etc.
+ */
+function detectExcelColumns(headers: string[]): Partial<Record<ColumnRole, string>> {
+  const result: Partial<Record<ColumnRole, string>> = {};
+  for (const header of headers) {
+    const norm = normalizeKey(header);
+    if (!result.stokKodu && (norm.includes('stokkodu') || norm === 'kod' || norm === 'sku' || norm === 'urunkodu')) {
+      result.stokKodu = header;
+      continue;
+    }
+    if (!result.stokAdi && (norm.includes('stokadi') || norm.includes('urunadi') || norm === 'urun' || norm === 'aciklama')) {
+      result.stokAdi = header;
+      continue;
+    }
+    if (!result.lot && (norm.includes('lot') || norm.includes('parti') || norm.includes('batch'))) {
+      result.lot = header;
+      continue;
+    }
+    if (
+      !result.miad &&
+      (norm.includes('miad') || norm.includes('miat') || norm.includes('skt') ||
+        norm.includes('sonkullanma') || norm.includes('expir') || norm.includes('sonkul'))
+    ) {
+      result.miad = header;
+      continue;
+    }
+    if (
+      !result.seri &&
+      (norm.includes('seri') || norm.includes('barkod') || norm.includes('serial') ||
+        norm.includes('udi'))
+    ) {
+      result.seri = header;
+      continue;
+    }
+    if (
+      !result.adet &&
+      (norm.includes('adet') || norm.includes('miktar') || norm.includes('kutu') ||
+        norm === 'qty' || norm.includes('quantity'))
+    ) {
+      result.adet = header;
+      continue;
+    }
+  }
+  return result;
+}
+
 type ParsedExcelRow = {
   stokKodu: string;
   stokAdi: string;
@@ -711,23 +763,41 @@ export default function LaboratuvarYonetimiPanel() {
         productMap.set(code.trim().toUpperCase(), { stokKodu: code, stokAdi: name });
       });
 
+      // Detect column roles from the very first row's keys. Excel headers
+      // can be "Stok Kodu / Barkod Seri / Miat / Lot" or any reasonable
+      // variation; we use keyword matching so users don't need to use a
+      // single canonical header set.
+      const headerKeys = jsonData.length > 0 ? Object.keys(jsonData[0]) : [];
+      const colMap = detectExcelColumns(headerKeys);
+
+      // Positional fallback when the file has unrecognizable headers.
+      // Default column order: A=Stok Kodu, B=Barkod Seri, C=Miat, D=Lot.
+      const positional = headerKeys;
+      const positionalRole = (role: ColumnRole, index: number): string | undefined =>
+        colMap[role] ?? positional[index];
+
       const rows: ParsedExcelRow[] = [];
 
       for (const rawRow of jsonData) {
-        const row: Record<string, any> = {};
-        for (const key of Object.keys(rawRow)) {
-          row[normalizeKey(key)] = rawRow[key];
-        }
+        const stokKoduHeader = positionalRole('stokKodu', 0);
+        const seriHeader = positionalRole('seri', 1);
+        const miadHeader = positionalRole('miad', 2);
+        const lotHeader = positionalRole('lot', 3);
+        const adetHeader = colMap.adet;
+        const stokAdiHeader = colMap.stokAdi;
 
-        const stokKodu = String(row['stokkodu'] || '').trim();
+        const stokKodu = String((stokKoduHeader && rawRow[stokKoduHeader]) || '').trim();
         if (!stokKodu) continue;
 
         const product = productMap.get(stokKodu.toUpperCase());
-        const stokAdi = String(row['stokadi'] || row['stokadı'] || product?.stokAdi || stokKodu).trim();
-        const lotNumarasi = String(row['lotnumarasi'] || row['lotno'] || row['lot'] || '').trim();
-        const miadRaw = String(row['miad'] || row['sonkullanmatarihi'] || row['skt'] || '').trim();
-        const seriNumarasi = String(row['serinumarasi'] || row['serino'] || row['seri'] || '').trim();
-        const adetRaw = row['adet'] || row['miktar'] || row['quantity'] || '1';
+        const stokAdi = String(
+          (stokAdiHeader && rawRow[stokAdiHeader]) || product?.stokAdi || stokKodu,
+        ).trim();
+        const lotNumarasi = String((lotHeader && rawRow[lotHeader]) || '').trim();
+        const miadRawValue = String((miadHeader && rawRow[miadHeader]) || '').trim();
+        const miadRaw = miadRawValue ? normalizeMiad(miadRawValue) : '';
+        const seriNumarasi = String((seriHeader && rawRow[seriHeader]) || '').trim();
+        const adetRaw = (adetHeader && rawRow[adetHeader]) || '1';
         const adet = Math.max(1, Math.floor(Number(adetRaw) || 1));
 
         let valid = true;
@@ -1445,7 +1515,9 @@ export default function LaboratuvarYonetimiPanel() {
             </div>
 
             <div className="text-xs text-muted-foreground bg-muted/50 rounded-md px-3 py-2">
-              Beklenen sütunlar: <strong>Stok Kodu</strong> (zorunlu), Stok Adı, Lot Numarası, Miad, Seri Numarası, Adet
+              Beklenen sütunlar: <strong>Stok Kodu</strong> (zorunlu), Lot / Lot Numarası, Miad / Miat / SKT,
+              Seri Numarası / Barkod Seri, Adet. Başlık satırı yoksa kolon sırası A=Stok Kodu, B=Barkod Seri,
+              C=Miat, D=Lot olarak okunur.
             </div>
 
             <ScrollArea className="h-[350px] border rounded-md">
