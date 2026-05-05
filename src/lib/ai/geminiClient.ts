@@ -88,7 +88,7 @@ export async function generateWithGemini(options: GenerateOptions): Promise<{ te
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
       lastDebug = `gemini_http_${res.status}:${model}:${errText.slice(0, 180)}`;
-      if (res.status === 400 || res.status === 404) continue;
+      if (res.status === 400 || res.status === 404 || res.status === 429 || res.status === 503) continue;
       throw new Error(lastDebug);
     }
 
@@ -111,5 +111,11 @@ export async function generateWithGemini(options: GenerateOptions): Promise<{ te
   }
 
   aiLogger.error('Gemini tum modellerde basarisiz oldu', { debug: lastDebug });
+  if (lastDebug.startsWith('gemini_http_429')) {
+    throw new Error('Gemini API kotası doldu (rate limit). Lütfen 30-60 saniye bekleyip tekrar deneyin veya farklı bir API anahtarı kullanın.');
+  }
+  if (lastDebug.startsWith('gemini_http_503')) {
+    throw new Error('Gemini API geçici olarak meşgul. Lütfen birkaç saniye sonra tekrar deneyin.');
+  }
   throw new Error(lastDebug);
 }
