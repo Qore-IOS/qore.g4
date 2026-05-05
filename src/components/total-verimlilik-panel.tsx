@@ -83,7 +83,6 @@ import { useAuth } from '@/contexts/auth-context';
 import { totalVerimlilikLogger } from '@/lib/logger';
 import { exportDataToExcel } from '@/lib/utils';
 import { getExchangeRates } from '@/lib/exchange-rates';
-import { generateWithGemini } from '@/lib/ai/geminiClient';
 import Link from 'next/link';
 
 interface TotalVerimlilikPanelProps {
@@ -2795,13 +2794,21 @@ export default function TotalVerimlilikPanel({
           ? `Sadece ${targetCol} sütununu analiz et. Düşük performans, anomali, trend ve aksiyon önerisi ver.\nVeri:${JSON.stringify(subset.map(r => ({ lab: r.lab, stok: r.stok, value: (r as Record<string, unknown>)[targetCol] })))}`
           : `Tek hücre analizi yap. Sütun:${targetCol}. Satır:${JSON.stringify(targetRow)}. Bu değeri anomali açısından değerlendir ve kısa öneri ver.`;
       setAiTargetLabel(mode === 'table' ? 'Tablo Geneli' : mode === 'column' ? `Sütun: ${targetCol}` : `Hücre: ${targetCol}`);
-      const res = await generateWithGemini({
-        systemPrompt: 'Sen sağlık operasyon verimlilik danışmanısın. Cevabı Türkçe, kısa, maddeli ve aksiyon odaklı ver.',
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.2,
-        maxOutputTokens: 1200,
+      const res = await fetch('/api/ai/total-verimlilik-analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          systemPrompt: 'Sen sağlık operasyon verimlilik danışmanısın. Cevabı Türkçe, kısa, maddeli ve aksiyon odaklı ver.',
+          prompt,
+          temperature: 0.2,
+          maxOutputTokens: 1200,
+        }),
       });
-      setAiAnalysisText(res.text || 'AI analiz çıktısı boş döndü.');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data?.message || data?.error || `HTTP ${res.status}`);
+      }
+      setAiAnalysisText(data?.text || 'AI analiz çıktısı boş döndü.');
     } catch (e) {
       setAiAnalysisText(`AI analiz hatası: ${e instanceof Error ? e.message : 'Bilinmeyen hata'}`);
     } finally {
