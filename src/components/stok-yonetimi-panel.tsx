@@ -49,7 +49,14 @@ import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { resolveDefaultTrackingMode } from '@/lib/tracking';
 import { calculateTransferSuggestions, distributeRiskyBoxes, type TransferSuggestion, type LabStockInfo } from '@/lib/rescue-transfer';
 import { createNotification } from '@/lib/notifications';
-import { touchStockMetadata } from '@/hooks/useFirebaseQueries';
+import {
+  touchStockMetadata,
+  useDepots,
+  useProductCodes,
+  useHospitals,
+  useUnshippedDepoStokByDepot,
+  useDepotMinMaxRules,
+} from '@/hooks/useFirebaseQueries';
 
 /* ────────────────────────────────────────────
    Filter Dialog (kept for marka/urunGrubu filters)
@@ -300,24 +307,35 @@ export default function StokYonetimiPanel() {
   const { toast } = useToast();
   const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
 
-  // Master data
-  const [depots, setDepots] = useState<Depot[]>([]);
-  const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
-  const [hospitals, setHospitals] = useState<Hospital[]>([]);
+  // Master data — TanStack Query backed (cache shared across panels & navigations)
+  const depotsQuery = useDepots();
+  const productCodesQuery = useProductCodes();
+  const hospitalsQuery = useHospitals();
+  const depots = useMemo(() => depotsQuery.data ?? [], [depotsQuery.data]);
+  const productCodes = useMemo(() => productCodesQuery.data ?? [], [productCodesQuery.data]);
+  const hospitals = useMemo(() => hospitalsQuery.data ?? [], [hospitalsQuery.data]);
+  const isLoading =
+    depotsQuery.isLoading || productCodesQuery.isLoading || hospitalsQuery.isLoading;
+
   const [selectedDepotId, setSelectedDepotId] = useState<string>('');
-  const [minMaxRules, setMinMaxRules] = useState<Record<string, MinMaxRule>>({});
-  const [isLoading, setIsLoading] = useState(true);
+
+  // Min/max rules for the selected depot — cached, keyed by depotId
+  const minMaxRulesQuery = useDepotMinMaxRules(selectedDepotId || null);
+  const minMaxRules = useMemo(() => minMaxRulesQuery.data ?? {}, [minMaxRulesQuery.data]);
+
+  // Full un-shipped depot stock — cached, server-side filtered by (depotId, isShipped=false).
+  // Returns ALL un-shipped items for the depot (no client-side cap), filtered by company scope.
+  const depotStockQuery = useUnshippedDepoStokByDepot(selectedDepotId || null);
+  const rawDepotStock = useMemo(() => depotStockQuery.data ?? [], [depotStockQuery.data]);
+  const isStockLoading = !!selectedDepotId && depotStockQuery.isLoading;
 
   // Client-side pagination state
-  const [allGroupedRows, setAllGroupedRows] = useState<GroupedStockRow[]>([]);
-  const [columnUniqueValues, setColumnUniqueValues] = useState<PaginatedStockResult['columnValues']>({ stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [] });
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
   const rowsPerPageOptions = [20, 30, 50, 100];
   const [sortField, setSortField] = useState('miad');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [columnFilters, setColumnFilters] = useState<Record<string, string[]>>({});
-  const [isStockLoading, setIsStockLoading] = useState(false);
 
   // Dialogs
   const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false);
@@ -336,124 +354,70 @@ export default function StokYonetimiPanel() {
   const [isBulkRescueModalOpen, setIsBulkRescueModalOpen] = useState(false);
   const [bulkRescueLoading, setBulkRescueLoading] = useState(false);
   const [bulkRescuePlans, setBulkRescuePlans] = useState<Array<{ stokKodu: string; stokAdi: string; riskyBoxes: number; miadDays: number; miad: string; rescuable: number; suggestions: TransferSuggestion[] }>>([]);
-  // For NFC modal & exports we may need raw stock
-  const [rawDepotStock, setRawDepotStock] = useState<DepoStokItem[]>([]);
 
-  /* ─── Fetch master data ─── */
+  // Auto-pick first operational depot once depots are available
   useEffect(() => {
-    (async () => {
-      setIsLoading(true);
-      try {
-        const [depotsSnap, productsSnap, hospitalsSnap] = await Promise.all([
-          getDocs(collection(db, 'depots')),
-          getDocs(collection(db, 'productCodes')),
-          getDocs(collection(db, 'hospitals')),
-        ]);
-        const allDepots = depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
-        setDepots(allDepots);
-        setProductCodes(productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
-        setHospitals(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
+    if (selectedDepotId) return;
+    if (depots.length === 0) return;
+    const operationalDepots = filterOperationalSourceDepots(depots, currentUserProfile);
+    if (operationalDepots.length > 0 && operationalDepots[0]?.id) {
+      setSelectedDepotId(operationalDepots[0].id);
+    }
+  }, [depots, selectedDepotId, currentUserProfile]);
 
-        // Filter out pool warehouses for operational panels
-        const operationalDepots = filterOperationalSourceDepots(allDepots, currentUserProfile);
-        if (operationalDepots.length > 0 && operationalDepots[0]?.id) {
-          setSelectedDepotId(operationalDepots[0].id);
-        }
-      } catch (e) {
-        toast({ title: 'Veri Yükleme Hatası', description: 'Ana veriler yüklenemedi.', variant: 'destructive' });
-      } finally {
-        setIsLoading(false);
-      }
-    })();
-  }, [toast, currentUserProfile]);
-
-  /* ─── Fetch min/max rules when depot changes ─── */
+  // Surface fetch errors via toast (TanStack Query handles retry; we just notify on final error).
   useEffect(() => {
-    if (!selectedDepotId) return;
-    (async () => {
-      try {
-        const rulesRef = collection(db, "depots", selectedDepotId, "minMaxRules");
-        const snapshot = await getDocs(rulesRef);
-        const rules: Record<string, MinMaxRule> = {};
-        snapshot.forEach(d => {
-          const rule = d.data() as MinMaxRule;
-          if (rule.stokKodu) rules[rule.stokKodu] = rule;
-        });
-        setMinMaxRules(rules);
-      } catch (e) { console.error("Error fetching min-max rules:", e); }
-    })();
+    if (depotsQuery.isError || productCodesQuery.isError || hospitalsQuery.isError) {
+      toast({ title: 'Veri Yükleme Hatası', description: 'Ana veriler yüklenemedi.', variant: 'destructive' });
+    }
+  }, [depotsQuery.isError, productCodesQuery.isError, hospitalsQuery.isError, toast]);
+
+  useEffect(() => {
+    if (depotStockQuery.isError) {
+      toast({ title: 'Hata', description: 'Stok verileri yüklenemedi.', variant: 'destructive' });
+    }
+  }, [depotStockQuery.isError, toast]);
+
+  // Reset to page 1 when the active depot changes
+  useEffect(() => {
+    setCurrentPage(1);
   }, [selectedDepotId]);
 
-  /* ─── Fetch depot stock (client-side, once per depot) ─── */
-  useEffect(() => {
-    if (!selectedDepotId) {
-      setAllGroupedRows([]);
-      setColumnUniqueValues({ stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [] });
-      setRawDepotStock([]);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      setIsStockLoading(true);
-      try {
-        const stockQuery = query(
-          collection(db, 'depoStok'),
-          where('depotId', '==', selectedDepotId),
-          where('isShipped', '==', false)
-        );
-        const snapshot = await getDocs(stockQuery);
-        if (cancelled) return;
-        const allItems = filterByCompanyScope(
-          snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
-          currentCompanyId,
-          isSuperAdmin,
-        );
-        setRawDepotStock(allItems);
-
-        // Group by (stokKodu, lotNumarasi, miad)
-        const grouped: Record<string, GroupedStockRow> = {};
-        const productMetaByCode = new Map<string, ProductCode>(
-          productCodes.filter((p) => p.stokKodu !== undefined).map((p) => [p.stokKodu!, p] as const)
-        );
-        for (const item of allItems) {
-          const lot = item.lotNumarasi || '';
-          const miad = typeof item.miad === 'string' ? item.miad : '';
-          const gKey = `${item.stokKodu}-${lot}-${miad}`;
-          if (!grouped[gKey]) {
-            grouped[gKey] = {
-              key: gKey,
-              stokKodu: item.stokKodu || '',
-              stokAdi: item.stokAdi || '',
-              lotNumarasi: lot,
-              miad,
-              anaBirim: productMetaByCode.get(item.stokKodu || '')?.anaBirim || 'Adet',
-              rafAdresi: item.rafAdresi || '',
-              quantity: 0,
-              itemIds: [],
-            };
-          }
-          grouped[gKey].quantity += 1;
-          if (item.id) grouped[gKey].itemIds.push(item.id);
-        }
-
-        const rows = Object.values(grouped);
-        setAllGroupedRows(rows);
-        setColumnUniqueValues({
-          stokAdi: [...new Set(rows.map(r => r.stokAdi))].sort(),
-          lotNumarasi: [...new Set(rows.map(r => r.lotNumarasi).filter(Boolean))].sort(),
-          miad: [...new Set(rows.map(r => r.miad).filter(Boolean))].sort(),
-          rafAdresi: [...new Set(rows.map(r => r.rafAdresi).filter(Boolean))].sort(),
-        });
-        setCurrentPage(1);
-      } catch (e) {
-        console.error('Stock fetch error:', e);
-        toast({ title: 'Hata', description: 'Stok verileri yüklenemedi.', variant: 'destructive' });
-      } finally {
-        if (!cancelled) setIsStockLoading(false);
+  // Group rawDepotStock by (stokKodu, lotNumarasi, miad) and derive column values
+  const { allGroupedRows, columnUniqueValues } = useMemo(() => {
+    const productMetaByCode = new Map<string, ProductCode>(
+      productCodes.filter((p) => p.stokKodu !== undefined).map((p) => [p.stokKodu!, p] as const),
+    );
+    const grouped: Record<string, GroupedStockRow> = {};
+    for (const item of rawDepotStock) {
+      const lot = item.lotNumarasi || '';
+      const miad = typeof item.miad === 'string' ? item.miad : '';
+      const gKey = `${item.stokKodu}-${lot}-${miad}`;
+      if (!grouped[gKey]) {
+        grouped[gKey] = {
+          key: gKey,
+          stokKodu: item.stokKodu || '',
+          stokAdi: item.stokAdi || '',
+          lotNumarasi: lot,
+          miad,
+          anaBirim: productMetaByCode.get(item.stokKodu || '')?.anaBirim || 'Adet',
+          rafAdresi: item.rafAdresi || '',
+          quantity: 0,
+          itemIds: [],
+        };
       }
-    })();
-    return () => { cancelled = true; };
-  }, [selectedDepotId, productCodes, toast, currentCompanyId, isSuperAdmin]);
+      grouped[gKey].quantity += 1;
+      if (item.id) grouped[gKey].itemIds.push(item.id);
+    }
+    const rows = Object.values(grouped);
+    const columnUniqueValues: PaginatedStockResult['columnValues'] = {
+      stokAdi: [...new Set(rows.map((r) => r.stokAdi))].sort(),
+      lotNumarasi: [...new Set(rows.map((r) => r.lotNumarasi).filter(Boolean))].sort(),
+      miad: [...new Set(rows.map((r) => r.miad).filter(Boolean))].sort(),
+      rafAdresi: [...new Set(rows.map((r) => r.rafAdresi).filter(Boolean))].sort(),
+    };
+    return { allGroupedRows: rows, columnUniqueValues };
+  }, [rawDepotStock, productCodes]);
 
   const lotTrackedStockCodes = useMemo(() => {
     const tracked = new Set<string>();
