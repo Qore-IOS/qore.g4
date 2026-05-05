@@ -2788,11 +2788,23 @@ export default function TotalVerimlilikPanel({
       }));
       const targetRow = payload?.rowId ? flatVisibleRows.find(r => r.id === payload.rowId) : null;
       const targetCol = payload?.colId || '';
+      const cellTargetValue = targetRow ? (targetRow as unknown as Record<string, unknown>)[targetCol] : undefined;
+      const cellSummary = targetRow ? {
+        lab: targetRow.labName,
+        stok: targetRow.stokAdi,
+        stokKodu: targetRow.stokKodu,
+        sutun: targetCol,
+        deger: cellTargetValue,
+        stokDogrulukFark: targetRow.stokDogrulukFark,
+        kitVerimlilikFark: targetRow.kitVerimlilikFark,
+        kutuKayip: Number(resolveFilterValue(targetRow, 'kutuKayip') || 0),
+        sarfiyatMaliyeti: Number(resolveFilterValue(targetRow, 'sarfiyatMaliyeti') || 0),
+      } : null;
       const prompt = mode === 'table'
         ? `Aşağıdaki total verimlilik verisini analiz et. Smart alertler, auto insights, anomaly detection ve gelecek ay tahmini verimlilik üret. Kısa ve madde madde yaz.\nVeri:${JSON.stringify(subset)}`
         : mode === 'column'
           ? `Sadece ${targetCol} sütununu analiz et. Düşük performans, anomali, trend ve aksiyon önerisi ver.\nVeri:${JSON.stringify(subset.map(r => ({ lab: r.lab, stok: r.stok, value: (r as Record<string, unknown>)[targetCol] })))}`
-          : `Tek hücre analizi yap. Sütun:${targetCol}. Satır:${JSON.stringify(targetRow)}. Bu değeri anomali açısından değerlendir ve kısa öneri ver.`;
+          : `Tek hücre analizi yap. ${targetCol} sütunundaki bu değeri anomali açısından değerlendir ve kısa, maddeli öneri ver.\nVeri:${JSON.stringify(cellSummary)}`;
       setAiTargetLabel(mode === 'table' ? 'Tablo Geneli' : mode === 'column' ? `Sütun: ${targetCol}` : `Hücre: ${targetCol}`);
       const res = await fetch('/api/ai/total-verimlilik-analyze', {
         method: 'POST',
