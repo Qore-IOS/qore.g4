@@ -224,6 +224,32 @@ export function useDepoStokByDepot(depotId: string | null) {
 }
 
 /**
+ * Unshipped depot stock - server-side filtered by (depotId, isShipped=false).
+ * Used by panels that only operate on un-shipped inventory (e.g., StokYonetimi).
+ * Returns ALL un-shipped items for the depot (no client-side cap).
+ */
+export function useUnshippedDepoStokByDepot(depotId: string | null) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['depoStok', 'unshipped', depotId, currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      if (!depotId) return [];
+      const q = query(
+        collection(db, 'depoStok'),
+        where('depotId', '==', depotId),
+        where('isShipped', '==', false),
+      );
+      const snap = await getDocs(q);
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+    },
+    enabled: !!depotId,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+}
+
+/**
  * All Depot Stock - For dashboard summaries
  * No polling - invalidated via metadata listener when stock changes
  */
@@ -461,6 +487,28 @@ export function useMinMaxRules(hospitalId: string | null) {
       return snap.docs.map(d => d.data() as MinMaxRule);
     },
     enabled: !!hospitalId,
+    staleTime: 30 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+  });
+}
+
+/**
+ * Min/Max Rules for a specific depot, returned as a stokKodu → rule map.
+ */
+export function useDepotMinMaxRules(depotId: string | null) {
+  return useQuery({
+    queryKey: ['depotMinMaxRules', depotId],
+    queryFn: async () => {
+      const map: Record<string, MinMaxRule> = {};
+      if (!depotId) return map;
+      const snap = await getDocs(collection(db, 'depots', depotId, 'minMaxRules'));
+      snap.forEach((d) => {
+        const rule = d.data() as MinMaxRule;
+        if (rule.stokKodu) map[rule.stokKodu] = rule;
+      });
+      return map;
+    },
+    enabled: !!depotId,
     staleTime: 30 * 60 * 1000,
     gcTime: 60 * 60 * 1000,
   });
