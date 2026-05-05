@@ -315,10 +315,26 @@ export default function LaboratuvarYonetimiPanel() {
 
         const product = productMap.get(stokKodu.toUpperCase());
         const stokAdi = String(row['stokadi'] || row['stokadı'] || product?.stokAdi || stokKodu).trim();
-        const lotNumarasi = String(row['lotnumarasi'] || row['lotno'] || row['lot'] || '').trim();
-        const miadRaw = String(row['miad'] || row['sonkullanmatarihi'] || row['skt'] || '').trim();
-        const seriNumarasi = String(row['serinumarasi'] || row['serino'] || row['seri'] || '').trim();
-        const adetRaw = row['adet'] || row['miktar'] || row['quantity'] || '1';
+        const lotNumarasi = String(
+          row['lotnumarasi'] || row['lotno'] || row['lot'] || ''
+        ).trim();
+        const miadRawValue = String(
+          row['miad']
+            || row['miat']
+            || row['sonkullanmatarihi']
+            || row['skt']
+            || ''
+        ).trim();
+        const miadRaw = miadRawValue ? normalizeMiad(miadRawValue) : '';
+        const seriNumarasi = String(
+          row['serinumarasi']
+            || row['barkodseri']
+            || row['barkodserisi']
+            || row['serino']
+            || row['seri']
+            || ''
+        ).trim();
+        const adetRaw = row['adet'] || row['miktar'] || row['quantity'] || row['kutu'] || '1';
         const adet = Math.max(1, Math.floor(Number(adetRaw) || 1));
 
         // Validate stokKodu exists in productCodes
