@@ -72,6 +72,7 @@ export interface Hospital {
   customProductOrder?: string[]; // Özel ürün sıralama - sipariş toplama ekranında kullanılır
   perifer?: boolean; // Perifer laboratuvar statüsü - ofis tarafından yönetilen, lojistik paneli açan siparişler
   ceomedCariKodu?: string; // Ceomed ERP'deki cari kodu (örn. M51001) - irsaliye eşlemesi için
+  ekHizmetLabIds?: string[]; // Bu ana laboratuvara bağlı ek hizmet laboratuvarlarının id'leri
   [k: string]: any;
 }
 

@@ -103,6 +103,7 @@ export default function CeomedIrsaliyePanel() {
 
   const [selected, setSelected] = useState<PendingIrsaliye | null>(null);
   const [approving, setApproving] = useState(false);
+  const [targetHospitalId, setTargetHospitalId] = useState<string>('');
 
   useEffect(() => {
     const q = query(collection(db, 'pendingCeomedIrsaliye'));
@@ -206,8 +207,8 @@ export default function CeomedIrsaliyePanel() {
   };
 
   const handleApprove = async (irs: PendingIrsaliye) => {
-    const match = hospitalByCari.get((irs.cariKodu || '').trim().toUpperCase());
-    if (!match) {
+    const mainMatch = hospitalByCari.get((irs.cariKodu || '').trim().toUpperCase());
+    if (!mainMatch) {
       toast({
         title: 'Eşleşme yok',
         description: `${irs.cariKodu} kodlu cariye karşılık gelen laboratuvar bulunamadı. Yönetim → Laboratuvarlar'dan ceomedCariKodu alanını doldurun.`,
@@ -215,6 +216,14 @@ export default function CeomedIrsaliyePanel() {
       });
       return;
     }
+    // Hedef: kullanici secmisse o, yoksa ana eslesme
+    const targetId = targetHospitalId || mainMatch.id;
+    const targetHospital = hospitals.find((h) => h.id === targetId);
+    if (!targetHospital) {
+      toast({ title: 'Hata', description: 'Hedef laboratuvar bulunamadı.', variant: 'destructive' });
+      return;
+    }
+    const match = { id: targetHospital.id, name: targetHospital.name };
 
     setApproving(true);
     try {
@@ -268,6 +277,7 @@ export default function CeomedIrsaliyePanel() {
 
       await batch.commit();
 
+      const wasRouted = match.id !== mainMatch.id;
       await updateDoc(doc(db, 'pendingCeomedIrsaliye', irs.id), {
         status: 'approved',
         approvedAt: serverTimestamp(),
@@ -275,6 +285,9 @@ export default function CeomedIrsaliyePanel() {
         approvedByName: currentUserProfile?.name || currentUser?.email || '',
         hospitalId: match.id,
         hospitalName: match.name,
+        mainHospitalId: mainMatch.id,
+        mainHospitalName: mainMatch.name,
+        routedTo: wasRouted ? match.id : null,
       });
 
       toast({
@@ -460,15 +473,49 @@ export default function CeomedIrsaliyePanel() {
       </div>
 
       {/* Detay Dialog */}
-      <Dialog open={!!selected} onOpenChange={(o) => !o && setSelected(null)}>
+      <Dialog open={!!selected} onOpenChange={(o) => { if (!o) { setSelected(null); setTargetHospitalId(''); } }}>
         <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle>
               {selected?.irsaliyeNo} — {selected?.cariUnvan}
             </DialogTitle>
           </DialogHeader>
-          {selected && (
-            <div className="flex-1 overflow-y-auto space-y-2 pr-2">
+          {selected && (() => {
+            const mainMatch = hospitalByCari.get((selected.cariKodu || '').trim().toUpperCase());
+            const mainHospital = mainMatch ? hospitals.find((h) => h.id === mainMatch.id) : null;
+            const ekHizmetIds = (mainHospital?.ekHizmetLabIds || []) as string[];
+            const ekHizmetLabs = ekHizmetIds
+              .map((id) => hospitals.find((h) => h.id === id))
+              .filter(Boolean) as { id: string; name: string }[];
+            const showRouting = selected.status === 'pending' && mainHospital && ekHizmetLabs.length > 0;
+            return (
+              <>
+                {showRouting && (
+                  <div className="rounded-xl border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)] p-3 mb-2">
+                    <label className="text-xs text-[var(--dashboard-muted)] mb-1 block">
+                      Hedef Laboratuvar (yönlendirme)
+                    </label>
+                    <Select
+                      value={targetHospitalId || mainHospital!.id}
+                      onValueChange={(v) => setTargetHospitalId(v)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={mainHospital!.id}>
+                          {mainHospital!.name} (Ana)
+                        </SelectItem>
+                        {ekHizmetLabs.map((l) => (
+                          <SelectItem key={l.id} value={l.id}>
+                            {l.name} (Ek hizmet)
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                <div className="flex-1 overflow-y-auto space-y-2 pr-2">
               {(selected.items || []).map((item, idx) => {
                 const product = productByStokKodu.get(String(item.STOK_KODU).trim());
                 const isSeri = product?.trackingMode === 'serial';
@@ -520,8 +567,10 @@ export default function CeomedIrsaliyePanel() {
                   </div>
                 );
               })}
-            </div>
-          )}
+                </div>
+              </>
+            );
+          })()}
           <DialogFooter className="gap-2">
             <Button
               variant="outline"
