@@ -73,14 +73,44 @@ pendingCeomedIrsaliye/{ceomedId}
 
 ## Adım 5 — Windows Task Scheduler ile Otomasyon
 
-`run-sync.bat` örneği:
-```bat
-@echo off
-cd /d C:\Users\btuba\Desktop\qore.g4\scripts\ceomed-sync
-call set-env.bat
-node syncToFirestore.js %DATE_BASLANGIC% %DATE_BITIS%
+`run-sync.bat` hazır — `.env` dosyasını yükler, dünden bugüne tarih aralığıyla 3 durumu da çeker, `sync.log`'a yazar.
+
+### Önce `.env` oluştur
+`scripts/ceomed-sync/.env` dosyası (gitignore'da):
+```
+CEOMED_BASE_URL=http://192.168.1.5:8081
+CEOMED_EPOSTA=merkez
+CEOMED_PAROLA=12345
+GOOGLE_APPLICATION_CREDENTIALS=C:\Users\btuba\firebase-sa.json
+FIREBASE_PROJECT_ID=your-project-id
 ```
 
-Sonraki adımlar:
-- Qore UI: Raporlar → Dosya Yönetimi'ne "İrsaliye Çek" butonu
-- Onay akışı: stokKodu eşleşmesi + yeni stok kartı önerisi
+### Test et
+```powershell
+cd C:\Users\btuba\Desktop\qore.g4\scripts\ceomed-sync
+.\run-sync.bat
+type sync.log
+```
+
+### Task Scheduler'a ekle
+1. Başlat → "Görev Zamanlayıcı" / Task Scheduler aç
+2. **Görev Oluştur** (Create Task) — "Temel Görev" değil, tam görev
+3. **Genel** sekmesi:
+   - Ad: `Ceomed Sync`
+   - "Kullanıcı oturum açmış olsun olmasın çalıştır" seç
+   - "En yüksek ayrıcalıklarla çalıştır" işaretle
+4. **Tetikleyiciler** → Yeni:
+   - "Bir programa göre"
+   - Günlük, başlangıç saati 08:00
+   - Tekrar: **15 dakika**, süre: **1 gün**
+5. **Eylemler** → Yeni:
+   - Eylem: Program başlat
+   - Program: `C:\Users\btuba\Desktop\qore.g4\scripts\ceomed-sync\run-sync.bat`
+   - Başlangıç: `C:\Users\btuba\Desktop\qore.g4\scripts\ceomed-sync` (önemli!)
+6. **Koşullar** → "Yalnızca AC güç kaynağında çalıştır" kapat (laptop için)
+7. Kaydet → şifreni iste → ver
+
+Artık her 15 dakikada bir Firestore otomatik güncelleniyor. Logu görmek için:
+```powershell
+type C:\Users\btuba\Desktop\qore.g4\scripts\ceomed-sync\sync.log
+```

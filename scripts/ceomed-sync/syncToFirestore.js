@@ -14,7 +14,13 @@ const { login } = require('./login');
 const { fetchIrsaliyeMaster } = require('./fetchIrsaliyeMaster');
 const { fetchOkutulanBarkod } = require('./fetchOkutulanBarkod');
 
-const ALLOWED_STATUSES = ['KURUMA SEVK EDILDI', 'MALZEME TOPLANABILIR', 'IRSALIYE YAZDIRILDI'];
+const ALLOWED_STATUSES = [
+  'KURUMA SEVK EDILDI',
+  'MALZEME TOPLANABILIR',
+  'MALZEME HAZIRLAMA DEVAM EDIYOR',
+  'IRSALIYE YAZDIRILABILIR',
+  'IRSALIYE YAZDIRILDI',
+];
 
 function initFirestore() {
   if (!admin.apps.length) {
