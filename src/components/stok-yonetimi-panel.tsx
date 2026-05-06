@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Checkbox } from './ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
-import { collection, getDocs, query, where, writeBatch, doc, Timestamp, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, getDoc, query, where, writeBatch, doc, Timestamp, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import {
   PackageSearch, Warehouse, FileSpreadsheet, Loader2,
@@ -376,48 +376,119 @@ export default function StokYonetimiPanel() {
     if (depotStockQuery.isError) {
       toast({ title: 'Hata', description: 'Stok verileri yüklenemedi.', variant: 'destructive' });
     }
-  }, [depotStockQuery.isError, toast]);
+    let cancelled = false;
+    (async () => {
+      setIsStockLoading(true);
+      try {
+        const selectedDepot = depots.find(d => d.id === selectedDepotId);
+        const isCeomed = !!selectedDepot?.ceomedEnabled;
 
-  // Reset to page 1 when the active depot changes
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [selectedDepotId]);
+        let rows: GroupedStockRow[] = [];
 
-  // Group rawDepotStock by (stokKodu, lotNumarasi, miad) and derive column values
-  const { allGroupedRows, columnUniqueValues } = useMemo(() => {
-    const productMetaByCode = new Map<string, ProductCode>(
-      productCodes.filter((p) => p.stokKodu !== undefined).map((p) => [p.stokKodu!, p] as const),
-    );
-    const grouped: Record<string, GroupedStockRow> = {};
-    for (const item of rawDepotStock) {
-      const lot = item.lotNumarasi || '';
-      const miad = typeof item.miad === 'string' ? item.miad : '';
-      const gKey = `${item.stokKodu}-${lot}-${miad}`;
-      if (!grouped[gKey]) {
-        grouped[gKey] = {
-          key: gKey,
-          stokKodu: item.stokKodu || '',
-          stokAdi: item.stokAdi || '',
-          lotNumarasi: lot,
-          miad,
-          anaBirim: productMetaByCode.get(item.stokKodu || '')?.anaBirim || 'Adet',
-          rafAdresi: item.rafAdresi || '',
-          quantity: 0,
-          itemIds: [],
-        };
+        if (isCeomed) {
+          // Ceomed entegre depo: ceomedDepoStok/{depotId} dokümanından oku
+          const ceomedRef = doc(db, 'ceomedDepoStok', selectedDepotId);
+          const ceomedSnap = await getDoc(ceomedRef);
+          if (cancelled) return;
+          setRawDepotStock([]);
+          if (!ceomedSnap.exists()) {
+            toast({
+              title: 'Senkronizasyon yok',
+              description: `Bu depo Ceomed ile entegre ama henüz veri çekilmemiş. Worker'ın çalışmasını bekleyin.`,
+            });
+            rows = [];
+          } else {
+            const data = ceomedSnap.data() as any;
+            const items = (data.items || []) as Array<{
+              stokKodu: string; stokAdi: string; lot: string; miyat: string; adet: number;
+            }>;
+            rows = items.map((it) => ({
+              key: `${it.stokKodu}-${it.lot}-${it.miyat}`,
+              stokKodu: it.stokKodu || '',
+              stokAdi: it.stokAdi || '',
+              lotNumarasi: it.lot || '',
+              miad: it.miyat || '',
+              anaBirim: 'Adet',
+              rafAdresi: '',
+              quantity: Number(it.adet) || 0,
+              itemIds: [],
+            }));
+
+            // Diff toast — son senkronizasyondaki değişimleri göster (oturumda 1 kez)
+            const diff = (data.lastDiff || []) as Array<{ stokKodu: string; lot: string; prev: number; curr: number; change: number; type: string }>;
+            const seenKey = `ceomedDiffSeen:${selectedDepotId}:${data.syncedAt?.seconds || ''}`;
+            if (diff.length > 0 && typeof window !== 'undefined' && !sessionStorage.getItem(seenKey)) {
+              const inc = diff.filter(d => d.change > 0).length;
+              const dec = diff.filter(d => d.change < 0).length;
+              const totalIn = diff.filter(d => d.change > 0).reduce((s, d) => s + d.change, 0);
+              const totalOut = diff.filter(d => d.change < 0).reduce((s, d) => s + Math.abs(d.change), 0);
+              toast({
+                title: 'Ceomed güncellemesi',
+                description: `${diff.length} hareket: +${inc} kalem (${totalIn} adet giriş), -${dec} kalem (${totalOut} adet çıkış).`,
+              });
+              sessionStorage.setItem(seenKey, '1');
+            }
+          }
+        } else {
+          const stockQuery = query(
+            collection(db, 'depoStok'),
+            where('depotId', '==', selectedDepotId),
+            where('isShipped', '==', false)
+          );
+          const snapshot = await getDocs(stockQuery);
+          if (cancelled) return;
+          const allItems = filterByCompanyScope(
+            snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
+            currentCompanyId,
+            isSuperAdmin,
+          );
+          setRawDepotStock(allItems);
+
+          // Group by (stokKodu, lotNumarasi, miad)
+          const grouped: Record<string, GroupedStockRow> = {};
+          const productMetaByCode = new Map<string, ProductCode>(
+            productCodes.filter((p) => p.stokKodu !== undefined).map((p) => [p.stokKodu!, p] as const)
+          );
+          for (const item of allItems) {
+            const lot = item.lotNumarasi || '';
+            const miad = typeof item.miad === 'string' ? item.miad : '';
+            const gKey = `${item.stokKodu}-${lot}-${miad}`;
+            if (!grouped[gKey]) {
+              grouped[gKey] = {
+                key: gKey,
+                stokKodu: item.stokKodu || '',
+                stokAdi: item.stokAdi || '',
+                lotNumarasi: lot,
+                miad,
+                anaBirim: productMetaByCode.get(item.stokKodu || '')?.anaBirim || 'Adet',
+                rafAdresi: item.rafAdresi || '',
+                quantity: 0,
+                itemIds: [],
+              };
+            }
+            grouped[gKey].quantity += 1;
+            if (item.id) grouped[gKey].itemIds.push(item.id);
+          }
+          rows = Object.values(grouped);
+        }
+
+        setAllGroupedRows(rows);
+        setColumnUniqueValues({
+          stokAdi: [...new Set(rows.map(r => r.stokAdi))].sort(),
+          lotNumarasi: [...new Set(rows.map(r => r.lotNumarasi).filter(Boolean))].sort(),
+          miad: [...new Set(rows.map(r => r.miad).filter(Boolean))].sort(),
+          rafAdresi: [...new Set(rows.map(r => r.rafAdresi).filter(Boolean))].sort(),
+        });
+        setCurrentPage(1);
+      } catch (e) {
+        console.error('Stock fetch error:', e);
+        toast({ title: 'Hata', description: 'Stok verileri yüklenemedi.', variant: 'destructive' });
+      } finally {
+        if (!cancelled) setIsStockLoading(false);
       }
-      grouped[gKey].quantity += 1;
-      if (item.id) grouped[gKey].itemIds.push(item.id);
-    }
-    const rows = Object.values(grouped);
-    const columnUniqueValues: PaginatedStockResult['columnValues'] = {
-      stokAdi: [...new Set(rows.map((r) => r.stokAdi))].sort(),
-      lotNumarasi: [...new Set(rows.map((r) => r.lotNumarasi).filter(Boolean))].sort(),
-      miad: [...new Set(rows.map((r) => r.miad).filter(Boolean))].sort(),
-      rafAdresi: [...new Set(rows.map((r) => r.rafAdresi).filter(Boolean))].sort(),
-    };
-    return { allGroupedRows: rows, columnUniqueValues };
-  }, [rawDepotStock, productCodes]);
+    })();
+    return () => { cancelled = true; };
+  }, [selectedDepotId, productCodes, toast, currentCompanyId, isSuperAdmin, depots]);
 
   const lotTrackedStockCodes = useMemo(() => {
     const tracked = new Set<string>();
