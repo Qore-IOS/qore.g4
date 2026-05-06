@@ -32,7 +32,13 @@ async function fetchIrsaliyeMaster({ token, idUser, baslangic, bitis, belgeTipi 
   return json.data;
 }
 
-module.exports = { fetchIrsaliyeMaster };
+const SEVK_EDILDI_DURUM = 'KURUMA SEVK EDILDI';
+
+function filterSevkEdildi(list) {
+  return list.filter((i) => (i.DURUM_ACIKLAMA || '').toUpperCase() === SEVK_EDILDI_DURUM);
+}
+
+module.exports = { fetchIrsaliyeMaster, filterSevkEdildi, SEVK_EDILDI_DURUM };
 
 if (require.main === module) {
   const [, , baslangic, bitis] = process.argv;
@@ -42,16 +48,18 @@ if (require.main === module) {
   }
   (async () => {
     const { token, user } = await login(process.env.CEOMED_EPOSTA, process.env.CEOMED_PAROLA);
-    const list = await fetchIrsaliyeMaster({
+    const all = await fetchIrsaliyeMaster({
       token,
       idUser: user.ID_USER,
       baslangic,
       bitis,
     });
-    console.log(`OK — ${list.length} irsaliye`);
+    const onlySevk = process.argv.includes('--sevk-edildi');
+    const list = onlySevk ? filterSevkEdildi(all) : all;
+    console.log(`OK — ${all.length} irsaliye${onlySevk ? ` (${list.length} adet "${SEVK_EDILDI_DURUM}")` : ''}`);
     for (const i of list) {
       console.log(
-        `  ${i.IRSALIYE_NO}  ${i.TARIH}  ${i.CARI_KODU}  ${i.CARI_UNVAN}  [${i.DURUM_ACIKLAMA}]  EVRAK_SEQ=${i.EVRAK_SEQ}`
+        `  ${i.IRSALIYE_NO}  ${i.TARIH}  ${i.CARI_KODU}  ${i.CARI_UNVAN}  [${i.DURUM_ACIKLAMA}]  ID=${i.ID}`
       );
     }
   })().catch((e) => {

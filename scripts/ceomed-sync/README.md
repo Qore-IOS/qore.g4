@@ -29,14 +29,16 @@ Token: eyJhbGciOiJIUzI1NiIs...
 
 ```bash
 node fetchIrsaliyeMaster.js 05.05.2026 06.05.2026
+# Sadece "KURUMA SEVK EDILDI" durumundakiler:
+node fetchIrsaliyeMaster.js 05.05.2026 06.05.2026 --sevk-edildi
 ```
 
-Çıktıda her satırda `IRSALIYE_NO`, `CARI_KODU`, `DURUM_ACIKLAMA`, `EVRAK_SEQ` görünür. Bir sonraki adımda kullanılacak `EVRAK_SEQ`'i not al.
+Çıktıda her satırda `IRSALIYE_NO`, `CARI_KODU`, `DURUM_ACIKLAMA`, `ID` görünür. Bir sonraki adımda kullanılacak `ID`'yi not al.
 
 ## Adım 3 — İrsaliyenin barkod/ürün listesi
 
 ```bash
-node fetchOkutulanBarkod.js <EVRAK_SEQ>
+node fetchOkutulanBarkod.js <ID_SEVK_MASTER>
 ```
 
 Sadece istenen alanlar dönülür: `BARKOD_SERI`, `BARKOD`, `STOK_KODU`, `LOT`, `MIYAT`, `MIKTAR`.
