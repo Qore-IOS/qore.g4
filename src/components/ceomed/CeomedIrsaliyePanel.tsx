@@ -320,6 +320,15 @@ export default function CeomedIrsaliyePanel() {
     setSelected(null);
   };
 
+  const handleRestore = async (irs: PendingIrsaliye) => {
+    await updateDoc(doc(db, 'pendingCeomedIrsaliye', irs.id), {
+      status: 'pending',
+      restoredAt: serverTimestamp(),
+    });
+    toast({ title: 'Geri yüklendi', description: `${irs.irsaliyeNo} tekrar onay bekliyor.` });
+    setSelected(null);
+  };
+
   return (
     <div className="glass-card rounded-3xl overflow-hidden" style={{ borderRadius: '24px' }}>
       <div className="px-6 pt-6 pb-4 flex items-center gap-3">
@@ -604,6 +613,11 @@ export default function CeomedIrsaliyePanel() {
                   )}
                 </Button>
               </>
+            )}
+            {(selected?.status === 'deleted' || selected?.status === 'rejected') && (
+              <Button onClick={() => selected && handleRestore(selected)}>
+                Geri Yükle
+              </Button>
             )}
           </DialogFooter>
         </DialogContent>
