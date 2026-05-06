@@ -72,8 +72,8 @@ async function syncOnce({ baslangic, bitis, statusFilter }) {
       const existing = await docRef.get();
       const existingStatus = existing.exists ? existing.get('status') : null;
 
-      // Onaylanmış / reddedilmiş kayitlara dokunma — sadece ERP durumunu (durumAciklama) tazele.
-      if (existingStatus === 'approved' || existingStatus === 'rejected') {
+      // Onaylanmis / reddedilmis / silinmis kayitlara dokunma — sadece ERP durumunu (durumAciklama) tazele.
+      if (existingStatus === 'approved' || existingStatus === 'rejected' || existingStatus === 'deleted') {
         await docRef.set(
           {
             durumAciklama: irs.DURUM_ACIKLAMA,

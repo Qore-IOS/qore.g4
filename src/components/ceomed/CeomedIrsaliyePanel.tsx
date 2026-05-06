@@ -11,7 +11,6 @@ import {
   Timestamp,
   updateDoc,
   serverTimestamp,
-  deleteDoc,
   getDocs,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -98,7 +97,7 @@ export default function CeomedIrsaliyePanel() {
 
   // Filters
   const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [recordStatusFilter, setRecordStatusFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
+  const [recordStatusFilter, setRecordStatusFilter] = useState<'pending' | 'approved' | 'rejected' | 'deleted' | 'all'>('pending');
   const [tarihBaslangic, setTarihBaslangic] = useState<string>(''); // yyyy-MM-dd input
   const [tarihBitis, setTarihBitis] = useState<string>('');
 
@@ -168,35 +167,37 @@ export default function CeomedIrsaliyePanel() {
   const handleDelete = async (irs: PendingIrsaliye) => {
     const wasApproved = irs.status === 'approved';
     const note = wasApproved
-      ? `${irs.irsaliyeNo} silinsin mi? Bu irsaliyeden eklenen tüm stok kayıtları da SİLİNECEK.`
-      : `${irs.irsaliyeNo} silinsin mi?`;
+      ? `${irs.irsaliyeNo} silinsin mi? Bu irsaliyeden eklenen tüm stok kayıtları da SİLİNECEK ve sync bunu bir daha yüklemeyecek.`
+      : `${irs.irsaliyeNo} silinsin mi? Sync bunu bir daha yüklemeyecek.`;
     if (!confirm(note)) return;
     try {
       // Approved ise depoStok'tan ceomedIrsaliyeId eşleşen kayıtları temizle
+      let removedStock = 0;
       if (wasApproved) {
         const stockSnap = await getDocs(
           query(collection(db, 'depoStok'), where('ceomedIrsaliyeId', '==', irs.ceomedId))
         );
-        if (stockSnap.size > 0) {
-          // Firestore batch limit 500
-          const chunks: typeof stockSnap.docs[] = [];
-          for (let i = 0; i < stockSnap.docs.length; i += 400) {
-            chunks.push(stockSnap.docs.slice(i, i + 400));
-          }
-          for (const chunk of chunks) {
-            const batch = writeBatch(db);
-            chunk.forEach((d) => batch.delete(d.ref));
-            await batch.commit();
-          }
+        removedStock = stockSnap.size;
+        for (let i = 0; i < stockSnap.docs.length; i += 400) {
+          const chunk = stockSnap.docs.slice(i, i + 400);
+          const batch = writeBatch(db);
+          chunk.forEach((d) => batch.delete(d.ref));
+          await batch.commit();
         }
-        toast({
-          title: 'Silindi',
-          description: `${irs.irsaliyeNo}: ${stockSnap.size} stok kaydı + irsaliye silindi.`,
-        });
-      } else {
-        toast({ title: 'Silindi', description: `${irs.irsaliyeNo} silindi.` });
       }
-      await deleteDoc(doc(db, 'pendingCeomedIrsaliye', irs.id));
+      // Soft-delete: dokümanı silme, status='deleted' işaretle ki sync bir daha geri getirmesin
+      await updateDoc(doc(db, 'pendingCeomedIrsaliye', irs.id), {
+        status: 'deleted',
+        deletedAt: serverTimestamp(),
+        deletedBy: currentUser?.uid || null,
+        deletedByName: currentUserProfile?.name || currentUser?.email || '',
+      });
+      toast({
+        title: 'Silindi',
+        description: wasApproved
+          ? `${irs.irsaliyeNo}: ${removedStock} stok kaydı temizlendi, irsaliye işaretlendi.`
+          : `${irs.irsaliyeNo} silindi.`,
+      });
       setSelected(null);
     } catch (e: any) {
       console.error(e);
@@ -335,6 +336,7 @@ export default function CeomedIrsaliyePanel() {
               <SelectItem value="pending">Onay Bekleyen</SelectItem>
               <SelectItem value="approved">Onaylanan</SelectItem>
               <SelectItem value="rejected">Reddedilen</SelectItem>
+              <SelectItem value="deleted">Silinen</SelectItem>
               <SelectItem value="all">Tümü</SelectItem>
             </SelectContent>
           </Select>
@@ -392,6 +394,8 @@ export default function CeomedIrsaliyePanel() {
                   ? { text: 'Onaylandı', cls: 'bg-emerald-100 text-emerald-700' }
                   : i.status === 'rejected'
                   ? { text: 'Reddedildi', cls: 'bg-red-100 text-red-700' }
+                  : i.status === 'deleted'
+                  ? { text: 'Silindi', cls: 'bg-gray-200 text-gray-600' }
                   : { text: 'Bekliyor', cls: 'bg-amber-100 text-amber-700' };
               return (
                 <div
