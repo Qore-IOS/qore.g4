@@ -234,6 +234,7 @@ export default function LaboratuvarPanel() {
         name: currentHospital.name.trim(),
         kod: (currentHospital.kod || '').trim().toUpperCase(),
         ceomedCariKodu: (currentHospital.ceomedCariKodu || '').trim().toUpperCase() || null,
+        ekHizmetLabIds: currentHospital.ekHizmetLabIds || [],
         address: currentHospital.address || '',
         lat: currentHospital.lat || null,
         lng: currentHospital.lng || null,
@@ -754,6 +755,35 @@ export default function LaboratuvarPanel() {
                   onChange={(e) => setResponsibleEmailsInput(e.target.value)}
                   className="pl-9 min-h-[96px]"
                 />
+              </div>
+
+              <div className="rounded-md border p-3 space-y-2">
+                <Label className="text-sm font-medium">Ek Hizmet Laboratuvarları</Label>
+                <p className="text-xs text-muted-foreground">
+                  Bu ana laboratuvara bağlı alt/ek hizmet labları. Ceomed irsaliyelerinde ana laboratuvar üzerinden gelen ürünler buralara yönlendirilebilir.
+                </p>
+                <div className="max-h-40 overflow-y-auto space-y-1">
+                  {hospitals
+                    .filter((h) => h.id !== currentHospital.id)
+                    .map((h) => {
+                      const checked = (currentHospital.ekHizmetLabIds || []).includes(h.id);
+                      return (
+                        <label key={h.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted/50 rounded px-2 py-1">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => {
+                              const cur = currentHospital.ekHizmetLabIds || [];
+                              const next = e.target.checked ? [...cur, h.id] : cur.filter((id) => id !== h.id);
+                              setCurrentHospital({ ...currentHospital, ekHizmetLabIds: next });
+                            }}
+                          />
+                          <span className="font-mono text-xs text-muted-foreground">{h.kod || '—'}</span>
+                          <span>{h.name}</span>
+                        </label>
+                      );
+                    })}
+                </div>
               </div>
 
               <div className="space-y-4">
