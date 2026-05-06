@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Table, TableHeader, TableHead, TableRow, TableBody, TableCell } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
-import { AlertTriangle, CheckCircle, ArrowLeft, Clock, FileDown, Share2, Edit3, Loader2, MoreVertical, Sun, Moon, Recycle, CornerDownRight, UserPlus, Phone, MapPin, Wrench, Navigation, X, Search, Plus, Camera, ImageIcon, Package, Trash2, Sparkles, Lock, ArrowRightLeft } from 'lucide-react';
+import { AlertTriangle, CheckCircle, ArrowLeft, Clock, FileDown, Share2, Edit3, Loader2, MoreVertical, Sun, Moon, Recycle, CornerDownRight, UserPlus, Phone, MapPin, Wrench, Navigation, X, Search, Plus, Camera, ImageIcon, Package, Trash2, Lock, ArrowRightLeft } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { format, differenceInMinutes, formatDistanceToNow } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -1835,60 +1835,6 @@ export default function FaultDetailPage() {
           <p className="font-medium">Açıklama</p>
           <p className="text-sm text-muted-foreground whitespace-pre-wrap">{fault.description || '-'}</p>
         </div>
-      </div>
-
-      {/* AI Suggestion Card */}
-      <div className="ariza-clay-card space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-violet-500" />
-            <p className="font-medium">AI Önerisi</p>
-          </div>
-          <Button variant="outline" size="sm" onClick={() => fetchAiSuggestion(true)} disabled={isAiLoading}>
-            {isAiLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Yenile'}
-          </Button>
-        </div>
-
-        {isAiLoading && (
-          <div className="text-sm text-muted-foreground flex items-center gap-2">
-            <Loader2 className="h-4 w-4 animate-spin" /> AI önerisi hazırlanıyor...
-          </div>
-        )}
-
-        {aiError && <p className="text-sm text-red-600">{aiError}</p>}
-
-        {!isAiLoading && !aiError && aiSuggestion && (
-          <div className="ariza-ai-surface space-y-3 text-sm">
-            {aiSuggestion.summary && <p><span className="font-medium">Özet:</span> {aiSuggestion.summary}</p>}
-            {typeof aiSuggestion.confidence === 'number' && (
-              <p><span className="font-medium">Güven Skoru:</span> %{Math.max(0, Math.min(100, Math.round(aiSuggestion.confidence)))}</p>
-            )}
-            {!!aiSuggestion.probableCauses?.length && (
-              <div>
-                <p className="font-medium mb-1">Olası Nedenler</p>
-                <ul className="list-disc pl-5 space-y-1">
-                  {aiSuggestion.probableCauses.map((item, idx) => <li key={`cause-${idx}`}>{item}</li>)}
-                </ul>
-              </div>
-            )}
-            {!!aiSuggestion.suggestedActions?.length && (
-              <div>
-                <p className="font-medium mb-1">Önerilen Aksiyonlar</p>
-                <ul className="list-disc pl-5 space-y-1">
-                  {aiSuggestion.suggestedActions.map((item, idx) => <li key={`action-${idx}`}>{item}</li>)}
-                </ul>
-              </div>
-            )}
-            {aiSuggestion.chronicInsight && <p><span className="font-medium">Kronik Sorun Analizi:</span> {aiSuggestion.chronicInsight}</p>}
-            {aiSuggestion.resolutionAssessment && <p><span className="font-medium">Kalıcı/Geçici Çözüm Yorumu:</span> {aiSuggestion.resolutionAssessment}</p>}
-            {aiSuggestion.evidenceBasedRecommendation && <p><span className="font-medium">Cihaz Geçmişine Dayalı Özel Öneri:</span> {aiSuggestion.evidenceBasedRecommendation}</p>}
-            {aiSuggestion.similarFaultStats && (
-              <p className="text-xs text-muted-foreground">
-                Benzer arıza: {aiSuggestion.similarFaultStats.total} • Aynı model: {aiSuggestion.similarFaultStats.sameModelCount} • Aynı başlık+kategori: {aiSuggestion.similarFaultStats.sameTitleCategoryCount} • Çözülen: {aiSuggestion.similarFaultStats.resolvedCount}
-              </p>
-            )}
-          </div>
-        )}
       </div>
 
       {/* Fault Flow Card */}
