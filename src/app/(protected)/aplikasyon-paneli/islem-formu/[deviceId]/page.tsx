@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/button';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, FileText, Cog, Camera, ImageIcon, X, Package, AlertTriangle, Clock, PauseCircle, ChevronLeft, Building2, Download, Upload } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
-import WizardFormShell, { haptic } from '@/components/islem-formu/WizardFormShell';
+import WizardFormShell, { hapticDouble } from '@/components/islem-formu/WizardFormShell';
 import type { WizardHeading } from '@/components/islem-formu/WizardFormShell';
 import Image from 'next/image';
 import { resolveImageSrc } from '@/lib/image-utils';
@@ -30,6 +30,15 @@ import AplikasyonTutanakPDFButton, { generateAplikasyonTutanakPDF } from '@/comp
 import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { reserveActionFormNumber } from '@/lib/form-number';
+import { useQueryClient } from '@tanstack/react-query';
+import {
+  useProductCodes,
+  useUsers,
+  useFaultDefinitions,
+  useMinMaxRules,
+  useMaintenancePlansForDevice,
+  useMaintenanceLogsForDevice,
+} from '@/hooks/useFirebaseQueries';
 
 // Operation types (Yapılan İşlem)
 type OperationType =
@@ -214,8 +223,15 @@ export default function AplikasyonIslemFormuPage() {
   const [cihazDurumu, setCihazDurumu] = useState<CihazDurumu>('');
   const [cihazDurumuAciklama, setCihazDurumuAciklama] = useState('');
   const [eslikEdenPersonel, setEslikEdenPersonel] = useState<{ uid: string; name: string; role: string }[]>([]);
-  const [allUsers, setAllUsers] = useState<User[]>([]);
   const [personelSearchQuery, setPersonelSearchQuery] = useState('');
+
+  // ─── Cached master data (TanStack Query) ───
+  // Shared cache with other panels. After successful form submit we invalidate
+  // device-scoped queries so the next mount/visit shows the freshly written logs.
+  const queryClient = useQueryClient();
+  const usersQueryHook = useUsers();
+  const faultDefinitionsQuery = useFaultDefinitions('aplikasyon');
+  const productCodesQueryForTests = useProductCodes();
 
   // Operation selection modal
   const [isOperationModalOpen, setIsOperationModalOpen] = useState(false);
@@ -270,12 +286,14 @@ export default function AplikasyonIslemFormuPage() {
     },
   ]);
 
-  // Maintenance plans for periyodik bakım
-  const [maintenancePlans, setMaintenancePlans] = useState<MaintenancePlan[]>([]);
-  const [maintenanceLogs, setMaintenanceLogs] = useState<MaintenanceLog[]>([]);
+  // Maintenance plans for periyodik bakım — sourced from TanStack Query.
+  const maintenancePlansQuery = useMaintenancePlansForDevice(deviceId || null, 'aplikasyon');
+  const maintenanceLogsQuery = useMaintenanceLogsForDevice(deviceId || null);
+  const minMaxRulesQuery = useMinMaxRules(device?.hospitalId || null);
   const [selectedMaintenanceTasks, setSelectedMaintenanceTasks] = useState<string[]>([]);
 
-  // Periodic part changes for periyodik bakım
+  // Periodic part changes for periyodik bakım — kept as raw fetches (see comment
+  // in teknik-servis form for rationale).
   const [periodicPartChanges, setPeriodicPartChanges] = useState<PeriodicPartChange[]>([]);
   const [periodicPartChangeLogs, setPeriodicPartChangeLogs] = useState<PeriodicPartChangeLog[]>([]);
   const [selectedPeriodicParts, setSelectedPeriodicParts] = useState<string[]>([]);
@@ -284,13 +302,13 @@ export default function AplikasyonIslemFormuPage() {
   const [autoStockPendingPartId, setAutoStockPendingPartId] = useState<string | null>(null);
   const [isAutoStockCreating, setIsAutoStockCreating] = useState(false);
 
-  // Fault definitions for arıza işlem türü
-  const [faultDefinitions, setFaultDefinitions] = useState<FaultDefinition[]>([]);
+  // Fault definitions, users, maintenance plans/logs and availableTests are all
+  // derived from cached queries (see useMemo blocks below). Variable names are
+  // preserved so the rest of the form continues to compile unchanged.
   const [selectedFaultId, setSelectedFaultId] = useState<string>('');
   const [customFaultName, setCustomFaultName] = useState<string>('');
 
   // Test selection for arıza
-  const [availableTests, setAvailableTests] = useState<string[]>([]);
   const [selectedTests, setSelectedTests] = useState<string[]>([]);
   const [isTestModalOpen, setIsTestModalOpen] = useState(false);
 
@@ -489,61 +507,33 @@ export default function AplikasyonIslemFormuPage() {
     })();
   }, [deviceId, currentCompanyId, isSuperAdmin]);
 
-  // Fetch users for accompanying personnel
-  useEffect(() => {
-    (async () => {
-      try {
-        const snap = await getDocs(collection(db, 'users'));
-        const users = filterByCompanyScope(
-          snap.docs.map(d => ({ uid: d.id, ...d.data() }) as User),
-          currentCompanyId,
-          isSuperAdmin
-        );
-        // Teknik/Aplikasyon personellerinin tamamını göster
-        setAllUsers(users.filter(u => u.role === 'teknik_servis' || u.role === 'aplikasyon'));
-      } catch (err) {
-        console.error("Error fetching users:", err);
-      }
-    })();
-  }, [currentCompanyId, isSuperAdmin]);
+  // ─── Derivations from cached queries (TanStack Query) ───
+  // These replace previous getDocs useEffect blocks. Cache is shared with the
+  // teknik-servis form; first-render is instant on subsequent mounts.
 
-  // Fetch maintenance plans and logs for this device (aplikasyon type)
-  useEffect(() => {
-    if (!rawDeviceId || isLabMode) return;
-    (async () => {
-      try {
-        // Fetch aplikasyon maintenance plans for this device
-        const plansQuery = query(
-          collection(db, 'maintenancePlans'),
-          where('deviceId', '==', deviceId),
-          where('type', '==', 'aplikasyon')
-        );
-        const plansSnap = await getDocs(plansQuery);
-        const plans = plansSnap.docs.map(d => ({ id: d.id, ...d.data() }) as MaintenancePlan);
-        setMaintenancePlans(plans);
+  const allUsers = useMemo<User[]>(() => {
+    const users = (usersQueryHook.data ?? []) as User[];
+    return users.filter((u) => u.role === 'teknik_servis' || u.role === 'aplikasyon');
+  }, [usersQueryHook.data]);
 
-        // Fetch maintenance logs for this device
-        const logsQuery = query(
-          collection(db, 'maintenanceLogs'),
-          where('deviceId', '==', deviceId),
-          orderBy('completedAt', 'desc')
-        );
-        const logsSnap = await getDocs(logsQuery);
-        const logs = logsSnap.docs.map(d => {
-          const data = d.data();
-          return {
-            id: d.id,
-            ...data,
-            completedAt: data.completedAt?.toDate ? data.completedAt.toDate() : new Date(data.completedAt),
-            nextDueDate: data.nextDueDate?.toDate ? data.nextDueDate.toDate() : new Date(data.nextDueDate),
-          } as MaintenanceLog;
-        });
-        setMaintenanceLogs(logs);
-      } catch (err) {
-        console.error("Error fetching maintenance plans/logs:", err);
-      }
-    })();
-  }, [deviceId]);
+  const maintenancePlans = useMemo(
+    () => (maintenancePlansQuery.data ?? []) as MaintenancePlan[],
+    [maintenancePlansQuery.data],
+  );
+
+  const maintenanceLogs = useMemo<MaintenanceLog[]>(() => {
+    const raw = (maintenanceLogsQuery.data ?? []) as Array<Record<string, any>>;
+    return raw.map((data) => ({
+      ...data,
+      id: data.id,
+      completedAt: data.completedAt instanceof Date
+        ? data.completedAt
+        : (data.completedAt?.toDate ? data.completedAt.toDate() : new Date(data.completedAt)),
+      nextDueDate: data.nextDueDate instanceof Date
+        ? data.nextDueDate
+        : (data.nextDueDate?.toDate ? data.nextDueDate.toDate() : new Date(data.nextDueDate)),
+    } as MaintenanceLog));
+  }, [maintenanceLogsQuery.data]);
 
   // Fetch periodic part changes and logs for this device
   useEffect(() => {
@@ -583,56 +573,22 @@ export default function AplikasyonIslemFormuPage() {
     })();
   }, [deviceId]);
 
-  // Fetch fault definitions for aplikasyon type
-  useEffect(() => {
-    (async () => {
-      try {
-        const q = query(
-          collection(db, 'faultDefinitions'),
-          where('type', '==', 'aplikasyon')
-        );
-        const snap = await getDocs(q);
-        const faults = snap.docs.map(d => ({
-          id: d.id,
-          ...d.data(),
-          createdAt: d.data().createdAt?.toDate?.() || null,
-        })) as FaultDefinition[];
-        setFaultDefinitions(faults);
-      } catch (err) {
-        console.error("Error fetching fault definitions:", err);
-      }
-    })();
-  }, []);
+  const faultDefinitions = useMemo(
+    () => (faultDefinitionsQuery.data ?? []) as FaultDefinition[],
+    [faultDefinitionsQuery.data],
+  );
 
-  // Fetch available tests from hospital minMaxRules + productCodes
-  useEffect(() => {
-    if (!device?.hospitalId) return;
-    (async () => {
-      try {
-        // Get minMaxRules for this hospital
-        const minMaxSnap = await getDocs(
-          collection(db, 'hospitals', device.hospitalId, 'minMaxRules')
-        );
-        const stokKodulari = minMaxSnap.docs.map(d => d.id);
-
-        // Get all ProductCodes
-        const productCodesSnap = await getDocs(collection(db, 'productCodes'));
-        const testNames = new Set<string>();
-
-        // Match products with rules and extract testAdi
-        productCodesSnap.docs.forEach(d => {
-          const data = d.data();
-          if (stokKodulari.includes(data.stokKodu) && data.testAdi) {
-            testNames.add(data.testAdi);
-          }
-        });
-
-        setAvailableTests(Array.from(testNames).sort());
-      } catch (err) {
-        console.error("Error fetching available tests:", err);
-      }
-    })();
-  }, [device?.hospitalId]);
+  const availableTests = useMemo<string[]>(() => {
+    const rules = (minMaxRulesQuery.data ?? []) as Array<{ stokKodu?: string }>;
+    const products = (productCodesQueryForTests.data ?? []) as Array<{ stokKodu?: string; testAdi?: string }>;
+    if (!device?.hospitalId || rules.length === 0 || products.length === 0) return [];
+    const stokSet = new Set(rules.map((r) => r.stokKodu).filter(Boolean));
+    const testNames = new Set<string>();
+    products.forEach((p) => {
+      if (p.stokKodu && stokSet.has(p.stokKodu) && p.testAdi) testNames.add(p.testAdi);
+    });
+    return Array.from(testNames).sort();
+  }, [device?.hospitalId, minMaxRulesQuery.data, productCodesQueryForTests.data]);
 
   // Sorted users based on current user's role
   const sortedUsers = useMemo(() => {
@@ -1523,6 +1479,7 @@ export default function AplikasyonIslemFormuPage() {
       setCurrentDraftId(draftId);
       setDraftActionLogs(updatedLogs);
 
+      hapticDouble();
       toast({ title: 'Ara Kayıt Kaydedildi', description: 'Form ara kayıt olarak kaydedildi. Daha sonra devam edebilirsiniz.' });
     } catch (err) {
       console.error('Error saving draft:', err);
@@ -2103,9 +2060,19 @@ export default function AplikasyonIslemFormuPage() {
 
         await batch.commit();
 
+        // Invalidate cached device-scoped queries so freshly-written maintenance
+        // logs / action forms / fault reports show up on next mount/visit.
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['maintenanceLogs', 'forDevice', deviceId] }),
+          queryClient.invalidateQueries({ queryKey: ['maintenancePlans', 'forDevice', deviceId] }),
+          queryClient.invalidateQueries({ queryKey: ['aplikasyonActionForms'] }),
+          queryClient.invalidateQueries({ queryKey: ['deviceFaultReports'] }),
+        ]);
+
         for (const data of createdFormsData) {
             await generateAplikasyonTutanakPDF(data.device, data.hospital, data.actionRecord as any, true);
         }
+        hapticDouble();
 
         toast({
             title: 'Başarılı',
@@ -2113,7 +2080,7 @@ export default function AplikasyonIslemFormuPage() {
               ? `Laboratuvar geneli için tek form oluşturuldu. (${labDeviceActionSummaries.length} cihaz işlendi)`
               : `İşlem formu #${createdFormIds[0]?.substring(0, 6)}... kaydedildi.`,
         });
-        
+
         // Form states sıfırlama (optional if we don't navigate back)
         setActions([]);
         setIslemTuru('');
