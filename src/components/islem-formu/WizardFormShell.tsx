@@ -1,6 +1,6 @@
 'use client';
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { ArrowLeft, Check } from 'lucide-react';
+import { ArrowLeft, WalletCards, Clock3, Cog, ClipboardCheck, MessageSquareText, Wrench, FileText, ShieldCheck, BookOpen, PackageCheck, UserRoundCheck } from 'lucide-react';
 import './wizard-form.css';
 
 /** Light single-tap haptic feedback */
@@ -24,6 +24,24 @@ type WizardView = { type: 'list' } | { type: 'detail'; headingId: string } | { t
 
 type TransitionState = 'idle' | 'exiting-to-detail' | 'entering-detail' | 'exiting-to-list' | 'entering-list';
 
+const headingIconMap: Record<string, React.ComponentType<{ className?: string }>> = {
+  islem_turu: WalletCards,
+  tarih_saat: Clock3,
+  tarih: Clock3,
+  degisen_parca: Cog,
+  yapilan_islem: ClipboardCheck,
+  aciklama: MessageSquareText,
+  islem_tipi: Wrench,
+  cihaz_durumu: ShieldCheck,
+  egitim: BookOpen,
+  hucre_degisimi: PackageCheck,
+  imza: UserRoundCheck,
+};
+
+function getHeadingIcon(id: string) {
+  return headingIconMap[id] || FileText;
+}
+
 interface WizardFormShellProps {
   headings: WizardHeading[];
   /** Render the detail content for a given heading id */
@@ -43,6 +61,11 @@ interface WizardFormShellProps {
   saveDisabled?: boolean;
   /** Use grid layout on tablets */
   useGrid?: boolean;
+  /** Optional legacy header props kept for existing callers; visual header is rendered by pages. */
+  title?: string;
+  deviceName?: string;
+  hospitalName?: string;
+  icon?: React.ReactNode;
   /** Custom class for the content area */
   className?: string;
 }
@@ -113,26 +136,33 @@ export default function WizardFormShell({
   }, [transition]);
 
   // Group inline headings together
-  const renderHeadingContent = (heading: WizardHeading, small = false) => (
-    <>
-      <span className="wizard-heading-arrow wizard-heading-arrow-right" aria-hidden="true">→</span>
-      <span className="wizard-heading-arrow wizard-heading-arrow-left" aria-hidden="true">→</span>
-      <span className="wizard-heading-circle" aria-hidden="true" />
-      <div className="wizard-heading-content">
-        <div className={`wizard-heading-label ${small ? 'wizard-heading-label-small' : ''}`}>{heading.label}</div>
-        {heading.isComplete && heading.completedSublabel && (
-          <div className="wizard-heading-sublabel">{heading.completedSublabel}</div>
-        )}
-      </div>
-      {heading.isComplete && (
-        <div className="wizard-checkmark" aria-label="Tamamlandı">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="20 6 9 17 4 12" />
-          </svg>
+  const renderHeadingContent = (heading: WizardHeading, small = false) => {
+    const HeadingIcon = getHeadingIcon(heading.id);
+
+    return (
+      <>
+        <span className="wizard-heading-arrow wizard-heading-arrow-right" aria-hidden="true">›</span>
+        <span className="wizard-heading-arrow wizard-heading-arrow-left" aria-hidden="true">›</span>
+        <span className="wizard-heading-circle" aria-hidden="true" />
+        <span className={`wizard-heading-icon wizard-heading-icon-${heading.id}`} aria-hidden="true">
+          <HeadingIcon className="wizard-heading-icon-svg" />
+        </span>
+        <div className="wizard-heading-content">
+          <div className={`wizard-heading-label ${small ? 'wizard-heading-label-small' : ''}`}>{heading.label}</div>
+          <div className="wizard-heading-sublabel">
+            {heading.isComplete && heading.completedSublabel ? heading.completedSublabel : 'Henüz seçilmedi'}
+          </div>
         </div>
-      )}
-    </>
-  );
+        {heading.isComplete && (
+          <div className="wizard-checkmark" aria-label="Tamamlandı">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+          </div>
+        )}
+      </>
+    );
+  };
 
   const renderHeadingList = () => {
     const groups: Array<WizardHeading | WizardHeading[]> = [];
@@ -154,6 +184,8 @@ export default function WizardFormShell({
 
     const exitClass = transition === 'exiting-to-detail' ? 'wizard-heading-exit' : '';
     const enterClass = transition === 'entering-list' ? 'wizard-heading-enter' : '';
+    const completedCount = headings.filter((heading) => heading.isComplete).length;
+    const completionPercent = headings.length ? Math.round((completedCount / headings.length) * 100) : 0;
 
     return (
       <div className={`wizard-heading-list ${useGrid ? 'wizard-grid-mode' : ''} ${exitClass} ${enterClass}`}>
@@ -196,6 +228,12 @@ export default function WizardFormShell({
         })}
 
         {/* Bottom buttons */}
+        <div className="wizard-progress-wrap" aria-label={`${completedCount}/${headings.length} alan tamamlandı`}>
+          <div className="wizard-progress-track">
+            <span className="wizard-progress-fill" style={{ width: `${completionPercent}%` }} />
+          </div>
+          <span className="wizard-progress-label">{completedCount}/{headings.length} alan tamamlandı</span>
+        </div>
         <div className="wizard-bottom-buttons">
           <button
             className="wizard-btn wizard-btn-secondary"
