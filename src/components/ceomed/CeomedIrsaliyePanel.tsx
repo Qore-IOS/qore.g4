@@ -11,6 +11,8 @@ import {
   Timestamp,
   updateDoc,
   serverTimestamp,
+  deleteDoc,
+  getDocs,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
@@ -41,6 +43,7 @@ import {
   Package,
   Loader2,
   Building2,
+  Trash2,
 } from 'lucide-react';
 
 interface CeomedItem {
@@ -95,6 +98,7 @@ export default function CeomedIrsaliyePanel() {
 
   // Filters
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [recordStatusFilter, setRecordStatusFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
   const [tarihBaslangic, setTarihBaslangic] = useState<string>(''); // yyyy-MM-dd input
   const [tarihBitis, setTarihBitis] = useState<string>('');
 
@@ -102,10 +106,7 @@ export default function CeomedIrsaliyePanel() {
   const [approving, setApproving] = useState(false);
 
   useEffect(() => {
-    const q = query(
-      collection(db, 'pendingCeomedIrsaliye'),
-      where('status', '==', 'pending')
-    );
+    const q = query(collection(db, 'pendingCeomedIrsaliye'));
     const unsub = onSnapshot(
       q,
       (snap) => {
@@ -146,6 +147,7 @@ export default function CeomedIrsaliyePanel() {
 
   const filtered = useMemo(() => {
     return list.filter((i) => {
+      if (recordStatusFilter !== 'all' && i.status !== recordStatusFilter) return false;
       if (statusFilter !== 'all') {
         if ((i.durumAciklama || '').toUpperCase() !== statusFilter) return false;
       }
@@ -161,7 +163,46 @@ export default function CeomedIrsaliyePanel() {
       }
       return true;
     });
-  }, [list, statusFilter, tarihBaslangic, tarihBitis]);
+  }, [list, statusFilter, recordStatusFilter, tarihBaslangic, tarihBitis]);
+
+  const handleDelete = async (irs: PendingIrsaliye) => {
+    const wasApproved = irs.status === 'approved';
+    const note = wasApproved
+      ? `${irs.irsaliyeNo} silinsin mi? Bu irsaliyeden eklenen tüm stok kayıtları da SİLİNECEK.`
+      : `${irs.irsaliyeNo} silinsin mi?`;
+    if (!confirm(note)) return;
+    try {
+      // Approved ise depoStok'tan ceomedIrsaliyeId eşleşen kayıtları temizle
+      if (wasApproved) {
+        const stockSnap = await getDocs(
+          query(collection(db, 'depoStok'), where('ceomedIrsaliyeId', '==', irs.ceomedId))
+        );
+        if (stockSnap.size > 0) {
+          // Firestore batch limit 500
+          const chunks: typeof stockSnap.docs[] = [];
+          for (let i = 0; i < stockSnap.docs.length; i += 400) {
+            chunks.push(stockSnap.docs.slice(i, i + 400));
+          }
+          for (const chunk of chunks) {
+            const batch = writeBatch(db);
+            chunk.forEach((d) => batch.delete(d.ref));
+            await batch.commit();
+          }
+        }
+        toast({
+          title: 'Silindi',
+          description: `${irs.irsaliyeNo}: ${stockSnap.size} stok kaydı + irsaliye silindi.`,
+        });
+      } else {
+        toast({ title: 'Silindi', description: `${irs.irsaliyeNo} silindi.` });
+      }
+      await deleteDoc(doc(db, 'pendingCeomedIrsaliye', irs.id));
+      setSelected(null);
+    } catch (e: any) {
+      console.error(e);
+      toast({ title: 'Hata', description: e.message, variant: 'destructive' });
+    }
+  };
 
   const handleApprove = async (irs: PendingIrsaliye) => {
     const match = hospitalByCari.get((irs.cariKodu || '').trim().toUpperCase());
@@ -283,9 +324,23 @@ export default function CeomedIrsaliyePanel() {
       </div>
 
       {/* Filtreler */}
-      <div className="px-6 pb-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="px-6 pb-4 grid grid-cols-1 md:grid-cols-4 gap-3">
         <div>
-          <label className="text-xs text-[var(--dashboard-muted)] mb-1 block">Durum</label>
+          <label className="text-xs text-[var(--dashboard-muted)] mb-1 block">Kayıt</label>
+          <Select value={recordStatusFilter} onValueChange={(v) => setRecordStatusFilter(v as any)}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="pending">Onay Bekleyen</SelectItem>
+              <SelectItem value="approved">Onaylanan</SelectItem>
+              <SelectItem value="rejected">Reddedilen</SelectItem>
+              <SelectItem value="all">Tümü</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div>
+          <label className="text-xs text-[var(--dashboard-muted)] mb-1 block">ERP Durumu</label>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger>
               <SelectValue />
@@ -332,17 +387,28 @@ export default function CeomedIrsaliyePanel() {
           <div className="space-y-2">
             {filtered.map((i) => {
               const match = hospitalByCari.get((i.cariKodu || '').trim().toUpperCase());
+              const statusBadge =
+                i.status === 'approved'
+                  ? { text: 'Onaylandı', cls: 'bg-emerald-100 text-emerald-700' }
+                  : i.status === 'rejected'
+                  ? { text: 'Reddedildi', cls: 'bg-red-100 text-red-700' }
+                  : { text: 'Bekliyor', cls: 'bg-amber-100 text-amber-700' };
               return (
-                <button
+                <div
                   key={i.id}
-                  onClick={() => setSelected(i)}
-                  className="w-full text-left rounded-2xl border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)] hover:bg-[var(--dashboard-surface)] transition-colors p-4"
+                  className="w-full rounded-2xl border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)] hover:bg-[var(--dashboard-surface)] transition-colors"
                 >
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
+                  <div className="flex items-center justify-between gap-3 p-4">
+                    <button
+                      onClick={() => setSelected(i)}
+                      className="flex-1 min-w-0 text-left"
+                    >
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <span className="font-semibold text-sm">{i.irsaliyeNo}</span>
                         <span className="text-xs text-[var(--dashboard-muted)]">{i.tarih}</span>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full ${statusBadge.cls}`}>
+                          {statusBadge.text}
+                        </span>
                         <span className="text-[10px] px-2 py-0.5 rounded-full bg-[var(--dashboard-surface)] text-[var(--dashboard-muted)]">
                           {i.durumAciklama}
                         </span>
@@ -364,13 +430,25 @@ export default function CeomedIrsaliyePanel() {
                           </span>
                         )}
                       </div>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <div className="text-lg font-bold">{i.itemCount}</div>
-                      <div className="text-[10px] text-[var(--dashboard-muted)]">barkod</div>
+                    </button>
+                    <div className="text-right shrink-0 flex items-center gap-3">
+                      <div>
+                        <div className="text-lg font-bold">{i.itemCount}</div>
+                        <div className="text-[10px] text-[var(--dashboard-muted)]">barkod</div>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDelete(i);
+                        }}
+                        className="p-2 rounded-lg hover:bg-red-100 text-red-500 transition-colors"
+                        title="Sil"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
                     </div>
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
@@ -443,25 +521,37 @@ export default function CeomedIrsaliyePanel() {
           <DialogFooter className="gap-2">
             <Button
               variant="outline"
-              onClick={() => selected && handleReject(selected)}
+              className="text-red-600 hover:bg-red-50"
+              onClick={() => selected && handleDelete(selected)}
               disabled={approving}
             >
-              Reddet
+              <Trash2 className="h-4 w-4 mr-2" /> Sil
             </Button>
-            <Button
-              onClick={() => selected && handleApprove(selected)}
-              disabled={approving}
-            >
-              {approving ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" /> İşleniyor...
-                </>
-              ) : (
-                <>
-                  <CheckCircle className="h-4 w-4 mr-2" /> Stoğa Aktar
-                </>
-              )}
-            </Button>
+            {selected?.status === 'pending' && (
+              <>
+                <Button
+                  variant="outline"
+                  onClick={() => selected && handleReject(selected)}
+                  disabled={approving}
+                >
+                  Reddet
+                </Button>
+                <Button
+                  onClick={() => selected && handleApprove(selected)}
+                  disabled={approving}
+                >
+                  {approving ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" /> İşleniyor...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="h-4 w-4 mr-2" /> Stoğa Aktar
+                    </>
+                  )}
+                </Button>
+              </>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>
