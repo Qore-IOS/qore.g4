@@ -25,9 +25,23 @@ OK — kullanıcı: Merkez Depo (ID_USER=3111)
 Token: eyJhbGciOiJIUzI1NiIs...
 ```
 
-Sonraki adımlar (henüz eklenmedi):
-- `selectIrsaliyeMaster` çekimi
-- `selectCeomedIrsaliye` + `selectOkutulanBarkod` ile detay/seri
-- Excel & PDF üretimi
-- Firebase Storage + Firestore yazımı
-- Cron tetikleyici
+## Adım 2 — İrsaliye listesi
+
+```bash
+node fetchIrsaliyeMaster.js 05.05.2026 06.05.2026
+```
+
+Çıktıda her satırda `IRSALIYE_NO`, `CARI_KODU`, `DURUM_ACIKLAMA`, `EVRAK_SEQ` görünür. Bir sonraki adımda kullanılacak `EVRAK_SEQ`'i not al.
+
+## Adım 3 — İrsaliyenin barkod/ürün listesi
+
+```bash
+node fetchOkutulanBarkod.js <EVRAK_SEQ>
+```
+
+Sadece istenen alanlar dönülür: `BARKOD_SERI`, `BARKOD`, `STOK_KODU`, `LOT`, `MIYAT`, `MIKTAR`.
+
+Sonraki adımlar:
+- ERP "Kuruma sevk edildi" durum güncelleme endpoint'i
+- Firestore'a "onay bekliyor" kaydı (CARI_KODU eşleşmesiyle laboratuvara)
+- Qore UI: Raporlar → Dosya Yönetimi'ne "İrsaliye Çek" butonu
