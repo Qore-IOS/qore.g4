@@ -319,6 +319,89 @@ export function useMaintenanceLogs() {
   });
 }
 
+/**
+ * Active Device Lab Pools (active == true).
+ * Used by teknik-servis and aplikasyon panels.
+ */
+export function useDeviceLabPools() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['deviceLabPools', 'active', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const q = query(collection(db, 'deviceLabPools'), where('active', '==', true));
+      const snap = await getDocs(q);
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+    },
+    staleTime: 30 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+  });
+}
+
+/**
+ * Fault Definitions, scoped by type ('teknik_servis' | 'aplikasyon').
+ * Static catalog — long cache.
+ */
+export function useFaultDefinitions(type: 'teknik_servis' | 'aplikasyon' | null) {
+  return useQuery({
+    queryKey: ['faultDefinitions', type],
+    queryFn: async () => {
+      if (!type) return [];
+      const q = query(collection(db, 'faultDefinitions'), where('type', '==', type));
+      const snap = await getDocs(q);
+      return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+    },
+    enabled: !!type,
+    staleTime: 60 * 60 * 1000, // 1 hour
+    gcTime: 2 * 60 * 60 * 1000,
+  });
+}
+
+/**
+ * Maintenance plans for a specific device (optionally filtered by type).
+ */
+export function useMaintenancePlansForDevice(
+  deviceId: string | null,
+  planType?: 'teknik_servis' | 'aplikasyon',
+) {
+  return useQuery({
+    queryKey: ['maintenancePlans', 'forDevice', deviceId, planType ?? null],
+    queryFn: async () => {
+      if (!deviceId) return [];
+      const constraints = [where('deviceId', '==', deviceId)];
+      if (planType) constraints.push(where('type', '==', planType));
+      const q = query(collection(db, 'maintenancePlans'), ...constraints);
+      const snap = await getDocs(q);
+      return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+    },
+    enabled: !!deviceId,
+    staleTime: 10 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+}
+
+/**
+ * Maintenance logs for a specific device, ordered by completedAt desc.
+ */
+export function useMaintenanceLogsForDevice(deviceId: string | null) {
+  return useQuery({
+    queryKey: ['maintenanceLogs', 'forDevice', deviceId],
+    queryFn: async () => {
+      if (!deviceId) return [];
+      const q = query(
+        collection(db, 'maintenanceLogs'),
+        where('deviceId', '==', deviceId),
+        orderBy('completedAt', 'desc'),
+      );
+      const snap = await getDocs(q);
+      return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+    },
+    enabled: !!deviceId,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+}
+
 // ============================================================================
 // DYNAMIC DATA HOOKS - Shorter cache times, more frequent updates
 // ============================================================================
