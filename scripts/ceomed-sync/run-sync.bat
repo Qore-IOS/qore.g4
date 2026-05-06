@@ -7,11 +7,17 @@ setlocal
 REM Calisma dizini
 cd /d %~dp0
 
-REM .env yukle (varsa). Bu dosyada CEOMED_*, GOOGLE_APPLICATION_CREDENTIALS, FIREBASE_PROJECT_ID olmali.
-if exist .env (
-  for /f "usebackq tokens=1,* delims==" %%A in (".env") do (
-    if not "%%A"=="" if not "%%A:~0,1%"=="#" set %%A=%%B
-  )
+REM Env yukle: set-env.bat (gitignored) icinde plain "set KEY=VALUE" satirlari olmali.
+if exist set-env.bat (
+  call set-env.bat
+) else (
+  echo [HATA] set-env.bat bulunamadi. Ornek icerik:
+  echo   set CEOMED_BASE_URL=http://192.168.1.5:8081
+  echo   set CEOMED_EPOSTA=merkez
+  echo   set CEOMED_PAROLA=12345
+  echo   set GOOGLE_APPLICATION_CREDENTIALS=C:\Users\btuba\Desktop\firebase-sa.json
+  echo   set FIREBASE_PROJECT_ID=invpilot
+  exit /b 1
 )
 
 REM Tarih araligi: dunden bugune (Turkiye lokal saatine gore)
@@ -20,7 +26,7 @@ for /f %%i in ('powershell -NoProfile -Command "(Get-Date).ToString('dd.MM.yyyy'
 
 echo [%date% %time%] Sync basliyor: %BAS% - %BIT% >> sync.log
 
-REM 3 durumu da cek (hicbir filtre yok = ALLOWED_STATUSES hepsi)
+REM 3 durumu da cek (filtre yok = ALLOWED_STATUSES hepsi)
 node syncToFirestore.js %BAS% %BIT% >> sync.log 2>&1
 
 echo [%date% %time%] Sync bitti. >> sync.log
