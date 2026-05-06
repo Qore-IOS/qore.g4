@@ -54,7 +54,6 @@ import {
   useDepots,
   useProductCodes,
   useHospitals,
-  useUnshippedDepoStokByDepot,
   useDepotMinMaxRules,
 } from '@/hooks/useFirebaseQueries';
 
@@ -323,11 +322,13 @@ export default function StokYonetimiPanel() {
   const minMaxRulesQuery = useDepotMinMaxRules(selectedDepotId || null);
   const minMaxRules = useMemo(() => minMaxRulesQuery.data ?? {}, [minMaxRulesQuery.data]);
 
-  // Full un-shipped depot stock — cached, server-side filtered by (depotId, isShipped=false).
-  // Returns ALL un-shipped items for the depot (no client-side cap), filtered by company scope.
-  const depotStockQuery = useUnshippedDepoStokByDepot(selectedDepotId || null);
-  const rawDepotStock = useMemo(() => depotStockQuery.data ?? [], [depotStockQuery.data]);
-  const isStockLoading = !!selectedDepotId && depotStockQuery.isLoading;
+  // Depot stock — fetched imperatively (Ceomed-aware) by the effect below.
+  const [rawDepotStock, setRawDepotStock] = useState<DepoStokItem[]>([]);
+  const [isStockLoading, setIsStockLoading] = useState(false);
+  const [allGroupedRows, setAllGroupedRows] = useState<GroupedStockRow[]>([]);
+  const [columnUniqueValues, setColumnUniqueValues] = useState<PaginatedStockResult['columnValues']>({
+    stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [],
+  });
 
   // Client-side pagination state
   const [currentPage, setCurrentPage] = useState(1);
@@ -373,9 +374,6 @@ export default function StokYonetimiPanel() {
   }, [depotsQuery.isError, productCodesQuery.isError, hospitalsQuery.isError, toast]);
 
   useEffect(() => {
-    if (depotStockQuery.isError) {
-      toast({ title: 'Hata', description: 'Stok verileri yüklenemedi.', variant: 'destructive' });
-    }
     let cancelled = false;
     (async () => {
       setIsStockLoading(true);
