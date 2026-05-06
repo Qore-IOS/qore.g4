@@ -20,9 +20,9 @@ if exist set-env.bat (
   exit /b 1
 )
 
-REM Tarih araligi: dunden bugune (Turkiye lokal saatine gore)
-for /f %%i in ('powershell -NoProfile -Command "(Get-Date).AddDays(-1).ToString('dd.MM.yyyy')"') do set BAS=%%i
-for /f %%i in ('powershell -NoProfile -Command "(Get-Date).ToString('dd.MM.yyyy')"') do set BIT=%%i
+REM Tarih araligi: bu haftanin pazartesi - pazar (Turkiye lokal saatine gore)
+for /f %%i in ('powershell -NoProfile -Command "$d=Get-Date; $d.AddDays(-((([int]$d.DayOfWeek + 6) %% 7))).ToString('dd.MM.yyyy')"') do set BAS=%%i
+for /f %%i in ('powershell -NoProfile -Command "$d=Get-Date; $d.AddDays(6 - ((([int]$d.DayOfWeek + 6) %% 7))).ToString('dd.MM.yyyy')"') do set BIT=%%i
 
 echo [%date% %time%] Sync basliyor: %BAS% - %BIT% >> sync.log
 
