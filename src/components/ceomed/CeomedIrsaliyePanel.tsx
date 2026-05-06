@@ -188,7 +188,7 @@ export default function CeomedIrsaliyePanel() {
           continue;
         }
         // İlk etapta sadece seri no takipli ürünler
-        if (product.trackingMode !== 'seri') {
+        if (product.trackingMode !== 'serial') {
           skippedNotSeri++;
           continue;
         }
@@ -389,7 +389,7 @@ export default function CeomedIrsaliyePanel() {
             <div className="flex-1 overflow-y-auto space-y-2 pr-2">
               {(selected.items || []).map((item, idx) => {
                 const product = productByStokKodu.get(String(item.STOK_KODU).trim());
-                const isSeri = product?.trackingMode === 'seri';
+                const isSeri = product?.trackingMode === 'serial';
                 return (
                   <div
                     key={idx}
