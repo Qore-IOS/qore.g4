@@ -1,8 +1,8 @@
 const { login, BASE_URL } = require('./login');
 
-async function fetchOkutulanBarkod({ token, evrakSeq, idUser }) {
+async function fetchOkutulanBarkod({ token, idSevkMaster, idUser }) {
   const body = new URLSearchParams({
-    EVRAK_SEQ: String(evrakSeq),
+    ID_SEVK_MASTER: String(idSevkMaster),
     ID_USER: String(idUser),
     IP_ADDRESS: '',
   });
@@ -41,14 +41,14 @@ async function fetchOkutulanBarkod({ token, evrakSeq, idUser }) {
 module.exports = { fetchOkutulanBarkod };
 
 if (require.main === module) {
-  const [, , evrakSeq] = process.argv;
-  if (!evrakSeq) {
-    console.error('Kullanım: node fetchOkutulanBarkod.js <EVRAK_SEQ>');
+  const [, , idSevkMaster] = process.argv;
+  if (!idSevkMaster) {
+    console.error('Kullanım: node fetchOkutulanBarkod.js <ID_SEVK_MASTER>');
     process.exit(1);
   }
   (async () => {
     const { token, user } = await login(process.env.CEOMED_EPOSTA, process.env.CEOMED_PAROLA);
-    const items = await fetchOkutulanBarkod({ token, evrakSeq, idUser: user.ID_USER });
+    const items = await fetchOkutulanBarkod({ token, idSevkMaster, idUser: user.ID_USER });
     console.log(`OK — ${items.length} barkod kaydı`);
     console.table(items);
   })().catch((e) => {
