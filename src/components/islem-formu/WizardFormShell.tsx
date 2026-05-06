@@ -1,14 +1,10 @@
 'use client';
 import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { haptic, hapticDouble } from '@/lib/haptics';
 import { ArrowLeft, WalletCards, Clock3, Cog, ClipboardCheck, MessageSquareText, Wrench, FileText, ShieldCheck, BookOpen, PackageCheck, UserRoundCheck } from 'lucide-react';
 import './wizard-form.css';
 
-/** Light single-tap haptic feedback */
-export const haptic = () => {
-  if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-    navigator.vibrate(1);
-  }
-};
+export { haptic, hapticDouble };
 
 export type WizardHeading = {
   id: string;
@@ -95,45 +91,34 @@ export default function WizardFormShell({
     };
   }, []);
 
+  const finishFastTransition = useCallback(() => {
+    if (animationTimeoutRef.current) clearTimeout(animationTimeoutRef.current);
+    animationTimeoutRef.current = setTimeout(() => {
+      setTransition('idle');
+    }, 140);
+  }, []);
+
   const navigateToDetail = useCallback((headingId: string) => {
-    if (transition !== 'idle') return;
     haptic();
     onHeadingClick?.(headingId);
-    setTransition('exiting-to-detail');
-    animationTimeoutRef.current = setTimeout(() => {
-      setView({ type: 'detail', headingId });
-      setTransition('entering-detail');
-      animationTimeoutRef.current = setTimeout(() => {
-        setTransition('idle');
-      }, 300);
-    }, 280);
-  }, [transition, onHeadingClick]);
+    setView({ type: 'detail', headingId });
+    setTransition('entering-detail');
+    finishFastTransition();
+  }, [finishFastTransition, onHeadingClick]);
 
   const navigateToList = useCallback(() => {
-    if (transition !== 'idle') return;
     haptic();
-    setTransition('exiting-to-list');
-    animationTimeoutRef.current = setTimeout(() => {
-      setView({ type: 'list' });
-      setTransition('entering-list');
-      animationTimeoutRef.current = setTimeout(() => {
-        setTransition('idle');
-      }, 300);
-    }, 250);
-  }, [transition]);
+    setView({ type: 'list' });
+    setTransition('entering-list');
+    finishFastTransition();
+  }, [finishFastTransition]);
 
   const navigateToSaveConfirm = useCallback(() => {
-    if (transition !== 'idle') return;
     haptic();
-    setTransition('exiting-to-detail');
-    animationTimeoutRef.current = setTimeout(() => {
-      setView({ type: 'save_confirm' });
-      setTransition('entering-detail');
-      animationTimeoutRef.current = setTimeout(() => {
-        setTransition('idle');
-      }, 300);
-    }, 280);
-  }, [transition]);
+    setView({ type: 'save_confirm' });
+    setTransition('entering-detail');
+    finishFastTransition();
+  }, [finishFastTransition]);
 
   // Group inline headings together
   const renderHeadingContent = (heading: WizardHeading, small = false) => {
@@ -296,14 +281,21 @@ export default function WizardFormShell({
     );
   };
 
-  const handleHapticCapture = useCallback((e: React.MouseEvent) => {
-    const target = e.target as HTMLElement;
-    const interactive = target.closest('button, [role="button"], [role="radio"], .wizard-option-item, .wizard-heading-row, .wizard-action-item-delete, .wizard-sub-tab, .wizard-add-button, .wizard-personel-item, [onclick], [data-haptic]');
-    if (interactive) haptic();
+  useEffect(() => {
+    const handlePanelTouch = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest('.wizard-page-wrapper, .wizard-modal')) return;
+      haptic();
+    };
+
+    document.addEventListener('pointerdown', handlePanelTouch, { capture: true, passive: true });
+    return () => {
+      document.removeEventListener('pointerdown', handlePanelTouch, { capture: true });
+    };
   }, []);
 
   return (
-    <div className={`wizard-content-area ${className}`} ref={contentRef} onClickCapture={handleHapticCapture}>
+    <div className={`wizard-content-area ${className}`} ref={contentRef}>
       {view.type === 'list' && renderHeadingList()}
       {view.type === 'detail' && renderDetailView()}
       {view.type === 'save_confirm' && renderSaveConfirmView()}

@@ -233,6 +233,7 @@ export default function LaboratuvarPanel() {
       const dataToSave: Partial<Hospital> = {
         name: currentHospital.name.trim(),
         kod: (currentHospital.kod || '').trim().toUpperCase(),
+        ceomedCariKodu: (currentHospital.ceomedCariKodu || '').trim().toUpperCase() || null,
         address: currentHospital.address || '',
         lat: currentHospital.lat || null,
         lng: currentHospital.lng || null,
@@ -742,6 +743,7 @@ export default function LaboratuvarPanel() {
             <div className="space-y-4">
               <Input placeholder="Laboratuvar Adı" value={currentHospital.name || ''} onChange={(e) => setCurrentHospital({ ...currentHospital, name: e.target.value })} />
               <Input placeholder="Laboratuvar Kodu (Max 3 Karakter)" value={currentHospital.kod || ''} onChange={(e) => setCurrentHospital({ ...currentHospital, kod: e.target.value.toUpperCase() })} maxLength={3} />
+              <Input placeholder="Ceomed Cari Kodu (örn. M51001)" value={currentHospital.ceomedCariKodu || ''} onChange={(e) => setCurrentHospital({ ...currentHospital, ceomedCariKodu: e.target.value.trim().toUpperCase() })} />
               <Input placeholder="Adres" value={currentHospital.address || ''} onChange={(e) => handleAddressInputChange(e.target.value)} />
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />

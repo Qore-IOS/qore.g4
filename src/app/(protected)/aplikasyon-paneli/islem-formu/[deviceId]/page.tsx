@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/button';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, FileText, Cog, Camera, ImageIcon, X, Package, AlertTriangle, Clock, PauseCircle, ChevronLeft, Building2, Download, Upload } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
-import WizardFormShell, { haptic } from '@/components/islem-formu/WizardFormShell';
+import WizardFormShell, { hapticDouble } from '@/components/islem-formu/WizardFormShell';
 import type { WizardHeading } from '@/components/islem-formu/WizardFormShell';
 import Image from 'next/image';
 import { resolveImageSrc } from '@/lib/image-utils';
@@ -1479,6 +1479,7 @@ export default function AplikasyonIslemFormuPage() {
       setCurrentDraftId(draftId);
       setDraftActionLogs(updatedLogs);
 
+      hapticDouble();
       toast({ title: 'Ara Kayıt Kaydedildi', description: 'Form ara kayıt olarak kaydedildi. Daha sonra devam edebilirsiniz.' });
     } catch (err) {
       console.error('Error saving draft:', err);
@@ -2071,6 +2072,7 @@ export default function AplikasyonIslemFormuPage() {
         for (const data of createdFormsData) {
             await generateAplikasyonTutanakPDF(data.device, data.hospital, data.actionRecord as any, true);
         }
+        hapticDouble();
 
         toast({
             title: 'Başarılı',
