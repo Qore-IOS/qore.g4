@@ -64,16 +64,36 @@ async function syncOnce({ baslangic, bitis, statusFilter }) {
   console.log(`Filtre sonrası: ${filtered.length} kayıt`);
 
   let written = 0;
+  let updatedOnly = 0;
   let failed = 0;
   for (const irs of filtered) {
     try {
+      const docRef = db.collection('pendingCeomedIrsaliye').doc(String(irs.ID));
+      const existing = await docRef.get();
+      const existingStatus = existing.exists ? existing.get('status') : null;
+
+      // Onaylanmış / reddedilmiş kayitlara dokunma — sadece ERP durumunu (durumAciklama) tazele.
+      if (existingStatus === 'approved' || existingStatus === 'rejected') {
+        await docRef.set(
+          {
+            durumAciklama: irs.DURUM_ACIKLAMA,
+            durumTipi: irs.DURUM_TIPI,
+            syncedAt: admin.firestore.FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+        updatedOnly++;
+        console.log(`  SKIP ${irs.IRSALIYE_NO} (${existingStatus}) - durum guncellendi`);
+        continue;
+      }
+
+      // Yeni veya hala pending → barkodlari cek, full set
       const items = await fetchOkutulanBarkod({
         token,
         idSevkMaster: irs.ID,
         idUser: user.ID_USER,
       });
 
-      const docRef = db.collection('pendingCeomedIrsaliye').doc(String(irs.ID));
       await docRef.set(
         {
           ceomedId: irs.ID,
@@ -87,8 +107,8 @@ async function syncOnce({ baslangic, bitis, statusFilter }) {
           durumTipi: irs.DURUM_TIPI,
           belgeTipi: irs.BELGE_TIPI,
           itemCount: items.length,
-          items, // BARKOD_SERI, BARKOD, STOK_KODU, LOT, MIYAT, MIKTAR
-          status: 'pending', // pending | approved | rejected
+          items,
+          status: 'pending',
           syncedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
         { merge: true }
@@ -101,7 +121,7 @@ async function syncOnce({ baslangic, bitis, statusFilter }) {
     }
   }
 
-  console.log(`\nÖzet: ${written} yazıldı, ${failed} başarısız.`);
+  console.log(`\nÖzet: ${written} yazıldı, ${updatedOnly} sadece-durum, ${failed} başarısız.`);
 }
 
 if (require.main === module) {
