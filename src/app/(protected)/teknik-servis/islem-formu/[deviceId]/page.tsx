@@ -25,7 +25,7 @@ import SignaturePad from '@/components/SignaturePad';
 import type { SignaturePadRef } from '@/components/SignaturePad';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Textarea } from '@/components/ui/textarea';
-import WizardFormShell, { haptic } from '@/components/islem-formu/WizardFormShell';
+import WizardFormShell, { hapticDouble } from '@/components/islem-formu/WizardFormShell';
 import type { WizardHeading } from '@/components/islem-formu/WizardFormShell';
 import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
 import { filterByCompanyScope } from '@/lib/company-scope';
@@ -1514,6 +1514,7 @@ export default function IslemFormuPage() {
       setCurrentDraftId(draftId);
       setDraftActionLogs(updatedLogs);
 
+      hapticDouble();
       toast({ title: 'Ara Kayıt Kaydedildi', description: 'Form ara kayıt olarak kaydedildi. Daha sonra devam edebilirsiniz.' });
     } catch (err) {
       console.error('Error saving draft:', err);
@@ -2123,6 +2124,7 @@ export default function IslemFormuPage() {
         for (const data of createdFormsData) {
             await generateTeknikServisTutanakPDF(data.device, data.hospital, data.actionRecord as any, true);
         }
+        hapticDouble();
 
         if (currentDraftId) await deleteDoc(doc(db, 'draftActionForms', currentDraftId));
 
