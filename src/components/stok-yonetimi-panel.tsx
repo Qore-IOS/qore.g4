@@ -383,7 +383,7 @@ export default function StokYonetimiPanel() {
         const selectedDepot = depots.find(d => d.id === selectedDepotId);
         const isCeomed = !!selectedDepot?.ceomedEnabled;
 
-        let rows: GroupedStockRow[] = [];
+        let nextRows: GroupedStockRow[] = [];
 
         if (isCeomed) {
           // Ceomed entegre depo: ceomedDepoStok/{depotId} dokümanından oku
@@ -396,13 +396,13 @@ export default function StokYonetimiPanel() {
               title: 'Senkronizasyon yok',
               description: `Bu depo Ceomed ile entegre ama henüz veri çekilmemiş. Worker'ın çalışmasını bekleyin.`,
             });
-            rows = [];
+            nextRows = [];
           } else {
             const data = ceomedSnap.data() as any;
             const items = (data.items || []) as Array<{
               stokKodu: string; stokAdi: string; lot: string; miyat: string; adet: number;
             }>;
-            rows = items.map((it) => ({
+            nextRows = items.map((it) => ({
               key: `${it.stokKodu}-${it.lot}-${it.miyat}`,
               stokKodu: it.stokKodu || '',
               stokAdi: it.stokAdi || '',
@@ -469,15 +469,15 @@ export default function StokYonetimiPanel() {
             grouped[gKey].quantity += 1;
             if (item.id) grouped[gKey].itemIds.push(item.id);
           }
-          rows = Object.values(grouped);
+          nextRows = Object.values(grouped);
         }
 
-        setAllGroupedRows(rows);
+        setAllGroupedRows(nextRows);
         setColumnUniqueValues({
-          stokAdi: [...new Set(rows.map(r => r.stokAdi))].sort(),
-          lotNumarasi: [...new Set(rows.map(r => r.lotNumarasi).filter(Boolean))].sort(),
-          miad: [...new Set(rows.map(r => r.miad).filter(Boolean))].sort(),
-          rafAdresi: [...new Set(rows.map(r => r.rafAdresi).filter(Boolean))].sort(),
+          stokAdi: [...new Set(nextRows.map(r => r.stokAdi))].sort(),
+          lotNumarasi: [...new Set(nextRows.map(r => r.lotNumarasi).filter(Boolean))].sort(),
+          miad: [...new Set(nextRows.map(r => r.miad).filter(Boolean))].sort(),
+          rafAdresi: [...new Set(nextRows.map(r => r.rafAdresi).filter(Boolean))].sort(),
         });
         setCurrentPage(1);
       } catch (e) {
