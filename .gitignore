@@ -26,6 +26,8 @@
 # misc
 .DS_Store
 *.pem
+scripts/ceomed-sync/set-env.bat
+scripts/ceomed-sync/sync.log
 
 # debug
 npm-debug.log*
