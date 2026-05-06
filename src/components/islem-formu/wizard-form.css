@@ -1947,3 +1947,23 @@
     border-radius: 0 !important;
   }
 }
+
+/* ============= Fast interaction tuning ============= */
+.wizard-heading-exit,
+.wizard-detail-enter,
+.wizard-detail-exit,
+.wizard-heading-enter,
+.wizard-stagger-item {
+  animation-duration: 120ms !important;
+  animation-delay: 0ms !important;
+}
+
+.wizard-heading-row,
+.wizard-heading-content,
+.wizard-heading-arrow,
+.wizard-btn,
+.wizard-option-item,
+.wizard-icon-btn,
+.wizard-back-button {
+  transition-duration: 120ms !important;
+}
