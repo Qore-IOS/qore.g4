@@ -43,7 +43,44 @@ node fetchOkutulanBarkod.js <ID_SEVK_MASTER>
 
 Sadece istenen alanlar dönülür: `BARKOD_SERI`, `BARKOD`, `STOK_KODU`, `LOT`, `MIYAT`, `MIKTAR`.
 
+## Adım 4 — Firestore'a Sync
+
+Bağımlılıkları kur:
+```bash
+npm install
+```
+
+Firebase service account JSON'unu indir (Firebase Console → Project Settings → Service accounts → Generate new private key) ve yolunu `.env`'e yaz:
+```
+GOOGLE_APPLICATION_CREDENTIALS=C:\path\to\firebase-service-account.json
+FIREBASE_PROJECT_ID=your-firebase-project-id
+```
+
+Çalıştır (3 durumun hepsini çekip Firestore `pendingCeomedIrsaliye` koleksiyonuna yazar):
+```bash
+node syncToFirestore.js 05.05.2026 06.05.2026
+# Sadece tek durum:
+node syncToFirestore.js 05.05.2026 06.05.2026 --status="KURUMA SEVK EDILDI"
+```
+
+Yazılan doküman şeması:
+```
+pendingCeomedIrsaliye/{ceomedId}
+  ceomedId, irsaliyeNo, tarih, cariKodu, cariUnvan, evrakSeq,
+  durumAciklama, items: [{BARKOD_SERI, BARKOD, STOK_KODU, LOT, MIYAT, MIKTAR}],
+  status: 'pending' | 'approved' | 'rejected', syncedAt
+```
+
+## Adım 5 — Windows Task Scheduler ile Otomasyon
+
+`run-sync.bat` örneği:
+```bat
+@echo off
+cd /d C:\Users\btuba\Desktop\qore.g4\scripts\ceomed-sync
+call set-env.bat
+node syncToFirestore.js %DATE_BASLANGIC% %DATE_BITIS%
+```
+
 Sonraki adımlar:
-- ERP "Kuruma sevk edildi" durum güncelleme endpoint'i
-- Firestore'a "onay bekliyor" kaydı (CARI_KODU eşleşmesiyle laboratuvara)
 - Qore UI: Raporlar → Dosya Yönetimi'ne "İrsaliye Çek" butonu
+- Onay akışı: stokKodu eşleşmesi + yeni stok kartı önerisi
