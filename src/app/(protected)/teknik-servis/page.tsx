@@ -1,108 +1,75 @@
 'use client';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import type { Hospital, Device, AssignedDevice, DeviceLabPool } from '@/lib/types';
 import { useToast } from "@/hooks/use-toast";
-import { collection, onSnapshot, query, orderBy, where, doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
+import {
+  useHospitals,
+  useDevices,
+  useHospitalDeviceAssignments,
+  useDeviceLabPools,
+} from '@/hooks/useFirebaseQueries';
 import TeknikServisPanel from '@/components/teknik-servis-panel';
 import { Loader2, Download, Upload } from 'lucide-react';
-import { filterByCompanyScope } from '@/lib/company-scope';
 import { reserveActionFormNumber } from '@/lib/form-number';
 import { format } from 'date-fns';
 
 export default function TeknikServisPage() {
-  const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
-  const { currentUserProfile, isSuperAdmin, currentCompanyId } = useAuth();
+  const { currentUserProfile, currentCompanyId } = useAuth();
+  const queryClient = useQueryClient();
 
-  const [hospitals, setHospitals] = useState<Hospital[]>([]);
-  const [devices, setDevices] = useState<Device[]>([]);
-  const [hospitalDeviceAssignments, setHospitalDeviceAssignments] = useState<AssignedDevice[]>([]);
-  const [deviceLabPools, setDeviceLabPools] = useState<DeviceLabPool[]>([]);
   const isAdminRole = currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'super_admin';
 
-  const fetchAllApplicationData = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const unsubHospitals = onSnapshot(
-        query(collection(db, 'hospitals'), orderBy('name', 'asc')),
-        (snap) => setHospitals(filterByCompanyScope(
-          snap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)),
-          currentCompanyId,
-          isSuperAdmin
-        )),
-        (err) => {
-          console.error("Hospitals listener error:", err);
-          toast({ title: 'Veri Hatası', description: 'Hastaneler yüklenemedi.', variant: 'destructive' });
-        }
-      );
+  // TanStack Query — cache shared with other panels (cihaz-yonetimi-host, stok-yonetimi).
+  // Static data (hospitals, devices, assignments, lab pools) changes rarely; TQ falls back
+  // to refetchOnWindowFocus + 30 min staleTime, which keeps the list responsive without
+  // a permanent realtime listener.
+  const hospitalsQuery = useHospitals();
+  const devicesQuery = useDevices();
+  const assignmentsQuery = useHospitalDeviceAssignments();
+  const labPoolsQuery = useDeviceLabPools();
 
-      const unsubDevices = onSnapshot(
-        collection(db, 'devices'),
-        (snap) => setDevices(filterByCompanyScope(
-          snap.docs.map(d => ({ id: d.id, ...d.data() } as Device)),
-          currentCompanyId,
-          isSuperAdmin
-        )),
-        (err) => {
-          console.error("Devices listener error:", err);
-          toast({ title: 'Veri Hatası', description: 'Cihazlar yüklenemedi.', variant: 'destructive' });
-        }
-      );
-
-      const unsubAssignments = onSnapshot(
-        collection(db, 'hospitalDeviceAssignments'),
-        (snap) => {
-          setHospitalDeviceAssignments(filterByCompanyScope(
-            snap.docs.map(d => ({ id: d.id, ...d.data() } as AssignedDevice)),
-            currentCompanyId,
-            isSuperAdmin
-          ));
-        },
-        (err) => {
-          console.error("Assignments listener error:", err);
-          toast({ title: 'Veri Hatası', description: 'Cihaz atamaları yüklenemedi.', variant: 'destructive' });
-        }
-      );
-
-      // Fetch active device lab pools
-      const unsubLabPools = onSnapshot(
-        query(collection(db, 'deviceLabPools'), where('active', '==', true)),
-        (snap) => {
-          setDeviceLabPools(filterByCompanyScope(
-            snap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceLabPool)),
-            currentCompanyId,
-            isSuperAdmin
-          ));
-          setIsLoading(false);
-        },
-        (err) => {
-          console.error("Lab pools listener error:", err);
-          setIsLoading(false);
-        }
-      );
-
-      return () => {
-        unsubHospitals();
-        unsubDevices();
-        unsubAssignments();
-        unsubLabPools();
-      };
-    } catch (error) {
-      console.error("Error setting up listeners:", error);
-      toast({ title: 'Kurulum Hatası', description: 'Veri dinleyicileri kurulamadı.', variant: 'destructive' });
-      setIsLoading(false);
-      return () => {};
-    }
-  }, [toast, currentCompanyId, isSuperAdmin]);
+  const isLoading =
+    hospitalsQuery.isLoading ||
+    devicesQuery.isLoading ||
+    assignmentsQuery.isLoading ||
+    labPoolsQuery.isLoading;
 
   useEffect(() => {
-    const cleanupPromise = fetchAllApplicationData();
-    return () => {
-      cleanupPromise.then(cleanup => cleanup && cleanup());
-    };
-  }, [fetchAllApplicationData]);
+    const anyError =
+      hospitalsQuery.isError || devicesQuery.isError ||
+      assignmentsQuery.isError || labPoolsQuery.isError;
+    if (anyError) {
+      toast({ title: 'Veri Hatası', description: 'Teknik servis verileri yüklenemedi.', variant: 'destructive' });
+    }
+  }, [hospitalsQuery.isError, devicesQuery.isError, assignmentsQuery.isError, labPoolsQuery.isError, toast]);
+
+  const hospitals = (hospitalsQuery.data ?? []) as Hospital[];
+  const devices = (devicesQuery.data ?? []) as Device[];
+  const hospitalDeviceAssignments = (assignmentsQuery.data ?? []) as AssignedDevice[];
+  const deviceLabPools = (labPoolsQuery.data ?? []) as DeviceLabPool[];
+
+  // Sort hospitals by name to preserve previous orderBy('name', 'asc') behavior.
+  const sortedHospitals = React.useMemo(
+    () => [...hospitals].sort((a, b) => (a.name || '').localeCompare(b.name || '', 'tr')),
+    [hospitals],
+  );
+
+  // Compatibility shim: subcomponents historically called fetchAllApplicationData()
+  // to refresh after writes. We invalidate the cached queries instead — TQ refetches
+  // automatically and any consumer re-renders with the new data.
+  const refreshAll = React.useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['hospitals'] }),
+      queryClient.invalidateQueries({ queryKey: ['devices'] }),
+      queryClient.invalidateQueries({ queryKey: ['hospitalDeviceAssignments'] }),
+      queryClient.invalidateQueries({ queryKey: ['deviceLabPools'] }),
+    ]);
+  }, [queryClient]);
 
 
   if (isLoading) {
@@ -119,8 +86,8 @@ export default function TeknikServisPage() {
   const buildScopedOptions = () => {
     const assignedLabs = currentUserProfile?.assignedLaboratories || [];
     const scopedHospitals = (isAdminRole || assignedLabs.length === 0)
-      ? hospitals
-      : hospitals.filter((h) => assignedLabs.includes(h.id));
+      ? sortedHospitals
+      : sortedHospitals.filter((h) => assignedLabs.includes(h.id));
     const scopedHospitalIds = new Set(scopedHospitals.map((h) => h.id));
     const scopedDevices = devices.filter((d) => scopedHospitalIds.has(d.hospitalId));
     return { scopedHospitals, scopedDevices };
@@ -274,16 +241,19 @@ export default function TeknikServisPage() {
   };
 
   const commonProps = {
-    hospitals,
+    hospitals: sortedHospitals,
     devices,
-    setDevices,
+    // Cached devices come from TanStack Query; the panel does not actually mutate
+    // the list (the prop is in the interface but not destructured). Keep a no-op
+    // setter so the component contract stays satisfied.
+    setDevices: (() => {}) as React.Dispatch<React.SetStateAction<Device[]>>,
     hospitalDeviceAssignments,
     labPools: deviceLabPools,
     userAssignedLabs: currentUserProfile?.assignedLaboratories || [],
     userRole: currentUserProfile?.role || '',
     toast,
     setSubView: () => {}, // No subviews in this dedicated page
-    fetchAllApplicationData: async () => { await fetchAllApplicationData(); }, // Provide a compatible function
+    fetchAllApplicationData: refreshAll,
   };
 
   return (
