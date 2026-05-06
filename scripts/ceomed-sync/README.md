@@ -71,6 +71,20 @@ pendingCeomedIrsaliye/{ceomedId}
   status: 'pending' | 'approved' | 'rejected', syncedAt
 ```
 
+## Adım 4b — Merkez depo stok sync (günlük)
+
+`syncMerkezDepo.js` Ceomed merkez depo stoğunu çeker; `depots` koleksiyonunda `ceomedEnabled=true` ve `ceomedDepoKodu` dolu olan her depo için `ceomedDepoStok/{depotId}` dokümanı yazar (items + lastDiff).
+
+```powershell
+.\run-depo-sync.bat
+type sync-depo.log
+```
+
+Task Scheduler'a günde 1 kez çalışacak şekilde ayrı bir görev ekle (örn. her sabah 06:30):
+- Program: `C:\Users\btuba\Desktop\qore.g4\scripts\ceomed-sync\run-depo-sync.bat`
+- Başlat: `C:\Users\btuba\Desktop\qore.g4\scripts\ceomed-sync`
+- Tetikleyici: Günlük 06:30, tekrar yok
+
 ## Adım 5 — Windows Task Scheduler ile Otomasyon
 
 `run-sync.bat` hazır — `.env` dosyasını yükler, dünden bugüne tarih aralığıyla 3 durumu da çeker, `sync.log`'a yazar.

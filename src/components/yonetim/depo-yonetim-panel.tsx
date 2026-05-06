@@ -108,6 +108,8 @@ export default function DepoYonetimPanel() {
         linkedLaboratoryIds: (currentDepot.linkedLaboratoryIds || []).filter(Boolean),
         isPoolWarehouse: currentDepot.isPoolWarehouse || false,
         linkedDeviceLabPoolIds: currentDepot.isPoolWarehouse ? (currentDepot.linkedDeviceLabPoolIds || []).filter(Boolean) : [],
+        ceomedEnabled: currentDepot.ceomedEnabled || false,
+        ceomedDepoKodu: currentDepot.ceomedEnabled ? (currentDepot.ceomedDepoKodu || '').toString().trim() : '',
       };
 
       if (currentDepot.id) {
@@ -264,6 +266,34 @@ export default function DepoYonetimPanel() {
                   onCheckedChange={(checked) => setCurrentDepot({ ...currentDepot, isPoolWarehouse: checked })}
                 />
               </div>
+
+              {/* Ceomed entegrasyonu */}
+              <div className="flex items-start justify-between gap-3 p-3 border rounded-md">
+                <div className="space-y-0.5">
+                  <label className="text-sm font-medium">Ceomed Entegrasyonu</label>
+                  <p className="text-xs text-muted-foreground">
+                    Bu depo Ceomed ERP'den günlük olarak senkronize edilir. Stok hareketleri ERP üzerinden yapılır.
+                  </p>
+                </div>
+                <Switch
+                  checked={currentDepot.ceomedEnabled || false}
+                  onCheckedChange={(checked) => setCurrentDepot({ ...currentDepot, ceomedEnabled: checked })}
+                />
+              </div>
+              {currentDepot.ceomedEnabled && (
+                <div>
+                  <label className="text-sm text-muted-foreground">Ceomed Depo Kodu *</label>
+                  <p className="text-xs text-muted-foreground mb-1">
+                    Ceomed'deki depo numarası (örn. 77). selectMerkezDepoListesi yanıtındaki "DEPO{'{kod}'}" alanı okunur.
+                  </p>
+                  <Input
+                    value={currentDepot.ceomedDepoKodu || ''}
+                    onChange={(e) => setCurrentDepot({ ...currentDepot, ceomedDepoKodu: e.target.value.replace(/\D/g, '') })}
+                    placeholder="77"
+                    className="mt-1"
+                  />
+                </div>
+              )}
 
               {/* Cihaz Laboratuvar Grubu seçimi - Sadece havuz depo seçiliyken */}
               {currentDepot.isPoolWarehouse && (

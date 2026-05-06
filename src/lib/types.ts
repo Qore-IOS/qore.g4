@@ -121,6 +121,9 @@ export interface Depot {
   // Havuz Depo alanları
   isPoolWarehouse?: boolean; // true ise bu bir havuz depo
   linkedDeviceLabPoolIds?: string[]; // Bağlı Cihaz Laboratuvar Grubu ID'leri
+  // Ceomed entegrasyonu
+  ceomedEnabled?: boolean; // true ise bu depo Ceomed ERP'den senkronize edilir
+  ceomedDepoKodu?: string; // Ceomed'deki depo kodu (örn. "77") — selectMerkezDepoListesi'ndeki DEPO{kod} alanını okur
   [k: string]: any;
 }
 
