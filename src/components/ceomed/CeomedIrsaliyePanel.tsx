@@ -71,6 +71,7 @@ const STATUS_OPTIONS = [
   { value: 'all', label: 'Tümü' },
   { value: 'KURUMA SEVK EDILDI', label: 'Kuruma Sevk Edildi' },
   { value: 'MALZEME TOPLANABILIR', label: 'Malzeme Toplanabilir' },
+  { value: 'MALZEME HAZIRLAMA DEVAM EDIYOR', label: 'Malzeme Hazırlama Devam Ediyor' },
   { value: 'IRSALIYE YAZDIRILABILIR', label: 'İrsaliye Yazdırılabilir' },
   { value: 'IRSALIYE YAZDIRILDI', label: 'İrsaliye Yazdırıldı' },
 ];
