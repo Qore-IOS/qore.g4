@@ -1,6 +1,7 @@
 
 'use server';
 
+import { adminDb } from '@/lib/firebase-admin';
 import { db } from '@/lib/firebase';
 import type { DepoStokItem } from '@/lib/types';
 import {
@@ -274,28 +275,33 @@ export async function getPaginatedDepotStock(params: {
     columnFilters, riskyOnly, companyId, isSuperAdmin,
   } = params;
 
+  const emptyResult: PaginatedStockResult = {
+    rows: [], totalRows: 0, totalPages: 0, currentPage: 1,
+    riskyRowsCount: 0, riskyBoxesTotal: 0,
+    columnValues: { stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [] },
+  };
+
   if (!depotId) {
-    return {
-      rows: [], totalRows: 0, totalPages: 0, currentPage: 1,
-      riskyRowsCount: 0, riskyBoxesTotal: 0,
-      columnValues: { stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [] },
-    };
+    return emptyResult;
   }
 
-  // Composite query: depotId + isShipped (requires Firestore composite index)
-  const stockQuery = query(
-    collection(db, 'depoStok'),
-    where('depotId', '==', depotId),
-    where('isShipped', '==', false)
-  );
-  // Side-load the depot's min/max rules and the product catalog in parallel
-  // so we can compute risk metadata without a second round-trip from the client.
+  try {
+
+  // Fetch stock + depot rules + product catalog in parallel using Admin SDK
   const [snapshot, rulesSnap, productsSnap] = await Promise.all([
-    getDocs(stockQuery),
-    getDocs(collection(db, 'depots', depotId, 'minMaxRules')),
-    getDocs(collection(db, 'productCodes')),
+    adminDb.collection('depoStok')
+      .where('depotId', '==', depotId)
+      .where('isShipped', '==', false)
+      .get(),
+    adminDb.collection('depots').doc(depotId).collection('minMaxRules').get(),
+    adminDb.collection('productCodes').get(),
   ]);
-  const allItems = filterByCompanyScope(snapshot.docs.map(processDoc), companyId, isSuperAdmin);
+
+  const allItems = filterByCompanyScope(
+    snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
+    companyId,
+    isSuperAdmin,
+  );
 
   // Build helper maps from the side-loaded master data
   const minMaxRules: Record<string, { max?: number; maxGun?: number; min?: number }> = {};
@@ -322,7 +328,15 @@ export async function getPaginatedDepotStock(params: {
   const grouped: Record<string, GroupedStockRow> = {};
   for (const item of allItems) {
     const lot = item.lotNumarasi || '';
-    const miad = typeof item.miad === 'string' ? item.miad : '';
+    const rawMiad = item.miad;
+    // Admin SDK may return miad as a Firestore Timestamp or a string — normalize.
+    let miad = '';
+    if (typeof rawMiad === 'string') {
+      miad = rawMiad;
+    } else if (rawMiad && typeof rawMiad === 'object' && typeof (rawMiad as any).toDate === 'function') {
+      const d = (rawMiad as any).toDate() as Date;
+      miad = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
+    }
     const key = `${item.stokKodu}-${lot}-${miad}`;
     if (!grouped[key]) {
       grouped[key] = {
@@ -485,6 +499,11 @@ export async function getPaginatedDepotStock(params: {
     riskyBoxesTotal,
     columnValues,
   };
+
+  } catch (err) {
+    console.error('[getPaginatedDepotStock] Error for depot', depotId, ':', err);
+    return emptyResult;
+  }
 }
 
 /**
