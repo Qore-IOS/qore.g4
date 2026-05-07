@@ -502,67 +502,74 @@ export default function MerkezSiparisPanel() {
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = () => {
     if (generatedItems.length === 0) {
       toast({ title: 'Hata', description: 'Kaydedilecek sipariş satırı yok.', variant: 'destructive' });
       return;
     }
 
-    setIsSaving(true);
-    try {
-      const id = generateId();
-      const orderRef = doc(db, 'centralOrders', id);
+    // --- OPTIMISTIC UI ---
+    const previousGeneratedItems = [...generatedItems];
+    const previousOpenOrders = [...openOrders];
 
-      const items: CentralOrderItem[] = generatedItems.map(item => ({
-        stokKodu: item.stokKodu,
-        stokAdi: item.stokAdi,
-        orderedQty: item.siparisAdedi,
-        receivedQty: 0,
-        locationType: item.locationType,
-        locationId: item.locationId,
-        locationName: item.locationName,
-        marka: item.marka,
-        urunGrubu: item.urunGrubu,
-        cihazGrubu: item.cihazGrubu,
-      }));
+    const id = generateId();
+    const items: CentralOrderItem[] = generatedItems.map(item => ({
+      stokKodu: item.stokKodu,
+      stokAdi: item.stokAdi,
+      orderedQty: item.siparisAdedi,
+      receivedQty: 0,
+      locationType: item.locationType,
+      locationId: item.locationId,
+      locationName: item.locationName,
+      marka: item.marka,
+      urunGrubu: item.urunGrubu,
+      cihazGrubu: item.cihazGrubu,
+    }));
 
-      await setDoc(orderRef, {
-        id,
-        status: 'open',
-        createdAt: serverTimestamp(),
-        selectedDepotIds,
-        selectedLabIds,
-        selectedBrands,
-        selectedProductGroups,
-        selectedDeviceGroups,
-        yeterlilikGun: Number(yeterlilikGun),
-        createdBy: currentUserProfile?.name || currentUser?.email || 'Bilinmiyor',
-        createdById: currentUserProfile?.uid || currentUser?.uid || '',
-        items,
-      });
+    const newOrder = {
+      id,
+      status: 'open',
+      createdAt: new Date(),
+      selectedDepotIds,
+      selectedLabIds,
+      selectedBrands,
+      selectedProductGroups,
+      selectedDeviceGroups,
+      yeterlilikGun: Number(yeterlilikGun),
+      createdBy: currentUserProfile?.name || currentUser?.email || 'Bilinmiyor',
+      createdById: currentUserProfile?.uid || currentUser?.uid || '',
+      items,
+    };
 
-      toast({ title: 'Başarılı', description: 'Merkez sipariş oluşturuldu.' });
-      setOpenOrders(prev => [{
-        id,
-        status: 'open',
-        createdAt: new Date(),
-        selectedDepotIds,
-        selectedLabIds,
-        selectedBrands,
-        selectedProductGroups,
-        selectedDeviceGroups,
-        yeterlilikGun: Number(yeterlilikGun),
-        createdBy: currentUserProfile?.name || currentUser?.email || 'Bilinmiyor',
-        createdById: currentUserProfile?.uid || currentUser?.uid || '',
-        items,
-      }, ...prev]);
-      setGeneratedItems([]);
-    } catch (error) {
-      console.error(error);
-      toast({ title: 'Hata', description: 'Sipariş kaydedilemedi.', variant: 'destructive' });
-    } finally {
-      setIsSaving(false);
-    }
+    // Ekranı beklemeden temizle ve açık siparişlere anında ekle
+    setGeneratedItems([]);
+    setOpenOrders(prev => [newOrder as any, ...prev]);
+
+    toast({
+      title: 'Siparişiniz İletiliyor...',
+      description: 'Arka planda kaydediliyor, çıkış yapmayınız.',
+      duration: 3000
+    });
+
+    // --- ARKA PLAN İŞLEMİ (Fire and Forget) ---
+    (async () => {
+      try {
+        const orderRef = doc(db, 'centralOrders', id);
+        
+        await setDoc(orderRef, {
+          ...newOrder,
+          createdAt: serverTimestamp(), // Sunucu saati ile eziyoruz
+        });
+
+        toast({ title: 'Başarılı', description: 'Merkez sipariş oluşturuldu.' });
+      } catch (error) {
+        console.error(error);
+        // --- ROLLBACK ---
+        setGeneratedItems(previousGeneratedItems);
+        setOpenOrders(previousOpenOrders);
+        toast({ title: 'İşlem İptal Edildi (Rollback)', description: 'Sipariş kaydedilemedi, veritabanı hatası.', variant: 'destructive' });
+      }
+    })();
   };
 
   const renderMultiSelect = (
