@@ -1,6 +1,7 @@
 
 'use client';
 import React from 'react';
+import { hapticDouble } from '@/lib/haptics';
 import { Button } from '@/components/ui/button';
 import { FileText, Loader2 } from 'lucide-react';
 import jsPDF from 'jspdf';
@@ -498,6 +499,7 @@ export default function AplikasyonTutanakPDFButton({ device, hospital, actionRec
   const onExport = async () => {
     setBusy(true);
     await generateAplikasyonTutanakPDF(device, hospital, actionRecord, false);
+    hapticDouble();
     setBusy(false);
   };
 
