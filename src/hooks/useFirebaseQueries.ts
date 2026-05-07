@@ -40,7 +40,9 @@ import type {
   MinMaxRule,
   BarcodeFormat,
   AddressDefinition,
-  User as AppUser
+  User as AppUser,
+  DeviceFaultReport,
+  PurchasingTask
 } from '@/lib/types';
 import { filterByCompanyScope } from '@/lib/company-scope';
 
@@ -144,23 +146,6 @@ export function useDevices() {
     staleTime: 30 * 60 * 1000, // 30 minutes
     gcTime: 60 * 60 * 1000,
     refetchOnWindowFocus: true,
-  });
-}
-
-/**
- * Device Fault Reports - Used in Dashboard and Fault Panels
- */
-export function useDeviceFaultReports() {
-  const { currentCompanyId, isSuperAdmin } = useAuth();
-  return useQuery({
-    queryKey: ['deviceFaultReports', currentCompanyId, isSuperAdmin],
-    queryFn: async () => {
-      const snap = await getDocs(collection(db, 'deviceFaultReports'));
-      const reports = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DeviceFaultReport));
-      return filterByCompanyScope(reports, currentCompanyId, isSuperAdmin);
-    },
-    staleTime: 5 * 60 * 1000,
-    gcTime: 15 * 60 * 1000,
   });
 }
 
@@ -367,7 +352,7 @@ export function useDeviceFaultReports() {
     queryKey: ['deviceFaultReports', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       const snap = await getDocs(collection(db, 'deviceFaultReports'));
-      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DeviceFaultReport));
       return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
     },
     staleTime: 60 * 1000, // 1 minute — faults change frequently
