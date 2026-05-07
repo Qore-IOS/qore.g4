@@ -633,10 +633,10 @@ export function useUnshippedDepoStokByDepot(depotId: string | null) {
 }
 
 /**
- * All Depot Stock - For dashboard summaries
+ * All Depot Stock - For dashboard summaries and order calculations
  * No polling - invalidated via metadata listener when stock changes
  */
-export function useAllDepoStok() {
+export function useDepoStok() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['depoStok', 'all', currentCompanyId, isSuperAdmin],
