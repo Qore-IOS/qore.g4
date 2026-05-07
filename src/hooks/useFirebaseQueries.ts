@@ -44,6 +44,8 @@ import type {
   DeviceFaultReport,
   PurchasingTask
 } from '@/lib/types';
+import { DepotStockCountSession } from '@/lib/mal-kabul/types';
+import { SayimSession } from '@/lib/cost-analytics';
 import { filterByCompanyScope } from '@/lib/company-scope';
 
 // Helper to convert Firestore timestamps
@@ -1235,4 +1237,93 @@ export function useLightweightDashboardData() {
       labPoolsQuery.refetch();
     },
   };
+}
+
+/**
+ * Depot Stock Count Sessions (Mal Kabul)
+ */
+export function useDepotCountSessions(depotId: string | null) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['depotCountSessions', currentCompanyId, isSuperAdmin, depotId],
+    queryFn: async () => {
+      if (!depotId) return [];
+      const q = query(
+        collection(db, 'depotStockCountSessions'),
+        where('depotId', '==', depotId),
+        orderBy('createdAt', 'desc')
+      );
+      const snap = await getDocs(q);
+      const sessions = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as unknown as DepotStockCountSession));
+      return filterByCompanyScope(sessions, currentCompanyId, isSuperAdmin);
+    },
+    enabled: !!depotId,
+    staleTime: 1000 * 60 * 5, // 5 minutes
+  });
+}
+
+/**
+ * Scanned Items (Mal Kabul)
+ */
+export function useScannedItems(sessionId: string | null) {
+  return useQuery({
+    queryKey: ['scannedItems', sessionId],
+    queryFn: async () => {
+      if (!sessionId) return [];
+      const snap = await getDocs(collection(db, 'depotStockCountSessions', sessionId, 'scannedItems'));
+      return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+    },
+    enabled: !!sessionId,
+    staleTime: 1000 * 30, // 30 seconds
+  });
+}
+
+/**
+ * Irsaliye Files (Mal Kabul)
+ */
+export function useIrsaliyeFiles(depotId: string | null) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['irsaliyeFiles', currentCompanyId, isSuperAdmin, depotId],
+    queryFn: async () => {
+      if (!depotId) return [];
+      const q = query(collection(db, 'irsaliyeFiles'), where('depotId', '==', depotId));
+      const snap = await getDocs(q);
+      const files = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+      return filterByCompanyScope(files, currentCompanyId, isSuperAdmin);
+    },
+    enabled: !!depotId,
+    staleTime: 1000 * 60 * 10, // 10 minutes
+  });
+}
+
+/**
+ * Maliyet Sayım Sessions (Dashboard)
+ */
+export function useMaliyetSayimSessions() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['maliyetSayimSessions', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const q = query(collection(db, 'maliyetSayimSessions'), orderBy('createdAt', 'desc'));
+      const snap = await getDocs(q);
+      const sessions = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as unknown as SayimSession));
+      return filterByCompanyScope(sessions, currentCompanyId, isSuperAdmin);
+    },
+    staleTime: 1000 * 60 * 30, // 30 minutes
+  });
+}
+
+/**
+ * Exchange Rates
+ */
+export function useExchangeRates() {
+  return useQuery({
+    queryKey: ['exchangeRates'],
+    queryFn: async () => {
+      const { getExchangeRates } = await import('@/lib/exchange-rates');
+      return getExchangeRates({ cacheStrategy: 'daily' });
+    },
+    staleTime: 1000 * 60 * 60, // 1 hour
+  });
 }
