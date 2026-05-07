@@ -666,7 +666,7 @@ export default function DirektTransferPanel() {
     });
 
     // Allocate for each group
-    const allocations = new Map<string, DepoStokItem[]>();
+    const allocations = new Map<string, (DepoStokItem & { transferAdet?: number })[]>();
     const usedIds = new Set<string>(alreadyAllocatedIds);
 
     for (const row of groupRows) {
@@ -677,15 +677,35 @@ export default function DirektTransferPanel() {
       const sourcePool = isQuantityTracked && !row.lotNumarasi
         ? (stockByCode.get(row.stokKodu) || [])
         : (stockByCodeAndLot.get(key) || []);
+      
       const pool = sourcePool.filter(s => !usedIds.has(s.id));
 
       const need = Math.max(1, row.adet ?? 1);
-      if (pool.length < need) {
-        return { allocations: new Map(), error: row };
+      let accumulated = 0;
+      const picks: (DepoStokItem & { transferAdet?: number })[] = [];
+
+      for (const docItem of pool) {
+        if (accumulated >= need) break;
+
+        const docQty = docItem.adet ?? 1;
+        const remainingToNeed = need - accumulated;
+        const take = Math.min(docQty, remainingToNeed);
+
+        picks.push({ ...docItem, transferAdet: take });
+        accumulated += take;
+        
+        // If we took EVERYTHING from this document, mark it as used
+        if (take === docQty) {
+          usedIds.add(docItem.id);
+        }
+        // If we only took PART of it, we don't mark it as fully used 
+        // because another pick might take the rest, but for simplicity in memory
+        // we'll track it in a more refined way if needed. For now, usedIds works for full takes.
       }
 
-      const picks = pool.slice(0, need);
-      picks.forEach(p => usedIds.add(p.id));
+      if (accumulated < need) {
+        return { allocations: new Map(), error: row };
+      }
       allocations.set(row.key, picks);
     }
 
@@ -753,30 +773,87 @@ export default function DirektTransferPanel() {
         const batch = writeBatch(db);
         const trackingDisabled = !isBorcMode && targetLab?.consumptionTrackingEnabled === false;
 
-        itemsToShip.forEach(item => {
-          const stokRef = doc(db, 'depoStok', item.id);
-          if (trackingDisabled) {
-            batch.delete(stokRef);
-            const consumptionRecord: Omit<ConsumptionRecord, 'id'> = {
-              stokKodu: item.stokKodu,
-              stokAdi: item.stokAdi,
-              lotNumarasi: item.lotNumarasi,
-              miad: item.miad,
-              seriNumarasi: item.seriNumarasi,
-              laboratoryId: selectedLabId,
-              laboratoryName: targetName,
-              consumptionTimestamp: new Date(),
-              consumptionType: 'normal_kullanim' as const,
-              userId: currentUser.uid ?? 'unknown',
-              userName: currentUserProfile.name ?? currentUser.email ?? 'Unknown User',
+        const targetHospitalId = isBorcMode ? null : selectedLabId;
+
+        itemsToShip.forEach((item: DepoStokItem & { transferAdet?: number }) => {
+          const transferQty = item.transferAdet ?? (item.adet || 1);
+          const originalQty = item.adet || 1;
+          const isPartial = transferQty < originalQty;
+
+          // Target Reference (If partial, we need a new ID for the target document)
+          const targetRef = isPartial ? doc(collection(db, 'depoStok')) : doc(db, 'depoStok', item.id);
+          const targetDocId = targetRef.id;
+
+          if (isPartial) {
+            // 1. UPDATE SOURCE: Subtract quantity
+            const sourceRef = doc(db, 'depoStok', item.id);
+            batch.update(sourceRef, {
+              adet: originalQty - transferQty
+            });
+
+            // 2. CREATE TARGET: New document for shipped portion
+            const targetData = {
+              ...item,
+              id: targetDocId,
+              adet: transferQty,
+              isShipped: true,
+              sevkTarihi: Timestamp.now(),
+              hedefKurum: targetName,
+              hedefKurumId: targetHospitalId,
+              transferId: transferRef.id,
+              sourceDepotId: selectedDepotId,
+              sourceDepotName: depotName,
             };
-            batch.set(doc(collection(db, 'tuketimKayitlari')), consumptionRecord);
+            delete (targetData as any).transferAdet;
+            
+            if (trackingDisabled) {
+              // If tracking is disabled at target, just record consumption
+              const consumptionRecord: Omit<ConsumptionRecord, 'id'> = {
+                stokKodu: item.stokKodu,
+                stokAdi: item.stokAdi,
+                lotNumarasi: item.lotNumarasi || '',
+                miad: item.miad as any,
+                seriNumarasi: item.seriNumarasi || '',
+                laboratoryId: selectedLabId || '',
+                laboratoryName: targetName,
+                consumptionTimestamp: new Date(),
+                consumptionType: 'normal_kullanim' as const,
+                userId: currentUser.uid ?? 'unknown',
+                userName: currentUserProfile.name ?? currentUser.email ?? 'Unknown User',
+              };
+              batch.set(doc(collection(db, 'tuketimKayitlari')), consumptionRecord);
+            } else {
+              batch.set(targetRef, targetData);
+            }
           } else {
-            batch.set(stokRef, {
-              isShipped: true, sevkTarihi: Timestamp.now(), hedefKurum: targetName,
-              hedefKurumId: targetId, transferId: transferRef.id,
-              sourceDepotId: selectedDepotId, sourceDepotName: depotName,
-            }, { merge: true });
+            // FULL TRANSFER: Just update existing doc
+            if (trackingDisabled) {
+              batch.delete(targetRef);
+              const consumptionRecord: Omit<ConsumptionRecord, 'id'> = {
+                stokKodu: item.stokKodu,
+                stokAdi: item.stokAdi,
+                lotNumarasi: item.lotNumarasi || '',
+                miad: item.miad as any,
+                seriNumarasi: item.seriNumarasi || '',
+                laboratoryId: selectedLabId || '',
+                laboratoryName: targetName,
+                consumptionTimestamp: new Date(),
+                consumptionType: 'normal_kullanim' as const,
+                userId: currentUser.uid ?? 'unknown',
+                userName: currentUserProfile.name ?? currentUser.email ?? 'Unknown User',
+              };
+              batch.set(doc(collection(db, 'tuketimKayitlari')), consumptionRecord);
+            } else {
+              batch.set(targetRef, {
+                isShipped: true, 
+                sevkTarihi: Timestamp.now(), 
+                hedefKurum: targetName,
+                hedefKurumId: targetHospitalId,
+                transferId: transferRef.id,
+                sourceDepotId: selectedDepotId, 
+                sourceDepotName: depotName,
+              }, { merge: true });
+            }
           }
 
           if (isBorcMode) {
@@ -786,15 +863,26 @@ export default function DirektTransferPanel() {
               company: selectedCompany, stokKodu: item.stokKodu, stokAdi: item.stokAdi,
               lot: item.lotNumarasi, miad: item.miad, seriNumarasi: item.seriNumarasi,
               isReturned: false, timestamp: Timestamp.now(),
+              adet: transferQty
             });
           }
 
           if (item.seriNumarasi) {
             const histRef = doc(collection(db, `serialHistory/${item.seriNumarasi}/events`));
-            batch.set(histRef, { type: 'transfer', transferId: transferRef.id, details: { sourceDepotId: selectedDepotId, sourceDepotName: depotName, targetName, targetHospitalId: targetId || null, stokKodu: item.stokKodu, stokAdi: item.stokAdi, lotNumarasi: item.lotNumarasi, miad: item.miad }, timestamp: Timestamp.now() });
+            batch.set(histRef, { type: 'transfer', transferId: transferRef.id, details: { sourceDepotId: selectedDepotId, sourceDepotName: depotName, targetName, targetHospitalId, stokKodu: item.stokKodu, stokAdi: item.stokAdi, lotNumarasi: item.lotNumarasi, miad: item.miad, adet: transferQty }, timestamp: Timestamp.now() });
           }
-          const itemRef = doc(db, 'transfers', transferRef.id, 'items', item.id);
-          batch.set(itemRef, { stokKodu: item.stokKodu, stokAdi: item.stokAdi, lotNumarasi: item.lotNumarasi || '', miad: item.miad || '', seriNumarasi: item.seriNumarasi || '', anaBirim: productMetaByCode.get(item.stokKodu || '')?.anaBirim || 'Adet', ambalajDegeri: productMetaByCode.get(item.stokKodu || '')?.ambalajDegeri ?? null });
+          
+          const itemRef = doc(db, 'transfers', transferRef.id, 'items', targetDocId);
+          batch.set(itemRef, { 
+            stokKodu: item.stokKodu, 
+            stokAdi: item.stokAdi, 
+            lotNumarasi: item.lotNumarasi || '', 
+            miad: item.miad || '', 
+            seriNumarasi: item.seriNumarasi || '', 
+            adet: transferQty,
+            anaBirim: productMetaByCode.get(item.stokKodu || '')?.anaBirim || 'Adet', 
+            ambalajDegeri: productMetaByCode.get(item.stokKodu || '')?.ambalajDegeri ?? null 
+          });
         });
 
         batch.set(transferRef, {
