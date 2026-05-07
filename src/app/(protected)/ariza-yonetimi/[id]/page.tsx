@@ -6,14 +6,12 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import { db } from '@/lib/firebase';
 import { doc, getDoc, collection, query, orderBy, onSnapshot, updateDoc, serverTimestamp, getDocs, where, addDoc, Timestamp, writeBatch, arrayUnion } from 'firebase/firestore';
-import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
+import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Table, TableHeader, TableHead, TableRow, TableBody, TableCell } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { AlertTriangle, CheckCircle, ArrowLeft, Clock, FileDown, Share2, Edit3, Loader2, MoreVertical, Sun, Moon, Recycle, CornerDownRight, UserPlus, Phone, MapPin, Wrench, Navigation, X, Search, Plus, Camera, ImageIcon, Package, Trash2, Sparkles, Lock, ArrowRightLeft } from 'lucide-react';
-import BackButton from '@/components/BackButton';
 import { format, differenceInMinutes, formatDistanceToNow } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { resolveImageSrc } from '@/lib/image-utils';
@@ -515,25 +513,6 @@ export default function FaultDetailPage() {
     }
     return null;
   }, [fault]);
-
-  const statusBadge = useMemo(() => {
-    if (!fault) return null;
-    const normalized = normalizeStatus(fault.status);
-    const config = STATUS_CONFIG[normalized];
-
-    return (
-      <div className="flex items-center gap-2">
-        <Badge variant={config.variant} className={`flex items-center gap-1 ${config.className}`}>
-          {config.icon} {config.label}
-        </Badge>
-        {normalized === 'cozuldu' && resolutionTime !== null && (
-          <Badge variant="secondary" className="flex items-center gap-1">
-            <Clock className="h-3 w-3" /> {resolutionTime} dk
-          </Badge>
-        )}
-      </div>
-    );
-  }, [fault, resolutionTime]);
 
   // Arızayı üzerine al
   const handleAssignToSelf = useCallback(async () => {
@@ -1731,89 +1710,97 @@ export default function FaultDetailPage() {
 
   if (!fault) return null;
 
+  const normalizedStatus = normalizeStatus(fault.status);
+  const statusConfig = STATUS_CONFIG[normalizedStatus] || STATUS_CONFIG.atama_bekliyor;
+  const shortFaultId = fault.id ? fault.id.slice(0, 9) : '-';
+  const faultTypeLabel = fault.faultType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon';
+
   return (
-    <div className="device-module-page p-4 space-y-4">
-      <div className="flex justify-between items-center flex-wrap gap-2">
-        <BackButton fallback="/ariza-yonetimi" />
-        <div className="flex items-center gap-2">
-            <div className="md:hidden">{statusBadge}</div>
-            <div className="hidden md:flex flex-wrap items-center justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
-                {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-              </Button>
-              <Button variant="outline" size="sm" onClick={handleShare}>
-                <Share2 className="h-4 w-4 mr-2" /> Paylaş
-              </Button>
-              <Button variant="outline" size="sm" onClick={generatePdf}>
-                  <FileDown className="h-4 w-4 mr-2" /> PDF Olarak İndir
-              </Button>
-            </div>
-             <div className="md:hidden">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="icon">
-                    <MoreVertical className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
-                     {theme === 'dark' ? <Sun className="h-4 w-4 mr-2" /> : <Moon className="h-4 w-4 mr-2" />}
-                     <span>Tema Değiştir</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={handleShare}>
-                    <Share2 className="h-4 w-4 mr-2" />
-                    <span>Paylaş</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={generatePdf}>
-                    <FileDown className="h-4 w-4 mr-2" />
-                    <span>PDF Olarak İndir</span>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-        </div>
+    <div className="fault-clay-page">
+      <div className="fault-topbar">
+        <button type="button" className="fault-round-btn" onClick={() => router.back()} aria-label="Geri dön">
+          <ArrowLeft className="h-5 w-5" />
+        </button>
+        <div className="fault-brand">QORE <span>technic</span></div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button type="button" className="fault-round-btn" aria-label="İşlemler">
+              <MoreVertical className="h-5 w-5" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>
+              {theme === 'dark' ? <Sun className="h-4 w-4 mr-2" /> : <Moon className="h-4 w-4 mr-2" />}
+              <span>Tema Değiştir</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleShare}>
+              <Share2 className="h-4 w-4 mr-2" />
+              <span>Paylaş</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={generatePdf}>
+              <FileDown className="h-4 w-4 mr-2" />
+              <span>PDF Olarak İndir</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
-      <Card>
-        <CardHeader>
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex items-center gap-4">
-              {device?.imageUrl && (
-                <div className="w-24 h-24 flex-shrink-0 bg-muted rounded-lg p-1">
-                  <Image
-                    src={resolveImageSrc(device.imageUrl)}
-                    alt={device.model || ''}
-                    width={96}
-                    height={96}
-                    className="object-contain w-full h-full"
-                  />
-                </div>
-              )}
-              <div>
-                <CardTitle className="text-xl font-headline">
-                  {fault.model} ({fault.serial})
-                </CardTitle>
-                <CardDescription>Arıza ID: {fault.id}</CardDescription>
-              </div>
+
+      <Card className="fault-hero-card">
+        <CardHeader className="fault-hero-content">
+          <div className="fault-hero-copy">
+            <div className="fault-chip-row">
+              <span className={`fault-status-chip fault-status-${normalizedStatus}`}>
+                <span className="fault-status-dot" />
+                {statusConfig.label}
+              </span>
+              <span className="fault-id-chip">ID&nbsp;&nbsp;·&nbsp;&nbsp;{shortFaultId}</span>
             </div>
-            <div className="hidden md:flex flex-col items-end gap-2">
-                {statusBadge}
+            <CardTitle className="fault-title">
+              {fault.model} <span>({fault.serial})</span>
+            </CardTitle>
+            <CardDescription className="fault-subtitle">
+              {fault.labName || '-'} · {faultTypeLabel} arızası
+            </CardDescription>
+            <div className="fault-hero-meta">
+              <div><span>AÇAN</span><strong>{fault.openedByName || '-'}</strong></div>
+              <div><span>TARİH</span><strong>{fault.openedAt ? format(fault.openedAt, 'dd.MM.yyyy HH:mm', { locale: tr }) : '-'}</strong></div>
+              <div><span>TİP</span><strong>{faultTypeLabel}</strong></div>
+              <div><span>AÇIKLAMA</span><strong>{fault.description || '-'}</strong></div>
+              {fault.status === 'closed' && (
+                <div><span>KAPATAN</span><strong>{fault.closedByName || '-'}</strong></div>
+              )}
             </div>
           </div>
+          <div className="fault-hero-visual" aria-hidden="true">
+            {device?.imageUrl ? (
+              <div className="fault-device-image">
+                <Image src={resolveImageSrc(device.imageUrl)} alt={device.model || ''} width={118} height={118} className="object-contain w-full h-full" />
+              </div>
+            ) : (
+              <div className="fault-device-illustration">
+                <div className="fault-device-screen" />
+                <div className="fault-device-dots" />
+                <span>!</span>
+              </div>
+            )}
+          </div>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid md:grid-cols-2 gap-4 text-sm">
-            <div><p className="font-medium">Laboratuvar:</p><p>{fault.labName}</p></div>
-            <div><p className="font-medium">Cihaz:</p><p>{fault.model} <span className="text-muted-foreground font-mono">({fault.serial})</span></p></div>
-            <div><p className="font-medium">Arıza Tipi:</p><p className="capitalize">{fault.faultType?.replace('_',' ')}</p></div>
-            <div><p className="font-medium">Durum:</p><p className="capitalize">{fault.status === 'open' ? 'Açık' : 'Giderildi'}</p></div>
-            <div><p className="font-medium">Açan:</p><p>{fault.openedByName} {fault.openedAt && (<span className="text-xs text-muted-foreground">({format(fault.openedAt, 'dd.MM.yyyy HH:mm', { locale: tr })})</span>)}</p></div>
+      </Card>
+
+      <div className="fault-detail-content">
+          <div className="fault-info-grid">
+            <div><p>Laboratuvar</p><strong>{fault.labName}</strong></div>
+            <div><p>Cihaz</p><strong>{fault.model} <span>({fault.serial})</span></strong></div>
+            <div><p>Arıza Tipi</p><strong>{faultTypeLabel}</strong></div>
+            <div><p>Durum</p><strong>{statusConfig.label}</strong></div>
+            <div><p>Açan</p><strong>{fault.openedByName || '-'}</strong></div>
             {fault.status === 'closed' && (
-              <div><p className="font-medium">Kapatan:</p><p>{fault.closedByName} {fault.closedAt && (<span className="text-xs text-muted-foreground">({format(fault.closedAt, 'dd.MM.yyyy HH:mm', { locale: tr })})</span>)}</p></div>
+              <div><p>Kapatan</p><strong>{fault.closedByName || '-'}</strong></div>
             )}
           </div>
 
           {fault.isEjectedKitFault && (
-            <div className="pt-4 border-t">
+            <div className="fault-clay-section">
                 <p className="font-medium mb-2 text-amber-600">İlişkili Kit Bilgisi</p>
                 <div className="text-sm grid grid-cols-2 gap-4">
                     <div><p className="font-medium">Ürün:</p><p>{fault.productStokAdi} ({fault.productStokKodu})</p></div>
@@ -1823,7 +1810,7 @@ export default function FaultDetailPage() {
           )}
             
 
-          <div className="space-y-3 pt-4 border-t">
+          <div className="fault-clay-section space-y-3">
             <p className="font-medium">Açıklama</p>
             <p className="text-sm text-muted-foreground whitespace-pre-wrap">{fault.description || '-'}</p>
           </div>
@@ -1835,7 +1822,7 @@ export default function FaultDetailPage() {
             // KİLİT MEKANİZMASI - Başka bir personel müdahale ediyorsa
             if (isLockedByOther) {
               return (
-                <div className="pt-4 border-t">
+                <div className="fault-clay-section">
                   <div className="relative rounded-lg overflow-hidden border-2 border-amber-400/50">
                     <div className="bg-amber-50 dark:bg-amber-950/30 p-6">
                       <div className="flex flex-col items-center justify-center text-center gap-3">
@@ -1871,64 +1858,51 @@ export default function FaultDetailPage() {
               const canAssign = isAdmin || (faultType === 'teknik_servis' && userRole === 'teknik_servis') || (faultType === 'aplikasyon' && userRole === 'aplikasyon');
 
               return (
-                <div className="pt-4 border-t">
-                  <div className="relative rounded-lg overflow-hidden">
-                    {/* Buzlu arka plan efekti */}
-                    <div className="absolute inset-0 backdrop-blur-sm bg-white/60 dark:bg-black/60 z-10" />
-
-                    {/* Arıza önizlemesi (bulanık) - butonlara yeterli alan sağlamak için min yükseklik */}
-                    <div className="p-4 opacity-50 min-h-[160px]">
-                      <p className="text-sm text-muted-foreground">{fault.description}</p>
-                    </div>
-
-                    {/* Üzerime Ata butonu */}
-                    <div className="absolute inset-0 z-20 flex items-center justify-center flex-col gap-3 px-4">
-                      {canAssign ? (
-                        <>
-                          <Button
-                            size="lg"
-                            onClick={handleAssignToSelf}
-                            disabled={isAssigning || isTransferringUnit}
-                            className="w-full max-w-xs bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg text-base px-6 py-5"
-                          >
-                            {isAssigning ? (
-                              <Loader2 className="h-5 w-5 mr-2 animate-spin" />
-                            ) : (
-                              <UserPlus className="h-5 w-5 mr-2" />
-                            )}
-                            Arızayı Üzerime Al
-                          </Button>
-                          <Button
-                            variant="outline"
-                            onClick={() => setIsTransferDialogOpen(true)}
-                            disabled={isAssigning || isTransferringUnit}
-                            className="w-full max-w-xs border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/30 px-6 py-4"
-                          >
-                            {isTransferringUnit ? (
-                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                            ) : (
-                              <ArrowRightLeft className="h-4 w-4 mr-2" />
-                            )}
-                            {fault.faultType === 'teknik_servis' ? 'Aplikasyon Birimine Aktar' : 'Teknik Servis Birimine Aktar'}
-                          </Button>
-                        </>
-                      ) : (
-                        <div className="text-center p-4 bg-white/80 dark:bg-black/80 rounded-lg">
-                          <p className="text-sm text-muted-foreground">
-                            Bu arıza <span className="font-semibold">{faultType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'}</span> tipinde.
-                          </p>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            Sadece {faultType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'} personeli bu arızayı üzerine alabilir.
-                          </p>
-                        </div>
-                      )}
-                    </div>
+                <div className="fault-clay-section space-y-4">
+                  <div>
+                    <p className="fault-section-title">Atama</p>
+                    {fault.openedAt && (
+                      <p className="text-sm text-muted-foreground mt-1">
+                        Arıza {formatDistanceToNow(fault.openedAt, { addSuffix: true, locale: tr })} açıldı — atama bekliyor
+                      </p>
+                    )}
                   </div>
-
-                  {fault.openedAt && (
-                    <p className="text-xs text-muted-foreground mt-2 text-center">
-                      Arıza {formatDistanceToNow(fault.openedAt, { addSuffix: true, locale: tr })} açıldı - Atama bekliyor
-                    </p>
+                  {canAssign ? (
+                    <div className="space-y-3">
+                      <button
+                        type="button"
+                        onClick={handleAssignToSelf}
+                        disabled={isAssigning || isTransferringUnit}
+                        className="fault-action-option fault-action-option-pink"
+                      >
+                        <span className="fault-option-icon">
+                          {isAssigning ? <Loader2 className="h-5 w-5 animate-spin" /> : <UserPlus className="h-5 w-5" />}
+                        </span>
+                        <span><strong>Arızayı Üzerime Al</strong><small>Hemen sorumluluğu sen üstlen</small></span>
+                        <ArrowRightLeft className="fault-option-arrow h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsTransferDialogOpen(true)}
+                        disabled={isAssigning || isTransferringUnit}
+                        className="fault-action-option fault-action-option-blue"
+                      >
+                        <span className="fault-option-icon">
+                          {isTransferringUnit ? <Loader2 className="h-5 w-5 animate-spin" /> : <ArrowRightLeft className="h-5 w-5" />}
+                        </span>
+                        <span><strong>{fault.faultType === 'teknik_servis' ? 'Aplikasyon Birimine Aktar' : 'Teknik Servis Birimine Aktar'}</strong><small>Yetkili birime yönlendir</small></span>
+                        <ArrowRightLeft className="fault-option-arrow h-4 w-4" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="fault-action-card">
+                      <p className="text-sm text-muted-foreground">
+                        Bu arıza <span className="font-semibold">{faultType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'}</span> tipinde.
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Sadece {faultType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'} personeli bu arızayı üzerine alabilir.
+                      </p>
+                    </div>
                   )}
                 </div>
               );
@@ -1937,16 +1911,16 @@ export default function FaultDetailPage() {
             // MÜDAHALE BEKLİYOR - Test seçimi ve müdahale tipi
             if (normalized === 'mudahale_bekliyor') {
               return (
-                <div className="pt-4 border-t space-y-4">
-                  <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+                <div className="fault-clay-section space-y-4">
+                  <div className="fault-action-card fault-action-amber">
                     <p className="font-medium text-amber-800 dark:text-amber-200 mb-1">Müdahale Tipi Seçin</p>
                     <p className="text-sm text-amber-700 dark:text-amber-300 mb-4">
                       Arızaya nasıl müdahale edeceğinizi seçin. Kurumda müdahale için konum doğrulaması gereklidir.
                     </p>
 
                     {/* Konum doğrulama (kurum ziyareti için) */}
-                    <div className="mb-4 p-3 bg-white/50 dark:bg-black/20 rounded-md">
-                      <div className="flex items-center justify-between">
+                    <div className="fault-soft-row mb-4">
+                      <div className="fault-section-head">
                         <div className="flex items-center gap-2">
                           <MapPin className={`h-4 w-4 ${locationVerified ? 'text-green-600' : 'text-muted-foreground'}`} />
                           <span className="text-sm">
@@ -2000,8 +1974,8 @@ export default function FaultDetailPage() {
             // MÜDAHALE EDİLİYOR - Çözüm açıklaması ve kapat butonu
             if (normalized === 'mudahale_ediliyor') {
               return (
-                <div className="pt-4 border-t space-y-4">
-                  <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                <div className="fault-clay-section space-y-4">
+                  <div className="fault-action-card fault-action-blue">
                     <div className="flex items-center gap-2 mb-2">
                       <Wrench className="h-4 w-4 text-blue-600" />
                       <span className="font-medium text-blue-800 dark:text-blue-200">
@@ -2038,9 +2012,9 @@ export default function FaultDetailPage() {
             if (normalized === 'cozuldu') {
               const canEdit = isAdmin || fault.closedByUid === currentUser?.uid || fault.closedBy === currentUser?.uid || fault.assignedToUid === currentUser?.uid;
               return (
-                <div className="pt-4 border-t space-y-3">
-                  <div className="flex items-center justify-between">
-                    <p className="font-medium flex items-center gap-2">
+                <div className="fault-clay-section space-y-3">
+                  <div className="fault-section-head">
+                    <p className="fault-section-title">
                       <CheckCircle className="h-4 w-4 text-green-600" />
                       Çözüm Bilgileri
                     </p>
@@ -2050,7 +2024,7 @@ export default function FaultDetailPage() {
                       </Button>
                     )}
                   </div>
-                  <div className="bg-green-50/50 dark:bg-green-950/20 border border-green-200/50 dark:border-green-800/50 rounded-lg p-4 space-y-3 text-sm">
+                  <div className="fault-action-card fault-action-green space-y-3 text-sm">
                     <div>
                       <p className="font-medium text-muted-foreground">Çözüm Açıklaması</p>
                       <p className="whitespace-pre-wrap mt-1">{fault.closeDescription || '-'}</p>
@@ -2082,7 +2056,7 @@ export default function FaultDetailPage() {
             // Legacy 'open' status için eski davranış
             if (fault.status === 'open') {
               return (
-                <div className="pt-4 border-t">
+                <div className="fault-clay-section">
                   {fault.isEjectedKitFault ? (
                     <div className="flex flex-col sm:flex-row gap-2">
                       <Button variant="destructive" size="sm" onClick={() => handleKitResolution('imha')} className="flex-1">
@@ -2117,9 +2091,9 @@ export default function FaultDetailPage() {
             if (!showPartChange && faultPartChanges.length === 0) return null;
 
             return (
-              <div className="space-y-3 pt-4 border-t">
-                <div className="flex items-center justify-between">
-                  <p className="font-medium flex items-center gap-2">
+              <div className="fault-clay-section space-y-3">
+                <div className="fault-section-head">
+                  <p className="fault-section-title">
                     <Package className="h-4 w-4" />
                     Yedek Parça Değişimleri
                     {faultPartChanges.length > 0 && (
@@ -2136,8 +2110,8 @@ export default function FaultDetailPage() {
                 {faultPartChanges.length > 0 ? (
                   <div className="space-y-2">
                     {faultPartChanges.map(pc => (
-                      <div key={pc.id} className="p-3 border rounded-lg bg-muted/30 text-sm space-y-1">
-                        <div className="flex items-center justify-between">
+                      <div key={pc.id} className="fault-list-pill text-sm space-y-1">
+                        <div className="fault-section-head">
                           <div>
                             <p className="font-medium">
                               Takılan: {pc.stokAdi} {pc.serialNumber && <span className="font-mono text-xs">({pc.serialNumber})</span>}
@@ -2196,9 +2170,9 @@ export default function FaultDetailPage() {
             if (!showHucreDegisimi && faultHucreDegisimleri.length === 0) return null;
 
             return (
-              <div className="space-y-3 pt-4 border-t">
-                <div className="flex items-center justify-between">
-                  <p className="font-medium flex items-center gap-2">
+              <div className="fault-clay-section space-y-3">
+                <div className="fault-section-head">
+                  <p className="fault-section-title">
                     <Wrench className="h-4 w-4" />
                     Hücre Değişimleri
                     {faultHucreDegisimleri.length > 0 && (
@@ -2215,8 +2189,8 @@ export default function FaultDetailPage() {
                 {faultHucreDegisimleri.length > 0 ? (
                   <div className="space-y-2">
                     {faultHucreDegisimleri.map(hd => (
-                      <div key={hd.id} className="p-3 border rounded-lg bg-muted/30 text-sm space-y-1">
-                        <div className="flex items-center justify-between">
+                      <div key={hd.id} className="fault-list-pill text-sm space-y-1">
+                        <div className="fault-section-head">
                           <div>
                             <p className="font-medium">{hd.stokAdi}</p>
                             <p className="text-xs font-mono text-muted-foreground">{hd.stokKodu}</p>
@@ -2242,40 +2216,31 @@ export default function FaultDetailPage() {
             );
           })()}
 
-          <div className="space-y-2 pt-4 border-t">
-            <p className="font-medium">Arıza Geçmişi</p>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Tarih</TableHead>
-                  <TableHead>Tür</TableHead>
-                  <TableHead>Kullanıcı</TableHead>
-                  <TableHead>Açıklama</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {history.map(ev => (
-                  <TableRow key={ev.id}>
-                    <TableCell className="text-xs">{ev.timestamp ? format(ev.timestamp, 'dd.MM.yyyy HH:mm', { locale: tr }) : '-'}</TableCell>
-                    <TableCell className="capitalize">{ev.type.replace('_', ' ')}</TableCell>
-                    <TableCell>{ev.actorName || '-'}</TableCell>
-                    <TableCell className="whitespace-pre-wrap">
-                      <div className="flex items-start justify-between">
-                        <span>{ev.description || '-'}</span>
-                        {ev.type === 'closed' && (isAdmin || fault.closedByUid === currentUser?.uid || fault.closedBy === currentUser?.uid || fault.assignedToUid === currentUser?.uid) && (
-                          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEditModal(ev)}>
-                            <Edit3 className="h-4 w-4 text-muted-foreground" />
-                          </Button>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+          <div className="fault-clay-section fault-history-section space-y-3">
+            <p className="fault-section-title">Arıza Geçmişi</p>
+            <div className="fault-history-list">
+              {history.map(ev => (
+                <div key={ev.id} className={`fault-history-item fault-history-${ev.type}`}>
+                  <span className="fault-history-icon">
+                    {ev.type === 'opened' ? <AlertTriangle className="h-4 w-4" /> : ev.type === 'closed' ? <CheckCircle className="h-4 w-4" /> : ev.type === 'status_change' ? <Navigation className="h-4 w-4" /> : <Edit3 className="h-4 w-4" />}
+                  </span>
+                  <div className="fault-history-copy">
+                    <strong className="capitalize">{ev.type.replace('_', ' ')}</strong>
+                    <span>{ev.actorName || '-'} · {ev.description || '-'}</span>
+                  </div>
+                  <div className="fault-history-time">
+                    {ev.timestamp ? format(ev.timestamp, 'dd.MM HH:mm', { locale: tr }) : '-'}
+                  </div>
+                  {ev.type === 'closed' && (isAdmin || fault.closedByUid === currentUser?.uid || fault.closedBy === currentUser?.uid || fault.assignedToUid === currentUser?.uid) && (
+                    <Button variant="ghost" size="icon" className="fault-history-edit" onClick={() => openEditModal(ev)}>
+                      <Edit3 className="h-4 w-4 text-muted-foreground" />
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
-        </CardContent>
-      </Card>
+      </div>
 
       <Dialog open={isCloseDialogOpen} onOpenChange={(open) => {
         setIsCloseDialogOpen(open);
@@ -2474,7 +2439,7 @@ export default function FaultDetailPage() {
                         }`}
                         onClick={() => setHucreDegisimiSelectedItem(item)}
                       >
-                        <div className="flex items-center justify-between">
+                        <div className="fault-section-head">
                           <div>
                             <p className="font-medium">{item.stokAdi}</p>
                             <p className="text-xs text-muted-foreground font-mono">{item.stokKodu}</p>
@@ -2637,7 +2602,7 @@ export default function FaultDetailPage() {
           </DialogHeader>
           <div className="py-4 space-y-4">
             {/* Kit/Ürün Bilgisi */}
-            <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+            <div className="fault-action-card fault-action-amber">
               <p className="text-sm font-medium text-amber-800 dark:text-amber-200 mb-2">İlişkili Ürün</p>
               <p className="font-medium">{fault?.productStokAdi}</p>
               <p className="text-sm text-muted-foreground font-mono">{fault?.productStokKodu}</p>
@@ -2647,7 +2612,7 @@ export default function FaultDetailPage() {
             </div>
 
             {/* Ürüne Bağlı Test Bilgisi */}
-            <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+            <div className="fault-action-card fault-action-blue">
               <p className="text-sm font-medium text-blue-800 dark:text-blue-200 mb-2">İlişkili Test</p>
               {productTestInfo ? (
                 <div className="flex items-center gap-2">
@@ -2697,7 +2662,7 @@ export default function FaultDetailPage() {
             </DialogTitle>
           </DialogHeader>
           <div className="py-4 space-y-4">
-            <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+            <div className="fault-action-card fault-action-blue">
               <div className="flex items-center justify-between gap-4">
                 <div className="text-center flex-1">
                   <p className="text-xs text-muted-foreground mb-1">Mevcut Birim</p>
