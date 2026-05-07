@@ -760,6 +760,13 @@ export default function UrunKullanimPanel() {
 
     // --- BACKGROUND PROCESS ---
     (async () => {
+      // Capture state for rollback
+      const prevHistory = [...sessionHistory];
+      const prevProduct = lastScannedProduct;
+      const prevLotRem = lastScannedLotRemaining;
+      const prevTotalRem = lastScannedTotalRemaining;
+      const prevImage = lastScannedDeviceGroupImage;
+
       try {
         await batch.commit();
 
@@ -791,56 +798,30 @@ export default function UrunKullanimPanel() {
           deleteDoc(doc(db, 'labManualSerialSnapshots', snapshotKey)).catch(() => undefined);
         }
       } catch (err: any) {
-        urunKullanimLogger.error('Tüketim kaydı yazılamadı (Rollback Gerebilir)', err);
-        // Note: For scanning, a full rollback might be confusing, 
-        // but we should at least notify the user that something went wrong.
+        urunKullanimLogger.error('Tüketim kaydı yazılamadı (Rollback Uygulanıyor)', err);
+        
+        // --- ROLLBACK STATE ---
+        setSessionHistory(prevHistory);
+        setLastScannedProduct(prevProduct);
+        setLastScannedLotRemaining(prevLotRem);
+        setLastScannedTotalRemaining(prevTotalRem);
+        setLastScannedDeviceGroupImage(prevImage);
+        
+        // Feedback
+        setScanStatus('error');
+        playFeedback(true); // Distinct error sound
+
         toast({ 
-          title: "Kayıt Hatası", 
-          description: "Arka planda kaydedilirken bir sorun oluştu. Lütfen bağlantınızı kontrol edin.", 
+          title: "Kayıt Başarısız (Geri Alındı)", 
+          description: "Stok güncellenirken bir sorun oluştu. Ürün başka bir kullanıcı tarafından düşülmüş olabilir.", 
           variant: 'destructive' 
         });
-        setScanStatus('error');
+
+        setTimeout(() => setScanStatus('idle'), 3000);
       }
     })();
 
     return newTuketimDocRef.id;
-    } catch (err: any) {
-      // Detailed error classification
-      const errorCode = err?.code || 'unknown';
-      const errorMessage = err?.message || 'Bilinmeyen hata';
-
-      urunKullanimLogger.error('Tüketim kaydı yazılamadı', err, {
-        stokKodu: itemToConsume.stokKodu,
-        seriNumarasi: itemToConsume.seriNumarasi,
-        itemId: itemToConsume.id,
-        errorCode,
-        errorMessage
-      });
-
-      // Classify error for better user feedback
-      let userMessage = 'Tüketim kaydedilirken hata oluştu.';
-
-      if (errorCode === 'permission-denied') {
-        userMessage = 'Yetkiniz yok. Lütfen sistem yöneticisiyle iletişime geçin.';
-      } else if (errorCode === 'not-found') {
-        userMessage = 'Ürün stokta bulunamadı (başka bir kullanıcı düşmüş olabilir).';
-      } else if (errorCode === 'unavailable' || errorCode === 'deadline-exceeded') {
-        userMessage = 'Sunucuya bağlanılamadı. İnternet bağlantınızı kontrol edin.';
-      } else if (errorMessage.includes('network')) {
-        userMessage = 'Ağ hatası. İnternet bağlantınızı kontrol edin.';
-      }
-
-      setScanStatus('error');
-      toast({
-        title: "Kayıt Hatası",
-        description: userMessage,
-        variant: 'destructive'
-      });
-      setTimeout(() => setScanStatus('idle'), 3000);
-
-      // Propagate error for retry mechanism
-      throw err;
-    }
   }, [currentUserProfile, selectedLab, laboratories, toast, selectedSubPoint, products, deviceGroups, invalidateDepoStok, invalidateConsumption, labStock, minMaxRules]);
   
   const pickEarliest = (items: DepoStokItem[]) => {
