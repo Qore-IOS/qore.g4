@@ -1122,6 +1122,11 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
       })();
 
       return true;
+    } catch (err) {
+      console.error('saveSessionToFirestore error:', err);
+      setIsSaving(false);
+      return false;
+    }
   }, [locationType, selectedLocationId, locationName, countData, currentUserProfile, totalBrands, isSaving, toast, sessionMode, activeSessionId, activeSession, resetToLocationSelection, currentCompanyId]);
 
   const flashFeedback = useCallback((type: 'success' | 'error', message: string) => {
