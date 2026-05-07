@@ -2,11 +2,19 @@
 # https://firebase.google.com/docs/app-hosting/configure
 
 runConfig:
-  # Increase this value if you'd like to automatically spin up
-  # more instances in response to increased traffic.
-  maxInstances: 1
-# Set the startup timeout to 180 seconds to allow for longer build/start times.
-startupTimeoutSeconds: 180
+  # Allow auto-scaling to handle traffic spikes and avoid 503s when the
+  # single instance is busy or restarting.
+  maxInstances: 5
+  minInstances: 0
+  # Per-instance concurrency. Next.js handles many concurrent requests
+  # well; lower this only if memory pressure shows up under load.
+  concurrency: 80
+  # Next.js cold start needs enough headroom; 512 MiB is too tight and
+  # contributes to slow boots that surface as 503 during scale events.
+  cpu: 1
+  memoryMiB: 1024
+# Allow extra time for cold starts of the Next.js server.
+startupTimeoutSeconds: 240
 
 # --- Environment Variables ---
 env:
