@@ -623,8 +623,8 @@ export default function CihazYonetimiHost() {
                 <span className="qt-personnel-lab">{row.laboratoryName || '—'}</span>
               </button>
             ))}
-          ))
-        )}
+          </div>
+        )))}
       </div>
 
       <Dialog open={isAvailabilityDialogOpen} onOpenChange={setIsAvailabilityDialogOpen}>
