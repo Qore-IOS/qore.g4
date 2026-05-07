@@ -2145,15 +2145,42 @@ export default function IslemFormuPage() {
           throw new Error('Kaydedilecek cihaz aksiyonu bulunamadı.');
         }
 
-        // Parallel execution: DB commit AND PDF generation
+        // Decoupled DB and PDF for maximum speed
         const dbPromise = batch.commit();
+        
+        // Start PDF generation immediately
         const pdfPromises = createdFormsData.map(data => 
            generateTeknikServisTutanakPDF(data.device, data.hospital, data.actionRecord as any, true)
         );
 
-        await Promise.all([dbPromise, ...pdfPromises]);
+        // Show WhatsApp button as soon as PDF is ready
+        Promise.all(pdfPromises).then(() => {
+          hapticDouble();
+          const firstForm = createdFormsData[0];
+          const waText = encodeURIComponent(
+            `🚀 *Teknik Servis İşlemi Tamamlandı*\n\n` +
+            `🏥 *Kurum:* ${firstForm.hospital?.name || '-'}\n` +
+            `🔬 *Cihaz:* ${firstForm.device.cihazAdi || firstForm.device.model || '-'}\n` +
+            `📋 *Form No:* ${firstForm.actionRecord.formNo || '-'}\n` +
+            `👨‍🔧 *Teknisyen:* ${currentUserProfile?.name || '-'}\n\n` +
+            `QORE Sistemi üzerinden detaylara ulaşabilirsiniz.`
+          );
 
-        hapticDouble();
+          toast({
+            title: 'Başarılı',
+            description: isLabMode ? 'Laboratuvar geneli form oluşturuldu ve PDF hazır.' : 'İşlem formu kaydedildi ve PDF hazır.',
+            action: (
+              <ToastAction altText="WhatsApp" onClick={() => window.open(`https://wa.me/?text=${waText}`, '_blank')}>
+                <div className="flex items-center gap-1.5">
+                  <MessageCircle className="h-4 w-4" />
+                  <span>WhatsApp</span>
+                </div>
+              </ToastAction>
+            )
+          });
+        });
+
+        await dbPromise;
 
         if (currentDraftId) await deleteDoc(doc(db, 'draftActionForms', currentDraftId));
 
@@ -2161,29 +2188,6 @@ export default function IslemFormuPage() {
         queryClient.invalidateQueries({ queryKey: ['maintenancePlans', 'forDevice', deviceId] });
         queryClient.invalidateQueries({ queryKey: ['deviceActionForms'] });
         queryClient.invalidateQueries({ queryKey: ['deviceFaultReports'] });
-
-        const firstForm = createdFormsData[0];
-        const waText = encodeURIComponent(
-          `🚀 *Teknik Servis İşlemi Tamamlandı*\n\n` +
-          `🏥 *Kurum:* ${firstForm.hospital?.name || '-'}\n` +
-          `🔬 *Cihaz:* ${firstForm.device.cihazAdi || firstForm.device.model || '-'}\n` +
-          `📋 *Form No:* ${firstForm.actionRecord.formNo || '-'}\n` +
-          `👨‍🔧 *Teknisyen:* ${currentUserProfile?.name || '-'}\n\n` +
-          `QORE Sistemi üzerinden detaylara ulaşabilirsiniz.`
-        );
-
-        toast({
-          title: 'Başarılı',
-          description: isLabMode ? 'Laboratuvar geneli form oluşturuldu.' : 'İşlem formu kaydedildi.',
-          action: (
-            <ToastAction altText="WhatsApp" onClick={() => window.open(`https://wa.me/?text=${waText}`, '_blank')}>
-              <div className="flex items-center gap-1.5">
-                <MessageCircle className="h-4 w-4" />
-                <span>WhatsApp</span>
-              </div>
-            </ToastAction>
-          )
-        });
 
       } catch (err) {
         console.error("Error saving action form (Optimistic):", err);

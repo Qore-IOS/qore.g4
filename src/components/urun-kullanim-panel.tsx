@@ -701,112 +701,109 @@ export default function UrunKullanimPanel() {
 
     const batch = writeBatch(db);
     batch.set(newTuketimDocRef, newRec);
-    batch.delete(depoStokDocRef);
+    
+    const currentAdet = itemToConsume.adet ?? 1;
+    if (currentAdet > 1) {
+      // OPTIMIZED: If bulk document, just decrement quantity
+      batch.update(depoStokDocRef, { adet: currentAdet - 1 });
+    } else {
+      // Single item or last unit, delete doc
+      batch.delete(depoStokDocRef);
+    }
 
-    try {
-      await batch.commit();
+    // --- OPTIMISTIC UI START ---
+    // 1. Immediately provide visual/audio feedback
+    setScanStatus('success');
+    playFeedback();
+    
+    // 2. Update local session history immediately
+    const optimisticRecord = { 
+      ...newRec, 
+      id: newTuketimDocRef.id, 
+      consumptionTimestamp: new Date() 
+    };
+    setLastScannedProduct(optimisticRecord as any);
+    setSessionHistory(prev => [optimisticRecord, ...prev].slice(0, 10));
 
-      urunKullanimLogger.info('Tüketim kaydı başarıyla yazıldı', {
-        consumptionId: newTuketimDocRef.id,
-        stokKodu: itemToConsume.stokKodu,
-        seriNumarasi: itemToConsume.seriNumarasi
-      });
+    // 3. Compute and update remaining counts optimistically
+    const consumedId = itemToConsume.id;
+    const consumedStokKodu = itemToConsume.stokKodu;
+    const consumedLot = itemToConsume.lotNumarasi || '';
+    
+    // Use local labStock to update UI immediately
+    const lotRemaining = labStock.filter(i =>
+      i.stokKodu === consumedStokKodu &&
+      (i.lotNumarasi || '') === consumedLot &&
+      i.id !== consumedId
+    ).length;
+    const totalRemaining = labStock.filter(i =>
+      i.stokKodu === consumedStokKodu &&
+      i.id !== consumedId
+    ).length;
+    
+    setLastScannedLotRemaining(lotRemaining);
+    setLastScannedTotalRemaining(totalRemaining);
 
-      // Invalidate caches so data refreshes
-      invalidateDepoStok();
-      invalidateConsumption();
+    // Update image
+    setLastScannedDeviceGroupImage(null);
+    const productInfo = products.find(p => p.stokKodu === itemToConsume.stokKodu);
+    const imageUrl = productInfo?.cihazGrubu ? deviceGroups.find(dg => dg.name === productInfo.cihazGrubu)?.imageUrl || null : null;
+    setLastScannedDeviceGroupImage(imageUrl);
 
-      // Update daily consumption stats for dashboard KPI
-      incrementTodayStats(selectedLab.id).catch(err =>
-        urunKullanimLogger.warn('Günlük tüketim istatistikleri güncellenemedi', { error: err?.message })
-      );
+    toast({ 
+      title: "Başarılı", 
+      description: `${itemToConsume.seriNumarasi || itemToConsume.stokKodu} stoğundan düşüldü.` 
+    });
 
-      // Log serial history asynchronously (don't block on this)
-      logSerialHistory(itemToConsume.seriNumarasi || '', 'consumption', {
-        stokKodu: itemToConsume.stokKodu,
-        usageLabId: selectedLab.id,
-        deductedFromLabId: ownerId,
-        subPointId: selectedSubPoint?.id || '',
-        subPointName: selectedSubPoint?.name || '',
-      }).catch(err =>
-        urunKullanimLogger.warn('Seri geçmişi kaydedilemedi', { error: err?.message })
-      );
+    // Reset status after a delay
+    setTimeout(() => setScanStatus('idle'), 3000);
 
-      const finalRecord = {...newRec, id: newTuketimDocRef.id, consumptionTimestamp: new Date()};
-      setLastScannedProduct(finalRecord as any);
-      setSessionHistory(prev => [finalRecord, ...prev].slice(0, 10)); // Update local history
-
-      // Compute remaining lot and total counts for the consumed product.
-      // labStock may not have refreshed yet, so exclude the item we just consumed.
+    // --- BACKGROUND PROCESS ---
+    (async () => {
       try {
-        const consumedId = itemToConsume.id;
-        const consumedStokKodu = itemToConsume.stokKodu;
-        const consumedLot = itemToConsume.lotNumarasi || '';
-        const lotRemaining = labStock.filter(i =>
-          i.stokKodu === consumedStokKodu &&
-          (i.lotNumarasi || '') === consumedLot &&
-          i.id !== consumedId
-        ).length;
-        const totalRemaining = labStock.filter(i =>
-          i.stokKodu === consumedStokKodu &&
-          i.id !== consumedId
-        ).length;
-        setLastScannedLotRemaining(lotRemaining);
-        setLastScannedTotalRemaining(totalRemaining);
+        await batch.commit();
 
-        // Eğer lot tükendiyse manuel seri snapshot'ını temizle
+        urunKullanimLogger.info('Tüketim kaydı başarıyla yazıldı (Arka Plan)', {
+          consumptionId: newTuketimDocRef.id,
+          stokKodu: itemToConsume.stokKodu,
+        });
+
+        // Invalidate caches in background
+        invalidateDepoStok();
+        invalidateConsumption();
+
+        // Stats update
+        incrementTodayStats(selectedLab.id).catch(() => undefined);
+        
+        // Serial history
+        logSerialHistory(itemToConsume.seriNumarasi || '', 'consumption', {
+          stokKodu: itemToConsume.stokKodu,
+          usageLabId: selectedLab.id,
+          deductedFromLabId: ownerId,
+          subPointId: selectedSubPoint?.id || '',
+          subPointName: selectedSubPoint?.name || '',
+        }).catch(() => undefined);
+
+        // Cleanup snapshots if lot is empty
         if (lotRemaining === 0) {
           const miadRaw = String(itemToConsume.miad || '');
           const snapshotKey = buildManualDeductionKey(selectedLab.id, consumedStokKodu, consumedLot, miadRaw);
           deleteDoc(doc(db, 'labManualSerialSnapshots', snapshotKey)).catch(() => undefined);
         }
-
-        // Check for stock warnings: min stock reached, and qty=1 when max>2.
-        const rule = minMaxRules.find(r => r.stokKodu === consumedStokKodu);
-        const minStock = rule?.min ?? null;
-        const maxStock = rule?.max ?? null;
-        const reasons: string[] = [];
-        if (minStock != null && minStock > 0 && totalRemaining <= minStock) {
-          reasons.push(`Minimum stok seviyesine ulaşıldı (Min: ${minStock}, Kalan: ${totalRemaining})`);
-        }
-        // Only warn for qty=1 when max stock is 2 or greater
-        if (totalRemaining === 1 && (maxStock == null || maxStock >= 2)) {
-          reasons.push('Laboratuvar stoğunda yalnızca 1 adet kaldı');
-        }
-        if (reasons.length > 0) {
-          setStockWarnings(prev => {
-            const filtered = prev.filter(w => w.stokKodu !== consumedStokKodu);
-            return [
-              ...filtered,
-              {
-                stokKodu: consumedStokKodu,
-                stokAdi: itemToConsume.stokAdi || '',
-                lotNumarasi: itemToConsume.lotNumarasi,
-                totalRemaining,
-                minStock,
-                maxStock,
-                reasons,
-              },
-            ];
-          });
-        }
-      } catch (computeErr: any) {
-        urunKullanimLogger.warn('Kalan stok hesaplanamadı', { error: computeErr?.message });
+      } catch (err: any) {
+        urunKullanimLogger.error('Tüketim kaydı yazılamadı (Rollback Gerebilir)', err);
+        // Note: For scanning, a full rollback might be confusing, 
+        // but we should at least notify the user that something went wrong.
+        toast({ 
+          title: "Kayıt Hatası", 
+          description: "Arka planda kaydedilirken bir sorun oluştu. Lütfen bağlantınızı kontrol edin.", 
+          variant: 'destructive' 
+        });
+        setScanStatus('error');
       }
+    })();
 
-      setLastScannedDeviceGroupImage(null);
-      setTimeout(() => {
-        const productInfo = products.find(p => p.stokKodu === itemToConsume.stokKodu);
-        const imageUrl = productInfo?.cihazGrubu ? deviceGroups.find(dg => dg.name === productInfo.cihazGrubu)?.imageUrl || null : null;
-        setLastScannedDeviceGroupImage(imageUrl);
-      }, 50);
-
-      setScanStatus('success');
-      playFeedback();
-      toast({ title: "Başarılı", description: `${itemToConsume.seriNumarasi || itemToConsume.stokKodu} ${ownerName} stoğundan düşüldü.` });
-      setTimeout(() => setScanStatus('idle'), 3000);
-
-      return newTuketimDocRef.id;
+    return newTuketimDocRef.id;
     } catch (err: any) {
       // Detailed error classification
       const errorCode = err?.code || 'unknown';

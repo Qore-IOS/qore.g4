@@ -1350,19 +1350,23 @@ export default function AnaPanel(props: AnaPanelProps) {
           });
 
           if (item.isGroup && serialsToProcess.length === 0) {
-            const adet = Math.max(1, item.adet ?? 1);
-            for (let i = 0; i < adet; i++) {
-              docsToCreate.push({
-                ref: doc(collection(db, 'depoStok')),
-                data: withCompanyScope(createDocData(), currentCompanyId),
-                item,
-              });
-            }
+            // OPTIMIZED: Create ONE document with 'adet' instead of 1000 separate ones
+            docsToCreate.push({
+              ref: doc(collection(db, 'depoStok')),
+              data: withCompanyScope({ 
+                ...createDocData(), 
+                adet: Math.max(1, item.adet ?? 1) 
+              }, currentCompanyId),
+              item,
+            });
           } else {
             for (const serial of (serialsToProcess.filter(Boolean) as string[])) {
               docsToCreate.push({
                 ref: doc(collection(db, 'depoStok')),
-                data: withCompanyScope(createDocData(serial), currentCompanyId),
+                data: withCompanyScope({ 
+                  ...createDocData(serial),
+                  adet: 1 // Serial items always have adet: 1
+                }, currentCompanyId),
                 serial,
                 item,
               });

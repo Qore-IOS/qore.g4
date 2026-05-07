@@ -351,7 +351,8 @@ export async function getPaginatedDepotStock(params: {
         itemIds: [],
       };
     }
-    grouped[key].quantity += 1;
+    const qty = (item.adet && typeof item.adet === 'number') ? item.adet : 1;
+    grouped[key].quantity += qty;
     if (item.id) grouped[key].itemIds.push(item.id);
   }
 
