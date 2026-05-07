@@ -63,6 +63,7 @@ import { format as formatDate, parse, compareAsc, isValid } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { Loader2, PlusCircle, Trash2, Check, FileSpreadsheet, History, Calculator, ChevronsUpDown, Undo, ClipboardPlus, ShoppingCart, Package, Plus, Minus, MoreHorizontal, ArrowRight, Search, CheckCircle2, Edit3, Save, Send, Share2 } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
+import { useDepots, useHospitals, useProductCodes, useDepoStok, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import * as XLSX from 'xlsx';
 import { useRowFocus } from '@/hooks/useRowFocus';
@@ -95,6 +96,23 @@ import LojistikSiparisView from '@/components/LojistikSiparisView';
 import { formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
 
 
+function SiparislerSkeleton() {
+  return (
+    <div className="flex flex-col gap-6 p-6 animate-pulse">
+      <div className="flex justify-between items-center mb-4">
+        <div className="h-10 w-48 bg-muted rounded" />
+        <div className="h-10 w-64 bg-muted rounded" />
+      </div>
+      <div className="h-20 bg-muted rounded-xl mb-4" />
+      <div className="flex gap-1 h-12 bg-muted/20 rounded-xl mb-6" />
+      <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-6">
+        <div className="h-[500px] bg-muted rounded-xl" />
+        <div className="h-[700px] bg-muted rounded-xl" />
+      </div>
+    </div>
+  );
+}
+
 /**
  * Orders Panel Component
  * @description Main panel for order management including creation, viewing,
@@ -107,14 +125,15 @@ export default function SiparislerPanel(): JSX.Element {
   const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   useRowFocus('focus');
 
-  const [depots, setDepots] = useState<Depot[]>([]);
-  const [hospitals, setHospitals] = useState<Hospital[]>([]);
-  const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
-  const [depoStok, setDepoStok] = useState<DepoStokItem[]>([]);
+  // Optimized Fetching
+  const { data: allDepotsData = [], isLoading: depotsLoading } = useDepots();
+  const { data: hospitals = [], isLoading: hospitalsLoading } = useHospitals();
+  const { data: productCodes = [], isLoading: productsLoading } = useProductCodes();
+  const { data: depoStok = [], isLoading: stokLoading } = useDepoStok();
+
+  const depots = useMemo(() => filterOperationalSourceDepots(allDepotsData, currentUserProfile), [allDepotsData, currentUserProfile]);
+
   const [allOrders, setAllOrders] = useState<Order[]>([]);
-  // Perifer siparişleri (depo atanmamış, ofis tarafından yönlendirilmeyi
-  // bekleyen) deponun seçiminden bağımsız olarak ofis panelinde göstermek
-  // için ayrı bir dinleyiciden geliyor.
   const [peripheralOrders, setPeripheralOrders] = useState<Order[]>([]);
 
   const [selectedDepotId, setSelectedDepotId] = useState<string>('');
@@ -123,7 +142,7 @@ export default function SiparislerPanel(): JSX.Element {
   const [manualStockCode, setManualStockCode] = useState<string>('');
   const [manualQty, setManualQty] = useState<number | string>(1);
 
-  const [isLoading, setIsLoading] = useState(true);
+  const isLoading = depotsLoading || hospitalsLoading || productsLoading || stokLoading;
   const [isProcessing, setIsProcessing] = useState(false);
   
   const [showBulk, setShowBulk] = useState(false);
@@ -227,39 +246,12 @@ export default function SiparislerPanel(): JSX.Element {
   }, []);
 
 
+  // Auto-select first depot
   useEffect(() => {
-    (async () => {
-      setIsLoading(true);
-      try {
-        const [dSnap, hSnap, pSnap, sSnap] = await Promise.all([
-          getDocs(collection(db, 'depots')),
-          getDocs(collection(db, 'hospitals')),
-          getDocs(collection(db, 'productCodes')),
-          getDocs(collection(db, 'depoStok')),
-        ]);
-        const depotList = dSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
-        const filteredDepots = filterOperationalSourceDepots(depotList, currentUserProfile);
-        setDepots(filteredDepots);
-        setHospitals(hSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
-        setProductCodes(pSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
-        setDepoStok(filterByCompanyScope(
-          sSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
-          currentCompanyId,
-          isSuperAdmin,
-        ));
-        
-        // Lojistik sorumlusu depo seçimine ihtiyaç duymaz; listesini sadece
-        // atanan laboratuvarlara ait perifer siparişlerden oluşturur.
-        if (filteredDepots.length > 0 && currentUserProfile?.role !== 'lojistik_sorumlusu') {
-          setSelectedDepotId(filteredDepots[0].id);
-        }
-      } catch (e) {
-        toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
-      } finally {
-        setIsLoading(false);
-      }
-    })();
-  }, [toast, currentUserProfile, currentCompanyId, isSuperAdmin]);
+    if (depots.length > 0 && !selectedDepotId && currentUserProfile?.role !== 'lojistik_sorumlusu') {
+      setSelectedDepotId(depots[0].id);
+    }
+  }, [depots, selectedDepotId, currentUserProfile]);
 
 
   const addManualItem = () => {
@@ -608,6 +600,10 @@ export default function SiparislerPanel(): JSX.Element {
   // ── Lojistik Sorumlusu: completely different UI ──
   if (isLojistikSorumlusu) {
     return <LojistikSiparisView />;
+  }
+
+  if (isLoading && pendingOrders.length === 0 && orderItems.length === 0) {
+    return <SiparislerSkeleton />;
   }
 
   return (
