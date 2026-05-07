@@ -429,6 +429,75 @@ export function useDepoStokByDepot(depotId: string | null) {
 }
 
 /**
+ * Server-side paginated grouped depot stock.
+ *
+ * Calls the `getPaginatedDepotStock` server action so that only the requested
+ * page of grouped rows + aggregate metadata travel down the wire. Risk
+ * metadata (miadDays, coverageDays, riskyBoxes, severities) is computed on the
+ * server using the depot's minMaxRules and the productCodes catalog — clients
+ * no longer need to ship the full depoStok dataset just to render the table.
+ *
+ * Cache key encodes every parameter so navigating between pages / sorts / filters
+ * is instant on revisit. After mutating writes (mal kabul, transfer, ürün kullanım)
+ * the metadata listener invalidates the `depoStokPaginated` query family.
+ */
+export function usePaginatedDepotStock(params: {
+  depotId: string | null;
+  page: number;
+  pageSize: number;
+  sortField: string;
+  sortDirection: 'asc' | 'desc';
+  columnFilters?: Record<string, string[]>;
+  riskyOnly?: boolean;
+}) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  const {
+    depotId, page, pageSize, sortField, sortDirection, columnFilters, riskyOnly,
+  } = params;
+
+  // Stable cache key derived from sorted column filter entries.
+  const filterKey = columnFilters
+    ? Object.entries(columnFilters)
+        .map(([k, v]) => `${k}:${[...v].sort().join('|')}`)
+        .sort()
+        .join(';')
+    : '';
+
+  return useQuery({
+    queryKey: [
+      'depoStokPaginated', depotId, page, pageSize,
+      sortField, sortDirection, filterKey, !!riskyOnly,
+      currentCompanyId, isSuperAdmin,
+    ],
+    queryFn: async () => {
+      if (!depotId) {
+        return {
+          rows: [], totalRows: 0, totalPages: 0, currentPage: 1,
+          riskyRowsCount: 0, riskyBoxesTotal: 0,
+          columnValues: { stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [] },
+        };
+      }
+      const { getPaginatedDepotStock } = await import('@/actions/stokActions');
+      return getPaginatedDepotStock({
+        depotId,
+        page,
+        pageSize,
+        sortField,
+        sortDirection,
+        columnFilters,
+        riskyOnly,
+        companyId: currentCompanyId,
+        isSuperAdmin,
+      });
+    },
+    enabled: !!depotId,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    placeholderData: (prev) => prev,
+  });
+}
+
+/**
  * Unshipped depot stock - server-side filtered by (depotId, isShipped=false).
  * Used by panels that only operate on un-shipped inventory (e.g., StokYonetimi).
  * Returns ALL un-shipped items for the depot (no client-side cap).
@@ -810,6 +879,7 @@ export function useStockUpdateListener() {
         // Invalidate all depoStok queries when metadata changes
         if (snapshot.exists()) {
           queryClient.invalidateQueries({ queryKey: ['depoStok'] });
+          queryClient.invalidateQueries({ queryKey: ['depoStokPaginated'] });
         }
       },
       (error) => {
@@ -1006,7 +1076,10 @@ export function useInvalidateQueries() {
   const queryClient = useQueryClient();
 
   return {
-    invalidateDepoStok: () => queryClient.invalidateQueries({ queryKey: ['depoStok'] }),
+    invalidateDepoStok: () => Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['depoStok'] }),
+      queryClient.invalidateQueries({ queryKey: ['depoStokPaginated'] }),
+    ]),
     invalidateConsumption: () => queryClient.invalidateQueries({ queryKey: ['tuketimKayitlari'] }),
     invalidateShipments: () => queryClient.invalidateQueries({ queryKey: ['shipments'] }),
     invalidateProductCodes: () => queryClient.invalidateQueries({ queryKey: ['productCodes'] }),

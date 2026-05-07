@@ -220,6 +220,14 @@ export interface GroupedStockRow {
   rafAdresi: string;
   quantity: number;
   itemIds: string[];
+  // Server-computed risk metadata (populated when minMaxRules are available).
+  miadDays?: number;
+  miadSeverity?: 'normal' | 'notice' | 'caution' | 'warning' | 'critical' | 'expired';
+  coverageDays?: number;
+  coverageSeverity?: 'good' | 'warning' | 'critical' | 'unknown';
+  coverageLabel?: string;
+  dailyNeed?: number;
+  riskyBoxes?: number;
 }
 
 export interface PaginatedStockResult {
@@ -227,6 +235,10 @@ export interface PaginatedStockResult {
   totalRows: number;
   totalPages: number;
   currentPage: number;
+  /** Total grouped rows that have riskyBoxes > 0 (for the unfiltered set). */
+  riskyRowsCount: number;
+  /** Sum of riskyBoxes across all rows (used by the rescue banner). */
+  riskyBoxesTotal: number;
   /** Unique values per column – used for Excel-like column filters */
   columnValues: {
     stokAdi: string[];
@@ -240,6 +252,10 @@ export interface PaginatedStockResult {
  * Server-side paginated + grouped depot stock.
  * Groups individual DepoStokItem docs by (stokKodu, lotNumarasi, miad).
  * Only the requested page of grouped rows is returned to the client.
+ *
+ * Risk metadata (miadDays, coverageDays, riskyBoxes, severities) is computed
+ * server-side using the depot's minMaxRules and the global productCodes catalog.
+ * The client therefore only ships paint-ready data per page.
  */
 export async function getPaginatedDepotStock(params: {
   depotId: string;
@@ -248,13 +264,22 @@ export async function getPaginatedDepotStock(params: {
   sortField: string;
   sortDirection: 'asc' | 'desc';
   columnFilters?: Record<string, string[]>;
+  /** When true, only rows with riskyBoxes > 0 are returned. */
+  riskyOnly?: boolean;
   companyId?: string | null;
   isSuperAdmin?: boolean;
 }): Promise<PaginatedStockResult> {
-  const { depotId, page, pageSize, sortField, sortDirection, columnFilters, companyId, isSuperAdmin } = params;
+  const {
+    depotId, page, pageSize, sortField, sortDirection,
+    columnFilters, riskyOnly, companyId, isSuperAdmin,
+  } = params;
 
   if (!depotId) {
-    return { rows: [], totalRows: 0, totalPages: 0, currentPage: 1, columnValues: { stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [] } };
+    return {
+      rows: [], totalRows: 0, totalPages: 0, currentPage: 1,
+      riskyRowsCount: 0, riskyBoxesTotal: 0,
+      columnValues: { stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [] },
+    };
   }
 
   // Composite query: depotId + isShipped (requires Firestore composite index)
@@ -263,8 +288,35 @@ export async function getPaginatedDepotStock(params: {
     where('depotId', '==', depotId),
     where('isShipped', '==', false)
   );
-  const snapshot = await getDocs(stockQuery);
+  // Side-load the depot's min/max rules and the product catalog in parallel
+  // so we can compute risk metadata without a second round-trip from the client.
+  const [snapshot, rulesSnap, productsSnap] = await Promise.all([
+    getDocs(stockQuery),
+    getDocs(collection(db, 'depots', depotId, 'minMaxRules')),
+    getDocs(collection(db, 'productCodes')),
+  ]);
   const allItems = filterByCompanyScope(snapshot.docs.map(processDoc), companyId, isSuperAdmin);
+
+  // Build helper maps from the side-loaded master data
+  const minMaxRules: Record<string, { max?: number; maxGun?: number; min?: number }> = {};
+  rulesSnap.forEach((d) => {
+    const rule = d.data() as { stokKodu?: string; max?: number; maxGun?: number; min?: number };
+    if (rule.stokKodu) minMaxRules[rule.stokKodu] = rule;
+  });
+
+  const productByCode = new Map<string, { anaBirim?: string; trackingMode?: string; defaultTrackingMode?: string }>();
+  const lotTrackedStokCodes = new Set<string>();
+  productsSnap.forEach((d) => {
+    const data = d.data() as Record<string, any>;
+    const stokKodu: string | undefined = data.stokKodu;
+    if (!stokKodu) return;
+    productByCode.set(stokKodu, data);
+    // Mirror resolveDefaultTrackingMode without importing client-only utilities.
+    const trackingMode = data.defaultTrackingMode || data.trackingMode || data.takipModu;
+    if (trackingMode === 'serial' || trackingMode === 'lot_barcode' || trackingMode === 'lot_manual') {
+      lotTrackedStokCodes.add(stokKodu);
+    }
+  });
 
   // Group by (stokKodu, lotNumarasi, miad)
   const grouped: Record<string, GroupedStockRow> = {};
@@ -279,7 +331,7 @@ export async function getPaginatedDepotStock(params: {
         stokAdi: item.stokAdi || '',
         lotNumarasi: lot,
         miad,
-        anaBirim: 'Kutu',
+        anaBirim: productByCode.get(item.stokKodu || '')?.anaBirim || 'Adet',
         rafAdresi: item.rafAdresi || '',
         quantity: 0,
         itemIds: [],
@@ -290,6 +342,87 @@ export async function getPaginatedDepotStock(params: {
   }
 
   let rows = Object.values(grouped);
+
+  // ─── Risk metadata: miad + coverage + riskyBoxes ───
+  // Mirrors getMiadInfoFromString / getCoverageInfoForRow / getRiskyBoxes from the panel.
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  // Pre-aggregate "total quantity by stokKodu" so non-lot-tracked coverage uses
+  // the depot-wide stock for the same stok code (matches client behaviour).
+  const totalByStokKodu = new Map<string, number>();
+  rows.forEach((r) => {
+    totalByStokKodu.set(r.stokKodu, (totalByStokKodu.get(r.stokKodu) ?? 0) + r.quantity);
+  });
+
+  rows = rows.map((row) => {
+    // Miad info
+    let miadDays = Number.POSITIVE_INFINITY;
+    let miadSeverity: GroupedStockRow['miadSeverity'] = 'normal';
+    if (row.miad) {
+      const miadDate = parse(row.miad, 'dd.MM.yyyy', new Date());
+      if (isValid(miadDate)) {
+        miadDays = differenceInDays(miadDate, today);
+        if (miadDays < 0) miadSeverity = 'expired';
+        else if (miadDays <= 3) miadSeverity = 'critical';
+        else if (miadDays <= 10) miadSeverity = 'warning';
+        else if (miadDays < 45) miadSeverity = 'caution';
+        else if (miadDays < 60) miadSeverity = 'notice';
+      }
+    }
+
+    // Coverage info
+    let coverageSeverity: GroupedStockRow['coverageSeverity'] = 'unknown';
+    let coverageLabel = 'Min/Max tanımsız';
+    let coverageDays = 0;
+    let dailyNeed = 0;
+    const rule = minMaxRules[row.stokKodu];
+    if (rule && rule.max && rule.maxGun) {
+      const stockForCoverage = lotTrackedStokCodes.has(row.stokKodu)
+        ? row.quantity
+        : (totalByStokKodu.get(row.stokKodu) ?? row.quantity);
+      const periodDays = Math.floor(rule.maxGun);
+      if (periodDays > 0) {
+        dailyNeed = rule.max / periodDays;
+        if (dailyNeed > 0) {
+          coverageDays = Math.floor(stockForCoverage / dailyNeed);
+          if (coverageDays <= 3) { coverageSeverity = 'critical'; coverageLabel = `${coverageDays} gün`; }
+          else if (coverageDays <= 10) { coverageSeverity = 'warning'; coverageLabel = `${coverageDays} gün`; }
+          else { coverageSeverity = 'good'; coverageLabel = `${coverageDays} gün yeter`; }
+        } else {
+          coverageLabel = 'Hesaplanamadı';
+        }
+      } else {
+        coverageLabel = 'Hesaplanamadı';
+      }
+    }
+
+    // Risky boxes (only meaningful when coverage outruns expiry)
+    let riskyBoxes = 0;
+    if (
+      coverageSeverity !== 'unknown' &&
+      Number.isFinite(miadDays) &&
+      miadDays > 0 &&
+      coverageDays > miadDays
+    ) {
+      const riskyDays = coverageDays - miadDays;
+      riskyBoxes = Math.max(0, Math.ceil(riskyDays * dailyNeed));
+    }
+
+    return {
+      ...row,
+      miadDays: Number.isFinite(miadDays) ? miadDays : undefined,
+      miadSeverity,
+      coverageDays,
+      coverageSeverity,
+      coverageLabel,
+      dailyNeed,
+      riskyBoxes,
+    };
+  });
+
+  // Risky aggregates over the unfiltered, ungrouped-by-page rows.
+  const riskyRowsCount = rows.reduce((acc, r) => acc + ((r.riskyBoxes ?? 0) > 0 ? 1 : 0), 0);
+  const riskyBoxesTotal = rows.reduce((acc, r) => acc + (r.riskyBoxes ?? 0), 0);
 
   // Collect unique column values BEFORE filtering (so filter dropdowns show all options)
   const columnValues = {
@@ -308,6 +441,11 @@ export async function getPaginatedDepotStock(params: {
         return values.includes(String(fieldVal ?? ''));
       });
     }
+  }
+
+  // Risky-only filter (applied after column filters, before sort+paginate)
+  if (riskyOnly) {
+    rows = rows.filter((r) => (r.riskyBoxes ?? 0) > 0);
   }
 
   // Sort
@@ -343,6 +481,8 @@ export async function getPaginatedDepotStock(params: {
     totalRows,
     totalPages,
     currentPage: safePage,
+    riskyRowsCount,
+    riskyBoxesTotal,
     columnValues,
   };
 }
