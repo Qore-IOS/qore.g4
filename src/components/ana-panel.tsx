@@ -23,7 +23,7 @@ import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
 
 // Hooks
 import { useToast } from "@/hooks/use-toast";
-import { useDepots, useProductCodes, useAddressDefinitions, useBarcodeFormatsQuery, useUsers, useDepoStokByDepot, useInvalidateQueries, touchStockMetadata } from '@/hooks/useFirebaseQueries';
+import { useDepots, useProductCodes, useAddressDefinitions, useBarcodeFormatsQuery, useUsers, useDepoStokByDepot, useInvalidateQueries, touchStockMetadata, useDepotCountSessions, useScannedItems, useIrsaliyeFiles } from '@/hooks/useFirebaseQueries';
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import useHidScanner from '@/hooks/useHidScanner';
 import { useAuth } from '@/contexts/auth-context';
@@ -271,6 +271,7 @@ function upsertGroupedRow(
     return [row, ...prev];
   });
 }
+
 
 const turkishFold = (value: string) =>
   (value || '')
@@ -579,6 +580,54 @@ export default function AnaPanel(props: AnaPanelProps) {
     }
   }, [sourceDepots, selectedDepotId]);
 
+  // --- Optimized Data Fetching Hooks ---
+  const sessionsQuery = useDepotCountSessions(selectedDepotId);
+  const scannedItemsQuery = useScannedItems(activeSession?.id ?? null);
+  const irsaliyeQuery = useIrsaliyeFiles(selectedDepotId);
+
+  // Derive state from queries
+  const availableSessions = useMemo(() => 
+    (sessionsQuery.data ?? []).filter(s => s.status === 'active'),
+    [sessionsQuery.data]
+  );
+
+  useEffect(() => {
+    if (activeSession && sessionsQuery.data) {
+      const stillExists = sessionsQuery.data.some(s => s.id === activeSession.id && s.status === 'active');
+      if (!stillExists) {
+        setActiveSession(null);
+        setScannedItems([]);
+        toast({ title: "Oturum Sona Erdi", description: "Mevcut sayım oturumu kapatıldı." });
+      }
+    }
+  }, [sessionsQuery.data, activeSession, toast]);
+
+  useEffect(() => {
+    if (scannedItemsQuery.data) {
+      const sessionItems = (scannedItemsQuery.data as any[]).map(d => ({...d, id: d.id}) as ScanRow);
+      setScannedItems(sessionItems.sort((a,b) => {
+        const aTime = a.timestamp instanceof Date ? a.timestamp.getTime() : (a.timestamp as any)?.toDate?.()?.getTime?.() || 0;
+        const bTime = b.timestamp instanceof Date ? b.timestamp.getTime() : (b.timestamp as any)?.toDate?.()?.getTime?.() || 0;
+        return bTime - aTime;
+      }));
+    }
+  }, [scannedItemsQuery.data]);
+
+  useEffect(() => {
+    if (irsaliyeQuery.data) {
+      const files = irsaliyeQuery.data ?? [];
+      const count = files.filter(f => {
+        const expiresAt = (f as any)?.expiresAt;
+        if (!expiresAt) return false;
+        const expiryTime = expiresAt instanceof Date ? expiresAt.getTime() : (expiresAt.toDate?.()?.getTime() || 0);
+        const notExpired = expiryTime > Date.now();
+        const depotMatch = (f as any)?.locationType === 'depot' && (f as any)?.locationId === selectedDepotId;
+        return notExpired && depotMatch;
+      }).length;
+      setPendingIrsaliyeCount(count);
+    }
+  }, [irsaliyeQuery.data, selectedDepotId]);
+
   // Build existing serials map from TanStack Query data (polling instead of real-time listener)
   // This reduces Firestore reads dramatically
   const existingDepotSerials = useMemo(() => {
@@ -596,66 +645,6 @@ export default function AnaPanel(props: AnaPanelProps) {
     return serialsByProduct;
   }, [depotStockData]);
   
-  useEffect(() => {
-    if (!selectedDepotId) {
-      setAvailableSessions([]);
-      if (activeSession) setActiveSession(null);
-      return;
-    }
-    const q = query(collection(db, 'depotCountSessions'), where('depotId', '==', selectedDepotId), where('status', '==', 'active'));
-    const unsub = onSnapshot(q, snap => {
-      const sessions = snap.docs.map(d => ({ id: d.id, ...d.data() } as DepotStockCountSession));
-      setAvailableSessions(sessions);
-
-      if (activeSession) {
-        const updatedSession = sessions.find(s => s.id === activeSession.id);
-        if (!updatedSession) { // Session ended or deleted
-          setActiveSession(null);
-          setScannedItems([]); // Clear local items
-          toast({ title: "Oturum Sona Erdi", description: "Mevcut sayım oturumu kapatıldı." });
-        }
-      }
-    });
-    return () => unsub();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDepotId]);
-
-  useEffect(() => {
-    if (!activeSession || !activeSession.id) return;
-    const unsub = onSnapshot(collection(db, 'depotCountSessions', activeSession.id, 'scannedItems'), (snapshot) => {
-        const sessionItems = snapshot.docs.map(d => ({...d.data(), id: d.id}) as ScanRow);
-        setScannedItems(sessionItems.sort((a,b) => {
-          const aTime = a.timestamp instanceof Date ? a.timestamp.getTime() : (a.timestamp as any)?.toDate?.()?.getTime?.() || 0;
-          const bTime = b.timestamp instanceof Date ? b.timestamp.getTime() : (b.timestamp as any)?.toDate?.()?.getTime?.() || 0;
-          return bTime - aTime;
-        }));
-    });
-    return () => unsub();
-  }, [activeSession]);
-
-  useEffect(() => {
-    if (!selectedDepotId) {
-      setPendingIrsaliyeCount(0);
-      return;
-    }
-    const unsub = onSnapshot(
-      query(collection(db, 'irsaliyeDosyalari'), orderBy('uploadedAt', 'desc')),
-      (snapshot) => {
-        let count = 0;
-        snapshot.forEach((docSnap) => {
-          const data = docSnap.data() as any;
-          const inScope = matchesCompanyScope(data, currentCompanyId, isSuperAdmin);
-          const notExpired = data?.expiresAt?.toMillis?.() > Date.now();
-          const depotMatch = data?.locationType === 'depot' && data?.locationId === selectedDepotId;
-          if (inScope && notExpired && depotMatch) count += 1;
-        });
-        setPendingIrsaliyeCount(count);
-      },
-      () => setPendingIrsaliyeCount(0)
-    );
-    return () => unsub();
-  }, [selectedDepotId, currentCompanyId, isSuperAdmin]);
-
   const processScan = useCallback(async (barcodeData: string, source: 'barcode' | 'bulk_item' = 'barcode') => {
     const scanCorrelationId = createCorrelationId();
     const trimmedData = (barcodeData || '').trim();
