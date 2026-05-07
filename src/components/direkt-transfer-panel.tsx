@@ -37,7 +37,7 @@ import {
   limit,
 } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
-import { useDepoStokByDepot, touchStockMetadata, useDepots, useProductCodes, useHospitals, useBorcDepots, useBarcodeFormatsQuery, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
+import { useDepoStokByDepot, touchStockMetadata, useDepots, useProductCodes, useHospitals, useBorcDepots, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Loader2, Camera, Truck, Plus, CheckCircle2, History, DatabaseZap, ChevronsUpDown, Check, Trash2, AlertTriangle, Package, FileText, ListChecks, ArrowRight, Minus, MoreHorizontal, X, ChevronDown, ChevronUp, Search, QrCode } from 'lucide-react';
@@ -52,11 +52,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { compareAsc, parse as parseDate } from 'date-fns';
 import { formatMiad } from '@/lib/date';
 import BackButton from '@/components/BackButton';
-import ManualInlineAdder from '@/components/direkt-transfer/ManualInlineAdder';
-import TemplateSelector from '@/components/direkt-transfer/TemplateSelector';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useBarcodeParser } from '@/hooks/useBarcodeParser';
-import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -218,13 +215,11 @@ export default function DirektTransferPanel() {
   const { data: products = [], isLoading: productsLoading } = useProductCodes();
   const { data: hospitals = [], isLoading: hospitalsLoading } = useHospitals();
   const { data: borcDepots = [], isLoading: borcLoading } = useBorcDepots();
-  const { data: barcodeFormats = [] } = useBarcodeFormatsQuery();
 
   const depots = useMemo(() => filterOperationalSourceDepots(allDepots, currentUserProfile), [allDepots, currentUserProfile]);
   const prereqsLoading = depotsLoading || productsLoading || hospitalsLoading || borcLoading;
 
-  const { formats: barcodeFormats, loading: formatsLoading } = useSafeBarcodeFormats();
-  const { parseAnyBarcode, resolveProductFromParsed, parseAndResolveBarcode } = useBarcodeParser();
+  const { formats: barcodeFormats, loading: formatsLoading, parseAnyBarcode, resolveProductFromParsed, parseAndResolveBarcode } = useBarcodeParser();
   
   const [productTracking, setProductTracking] = useState<Record<string, TrackingMode>>({});
   const [productNames, setProductNames] = useState<Record<string, string>>({});
