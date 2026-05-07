@@ -1797,12 +1797,13 @@ export default function FaultDetailPage() {
                 </div>
             </div>
           )}
-            
+        </div>
 
           <div className="fault-clay-section space-y-3">
             <p className="font-medium">Açıklama</p>
             <p className="text-sm text-muted-foreground whitespace-pre-wrap">{fault.description || '-'}</p>
           </div>
+        )}
 
           {/* Yeni Arıza Akış Sistemi */}
           {(() => {
@@ -1906,6 +1907,18 @@ export default function FaultDetailPage() {
                     <p className="text-sm text-amber-700 dark:text-amber-300 mb-4">
                       Arızaya nasıl müdahale edeceğinizi seçin. Kurumda müdahale için konum doğrulaması gereklidir.
                     </p>
+                    <p className="text-xs text-amber-600/80 dark:text-amber-400/80 mt-2">
+                      Arıza kapama, müdahale ve diğer işlemler sadece atanmış personel tarafından yapılabilir.
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="border-amber-400 text-amber-700 dark:text-amber-300 mt-1">
+                    {normalized === 'mudahale_bekliyor' ? 'Müdahale Bekleniyor' : 'Müdahale Ediliyor'}
+                  </Badge>
+                </div>
+              </div>
+            </div>
+          );
+        }
 
                     {/* Konum doğrulama (kurum ziyareti için) */}
                     <div className="fault-soft-row mb-4">
@@ -1939,23 +1952,42 @@ export default function FaultDetailPage() {
 
                     <div className="flex flex-col sm:flex-row gap-2">
                       <Button
-                        variant="default"
-                        className="flex-1 bg-blue-600 hover:bg-blue-700"
-                        onClick={() => openInterventionDialog('telefon')}
-                        disabled={isStartingIntervention}
+                        size="lg"
+                        onClick={handleAssignToSelf}
+                        disabled={isAssigning || isTransferringUnit}
+                        className="w-full max-w-xs bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg text-base px-6 py-5"
                       >
-                        <Phone className="h-4 w-4 mr-2" /> Telefonla Destek Ver
+                        {isAssigning ? (
+                          <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                        ) : (
+                          <UserPlus className="h-5 w-5 mr-2" />
+                        )}
+                        Arızayı Üzerime Al
                       </Button>
                       <Button
-                        variant="default"
-                        className="flex-1 bg-green-600 hover:bg-green-700"
-                        onClick={() => openInterventionDialog('kurum_ziyaret')}
-                        disabled={isStartingIntervention || !locationVerified}
+                        variant="outline"
+                        onClick={() => setIsTransferDialogOpen(true)}
+                        disabled={isAssigning || isTransferringUnit}
+                        className="w-full max-w-xs border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950/30 px-6 py-4"
                       >
-                        <MapPin className="h-4 w-4 mr-2" /> Kurumda Müdahale Et
+                        {isTransferringUnit ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <ArrowRightLeft className="h-4 w-4 mr-2" />
+                        )}
+                        {fault.faultType === 'teknik_servis' ? 'Aplikasyon Birimine Aktar' : 'Teknik Servis Birimine Aktar'}
                       </Button>
+                    </>
+                  ) : (
+                    <div className="text-center p-4 bg-white/80 dark:bg-black/80 rounded-lg">
+                      <p className="text-sm text-muted-foreground">
+                        Bu arıza <span className="font-semibold">{faultType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'}</span> tipinde.
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Sadece {faultType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon'} personeli bu arızayı üzerine alabilir.
+                      </p>
                     </div>
-                  </div>
+                  )}
                 </div>
               );
             }
@@ -1972,11 +2004,14 @@ export default function FaultDetailPage() {
                       </span>
                     </div>
 
-                    {fault.relatedTests && fault.relatedTests.length > 0 && (
-                      <p className="text-sm text-blue-700 dark:text-blue-300 mb-3">
-                        İlişkili testler: {fault.relatedTests.join(', ')}
-                      </p>
-                    )}
+        if (normalized === 'mudahale_bekliyor') {
+          return (
+            <div className="ariza-clay-card space-y-4">
+              <div className="ariza-flow-surface">
+                <p className="font-medium text-amber-800 dark:text-amber-200 mb-1">Müdahale Tipi Seçin</p>
+                <p className="text-sm text-amber-700 dark:text-amber-300 mb-4">
+                  Arızaya nasıl müdahale edeceğinizi seçin. Kurumda müdahale için konum doğrulaması gereklidir.
+                </p>
 
                     {fault.isEjectedKitFault ? (
                       <div className="flex flex-col sm:flex-row gap-2">
@@ -2018,24 +2053,20 @@ export default function FaultDetailPage() {
                       <p className="font-medium text-muted-foreground">Çözüm Açıklaması</p>
                       <p className="whitespace-pre-wrap mt-1">{fault.closeDescription || '-'}</p>
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <p className="font-medium text-muted-foreground">Kapatan</p>
-                        <p className="mt-1">{fault.closedByName || '-'}</p>
-                        {fault.closedAt && (
-                          <p className="text-xs text-muted-foreground">{format(fault.closedAt, 'dd.MM.yyyy HH:mm', { locale: tr })}</p>
+                    {!locationVerified && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleVerifyLocation}
+                        disabled={isVerifyingLocation}
+                      >
+                        {isVerifyingLocation ? (
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        ) : (
+                          <Navigation className="h-4 w-4 mr-2" />
                         )}
-                      </div>
-                      <div>
-                        <p className="font-medium text-muted-foreground">Destek Personeli</p>
-                        <p className="mt-1">{((fault as any).supportPersonnelNames?.join(', ')) || fault.supportPersonnelName || 'Belirtilmedi'}</p>
-                      </div>
-                    </div>
-                    {fault.toplamCozumSuresi && (
-                      <div>
-                        <p className="font-medium text-muted-foreground">Toplam Çözüm Süresi</p>
-                        <p className="mt-1">{Math.round(fault.toplamCozumSuresi / 60000)} dakika</p>
-                      </div>
+                        Konumu Doğrula
+                      </Button>
                     )}
                   </div>
                 </div>
@@ -2089,10 +2120,15 @@ export default function FaultDetailPage() {
                       <Badge variant="secondary">{faultPartChanges.length}</Badge>
                     )}
                   </p>
-                  {showPartChange && (
-                    <Button variant="outline" size="sm" onClick={openPartModal}>
-                      <Plus className="h-4 w-4 mr-1" />
-                      {isOwnClosedFault ? 'Sonradan Parça Ekle' : 'Parça Değişimi Ekle'}
+                )}
+
+                {fault.isEjectedKitFault ? (
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <Button variant="destructive" size="sm" onClick={() => handleKitResolution('imha')} className="flex-1">
+                      <Recycle className="h-4 w-4 mr-2" /> Kit İmhaya Gönderildi
+                    </Button>
+                    <Button variant="secondary" size="sm" onClick={() => handleKitResolution('tekrar_kullanim')} className="flex-1">
+                      <CornerDownRight className="h-4 w-4 mr-2" /> Kit Tekrar Kullanılabildi
                     </Button>
                   )}
                 </div>
@@ -2142,7 +2178,28 @@ export default function FaultDetailPage() {
                     ))}
                   </div>
                 ) : (
-                  <p className="text-sm text-muted-foreground">Henüz parça değişimi eklenmedi.</p>
+                  <Button variant="default" size="sm" onClick={() => setIsCloseDialogOpen(true)} className="w-full sm:w-auto">
+                    <CheckCircle className="h-4 w-4 mr-2" /> Arızayı Çözüldü Olarak Kapat
+                  </Button>
+                )}
+              </div>
+            </div>
+          );
+        }
+
+        if (normalized === 'cozuldu') {
+          const canEdit = isAdmin || fault.closedByUid === currentUser?.uid || fault.closedBy === currentUser?.uid || fault.assignedToUid === currentUser?.uid;
+          return (
+            <div className="ariza-clay-card space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="font-medium flex items-center gap-2">
+                  <CheckCircle className="h-4 w-4 text-green-600" />
+                  Çözüm Bilgileri
+                </p>
+                {canEdit && (
+                  <Button variant="outline" size="sm" onClick={openEditResolved}>
+                    <Edit3 className="h-4 w-4 mr-1" /> Düzenle
+                  </Button>
                 )}
               </div>
             );
@@ -2167,13 +2224,11 @@ export default function FaultDetailPage() {
                     {faultHucreDegisimleri.length > 0 && (
                       <Badge variant="secondary">{faultHucreDegisimleri.length}</Badge>
                     )}
-                  </p>
-                  {showHucreDegisimi && (
-                    <Button variant="outline" size="sm" onClick={() => setIsHucreDegisimiModalOpen(true)}>
-                      <Plus className="h-4 w-4 mr-1" />
-                      Hücre Değişimi Ekle
-                    </Button>
-                  )}
+                  </div>
+                  <div>
+                    <p className="font-medium text-muted-foreground">Destek Personeli</p>
+                    <p className="mt-1">{((fault as any).supportPersonnelNames?.join(', ')) || fault.supportPersonnelName || 'Belirtilmedi'}</p>
+                  </div>
                 </div>
                 {faultHucreDegisimleri.length > 0 ? (
                   <div className="space-y-2">
@@ -2198,8 +2253,6 @@ export default function FaultDetailPage() {
                       </div>
                     ))}
                   </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">Henüz hücre değişimi eklenmedi.</p>
                 )}
               </div>
             );

@@ -1,6 +1,6 @@
 const { login, BASE_URL } = require('./login');
 
-async function fetchIrsaliyeMaster({ token, idUser, baslangic, bitis, belgeTipi = 1 }) {
+async function fetchIrsaliyeMaster({ token, idUser, baslangic, bitis, belgeTipi = 0 }) {
   const body = new URLSearchParams({
     BASLANGIC: baslangic,
     BITIS: bitis,

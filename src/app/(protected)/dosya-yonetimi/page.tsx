@@ -32,6 +32,7 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import BackButton from '@/components/BackButton';
+import CeomedIrsaliyePanel from '@/components/ceomed/CeomedIrsaliyePanel';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface IrsaliyeDosya {
@@ -570,6 +571,11 @@ export default function DosyaYonetimiPage() {
             <span>Yüklenen dosyalar 1 hafta sonra otomatik olarak sistemden ve veritabanından silinir.</span>
           </div>
         </div>
+      </div>
+
+      {/* ─── Ceomed İrsaliyeleri ─────────────────────────────── */}
+      <div className="mt-6">
+        <CeomedIrsaliyePanel />
       </div>
     </div>
   );

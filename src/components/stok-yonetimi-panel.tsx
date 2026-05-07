@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Checkbox } from './ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
-import { collection, getDocs, query, where, writeBatch, doc, Timestamp, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, getDoc, query, where, writeBatch, doc, Timestamp, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import {
   PackageSearch, Warehouse, FileSpreadsheet, Loader2,
@@ -54,8 +54,8 @@ import {
   useDepots,
   useProductCodes,
   useHospitals,
-  useUnshippedDepoStokByDepot,
   useDepotMinMaxRules,
+  usePaginatedDepotStock,
 } from '@/hooks/useFirebaseQueries';
 
 /* ────────────────────────────────────────────
@@ -323,13 +323,7 @@ export default function StokYonetimiPanel() {
   const minMaxRulesQuery = useDepotMinMaxRules(selectedDepotId || null);
   const minMaxRules = useMemo(() => minMaxRulesQuery.data ?? {}, [minMaxRulesQuery.data]);
 
-  // Full un-shipped depot stock — cached, server-side filtered by (depotId, isShipped=false).
-  // Returns ALL un-shipped items for the depot (no client-side cap), filtered by company scope.
-  const depotStockQuery = useUnshippedDepoStokByDepot(selectedDepotId || null);
-  const rawDepotStock = useMemo(() => depotStockQuery.data ?? [], [depotStockQuery.data]);
-  const isStockLoading = !!selectedDepotId && depotStockQuery.isLoading;
-
-  // Client-side pagination state
+  // Server-side pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
   const rowsPerPageOptions = [20, 30, 50, 100];
@@ -355,6 +349,40 @@ export default function StokYonetimiPanel() {
   const [bulkRescueLoading, setBulkRescueLoading] = useState(false);
   const [bulkRescuePlans, setBulkRescuePlans] = useState<Array<{ stokKodu: string; stokAdi: string; riskyBoxes: number; miadDays: number; miad: string; rescuable: number; suggestions: TransferSuggestion[] }>>([]);
 
+  // ─── Server-side paginated table data ───
+  // Only the rows for the active page travel down the wire (full payload was
+  // previously the depot's entire un-shipped stock = potentially 100K+ docs).
+  // Risk metadata (miadDays, coverageDays, riskyBoxes, severities) is computed
+  // server-side; the client just paints the cells.
+  const paginatedQuery = usePaginatedDepotStock({
+    depotId: selectedDepotId || null,
+    page: currentPage,
+    pageSize: rowsPerPage,
+    sortField,
+    sortDirection,
+    columnFilters,
+    riskyOnly: showOnlyRiskyStock,
+  });
+
+  const paginatedRows = useMemo(
+    () => (paginatedQuery.data?.rows ?? []) as GroupedStockRow[],
+    [paginatedQuery.data],
+  );
+  const paginatedTotalRows = paginatedQuery.data?.totalRows ?? 0;
+  const paginatedTotalPages = paginatedQuery.data?.totalPages ?? 1;
+  const paginatedColumnValues: PaginatedStockResult['columnValues'] =
+    paginatedQuery.data?.columnValues ?? { stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [] };
+  const riskyRowsCount = paginatedQuery.data?.riskyRowsCount ?? 0;
+
+  // ─── Lazy full-stock fetch (on-demand) ───
+  // Required for NFC modal, bulk rescue and lab-stock report which scan the
+  // entire depot. Disabled by default; enabled only when the consumer opens.
+  // Single shared cache key — cost is paid at most once per depot/session.
+  const needsFullStock = isNfcQueryModalOpen || isBulkRescueModalOpen || isLabCountModalOpen;
+  const depotStockQuery = useUnshippedDepoStokByDepot(needsFullStock ? (selectedDepotId || null) : null);
+  const rawDepotStock = useMemo(() => depotStockQuery.data ?? [], [depotStockQuery.data]);
+  const isStockLoading = !!selectedDepotId && paginatedQuery.isLoading;
+
   // Auto-pick first operational depot once depots are available
   useEffect(() => {
     if (selectedDepotId) return;
@@ -373,8 +401,15 @@ export default function StokYonetimiPanel() {
   }, [depotsQuery.isError, productCodesQuery.isError, hospitalsQuery.isError, toast]);
 
   useEffect(() => {
-    if (depotStockQuery.isError) {
+    if (paginatedQuery.isError) {
       toast({ title: 'Hata', description: 'Stok verileri yüklenemedi.', variant: 'destructive' });
+    }
+  }, [paginatedQuery.isError, toast]);
+
+  // Lazy-loaded full-stock surface (only when NFC / bulk rescue / lab-count modals open)
+  useEffect(() => {
+    if (depotStockQuery.isError) {
+      toast({ title: 'Hata', description: 'Tam stok verisi yüklenemedi.', variant: 'destructive' });
     }
   }, [depotStockQuery.isError, toast]);
 
@@ -383,104 +418,15 @@ export default function StokYonetimiPanel() {
     setCurrentPage(1);
   }, [selectedDepotId]);
 
-  // Group rawDepotStock by (stokKodu, lotNumarasi, miad) and derive column values
-  const { allGroupedRows, columnUniqueValues } = useMemo(() => {
-    const productMetaByCode = new Map<string, ProductCode>(
-      productCodes.filter((p) => p.stokKodu !== undefined).map((p) => [p.stokKodu!, p] as const),
-    );
-    const grouped: Record<string, GroupedStockRow> = {};
-    for (const item of rawDepotStock) {
-      const lot = item.lotNumarasi || '';
-      const miad = typeof item.miad === 'string' ? item.miad : '';
-      const gKey = `${item.stokKodu}-${lot}-${miad}`;
-      if (!grouped[gKey]) {
-        grouped[gKey] = {
-          key: gKey,
-          stokKodu: item.stokKodu || '',
-          stokAdi: item.stokAdi || '',
-          lotNumarasi: lot,
-          miad,
-          anaBirim: productMetaByCode.get(item.stokKodu || '')?.anaBirim || 'Adet',
-          rafAdresi: item.rafAdresi || '',
-          quantity: 0,
-          itemIds: [],
-        };
-      }
-      grouped[gKey].quantity += 1;
-      if (item.id) grouped[gKey].itemIds.push(item.id);
-    }
-    const rows = Object.values(grouped);
-    const columnUniqueValues: PaginatedStockResult['columnValues'] = {
-      stokAdi: [...new Set(rows.map((r) => r.stokAdi))].sort(),
-      lotNumarasi: [...new Set(rows.map((r) => r.lotNumarasi).filter(Boolean))].sort(),
-      miad: [...new Set(rows.map((r) => r.miad).filter(Boolean))].sort(),
-      rafAdresi: [...new Set(rows.map((r) => r.rafAdresi).filter(Boolean))].sort(),
-    };
-    return { allGroupedRows: rows, columnUniqueValues };
-  }, [rawDepotStock, productCodes]);
 
-  const lotTrackedStockCodes = useMemo(() => {
-    const tracked = new Set<string>();
-    for (const product of productCodes) {
-      if (!product.stokKodu) continue;
-      const trackingMode = resolveDefaultTrackingMode(product);
-      if (trackingMode === 'serial' || trackingMode === 'lot_barcode' || trackingMode === 'lot_manual') {
-        tracked.add(product.stokKodu);
-      }
-    }
-    return tracked;
-  }, [productCodes]);
-
-
-  /* ─── Client-side filtering, sorting, pagination ─── */
-  const { rows, totalRows, totalPages, colValues } = useMemo(() => {
-    let filtered = [...allGroupedRows];
-
-    // Apply column filters
-    for (const [col, values] of Object.entries(columnFilters) as [string, string[]][]) {
-      if (values.length === 0) continue;
-      filtered = filtered.filter(r => {
-        const fieldVal = (r as any)[col];
-        return values.includes(String(fieldVal ?? ''));
-      });
-    }
-
-    if (showOnlyRiskyStock) {
-      filtered = filtered.filter((row) => {
-        const miadInfo = getMiadInfoFromString(row.miad);
-        const coverageInfo = getCoverageInfoForRow(row, minMaxRules, lotTrackedStockCodes, allGroupedRows);
-        return getRiskyBoxes(miadInfo, coverageInfo) > 0;
-      });
-    }
-
-    // Sort
-    filtered.sort((a, b) => {
-      const aVal = (a as any)[sortField] ?? '';
-      const bVal = (b as any)[sortField] ?? '';
-
-      if (sortField === 'miad') {
-        const dateA = parse(String(aVal), 'dd.MM.yyyy', new Date());
-        const dateB = parse(String(bVal), 'dd.MM.yyyy', new Date());
-        if (isValid(dateA) && isValid(dateB)) {
-          return sortDirection === 'asc' ? compareAsc(dateA, dateB) : compareAsc(dateB, dateA);
-        }
-      }
-      if (sortField === 'quantity') {
-        return sortDirection === 'asc' ? Number(aVal) - Number(bVal) : Number(bVal) - Number(aVal);
-      }
-      return sortDirection === 'asc'
-        ? String(aVal).localeCompare(String(bVal), 'tr')
-        : String(bVal).localeCompare(String(aVal), 'tr');
-    });
-
-    const total = filtered.length;
-    const pages = Math.max(1, Math.ceil(total / rowsPerPage));
-    const safePage = Math.min(Math.max(1, currentPage), pages);
-    const start = (safePage - 1) * rowsPerPage;
-    const pageRows = filtered.slice(start, start + rowsPerPage);
-
-    return { rows: pageRows, totalRows: total, totalPages: pages, colValues: columnUniqueValues };
-  }, [allGroupedRows, columnFilters, sortField, sortDirection, currentPage, rowsPerPage, columnUniqueValues, showOnlyRiskyStock, minMaxRules, lotTrackedStockCodes]);
+  /* ─── Server-side filtering, sorting and pagination outputs ───
+     The server action does the heavy lifting (group + filter + risky + sort +
+     paginate). We just unpack the response into the variable names the rest of
+     the component already references. */
+  const rows = paginatedRows;
+  const totalRows = paginatedTotalRows;
+  const totalPages = paginatedTotalPages;
+  const colValues = paginatedColumnValues;
 
   // Filter out pool warehouses for the depot selector
   const availableDepots = useMemo(
@@ -488,7 +434,7 @@ export default function StokYonetimiPanel() {
     [depots, currentUserProfile]
   );
   const depotName = depots.find(d => d.id === selectedDepotId)?.name || '';
-  const isPending = isStockLoading;
+  const isPending = isStockLoading || paginatedQuery.isFetching;
 
   /* ─── Sorting handler ─── */
   const handleSort = (field: string) => {
@@ -522,25 +468,51 @@ export default function StokYonetimiPanel() {
 
   const hasActiveColumnFilters = Object.values(columnFilters).some((v: string[]) => v.length > 0);
 
-  const getMiadInfo = getMiadInfoFromString;
+  /* ─── Risk metadata accessors ───
+     Prefer server-computed metadata on the row; fall back to client-side
+     calculation for surfaces (NFC modal, rescue) that still ship raw rows. */
+  const getMiadInfo = (rowOrStr: GroupedStockRow | string): { days: number; severity: MiadSeverity } => {
+    if (typeof rowOrStr === 'string') return getMiadInfoFromString(rowOrStr);
+    if (rowOrStr.miadSeverity !== undefined) {
+      return {
+        days: rowOrStr.miadDays ?? Number.POSITIVE_INFINITY,
+        severity: rowOrStr.miadSeverity,
+      };
+    }
+    return getMiadInfoFromString(rowOrStr.miad);
+  };
 
-  const getCoverageInfo = (row: GroupedStockRow) =>
-    getCoverageInfoForRow(row, minMaxRules, lotTrackedStockCodes, allGroupedRows);
+  const getCoverageInfo = (row: GroupedStockRow): { label: string; severity: 'good' | 'warning' | 'critical' | 'unknown'; coverageDays: number; dailyNeed: number } => {
+    if (row.coverageSeverity !== undefined) {
+      return {
+        label: row.coverageLabel ?? 'Hesaplanamadı',
+        severity: row.coverageSeverity,
+        coverageDays: row.coverageDays ?? 0,
+        dailyNeed: row.dailyNeed ?? 0,
+      };
+    }
+    return getCoverageInfoForRow(row, minMaxRules, lotTrackedStockCodes, []);
+  };
 
-  const riskyRows = useMemo(
-    () => allGroupedRows.filter((row) => {
-      const miadInfo = getMiadInfoFromString(row.miad);
-      const coverageInfo = getCoverageInfoForRow(row, minMaxRules, lotTrackedStockCodes, allGroupedRows);
-      return getRiskyBoxes(miadInfo, coverageInfo) > 0;
-    }),
-    [allGroupedRows, minMaxRules, lotTrackedStockCodes]
-  );
+  const lotTrackedStockCodes = useMemo(() => {
+    const tracked = new Set<string>();
+    for (const product of productCodes) {
+      if (!product.stokKodu) continue;
+      const trackingMode = resolveDefaultTrackingMode(product);
+      if (trackingMode === 'serial' || trackingMode === 'lot_barcode' || trackingMode === 'lot_manual') {
+        tracked.add(product.stokKodu);
+      }
+    }
+    return tracked;
+  }, [productCodes]);
 
-  const hasRiskyRows = riskyRows.length > 0;
+  /** True when at least one grouped row in the depot has riskyBoxes > 0.
+   *  Sourced from the server action so we don't need the full dataset client-side. */
+  const hasRiskyRows = riskyRowsCount > 0;
 
   /* ─── Row color strip ─── */
   const getRowStripeColor = (row: GroupedStockRow): string => {
-    const miadInfo = getMiadInfo(row.miad);
+    const miadInfo = getMiadInfo(row);
     if (miadInfo.severity === 'expired' || miadInfo.severity === 'critical') return 'bg-red-500';
     if (miadInfo.severity === 'warning' || miadInfo.severity === 'caution') return 'bg-amber-500';
     if (miadInfo.severity === 'notice') return 'bg-yellow-400';
@@ -626,21 +598,47 @@ export default function StokYonetimiPanel() {
     }
   };
 
-  const riskyExportRows = useMemo(() => {
-    return riskyRows.map((row) => {
-      const miadInfo = getMiadInfoFromString(row.miad);
-      const coverageInfo = getCoverageInfoForRow(row, minMaxRules, lotTrackedStockCodes, allGroupedRows);
-      const riskyBoxes = getRiskyBoxes(miadInfo, coverageInfo);
-      return {
-        row,
-        miadInfo,
-        coverageInfo,
-        riskyBoxes,
-      };
+  /**
+   * Pull every risky row for the current depot from the server in a single
+   * call. Used by the Excel/PDF export and bulk rescue handlers — none of
+   * which can rely on the paginated table view.
+   */
+  const fetchAllRiskyRows = useCallback(async (): Promise<Array<{
+    row: GroupedStockRow;
+    miadInfo: { days: number; severity: MiadSeverity };
+    coverageInfo: { label: string; severity: 'good' | 'warning' | 'critical' | 'unknown'; coverageDays: number; dailyNeed: number };
+    riskyBoxes: number;
+  }>> => {
+    if (!selectedDepotId) return [];
+    const { getPaginatedDepotStock } = await import('@/actions/stokActions');
+    const result = await getPaginatedDepotStock({
+      depotId: selectedDepotId,
+      page: 1,
+      pageSize: 1_000_000,
+      sortField: 'miad',
+      sortDirection: 'asc',
+      riskyOnly: true,
+      companyId: currentCompanyId,
+      isSuperAdmin,
     });
-  }, [riskyRows, minMaxRules, lotTrackedStockCodes, allGroupedRows]);
+    return result.rows.map((row) => ({
+      row,
+      miadInfo: {
+        days: row.miadDays ?? Number.POSITIVE_INFINITY,
+        severity: (row.miadSeverity ?? 'normal') as MiadSeverity,
+      },
+      coverageInfo: {
+        label: row.coverageLabel ?? '',
+        severity: (row.coverageSeverity ?? 'unknown') as 'good' | 'warning' | 'critical' | 'unknown',
+        coverageDays: row.coverageDays ?? 0,
+        dailyNeed: row.dailyNeed ?? 0,
+      },
+      riskyBoxes: row.riskyBoxes ?? 0,
+    }));
+  }, [selectedDepotId, currentCompanyId, isSuperAdmin]);
 
-  const handleRiskyExcelExport = () => {
+  const handleRiskyExcelExport = async () => {
+    const riskyExportRows = await fetchAllRiskyRows();
     const data = riskyExportRows.map(({ row, miadInfo, coverageInfo, riskyBoxes }) => ({
       'Stok Adı': row.stokAdi,
       'Stok Kodu': row.stokKodu,
@@ -676,6 +674,7 @@ export default function StokYonetimiPanel() {
 
   const handleRiskyPdfExport = async () => {
     try {
+      const riskyExportRows = await fetchAllRiskyRows();
       const [jsPDFModule, autoTableModule] = await Promise.all([
         import('jspdf'),
         import('jspdf-autotable')
@@ -1192,17 +1191,20 @@ export default function StokYonetimiPanel() {
     setBulkRescuePlans([]);
 
     try {
-      // Find all risky rows
+      // Pull every risky row in one server call (already grouped + risk-scored).
+      const riskyAll = await fetchAllRiskyRows();
       const riskyRows: Array<{ stokKodu: string; stokAdi: string; riskyBoxes: number; miadDays: number; miad: string }> = [];
       const seenProducts = new Set<string>();
-
-      for (const row of allGroupedRows) {
-        const miadInfo = getMiadInfoFromString(row.miad);
-        const coverageInfo = getCoverageInfoForRow(row, minMaxRules, lotTrackedStockCodes, allGroupedRows);
-        const risky = getRiskyBoxes(miadInfo, coverageInfo);
-        if (risky > 0 && !seenProducts.has(row.stokKodu)) {
+      for (const { row, miadInfo, riskyBoxes } of riskyAll) {
+        if (riskyBoxes > 0 && !seenProducts.has(row.stokKodu)) {
           seenProducts.add(row.stokKodu);
-          riskyRows.push({ stokKodu: row.stokKodu, stokAdi: row.stokAdi, riskyBoxes: risky, miadDays: miadInfo.days, miad: row.miad });
+          riskyRows.push({
+            stokKodu: row.stokKodu,
+            stokAdi: row.stokAdi,
+            riskyBoxes,
+            miadDays: miadInfo.days,
+            miad: row.miad,
+          });
         }
       }
 
@@ -1227,7 +1229,7 @@ export default function StokYonetimiPanel() {
     } finally {
       setBulkRescueLoading(false);
     }
-  }, [allGroupedRows, minMaxRules, fetchLabStockInfoForProduct, toast]);
+  }, [fetchAllRiskyRows, fetchLabStockInfoForProduct, toast]);
 
   /* ═════════════════════════ RENDER ═════════════════════════ */
   return (
@@ -1368,7 +1370,7 @@ export default function StokYonetimiPanel() {
         {/* Sticky toolbar with summary */}
         <div className="sticky top-0 z-20 bg-[var(--dashboard-surface)] border-b border-[var(--dashboard-stroke)] px-4 py-2.5 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 text-xs text-[var(--dashboard-muted)]">
-            <span className="font-medium">Toplam: <span className="text-[var(--dashboard-text)] font-bold">{showOnlyRiskyStock ? riskyRows.length : totalRows}</span> kayıt</span>
+            <span className="font-medium">Toplam: <span className="text-[var(--dashboard-text)] font-bold">{totalRows}</span> kayıt</span>
             {totalPages > 1 && <span>Sayfa <span className="text-[var(--dashboard-text)] font-bold">{currentPage}</span>/{totalPages}</span>}
           </div>
           <div className="flex items-center gap-3">
