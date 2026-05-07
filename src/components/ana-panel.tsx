@@ -1256,7 +1256,13 @@ export default function AnaPanel(props: AnaPanelProps) {
 
       toast({ title: 'Başarılı', description: `${barcodeValues.length} ürün için toplu barkod oluşturuldu ve PDF indirildi.` });
     } catch (error: any) {
-      toast({ title: 'Barkod üretilemedi', description: safeStr(error?.message) || 'Toplu bar  const performGoodsReceipt = (itemsToProcess: ScanRow[]) => {
+      toast({ title: 'Barkod üretilemedi', description: safeStr(error?.message) || 'Toplu barkod oluşturulurken bir hata oluştu.', variant: 'destructive' });
+    } finally {
+      setIsGeneratingBulkQr(false);
+    }
+  };
+
+  const performGoodsReceipt = (itemsToProcess: ScanRow[]) => {
     // 1. Durumu Yedekle (Rollback için)
     const previousScannedItems = [...scannedItems];
     const processedIds = new Set(itemsToProcess.map(i => i.id).filter(Boolean) as string[]);
