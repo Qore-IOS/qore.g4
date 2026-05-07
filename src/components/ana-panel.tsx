@@ -525,7 +525,6 @@ export default function AnaPanel(props: AnaPanelProps) {
   const [showManualInline, setShowManualInline] = useState(false);
   
   const [isSessionModalOpen, setIsSessionModalOpen] = useState(false);
-  const [availableSessions, setAvailableSessions] = useState<DepotStockCountSession[]>([]);
   const [activeSession, setActiveSession] = useState<DepotStockCountSession | null>(null);
   const [selectedParticipants, setSelectedParticipants] = useState<string[]>([]);
   const [joining, setJoining] = useState(false);
