@@ -472,11 +472,23 @@ export default function CihazYonetimiHost() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="flex flex-col items-center gap-4">
-          <div className="custom-loader" />
-          <p className="text-sm text-[var(--qt-muted)]">Yükleniyor&hellip;</p>
+      <div className="space-y-6 p-4 sm:p-6 animate-pulse">
+        <div className="flex justify-between items-center mb-8">
+          <div className="space-y-2">
+            <div className="h-8 w-64 bg-[var(--qt-surface-2)] rounded-lg" />
+            <div className="h-4 w-48 bg-[var(--qt-surface-2)] rounded" />
+          </div>
+          <div className="flex gap-2">
+            <div className="h-10 w-24 bg-[var(--qt-surface-2)] rounded-lg" />
+            <div className="h-10 w-24 bg-[var(--qt-surface-2)] rounded-lg" />
+          </div>
         </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+          <div className="h-32 bg-[var(--qt-surface-2)] rounded-2xl shadow-sm" />
+          <div className="h-32 bg-[var(--qt-surface-2)] rounded-2xl shadow-sm" />
+          <div className="h-32 bg-[var(--qt-surface-2)] rounded-2xl shadow-sm" />
+        </div>
+        <div className="h-[400px] bg-[var(--qt-surface-2)] rounded-2xl shadow-sm" />
       </div>
     );
   }

@@ -37,7 +37,7 @@ import {
   limit,
 } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
-import { useDepoStokByDepot, touchStockMetadata } from '@/hooks/useFirebaseQueries';
+import { useDepoStokByDepot, touchStockMetadata, useDepots, useProductCodes, useHospitals, useBorcDepots, useBarcodeFormatsQuery, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Loader2, Camera, Truck, Plus, CheckCircle2, History, DatabaseZap, ChevronsUpDown, Check, Trash2, AlertTriangle, Package, FileText, ListChecks, ArrowRight, Minus, MoreHorizontal, X, ChevronDown, ChevronUp, Search, QrCode } from 'lucide-react';
@@ -73,7 +73,6 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { autoPrintTutanakFromTransferId, isAutoTutanakEnabled } from '@/lib/tutanak-autoprint';
 import { emitFefoOverride } from '@/lib/notifications';
 import { VirtualizedList } from '@/components/ui/virtualized-list';
-import { useInvalidateQueries } from '@/hooks/useFirebaseQueries';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
 
@@ -83,7 +82,29 @@ const CameraScanner = dynamic(() => import('@/components/camera-barcode-scanner'
   loading: () => <div className="flex items-center justify-center p-8"><Loader2 className="h-6 w-6 animate-spin" /><span className="ml-2">Kamera Yükleniyor...</span></div>,
 });
 
-// TransferRow and FefoViolation types imported from @/lib/direkt-transfer/types
+const TemplateSelector = dynamic(() => import('@/components/direkt-transfer/TemplateSelector'), {
+  ssr: false,
+  loading: () => <div className="h-20 animate-pulse bg-muted rounded-md" />
+});
+
+const ManualInlineAdder = dynamic(() => import('@/components/direkt-transfer/ManualInlineAdder'), {
+  ssr: false,
+  loading: () => <div className="h-10 animate-pulse bg-muted rounded-md" />
+});
+
+function DirektTransferSkeleton() {
+  return (
+    <div className="flex flex-col gap-4 p-4 animate-pulse">
+      <div className="h-12 w-32 bg-muted rounded mb-4" />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="h-48 bg-muted rounded-xl" />
+        <div className="h-48 bg-muted rounded-xl" />
+      </div>
+      <div className="h-24 bg-muted rounded-xl mt-4" />
+      <div className="flex-1 bg-muted rounded-xl mt-4" style={{ minHeight: '400px' }} />
+    </div>
+  );
+}
 
 
 // OPTIMIZED FEFO CHECK:
@@ -192,11 +213,15 @@ export default function DirektTransferPanel() {
   const router = useRouter();
   const { invalidateDepoStok } = useInvalidateQueries();
 
-  const [depots, setDepots] = useState<Depot[]>([]);
-  const [products, setProducts] = useState<ProductCode[]>([]);
-  const [hospitals, setHospitals] = useState<Hospital[]>([]);
-  const [borcDepots, setBorcDepots] = useState<Depot[]>([]);
-  const [prereqsLoading, setPrereqsLoading] = useState(true);
+  // Optimized fetching with TanStack Query
+  const { data: allDepots = [], isLoading: depotsLoading } = useDepots();
+  const { data: products = [], isLoading: productsLoading } = useProductCodes();
+  const { data: hospitals = [], isLoading: hospitalsLoading } = useHospitals();
+  const { data: borcDepots = [], isLoading: borcLoading } = useBorcDepots();
+  const { data: barcodeFormats = [] } = useBarcodeFormatsQuery();
+
+  const depots = useMemo(() => filterOperationalSourceDepots(allDepots, currentUserProfile), [allDepots, currentUserProfile]);
+  const prereqsLoading = depotsLoading || productsLoading || hospitalsLoading || borcLoading;
 
   const { formats: barcodeFormats, loading: formatsLoading } = useSafeBarcodeFormats();
   const { parseAnyBarcode, resolveProductFromParsed, parseAndResolveBarcode } = useBarcodeParser();
@@ -306,40 +331,12 @@ export default function DirektTransferPanel() {
       .reduce((n, it) => n + (it.adet ?? 1), 0);
   }, [directTransferItems, lastScannedProduct]);
   
-  const fetchPrerequisites = useCallback(async () => {
-    setPrereqsLoading(true);
-    try {
-      const [depotSnap, productSnap, hospitalSnap, borcSnap] = await Promise.all([
-        getDocs(collection(db, 'depots')),
-        getDocs(collection(db, 'productCodes')),
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'borcDepots')),
-      ]);
-
-      const depotList = depotSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
-      const filteredDepots = filterOperationalSourceDepots(depotList, currentUserProfile);
-      setDepots(filteredDepots);
-      setProducts(productSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
-      setHospitals(hospitalSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
-      setBorcDepots(borcSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)));
-
-      if (filteredDepots.length > 0 && !selectedDepotId) {
-          setSelectedDepotId(filteredDepots[0].id);
-      }
-
-    } catch (e: any) {
-      direktTransferLogger.error('Ön veriler yüklenemedi', e, {
-        operation: 'fetchPrerequisites',
-      });
-      toast({ title: "Veri Hatası", description: `Ön veriler yüklenemedi: ${e.message}`, variant: "destructive" });
-    } finally {
-      setPrereqsLoading(false);
-    }
-  }, [selectedDepotId, toast, currentUserProfile]);
-
+  // Auto-select first depot
   useEffect(() => {
-    fetchPrerequisites();
-  }, [fetchPrerequisites]);
+    if (depots.length > 0 && !selectedDepotId) {
+      setSelectedDepotId(depots[0].id);
+    }
+  }, [depots, selectedDepotId]);
 
   // Fetch templates when template selector is opened
   const fetchTemplates = useCallback(async () => {
