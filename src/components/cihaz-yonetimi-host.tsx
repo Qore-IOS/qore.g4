@@ -153,6 +153,30 @@ function MetricCard({ label, value, unit, footer, icon: Icon, tone = 'default', 
   );
 }
 
+function MetricCardSkeleton() {
+  return (
+    <div className="qt-metric-card animate-pulse">
+      <div className="qt-metric-card__icon bg-[var(--qt-surface-2)] h-10 w-10 rounded-xl" />
+      <div className="h-4 w-24 bg-[var(--qt-surface-2)] rounded mt-4" />
+      <div className="h-8 w-16 bg-[var(--qt-surface-2)] rounded mt-2" />
+      <div className="h-4 w-32 bg-[var(--qt-surface-2)] rounded mt-4" />
+    </div>
+  );
+}
+
+function PersonnelSkeleton() {
+  return (
+    <div className="space-y-3 animate-pulse px-2 py-4">
+      {[1, 2, 3].map((i) => (
+        <div key={i} className="qt-personnel-row border-none shadow-none bg-[var(--qt-surface-2)]/40">
+          <div className="h-5 w-40 bg-[var(--qt-surface-2)] rounded" />
+          <div className="h-6 w-20 bg-[var(--qt-surface-2)] rounded-full ml-auto" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function CihazYonetimiHost() {
   const [isQoreAIPanelOpen, setIsQoreAIPanelOpen] = useState(false);
   const [isAvailabilityDialogOpen, setIsAvailabilityDialogOpen] = useState(false);
@@ -470,28 +494,6 @@ export default function CihazYonetimiHost() {
     }
   };
 
-  if (isLoading) {
-    return (
-      <div className="space-y-6 p-4 sm:p-6 animate-pulse">
-        <div className="flex justify-between items-center mb-8">
-          <div className="space-y-2">
-            <div className="h-8 w-64 bg-[var(--qt-surface-2)] rounded-lg" />
-            <div className="h-4 w-48 bg-[var(--qt-surface-2)] rounded" />
-          </div>
-          <div className="flex gap-2">
-            <div className="h-10 w-24 bg-[var(--qt-surface-2)] rounded-lg" />
-            <div className="h-10 w-24 bg-[var(--qt-surface-2)] rounded-lg" />
-          </div>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
-          <div className="h-32 bg-[var(--qt-surface-2)] rounded-2xl shadow-sm" />
-          <div className="h-32 bg-[var(--qt-surface-2)] rounded-2xl shadow-sm" />
-          <div className="h-32 bg-[var(--qt-surface-2)] rounded-2xl shadow-sm" />
-        </div>
-        <div className="h-[400px] bg-[var(--qt-surface-2)] rounded-2xl shadow-sm" />
-      </div>
-    );
-  }
 
   const teknikRows = personnelRows.filter((r) => r.user.role === 'teknik_servis');
   const aplikasyonRows = personnelRows.filter((r) => r.user.role === 'aplikasyon');
@@ -505,7 +507,9 @@ export default function CihazYonetimiHost() {
           <div>
             <h1 className="qt-hub-title hidden md:block">Cihaz Yönetim Merkezi</h1>
             <p className="qt-hub-subtitle">
-              {hospitals.length} kurum · {devices.length} cihaz · {hospitalDeviceAssignments.length} atama
+              {hospitalsQuery.isLoading ? 'Kurumlar yükleniyor...' : `${hospitals.length} kurum`} · 
+              {devicesQuery.isLoading ? 'Cihazlar yükleniyor...' : `${devices.length} cihaz`} · 
+              {assignmentsQuery.isLoading ? 'Atamalar yükleniyor...' : `${hospitalDeviceAssignments.length} atama`}
             </p>
           </div>
         </div>
@@ -538,32 +542,42 @@ export default function CihazYonetimiHost() {
 
       {/* Metric grid */}
       <div className="qt-metric-grid">
-        <MetricCard
-          label="Aktif Cihaz"
-          value={activeDeviceCount}
-          unit="cihaz"
-          footer="Kurumlarda sahada"
-          icon={Cpu}
-          tone="default"
-        />
-        <MetricCard
-          label="Arızalı Cihaz"
-          value={faultyDeviceCount}
-          unit="açık arıza"
-          footer={faultyDeviceCount > 0 ? 'Atama bekleyenler' : 'Açık arıza yok'}
-          icon={ShieldAlert}
-          tone={faultyDeviceCount > 0 ? 'danger' : 'success'}
-          onClick={() => router.push('/ariza-yonetimi?tab=atama_bekliyor')}
-        />
-        <MetricCard
-          label="Bakımı Yaklaşan"
-          value={upcomingMaintenanceCount}
-          unit="cihaz"
-          footer={upcomingMaintenanceCount > 0 ? 'Periyodik bakım planları' : 'Yaklaşan bakım yok'}
-          icon={Wrench}
-          tone={upcomingMaintenanceCount > 0 ? 'warn' : 'success'}
-          onClick={() => router.push('/cihaz-tanimlamalari/periyodik-bakim-yonetimi')}
-        />
+        {(devicesQuery.isLoading || assignmentsQuery.isLoading) ? (
+          <>
+            <MetricCardSkeleton />
+            <MetricCardSkeleton />
+            <MetricCardSkeleton />
+          </>
+        ) : (
+          <>
+            <MetricCard
+              label="Aktif Cihaz"
+              value={activeDeviceCount}
+              unit="cihaz"
+              footer="Kurumlarda sahada"
+              icon={Cpu}
+              tone="default"
+            />
+            <MetricCard
+              label="Arızalı Cihaz"
+              value={faultyDeviceCount}
+              unit="açık arıza"
+              footer={faultyDeviceCount > 0 ? 'Atama bekleyenler' : 'Açık arıza yok'}
+              icon={ShieldAlert}
+              tone={faultyDeviceCount > 0 ? 'danger' : 'success'}
+              onClick={() => router.push('/ariza-yonetimi?tab=atama_bekliyor')}
+            />
+            <MetricCard
+              label="Bakımı Yaklaşan"
+              value={upcomingMaintenanceCount}
+              unit="cihaz"
+              footer={upcomingMaintenanceCount > 0 ? 'Periyodik bakım planları' : 'Yaklaşan bakım yok'}
+              icon={Wrench}
+              tone={upcomingMaintenanceCount > 0 ? 'warn' : 'success'}
+              onClick={() => router.push('/cihaz-tanimlamalari/periyodik-bakim-yonetimi')}
+            />
+          </>
+        )}
       </div>
 
       {/* Personnel panel */}
@@ -578,26 +592,29 @@ export default function CihazYonetimiHost() {
             <span>{personnelUsers.length} personel</span>
           </div>
         </div>
-
-        {([
-          { key: 'teknik', label: 'Teknik Personeller', rows: teknikRows },
-          { key: 'aplikasyon', label: 'Aplikasyon Personelleri', rows: aplikasyonRows },
-        ] as const).map((group) => (
-          <div key={group.key} className="qt-personnel-group">
-            <div className="qt-personnel-group__label">{group.label}</div>
-            {group.rows.length === 0 && (
-              <div className="qt-personnel-row">
-                <span className="qt-personnel-lab">Kayıt bulunmuyor.</span>
-              </div>
-            )}
-            {group.rows.map((row) => (
-              <button
-                key={row.user.uid}
-                type="button"
-                className="qt-personnel-row"
-                onClick={() => router.push(`/cihaz-yonetimi-ana/personel-gecmis7/${row.user.uid}`)}
-              >
-                <span className="qt-personnel-name">
+        
+        {usersQuery.isLoading ? (
+          <PersonnelSkeleton />
+        ) : (
+          ([
+            { key: 'teknik', label: 'Teknik Personeller', rows: teknikRows },
+            { key: 'aplikasyon', label: 'Aplikasyon Personelleri', rows: aplikasyonRows },
+          ] as const).map((group) => (
+            <div key={group.key} className="qt-personnel-group">
+              <div className="qt-personnel-group__label">{group.label}</div>
+              {group.rows.length === 0 && (
+                <div className="qt-personnel-row">
+                  <span className="qt-personnel-lab">Kayıt bulunmuyor.</span>
+                </div>
+              )}
+              {group.rows.map((row) => (
+                <button
+                  key={row.user.uid}
+                  type="button"
+                  className="qt-personnel-row"
+                  onClick={() => router.push(`/cihaz-yonetimi-ana/personel-gecmis7/${row.user.uid}`)}
+                >
+                  <span className="qt-personnel-name">
                   {row.user.name || row.user.email || row.user.uid}
                 </span>
                 <span className="qt-personnel-status">
@@ -606,8 +623,8 @@ export default function CihazYonetimiHost() {
                 <span className="qt-personnel-lab">{row.laboratoryName || '—'}</span>
               </button>
             ))}
-          </div>
-        ))}
+          ))
+        )}
       </div>
 
       <Dialog open={isAvailabilityDialogOpen} onOpenChange={setIsAvailabilityDialogOpen}>
