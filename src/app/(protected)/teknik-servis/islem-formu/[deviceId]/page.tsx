@@ -13,7 +13,8 @@ import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
-import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, Settings, Cog, FileText, Camera, ImageIcon, X, Package, AlertTriangle, Clock, PauseCircle, ChevronLeft, Building2, Download, Upload } from 'lucide-react';
+import { Loader2, Wrench, ClipboardList, Trash2, Save, History, Search, Plus, Settings, Cog, FileText, Camera, ImageIcon, X, Package, AlertTriangle, Clock, PauseCircle, ChevronLeft, Building2, Download, Upload, MessageCircle } from 'lucide-react';
+import { ToastAction } from '@/components/ui/toast';
 import Image from 'next/image';
 import { resolveImageSrc } from '@/lib/image-utils';
 import { format } from 'date-fns';
@@ -1708,24 +1709,65 @@ export default function IslemFormuPage() {
     });
   };
 
-  const handleSaveSignaturesAndFinish = async (finalSignatures: { personnel?: string; technician?: string }, finalTechnicianName?: string) => {
+  const handleSaveSignaturesAndFinish = (finalSignatures: { personnel?: string; technician?: string }, finalTechnicianName?: string) => {
+    // --- OPTIMISTIC UI BACKUP ---
+    const previousActions = [...actions];
+    const previousIslemTipi = islemTipi;
+    const previousIslemTuru = islemTuru;
+    const previousAciklama = aciklama;
+    const previousSignatures = { ...signatures };
+    const previousTechnicianName = technicianName;
+    const previousSelectedFaultId = selectedFaultId;
+    const previousCustomFaultName = customFaultName;
+    const previousSelectedTests = [...selectedTests];
+    const previousEslikEdenPersonel = [...eslikEdenPersonel];
+    const previousCihazDurumu = cihazDurumu;
+    const previousCihazDurumuAciklama = cihazDurumuAciklama;
+    const previousSelectedMaintenanceTasks = [...selectedMaintenanceTasks];
+    const previousEgitimIcerigi = egitimIcerigi;
+    const previousEgitimKatilanlar = [...egitimKatilanlar];
+
+    // --- IMMEDIATE UI UPDATE ---
     setIsSaving(true);
     setIsSignatureModalOpen(false);
+    
+    // Clear form immediately
+    setActions([]);
+    setIslemTipi('');
+    setIslemTuru('');
+    setAciklama('');
+    setSelectedMaintenanceTasks([]);
+    setSelectedFaultId('');
+    setCustomFaultName('');
+    setSelectedTests([]);
+    setEslikEdenPersonel([]);
+    setCihazDurumu('');
+    setCihazDurumuAciklama('');
+    setEgitimIcerigi('');
+    setEgitimKatilanlar([]);
 
-    try {
+    toast({
+      title: 'İşlem Kaydediliyor...',
+      description: 'Form verileri ve PDF arka planda hazırlanıyor.',
+      duration: 3000
+    });
+
+    // --- BACKGROUND PROCESS ---
+    (async () => {
+      try {
         const now = new Date();
         const batch = writeBatch(db);
         let targetDevices = isLabMode ? [...devicesByLab] : (device ? [device] : []);
 
         if (isLabMode) {
           const assignedIds = Array.from(new Set(
-            actions
+            previousActions
               .filter((a) => a.type !== 'operation')
               .map((a) => a.assignedDeviceId)
               .filter((id): id is string => !!id)
           ));
 
-          const hasGlobalOnlyActions = assignedIds.length === 0 && actions.some((a) => a.type === 'operation');
+          const hasGlobalOnlyActions = assignedIds.length === 0 && previousActions.some((a) => a.type === 'operation');
           if (!hasGlobalOnlyActions && assignedIds.length > 0) {
             const existingMap = new Map(targetDevices.map((d) => [d.id, d]));
             const resolvedDevices: Device[] = [];
@@ -1747,11 +1789,8 @@ export default function IslemFormuPage() {
           throw new Error('İşlem yapılacak cihaz bulunamadı.');
         }
 
-        // Global side-effect tracking to avoid double updates in the same batch
         const processedPersonalStockIdsGlobal = new Set<string>();
         const processedPoolStockIdsGlobal = new Set<string>();
-
-        // We'll collect all form IDs to show in the success toast
         const createdFormIds: string[] = [];
         const labDeviceActionSummaries: Array<{
           deviceId: string;
@@ -1762,19 +1801,17 @@ export default function IslemFormuPage() {
         const labMasterFormRef = isLabMode ? doc(collection(db, 'teknikServisActionForms')) : null;
         const createdFormsData: any[] = [];
 
+        // Parallel PDF generation and DB writing start here
+        const formNumberPromises: Promise<string>[] = [];
+
         for (const currentDevice of targetDevices) {
           const currentDeviceId = currentDevice.id;
-          
-          // Filter actions for this specific device
-          // 'operation' types apply to all, others only if assigned to this device
-          const deviceActions = actions.filter(a => 
+          const deviceActions = previousActions.filter(a => 
             a.type === 'operation' || 
             a.assignedDeviceId === currentDeviceId ||
-            (!isLabMode && a.type !== 'operation') // Fallback for single mode
+            (!isLabMode && a.type !== 'operation')
           );
 
-          // If lab mode and no actions for this device, skip creating a form for it
-          // EXCEPT if it's a general maintenance/checkup where 'operation' items exist
           if (isLabMode && deviceActions.length === 0) continue;
 
           if (isLabMode) {
@@ -1786,36 +1823,31 @@ export default function IslemFormuPage() {
             });
           }
 
-          // Get selected maintenance plan details for this device
-          // In lab mode, maintenance tasks are tricky because they are per plan ID of the initial device.
-          // For now, if lab mode, we only apply maintenance tasks to the primary device or match by taskName if possible.
-          // IMPROVEMENT: Fetch maintenance plans for each device in devicesByLab if needed.
-          // For this first version, we'll only handle maintenance for the 'actualDeviceId' if in lab mode,
-          // or we can skip it for others to avoid mismatching plan IDs.
           const isPrimaryDevice = currentDeviceId === actualDeviceId;
-          const currentMaintenancePlans = isPrimaryDevice ? maintenancePlans : []; // Simplified for now
-          
+          const currentMaintenancePlans = isPrimaryDevice ? maintenancePlans : [];
           const selectedMaintenancePlanDetails = currentMaintenancePlans
-            .filter(p => selectedMaintenanceTasks.includes(p.id))
+            .filter(p => previousSelectedMaintenanceTasks.includes(p.id))
             .map(p => ({ id: p.id, taskName: p.taskName }));
 
-          // Fault info
-          const isCustomFault = selectedFaultId === 'diger';
-          const selectedFault = islemTuru === 'ariza' && !isCustomFault ? faultDefinitions.find(f => f.id === selectedFaultId) : null;
-          const resolvedFaultName = isCustomFault ? customFaultName.trim() : (selectedFault?.name || null);
+          const isCustomFault = previousSelectedFaultId === 'diger';
+          const selectedFault = previousIslemTuru === 'ariza' && !isCustomFault ? faultDefinitions.find(f => f.id === previousSelectedFaultId) : null;
+          const resolvedFaultName = isCustomFault ? previousCustomFaultName.trim() : (selectedFault?.name || null);
           const resolvedFaultId = isCustomFault ? null : (selectedFault?.id || null);
 
-          // Create form document
           const formRef = isLabMode
             ? doc(collection(db, 'deviceActionForms'))
             : doc(collection(db, 'teknikServisActionForms'));
-          const formNo = await reserveActionFormNumber({
+          
+          const formNoPromise = reserveActionFormNumber({
             db,
             companyId: currentCompanyId,
             userUid: currentUserProfile?.uid || 'unknown',
             userName: currentUserProfile?.name || currentUserProfile?.displayName || '',
             formTypeLetter: 'T',
           });
+          formNumberPromises.push(formNoPromise);
+          const formNo = await formNoPromise;
+
           if (!isLabMode) createdFormIds.push(formRef.id);
 
           const formEntries = {
@@ -1825,16 +1857,16 @@ export default function IslemFormuPage() {
               hospitalId: currentDevice.hospitalId,
               labName: hospital?.name,
               actions: deviceActions,
-              islemTipi,
-              islemTuru,
-              aciklama: aciklama.trim(),
+              islemTipi: previousIslemTipi,
+              islemTuru: previousIslemTuru,
+              aciklama: previousAciklama.trim(),
               baslangicSaati,
               bitisSaati,
               baslangicTarihi,
               bitisTarihi,
-              cihazDurumu,
-              cihazDurumuAciklama: cihazDurumu === 'diger' ? cihazDurumuAciklama : null,
-              eslikEdenPersonel: eslikEdenPersonel.length > 0 ? eslikEdenPersonel : null,
+              cihazDurumu: previousCihazDurumu,
+              cihazDurumuAciklama: previousCihazDurumu === 'diger' ? previousCihazDurumuAciklama : null,
+              eslikEdenPersonel: previousEslikEdenPersonel.length > 0 ? previousEslikEdenPersonel : null,
               personnelSignature: finalSignatures.personnel || null,
               technicianSignature: finalSignatures.technician || null,
               technicianName: finalTechnicianName || null,
@@ -1844,13 +1876,13 @@ export default function IslemFormuPage() {
               createdByUid: currentUserProfile?.uid,
               companyId: currentCompanyId || null,
               formType: 'teknik_servis',
-              selectedMaintenanceTasks: islemTuru === 'periyodik_bakim' ? selectedMaintenancePlanDetails : null,
+              selectedMaintenanceTasks: previousIslemTuru === 'periyodik_bakim' ? selectedMaintenancePlanDetails : null,
               selectedFaultId: resolvedFaultId,
               selectedFaultName: resolvedFaultName,
               isCustomFault: isCustomFault || false,
-              selectedTests: islemTuru === 'ariza' && selectedTests.length > 0 ? selectedTests : null,
-              egitimIcerigi: islemTipi === 'egitim' && egitimIcerigi.trim() ? egitimIcerigi.trim() : null,
-              egitimKatilanlar: islemTipi === 'egitim' && egitimKatilanlar.length > 0 ? egitimKatilanlar : null,
+              selectedTests: previousIslemTuru === 'ariza' && previousSelectedTests.length > 0 ? previousSelectedTests : null,
+              egitimIcerigi: previousIslemTipi === 'egitim' && previousEgitimIcerigi.trim() ? previousEgitimIcerigi.trim() : null,
+              egitimKatilanlar: previousIslemTipi === 'egitim' && previousEgitimKatilanlar.length > 0 ? previousEgitimKatilanlar : null,
               draftActionLogs: draftActionLogs.length > 0 ? draftActionLogs.map(log => ({
                 ...log,
                 timestamp: log.timestamp instanceof Date ? Timestamp.fromDate(log.timestamp) : log.timestamp,
@@ -1871,14 +1903,12 @@ export default function IslemFormuPage() {
              actionRecord: { id: formRef.id, ...formEntries }
           });
 
-          // Mirror to deviceActionForms for single-device flow
           if (!isLabMode) {
             const deviceFormRef = doc(collection(db, 'deviceActionForms'), formRef.id);
             batch.set(deviceFormRef, formEntries);
           }
 
-          // Create closed fault report if ariza
-          if (islemTuru === 'ariza' && (selectedFault || isCustomFault)) {
+          if (previousIslemTuru === 'ariza' && (selectedFault || isCustomFault)) {
             const [startYear, startMonth, startDay] = baslangicTarihi.split('-').map(Number);
             const [startHour, startMinute] = baslangicSaati.split(':').map(Number);
             const [endYear, endMonth, endDay] = bitisTarihi.split('-').map(Number);
@@ -1886,7 +1916,7 @@ export default function IslemFormuPage() {
             const startTime = new Date(startYear, startMonth - 1, startDay, startHour, startMinute);
             const endTime = new Date(endYear, endMonth - 1, endDay, endHour, endMinute);
             const cozumSuresi = endTime.getTime() - startTime.getTime();
-            const supportPerson = eslikEdenPersonel.length > 0 ? eslikEdenPersonel[0] : null;
+            const supportPerson = previousEslikEdenPersonel.length > 0 ? previousEslikEdenPersonel[0] : null;
 
             const faultReportRef = doc(collection(db, 'deviceFaultReports'));
             batch.set(faultReportRef, {
@@ -1898,7 +1928,7 @@ export default function IslemFormuPage() {
               faultType: 'teknik_servis',
               faultDefinitionId: resolvedFaultId,
               faultName: resolvedFaultName,
-              description: aciklama.trim(),
+              description: previousAciklama.trim(),
               status: 'cozuldu',
               openedAt: Timestamp.fromDate(startTime),
               closedAt: Timestamp.fromDate(endTime),
@@ -1906,7 +1936,7 @@ export default function IslemFormuPage() {
               openedByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
               closedByUid: currentUserProfile?.uid,
               closedByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
-              closeDescription: aciklama.trim(),
+              closeDescription: previousAciklama.trim(),
               assignedToUid: currentUserProfile?.uid,
               assignedToName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
               assignedAt: Timestamp.fromDate(startTime),
@@ -1916,10 +1946,10 @@ export default function IslemFormuPage() {
               toplamCozumSuresi: cozumSuresi,
               resolvedFromFormId: formRef.id,
               resolvedFromFormType: 'teknik_servis',
-              eslikEdenPersonel: eslikEdenPersonel.length > 0 ? eslikEdenPersonel : null,
+              eslikEdenPersonel: previousEslikEdenPersonel.length > 0 ? previousEslikEdenPersonel : null,
               supportPersonnelUid: supportPerson?.uid || null,
               supportPersonnelName: supportPerson?.name || null,
-              relatedTests: selectedTests.length > 0 ? selectedTests : null,
+              relatedTests: previousSelectedTests.length > 0 ? previousSelectedTests : null,
               isCustomFault: isCustomFault || false,
               createdFromActionForm: true,
             });
@@ -1929,7 +1959,7 @@ export default function IslemFormuPage() {
               type: 'opened',
               actorUid: currentUserProfile?.uid,
               actorName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
-              description: aciklama.trim(),
+              description: previousAciklama.trim(),
               timestamp: Timestamp.fromDate(startTime),
             });
 
@@ -1938,12 +1968,11 @@ export default function IslemFormuPage() {
               type: 'closed',
               actorUid: currentUserProfile?.uid,
               actorName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
-              description: supportPerson ? `${aciklama.trim()} (Destek: ${supportPerson.name})` : aciklama.trim(),
+              description: supportPerson ? `${previousAciklama.trim()} (Destek: ${supportPerson.name})` : previousAciklama.trim(),
               timestamp: Timestamp.fromDate(endTime),
             });
           }
 
-          // Process device-specific part/cell changes
           const devicePartChanges = deviceActions.filter(a => a.type === 'part_change');
           for (const partChange of devicePartChanges) {
             let removedStockRefId: string | null = null;
@@ -2000,8 +2029,6 @@ export default function IslemFormuPage() {
             }
 
             if (partChange.isDepotSelection) {
-              // Note: Depot selection consumption logic usually involves decrementing quantity
-              // For simplicity in lab mode, we execute this once per part change.
               const depotEntry = await consumeDepotSelection(partChange, batch);
               createDepotBorrowRecord(partChange, depotEntry, batch, currentDevice, formRef.id, now);
             }
@@ -2045,9 +2072,8 @@ export default function IslemFormuPage() {
             }
           }
 
-          // Maintenance Logs (only if primary device for now to avoid ID mismatch, or if we had plans for all)
-          if (islemTuru === 'periyodik_bakim' && selectedMaintenanceTasks.length > 0 && isPrimaryDevice) {
-            for (const planId of selectedMaintenanceTasks) {
+          if (previousIslemTuru === 'periyodik_bakim' && previousSelectedMaintenanceTasks.length > 0 && isPrimaryDevice) {
+            for (const planId of previousSelectedMaintenanceTasks) {
               const plan = maintenancePlans.find(p => p.id === planId);
               if (plan) {
                 const maintenanceLogRef = doc(collection(db, 'maintenanceLogs'));
@@ -2058,7 +2084,7 @@ export default function IslemFormuPage() {
                   completedAt: Timestamp.fromDate(now),
                   completedByUid: currentUserProfile?.uid || '',
                   completedByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
-                  nextDueDate: Timestamp.fromDate(now), // Simplified calculation for now
+                  nextDueDate: Timestamp.fromDate(now), 
                   formId: formRef.id,
                   formType: 'teknik_servis',
                 });
@@ -2081,17 +2107,17 @@ export default function IslemFormuPage() {
             seriNumarasi: `LAB-${(hospital?.id || labHospitalId || 'GENEL').slice(0, 8)}`,
             hospitalId: hospital?.id || labHospitalId,
             labName: hospital?.name,
-            actions,
-            islemTipi,
-            islemTuru,
-            aciklama: aciklama.trim(),
+            actions: previousActions,
+            islemTipi: previousIslemTipi,
+            islemTuru: previousIslemTuru,
+            aciklama: previousAciklama.trim(),
             baslangicSaati,
             bitisSaati,
             baslangicTarihi,
             bitisTarihi,
-            cihazDurumu,
-            cihazDurumuAciklama: cihazDurumu === 'diger' ? cihazDurumuAciklama : null,
-            eslikEdenPersonel: eslikEdenPersonel.length > 0 ? eslikEdenPersonel : null,
+            cihazDurumu: previousCihazDurumu,
+            cihazDurumuAciklama: previousCihazDurumu === 'diger' ? previousCihazDurumuAciklama : null,
+            eslikEdenPersonel: previousEslikEdenPersonel.length > 0 ? previousEslikEdenPersonel : null,
             personnelSignature: finalSignatures.personnel || null,
             technicianSignature: finalSignatures.technician || null,
             technicianName: finalTechnicianName || null,
@@ -2105,9 +2131,9 @@ export default function IslemFormuPage() {
             selectedFaultId: null,
             selectedFaultName: null,
             isCustomFault: false,
-            selectedTests: islemTuru === 'ariza' && selectedTests.length > 0 ? selectedTests : null,
-            egitimIcerigi: islemTipi === 'egitim' && egitimIcerigi.trim() ? egitimIcerigi.trim() : null,
-            egitimKatilanlar: islemTipi === 'egitim' && egitimKatilanlar.length > 0 ? egitimKatilanlar : null,
+            selectedTests: previousIslemTuru === 'ariza' && previousSelectedTests.length > 0 ? previousSelectedTests : null,
+            egitimIcerigi: previousIslemTipi === 'egitim' && previousEgitimIcerigi.trim() ? previousEgitimIcerigi.trim() : null,
+            egitimKatilanlar: previousIslemTipi === 'egitim' && previousEgitimKatilanlar.length > 0 ? previousEgitimKatilanlar : null,
             isBulkLabForm: true,
             isLabDeviceChild: false,
             labDeviceActionSummaries,
@@ -2116,48 +2142,77 @@ export default function IslemFormuPage() {
         }
 
         if (createdFormIds.length === 0) {
-          throw new Error('Kaydedilecek cihaz aksiyonu bulunamadı. Lütfen cihaz atamalarını kontrol edin.');
+          throw new Error('Kaydedilecek cihaz aksiyonu bulunamadı.');
         }
 
-        await batch.commit();
+        // Parallel execution: DB commit AND PDF generation
+        const dbPromise = batch.commit();
+        const pdfPromises = createdFormsData.map(data => 
+           generateTeknikServisTutanakPDF(data.device, data.hospital, data.actionRecord as any, true)
+        );
 
-        for (const data of createdFormsData) {
-            await generateTeknikServisTutanakPDF(data.device, data.hospital, data.actionRecord as any, true);
-        }
+        await Promise.all([dbPromise, ...pdfPromises]);
+
         hapticDouble();
 
         if (currentDraftId) await deleteDoc(doc(db, 'draftActionForms', currentDraftId));
 
-        // Invalidate cached device-scoped queries so the freshly created logs
-        // (maintenanceLogs, deviceActionForms) show up immediately on this page
-        // and downstream consumers (history view, dashboard) without a full reload.
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: ['maintenanceLogs', 'forDevice', deviceId] }),
-          queryClient.invalidateQueries({ queryKey: ['maintenancePlans', 'forDevice', deviceId] }),
-          queryClient.invalidateQueries({ queryKey: ['deviceActionForms'] }),
-          queryClient.invalidateQueries({ queryKey: ['deviceFaultReports'] }),
-        ]);
+        queryClient.invalidateQueries({ queryKey: ['maintenanceLogs', 'forDevice', deviceId] });
+        queryClient.invalidateQueries({ queryKey: ['maintenancePlans', 'forDevice', deviceId] });
+        queryClient.invalidateQueries({ queryKey: ['deviceActionForms'] });
+        queryClient.invalidateQueries({ queryKey: ['deviceFaultReports'] });
+
+        const firstForm = createdFormsData[0];
+        const waText = encodeURIComponent(
+          `🚀 *Teknik Servis İşlemi Tamamlandı*\n\n` +
+          `🏥 *Kurum:* ${firstForm.hospital?.name || '-'}\n` +
+          `🔬 *Cihaz:* ${firstForm.device.cihazAdi || firstForm.device.model || '-'}\n` +
+          `📋 *Form No:* ${firstForm.actionRecord.formNo || '-'}\n` +
+          `👨‍🔧 *Teknisyen:* ${currentUserProfile?.name || '-'}\n\n` +
+          `QORE Sistemi üzerinden detaylara ulaşabilirsiniz.`
+        );
 
         toast({
           title: 'Başarılı',
-          description: isLabMode
-            ? `Laboratuvar geneli için tek form oluşturuldu. (${labDeviceActionSummaries.length} cihaz işlendi)`
-            : `İşlem formu #${createdFormIds[0]?.substring(0,6)}... kaydedildi.`
+          description: isLabMode ? 'Laboratuvar geneli form oluşturuldu.' : 'İşlem formu kaydedildi.',
+          action: (
+            <ToastAction altText="WhatsApp" onClick={() => window.open(`https://wa.me/?text=${waText}`, '_blank')}>
+              <div className="flex items-center gap-1.5">
+                <MessageCircle className="h-4 w-4" />
+                <span>WhatsApp</span>
+              </div>
+            </ToastAction>
+          )
         });
 
-        setActions([]);
-        setIslemTipi('');
-        setIslemTuru('');
-        setAciklama('');
-        setIsSignatureModalOpen(false);
-        // router.back() removed string to stay on same page
-
-    } catch(err) {
-        console.error("Error saving action form:", err);
-        toast({ title: 'Hata', description: 'Form kaydedilemedi: ' + (err as Error).message, variant: 'destructive'});
-    } finally {
+      } catch (err) {
+        console.error("Error saving action form (Optimistic):", err);
+        // --- ROLLBACK ---
+        setActions(previousActions);
+        setIslemTipi(previousIslemTipi);
+        setIslemTuru(previousIslemTuru);
+        setAciklama(previousAciklama);
+        setSignatures(previousSignatures);
+        setTechnicianName(previousTechnicianName);
+        setSelectedFaultId(previousSelectedFaultId);
+        setCustomFaultName(previousCustomFaultName);
+        setSelectedTests(previousSelectedTests);
+        setEslikEdenPersonel(previousEslikEdenPersonel);
+        setCihazDurumu(previousCihazDurumu);
+        setCihazDurumuAciklama(previousCihazDurumuAciklama);
+        setSelectedMaintenanceTasks(previousSelectedMaintenanceTasks);
+        setEgitimIcerigi(previousEgitimIcerigi);
+        setEgitimKatilanlar(previousEgitimKatilanlar);
+        
+        toast({ 
+          title: 'Hata (Veriler Geri Yüklendi)', 
+          description: 'Kayıt sırasında bir hata oluştu: ' + (err as Error).message, 
+          variant: 'destructive'
+        });
+      } finally {
         setIsSaving(false);
-    }
+      }
+    })();
   };
 
 
