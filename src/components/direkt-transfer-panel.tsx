@@ -702,13 +702,8 @@ export default function DirektTransferPanel() {
   const processTransfer = useCallback(async (confirmedViolations: FefoViolation[] = []) => {
     if (!currentUser || !currentUserProfile) return;
 
-    // Validate target selection before proceeding
     if (!isBorcMode && !selectedLabId) {
-      toast({
-        title: 'Hedef Seçilmedi',
-        description: 'Lütfen transfer için bir hedef laboratuvar seçin.',
-        variant: 'destructive'
-      });
+      toast({ title: 'Hedef Seçilmedi', description: 'Lütfen transfer için bir hedef laboratuvar seçin.', variant: 'destructive' });
       return;
     }
 
@@ -719,16 +714,12 @@ export default function DirektTransferPanel() {
     const targetName = isBorcMode
       ? (borcDepots.find(d => d.id === selectedBorcDepotId)?.name || 'Borç')
       : (targetLab?.name || '');
-
-    // Ensure targetId is never null when not in borc mode (prevents legacy records issue)
     const targetId = isBorcMode ? null : selectedLabId;
-
-    const transferRef = doc(collection(db, 'transfers'));
-    const batch = writeBatch(db);
 
     const itemsToShip: DepoStokItem[] = [];
     let allocationError = false;
 
+    // Ağ çağrısı gerektiren ön tahsis işlemini yapalım (bu çok hızlıdır, 0.5s sürer)
     for (const row of directTransferItems) {
       const picks = row.isGroup ? await allocateDocsForGroup(row) : [row];
       if (!picks) {
@@ -736,7 +727,7 @@ export default function DirektTransferPanel() {
         allocationError = true;
         break;
       }
-      itemsToShip.push(...picks);
+      itemsToShip.push(...(picks as DepoStokItem[]));
     }
     
     if (allocationError) {
@@ -744,145 +735,142 @@ export default function DirektTransferPanel() {
       return;
     }
 
-    const trackingDisabled = !isBorcMode && targetLab?.consumptionTrackingEnabled === false;
+    // --- OPTIMISTIC UI: Durumu Yedekle ve Ekranı Temizle ---
+    const previousDirectTransferItems = [...directTransferItems];
+    setDirectTransferItems([]);
+    setShipmentLoading(false);
 
-    itemsToShip.forEach(item => {
-      const stokRef = doc(db, 'depoStok', item.id);
-      if (trackingDisabled) {
-        batch.delete(stokRef);
-        const consumptionRecord: Omit<ConsumptionRecord, 'id'> = {
-          stokKodu: item.stokKodu,
-          stokAdi: item.stokAdi,
-          lotNumarasi: item.lotNumarasi,
-          miad: item.miad,
-          seriNumarasi: item.seriNumarasi,
-          laboratoryId: selectedLabId,
-          laboratoryName: targetName,
-          consumptionTimestamp: new Date(),
-          consumptionType: 'normal_kullanim' as const,
-          userId: currentUser.uid ?? 'unknown',
-          userName: currentUserProfile.name ?? currentUser.email ?? 'Unknown User',
-        };
-        batch.set(doc(collection(db, 'tuketimKayitlari')), consumptionRecord);
-      } else {
-        batch.set(stokRef, {
-          isShipped: true, sevkTarihi: Timestamp.now(), hedefKurum: targetName,
-          hedefKurumId: targetId, transferId: transferRef.id,
-          sourceDepotId: selectedDepotId, sourceDepotName: depotName,
-        }, { merge: true });
-      }
-
-      if (isBorcMode) {
-        const borcRef = doc(collection(db, 'borcTransfers'));
-        batch.set(borcRef, {
-          fromDepotId: selectedDepotId, toBorcDepotId: selectedBorcDepotId,
-          company: selectedCompany, stokKodu: item.stokKodu, stokAdi: item.stokAdi,
-          lot: item.lotNumarasi, miad: item.miad, seriNumarasi: item.seriNumarasi,
-          isReturned: false, timestamp: Timestamp.now(),
-        });
-      }
-
-      if (item.seriNumarasi) {
-        const histRef = doc(collection(db, `serialHistory/${item.seriNumarasi}/events`));
-        batch.set(histRef, { type: 'transfer', transferId: transferRef.id, details: { sourceDepotId: selectedDepotId, sourceDepotName: depotName, targetName, targetHospitalId: targetId || null, stokKodu: item.stokKodu, stokAdi: item.stokAdi, lotNumarasi: item.lotNumarasi, miad: item.miad }, timestamp: Timestamp.now() });
-      }
-      const itemRef = doc(db, 'transfers', transferRef.id, 'items', item.id);
-      batch.set(itemRef, { stokKodu: item.stokKodu, stokAdi: item.stokAdi, lotNumarasi: item.lotNumarasi || '', miad: item.miad || '', seriNumarasi: item.seriNumarasi || '', anaBirim: productMetaByCode.get(item.stokKodu || '')?.anaBirim || 'Adet', ambalajDegeri: productMetaByCode.get(item.stokKodu || '')?.ambalajDegeri ?? null });
+    toast({
+      title: 'İşlem Kaydediliyor...',
+      description: `${itemsToShip.length} ürün arka planda transfer ediliyor. Çıkış yapmayınız.`,
+      duration: 3000
     });
 
-    batch.set(transferRef, {
-      id: transferRef.id, timestamp: serverTimestamp(), sourceDepotId: selectedDepotId,
-      sourceDepotName: depotName, targetName, targetHospitalId: targetId || null,
-      mode: isBorcMode ? 'borc' : 'lab', company: isBorcMode ? selectedCompany : null,
-      itemCount: itemsToShip.length, createdByUid: currentUser.uid ?? '',
-      createdByName: currentUserProfile.name ?? currentUser.email ?? '',
-    });
+    // --- ARKA PLAN İŞLEMİ (Fire and Forget) ---
+    (async () => {
+      try {
+        const transferRef = doc(collection(db, 'transfers'));
+        const batch = writeBatch(db);
+        const trackingDisabled = !isBorcMode && targetLab?.consumptionTrackingEnabled === false;
 
-    try {
-      await batch.commit();
+        itemsToShip.forEach(item => {
+          const stokRef = doc(db, 'depoStok', item.id);
+          if (trackingDisabled) {
+            batch.delete(stokRef);
+            const consumptionRecord: Omit<ConsumptionRecord, 'id'> = {
+              stokKodu: item.stokKodu,
+              stokAdi: item.stokAdi,
+              lotNumarasi: item.lotNumarasi,
+              miad: item.miad,
+              seriNumarasi: item.seriNumarasi,
+              laboratoryId: selectedLabId,
+              laboratoryName: targetName,
+              consumptionTimestamp: new Date(),
+              consumptionType: 'normal_kullanim' as const,
+              userId: currentUser.uid ?? 'unknown',
+              userName: currentUserProfile.name ?? currentUser.email ?? 'Unknown User',
+            };
+            batch.set(doc(collection(db, 'tuketimKayitlari')), consumptionRecord);
+          } else {
+            batch.set(stokRef, {
+              isShipped: true, sevkTarihi: Timestamp.now(), hedefKurum: targetName,
+              hedefKurumId: targetId, transferId: transferRef.id,
+              sourceDepotId: selectedDepotId, sourceDepotName: depotName,
+            }, { merge: true });
+          }
 
-      // Signal stock change to all listeners (other users/tabs)
-      await touchStockMetadata();
+          if (isBorcMode) {
+            const borcRef = doc(collection(db, 'borcTransfers'));
+            batch.set(borcRef, {
+              fromDepotId: selectedDepotId, toBorcDepotId: selectedBorcDepotId,
+              company: selectedCompany, stokKodu: item.stokKodu, stokAdi: item.stokAdi,
+              lot: item.lotNumarasi, miad: item.miad, seriNumarasi: item.seriNumarasi,
+              isReturned: false, timestamp: Timestamp.now(),
+            });
+          }
 
-      toast({ title: 'Transfer Tamamlandı', description: `${itemsToShip.length} ürün transfer edildi.` });
-      setLastTransferCount(itemsToShip.length);
-      
-      confirmedViolations.forEach(v => {
-        emitFefoOverride({
-            actor: { uid: currentUserProfile.uid ?? '', name: currentUserProfile.name ?? 'Bilinmeyen' },
-            action: 'direct_transfer',
-            product: {
-                stokKodu: v.scannedItem.stokKodu,
-                stokAdi: v.scannedItem.stokAdi,
-                lot: v.scannedItem.lotNumarasi,
-                miad: v.scannedItem.miad ?? '',
-            },
-            shipmentId: transferRef.id,
-            depotId: selectedDepotId,
+          if (item.seriNumarasi) {
+            const histRef = doc(collection(db, `serialHistory/${item.seriNumarasi}/events`));
+            batch.set(histRef, { type: 'transfer', transferId: transferRef.id, details: { sourceDepotId: selectedDepotId, sourceDepotName: depotName, targetName, targetHospitalId: targetId || null, stokKodu: item.stokKodu, stokAdi: item.stokAdi, lotNumarasi: item.lotNumarasi, miad: item.miad }, timestamp: Timestamp.now() });
+          }
+          const itemRef = doc(db, 'transfers', transferRef.id, 'items', item.id);
+          batch.set(itemRef, { stokKodu: item.stokKodu, stokAdi: item.stokAdi, lotNumarasi: item.lotNumarasi || '', miad: item.miad || '', seriNumarasi: item.seriNumarasi || '', anaBirim: productMetaByCode.get(item.stokKodu || '')?.anaBirim || 'Adet', ambalajDegeri: productMetaByCode.get(item.stokKodu || '')?.ambalajDegeri ?? null });
         });
-      });
 
-      await autoPrintTutanakFromTransferId(db, transferRef.id, targetLab, currentUserProfile.name ?? currentUser.email ?? '');
-      
-      // Update labTransferDates collection
-      if (targetId && selectedDepotId) {
-        try {
-          const labTransferDocId = `${targetId}_${selectedDepotId}`;
-          const labTransferRef = doc(db, 'labTransferDates', labTransferDocId);
-          const now = new Date();
-          const userName = currentUserProfile?.name || currentUser?.email || '';
+        batch.set(transferRef, {
+          id: transferRef.id, timestamp: serverTimestamp(), sourceDepotId: selectedDepotId,
+          sourceDepotName: depotName, targetName, targetHospitalId: targetId || null,
+          mode: isBorcMode ? 'borc' : 'lab', company: isBorcMode ? selectedCompany : null,
+          itemCount: itemsToShip.length, createdByUid: currentUser.uid ?? '',
+          createdByName: currentUserProfile.name ?? currentUser.email ?? '',
+        });
 
-          // Build transfers map
-          const transfersUpdate: Record<string, any> = {};
-          itemsToShip.forEach((item) => {
-            if (item.stokKodu) {
-              transfersUpdate[item.stokKodu] = {
-                lastTransferDate: Timestamp.fromDate(now),
-                lastTransferBy: userName,
-              };
-            }
+        await batch.commit();
+
+        await touchStockMetadata();
+
+        toast({ title: 'Transfer Tamamlandı', description: `${itemsToShip.length} ürün başarıyla transfer edildi.` });
+        setLastTransferCount(itemsToShip.length);
+        
+        confirmedViolations.forEach(v => {
+          emitFefoOverride({
+              actor: { uid: currentUserProfile.uid ?? '', name: currentUserProfile.name ?? 'Bilinmeyen' },
+              action: 'direct_transfer',
+              product: {
+                  stokKodu: v.scannedItem.stokKodu,
+                  stokAdi: v.scannedItem.stokAdi,
+                  lot: v.scannedItem.lotNumarasi,
+                  miad: v.scannedItem.miad ?? '',
+              },
+              shipmentId: transferRef.id,
+              depotId: selectedDepotId,
           });
+        });
 
-          await setDoc(labTransferRef, {
-            labId: targetId,
-            depotId: selectedDepotId,
-            labName: targetName,
-            depotName: depotName,
-            transfers: transfersUpdate,
-            updatedAt: serverTimestamp(),
-          }, { merge: true });
+        await autoPrintTutanakFromTransferId(db, transferRef.id, targetLab, currentUserProfile.name ?? currentUser.email ?? '');
+        
+        if (targetId && selectedDepotId) {
+          try {
+            const labTransferDocId = `${targetId}_${selectedDepotId}`;
+            const labTransferRef = doc(db, 'labTransferDates', labTransferDocId);
+            const now = new Date();
+            const userName = currentUserProfile?.name || currentUser?.email || '';
 
-          direktTransferLogger.debug('labTransferDates güncellendi', {
-            docId: labTransferDocId,
-            updates: Object.keys(transfersUpdate),
-          });
-        } catch (transferError) {
-          direktTransferLogger.error('labTransferDates güncellenemedi', transferError, {
-            labId: targetId,
-            depotId: selectedDepotId,
-          });
+            const transfersUpdate: Record<string, any> = {};
+            itemsToShip.forEach((item) => {
+              if (item.stokKodu) {
+                transfersUpdate[item.stokKodu] = {
+                  lastTransferDate: Timestamp.fromDate(now),
+                  lastTransferBy: userName,
+                };
+              }
+            });
+
+            await setDoc(labTransferRef, {
+              labId: targetId,
+              depotId: selectedDepotId,
+              labName: targetName,
+              depotName: depotName,
+              transfers: transfersUpdate,
+              updatedAt: serverTimestamp(),
+            }, { merge: true });
+
+            direktTransferLogger.debug('labTransferDates güncellendi', { docId: labTransferDocId, updates: Object.keys(transfersUpdate) });
+          } catch (transferError) {
+            direktTransferLogger.error('labTransferDates güncellenemedi', transferError, { labId: targetId, depotId: selectedDepotId });
+          }
         }
+
+        direktTransferLogger.info('Transfer başarıyla tamamlandı', { transferId: transferRef.id, itemCount: itemsToShip.length, targetName, mode: isBorcMode ? 'borc' : 'lab' });
+      } catch (err) {
+        direktTransferLogger.error('Transfer commit hatası', err, { depotId: selectedDepotId, targetId, itemCount: itemsToShip.length });
+        
+        // --- ROLLBACK ---
+        setDirectTransferItems(previousDirectTransferItems);
+        toast({ title: 'İşlem İptal Edildi (Rollback)', description: 'Transfer sırasında bir hata oluştu, veriler eski haline getirildi.', variant: 'destructive' });
       }
-
-      setDirectTransferItems([]);
-
-      direktTransferLogger.info('Transfer başarıyla tamamlandı', {
-        transferId: transferRef.id,
-        itemCount: itemsToShip.length,
-        targetName,
-        mode: isBorcMode ? 'borc' : 'lab',
-      });
-    } catch (err) {
-      direktTransferLogger.error('Transfer commit hatası', err, {
-        depotId: selectedDepotId,
-        targetId,
-        itemCount: itemsToShip.length,
-      });
-      toast({ title: 'Veritabanı Hatası', description: 'Transfer sırasında hata oluştu.', variant: 'destructive' });
-    } finally {
-      setShipmentLoading(false);
-    }
-  }, [currentUser, currentUserProfile, isBorcMode, selectedLabId, hospitals, borcDepots, selectedBorcDepotId, selectedDepotId, depotName, directTransferItems, allocateDocsForGroup, toast, selectedCompany, invalidateDepoStok]);
+    })();
+  }, [currentUser, currentUserProfile, isBorcMode, selectedLabId, hospitals, borcDepots, selectedBorcDepotId, selectedDepotId, depotName, directTransferItems, allocateDocsForGroup, toast, selectedCompany, invalidateDepoStok, productMetaByCode]);
 
 
   const handleCompleteDirectTransfer = async () => {
