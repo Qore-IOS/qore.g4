@@ -24,7 +24,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Checkbox } from './ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
-import { collection, getDocs, query, where, writeBatch, doc, Timestamp, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, getDoc, query, where, writeBatch, doc, Timestamp, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import {
   PackageSearch, Warehouse, FileSpreadsheet, Loader2,
@@ -54,7 +54,6 @@ import {
   useDepots,
   useProductCodes,
   useHospitals,
-  useUnshippedDepoStokByDepot,
   useDepotMinMaxRules,
   usePaginatedDepotStock,
 } from '@/hooks/useFirebaseQueries';

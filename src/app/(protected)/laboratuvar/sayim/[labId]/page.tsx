@@ -1,6 +1,6 @@
 // File: /app/(protected)/laboratuvar/sayim/[labId]/page.tsx
 'use client';
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import {
@@ -20,6 +20,7 @@ import {
   Circle,
   Loader2,
   Save,
+  ScanBarcode,
   Search,
   TestTube,
   X,
@@ -31,6 +32,9 @@ import type { ProductCode, DepoStokItem, ConsumptionRecord, MinMaxRule } from '@
 import { saveLabCountSession } from '@/lib/labCount';
 import { formatMiad } from '@/lib/date';
 import { differenceInDays, parse, isValid } from 'date-fns';
+import useHidScanner from '@/hooks/useHidScanner';
+import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
+import { parseAndResolveBarcode } from '@/lib/barcode';
 
 // ============================================================================
 // TYPES
@@ -343,6 +347,12 @@ export default function LaboratuvarSayimPage() {
   const [showOnlyUncounted, setShowOnlyUncounted] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
+  // Barcode scanning
+  const [scannerActive, setScannerActive] = useState(false);
+  const [scanFeedback, setScanFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const scanFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { formats: barcodeFormats } = useSafeBarcodeFormats();
+
   // Per-product count state
   const [countData, setCountData] = useState<Record<string, { enteredQty: string; counted: boolean }>>({});
 
@@ -626,6 +636,71 @@ export default function LaboratuvarSayimPage() {
   }, [groupProgress, activeGroup]);
 
   // ------------------------------------------------------------------
+  // Barcode scanning
+  // ------------------------------------------------------------------
+  const flashFeedback = useCallback((type: 'success' | 'error', message: string) => {
+    if (scanFeedbackTimer.current) clearTimeout(scanFeedbackTimer.current);
+    setScanFeedback({ type, message });
+    scanFeedbackTimer.current = setTimeout(() => setScanFeedback(null), 2200);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (scanFeedbackTimer.current) clearTimeout(scanFeedbackTimer.current);
+    };
+  }, []);
+
+  const handleScan = useCallback(({ raw }: { raw: string }) => {
+    const trimmed = raw.trim();
+    if (!trimmed) return;
+
+    const result = parseAndResolveBarcode(trimmed, barcodeFormats, productCodes);
+    let found = result?.product;
+    if (!found) {
+      found = productCodes.find(p => p.barcodeNumber === trimmed || p.stokKodu === trimmed);
+    }
+
+    if (!found) {
+      flashFeedback('error', 'Ürün bulunamadı');
+      return;
+    }
+
+    // Check the product is in the count scope (has min/max defined OR has stock).
+    if (!scopeStokKodus.has(found.stokKodu)) {
+      flashFeedback('error', `${found.stokAdi} bu laboratuvarda tanımlı değil`);
+      return;
+    }
+
+    // Switch active group if the scanned product belongs to a different one.
+    const targetGroup = filterMode === 'marka' ? (found.marka ?? '') : (found.urunGrubu ?? '');
+    if (targetGroup && targetGroup !== activeGroup) {
+      setActiveGroup(targetGroup);
+    }
+
+    // Increment the entered quantity by 1 and mark as counted.
+    setCountData(prev => {
+      const cur = prev[found!.stokKodu] ?? { enteredQty: '', counted: false };
+      const baseStr = cur.enteredQty.trim();
+      const baseNum = baseStr === '' ? 0 : (parseInt(baseStr, 10) || 0);
+      return {
+        ...prev,
+        [found!.stokKodu]: {
+          enteredQty: String(baseNum + 1),
+          counted: true,
+        },
+      };
+    });
+
+    flashFeedback('success', `${found.stokAdi} +1`);
+  }, [barcodeFormats, productCodes, scopeStokKodus, filterMode, activeGroup, flashFeedback]);
+
+  useHidScanner({
+    enabled: scannerActive,
+    allowDuringInputs: false,
+    onScan: handleScan,
+  });
+
+  // ------------------------------------------------------------------
   // Save: update lab stock based on counts + persist count session
   // ------------------------------------------------------------------
   const handleSave = useCallback(async () => {
@@ -777,6 +852,32 @@ export default function LaboratuvarSayimPage() {
           <div className="flex items-center gap-2">
             <TestTube className="w-4 h-4 text-[var(--dashboard-accent)]" />
             <span className="text-sm font-semibold text-[var(--dashboard-text)]">{labName}</span>
+
+            <button
+              onClick={() => setScannerActive(prev => !prev)}
+              className={cn(
+                'flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium transition-all duration-200',
+                scannerActive
+                  ? 'bg-emerald-500 text-white shadow-md animate-pulse'
+                  : 'bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]',
+              )}
+            >
+              <ScanBarcode className="w-4 h-4" />
+              {scannerActive ? 'Okuyucu Aktif' : 'Barkod'}
+            </button>
+
+            {scanFeedback && (
+              <span
+                className={cn(
+                  'text-xs font-medium px-2 py-1 rounded-lg animate-in fade-in slide-in-from-left-2',
+                  scanFeedback.type === 'success'
+                    ? 'bg-emerald-500/10 text-emerald-600'
+                    : 'bg-red-500/10 text-red-600',
+                )}
+              >
+                {scanFeedback.message}
+              </span>
+            )}
           </div>
 
           {/* Filter mode toggle */}
