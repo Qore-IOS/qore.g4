@@ -92,6 +92,44 @@ export async function getExpiringItems(
     return expiringItems;
 }
 
+export async function getExpiringProductsCountServer(
+  companyId?: string | null,
+  isSuperAdmin?: boolean,
+): Promise<number> {
+  try {
+    const depoStokRef = collection(db, 'depoStok');
+    const q = query(depoStokRef, where('isShipped', '==', false));
+    const snapshot = await getDocs(q);
+    const allItems = filterByCompanyScope(
+      snapshot.docs.map(d => ({ stokKodu: d.data().stokKodu, lotNumarasi: d.data().lotNumarasi, miad: d.data().miad, companyId: d.data().companyId })),
+      companyId,
+      isSuperAdmin
+    );
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const seenKeys = new Set<string>();
+    let count = 0;
+
+    allItems.forEach(data => {
+      const miadStr = typeof data.miad === 'string' ? data.miad : '';
+      if (!miadStr) return;
+      const miadDate = parse(miadStr, 'dd.MM.yyyy', new Date());
+      if (!isValid(miadDate)) return;
+      const days = differenceInDays(miadDate, today);
+      if (days <= 45) {
+        const key = `${data.stokKodu}-${data.lotNumarasi || ''}-${miadStr}`;
+        if (!seenKeys.has(key)) { seenKeys.add(key); count++; }
+      }
+    });
+
+    return count;
+  } catch (err) {
+    console.error('Error getting expiring products count:', err);
+    return 0;
+  }
+}
+
 export async function getDeviceImages(): Promise<string[]> {
   try {
     const publicPath = path.join(process.cwd(), 'public');

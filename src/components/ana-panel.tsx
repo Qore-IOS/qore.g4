@@ -61,10 +61,39 @@ import { formatQuantityWithUnit, formatUnitMultiplier, normalizeUnitLabel } from
 import { matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
 
 // Child Components
-import ManualInlineAdder from '@/components/mal-kabul/ManualInlineAdder';
-import IrsaliyeOcrModal from '@/components/mal-kabul/IrsaliyeOcrModal';
-import BulkBarcodeScanModal, { type BulkScanResultItem } from '@/components/mal-kabul/BulkBarcodeScanModal';
-import { VirtualizedList } from '@/components/ui/virtualized-list';
+const ManualInlineAdder = dynamic(() => import('@/components/mal-kabul/ManualInlineAdder'), {
+  ssr: false,
+  loading: () => <div className="h-10 animate-pulse bg-muted rounded-md" />
+});
+
+const IrsaliyeOcrModal = dynamic(() => import('@/components/mal-kabul/IrsaliyeOcrModal'), {
+  ssr: false,
+});
+
+const BulkBarcodeScanModal = dynamic(() => import('@/components/mal-kabul/BulkBarcodeScanModal'), {
+  ssr: false,
+});
+
+function AnaPanelSkeleton() {
+  return (
+    <div className="flex flex-col gap-6 p-6 animate-pulse">
+      <div className="flex justify-between items-center mb-4">
+        <div className="h-10 w-48 bg-muted rounded" />
+        <div className="h-10 w-64 bg-muted rounded" />
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 space-y-6">
+          <div className="h-64 bg-muted rounded-xl" />
+          <div className="h-96 bg-muted rounded-xl" />
+        </div>
+        <div className="space-y-6">
+          <div className="h-80 bg-muted rounded-xl" />
+          <div className="h-40 bg-muted rounded-xl" />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // =============================================================================
 // DYNAMIC IMPORTS
@@ -1489,6 +1518,10 @@ export default function AnaPanel(props: AnaPanelProps) {
     scannedItems.reduce((n, it) => n + (it.adet ?? 1), 0),
     [scannedItems]
   );
+
+  if (isLoading && scannedItems.length === 0) {
+    return <AnaPanelSkeleton />;
+  }
 
   return (
     <div className="cihaz-shell px-3 py-4 sm:px-5 sm:py-6 space-y-4 sm:space-y-5 min-h-screen">

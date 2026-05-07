@@ -113,6 +113,23 @@ export function useHospitals() {
 }
 
 /**
+ * Borc Depots - Used in transfer and payment panels
+ */
+export function useBorcDepots() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['borcDepots', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const snap = await getDocs(collection(db, 'borcDepots'));
+      const depots = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Depot));
+      return filterByCompanyScope(depots, currentCompanyId, isSuperAdmin);
+    },
+    staleTime: 60 * 60 * 1000,
+    gcTime: 2 * 60 * 60 * 1000,
+  });
+}
+
+/**
  * Devices
  */
 export function useDevices() {
@@ -127,6 +144,113 @@ export function useDevices() {
     staleTime: 30 * 60 * 1000, // 30 minutes
     gcTime: 60 * 60 * 1000,
     refetchOnWindowFocus: true,
+  });
+}
+
+/**
+ * Device Fault Reports - Used in Dashboard and Fault Panels
+ */
+export function useDeviceFaultReports() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['deviceFaultReports', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const snap = await getDocs(collection(db, 'deviceFaultReports'));
+      const reports = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DeviceFaultReport));
+      return filterByCompanyScope(reports, currentCompanyId, isSuperAdmin);
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
+  });
+}
+
+/**
+ * Purchasing Tasks - Used in Dashboard and Task Planner
+ */
+export function usePurchasingTasks() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['purchasingTasks', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const snap = await getDocs(collection(db, 'purchasingTasks'));
+      const tasks = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as PurchasingTask));
+      return filterByCompanyScope(tasks, currentCompanyId, isSuperAdmin);
+    },
+    staleTime: 10 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+}
+
+/**
+ * Expiring Products Count - Used in Dashboard for KPI
+ */
+export function useExpiringProductsCount() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['expiringProductsCount', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const { getExpiringProductsCountServer } = await import('@/actions/stokActions');
+      return getExpiringProductsCountServer(currentCompanyId, isSuperAdmin);
+    },
+    staleTime: 60 * 60 * 1000, // 1 hour
+    gcTime: 2 * 60 * 60 * 1000,
+  });
+}
+
+/**
+ * Device Groups
+ */
+export function useDeviceGroups() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['deviceGroups', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const snap = await getDocs(collection(db, 'deviceGroups'));
+      const groups = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DeviceGroup));
+      return filterByCompanyScope(groups, currentCompanyId, isSuperAdmin);
+    },
+    staleTime: 60 * 60 * 1000,
+    gcTime: 2 * 60 * 60 * 1000,
+  });
+}
+
+/**
+ * Min-Max Rules for a specific depot
+ */
+export function useMinMaxRulesForDepot(depotId: string) {
+  return useQuery({
+    queryKey: ['minMaxRules', 'depot', depotId],
+    queryFn: async () => {
+      if (!depotId) return {};
+      const snap = await getDocs(collection(db, 'depots', depotId, 'minMaxRules'));
+      return snap.docs.reduce<Record<string, MinMaxRule>>((acc, d) => {
+        const r = d.data() as MinMaxRule;
+        if (r?.stokKodu) acc[r.stokKodu] = { ...r, id: d.id };
+        return acc;
+      }, {});
+    },
+    enabled: !!depotId,
+    staleTime: 30 * 60 * 1000,
+  });
+}
+
+/**
+ * Min-Max Rules for a specific hospital
+ */
+export function useMinMaxRulesForHospital(hospitalId: string) {
+  return useQuery({
+    queryKey: ['minMaxRules', 'hospital', hospitalId],
+    queryFn: async () => {
+      if (!hospitalId) return {};
+      const snap = await getDocs(collection(db, 'hospitals', hospitalId, 'minMaxRules'));
+      return snap.docs.reduce<Record<string, MinMaxRule>>((acc, d) => {
+        const r = d.data() as MinMaxRule;
+        if (r?.stokKodu) acc[r.stokKodu] = { ...r, id: d.id };
+        return acc;
+      }, {});
+    },
+    enabled: !!hospitalId,
+    staleTime: 30 * 60 * 1000,
   });
 }
 
