@@ -1788,19 +1788,6 @@ export default function FaultDetailPage() {
       </Card>
 
       <div className="fault-detail-content">
-          <div className="fault-info-grid">
-            <div><p>Laboratuvar</p><strong>{fault.labName}</strong></div>
-            <div><p>Cihaz</p><strong>{fault.model} <span>({fault.serial})</span></strong></div>
-            <div><p>Arıza Tipi</p><strong>{faultTypeLabel}</strong></div>
-            <div><p>Durum</p><strong>{statusConfig.label}</strong></div>
-            <div><p>Açan</p><strong>{fault.openedByName || '-'}</strong></div>
-            {fault.status === 'closed' && (
-              <div><p>Kapatan</p><strong>{fault.closedByName || '-'}</strong></div>
-            )}
-          </div>
-        </div>
-      </div>
-
           {fault.isEjectedKitFault && (
             <div className="fault-clay-section">
                 <p className="font-medium mb-2 text-amber-600">İlişkili Kit Bilgisi</p>
