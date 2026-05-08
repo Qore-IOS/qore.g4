@@ -38,6 +38,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { VirtualizedList } from '@/components/ui/virtualized-list';
 
 // Icons
 import { Trash2, CheckSquare, PlusCircle, Loader2, Search, History, Camera, ScanLine, Package, MapPin, FileText, X, Undo2, AlertTriangle, QrCode, Download, Sparkles } from 'lucide-react';
