@@ -259,6 +259,8 @@ export interface GroupedStockRow {
   rafAdresi: string;
   quantity: number;
   itemIds: string[];
+  /** Brand from productCodes — used by the marka column filter. */
+  marka?: string;
   // Server-computed risk metadata (populated when minMaxRules are available).
   miadDays?: number;
   miadSeverity?: 'normal' | 'notice' | 'caution' | 'warning' | 'critical' | 'expired';
@@ -267,6 +269,8 @@ export interface GroupedStockRow {
   coverageLabel?: string;
   dailyNeed?: number;
   riskyBoxes?: number;
+  /** True when an active minMax rule says quantity is at or below the minimum. */
+  belowMin?: boolean;
 }
 
 export interface PaginatedStockResult {
@@ -287,6 +291,8 @@ export interface PaginatedStockResult {
     lotNumarasi: string[];
     miad: string[];
     rafAdresi: string[];
+    /** Distinct brands present in the depot, used by the marka filter. */
+    marka: string[];
   };
 }
 
@@ -319,7 +325,7 @@ export async function getPaginatedDepotStock(params: {
   const emptyResult: PaginatedStockResult = {
     rows: [], totalRows: 0, totalPages: 0, currentPage: 1,
     riskyRowsCount: 0, riskyBoxesTotal: 0,
-    columnValues: { stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [] },
+    columnValues: { stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [], marka: [] },
   };
 
   if (!depotId) {
@@ -390,7 +396,7 @@ export async function getPaginatedDepotStock(params: {
     if (rule.stokKodu) minMaxRules[rule.stokKodu] = rule;
   });
 
-  const productByCode = new Map<string, { anaBirim?: string; trackingMode?: string; defaultTrackingMode?: string }>();
+  const productByCode = new Map<string, { anaBirim?: string; trackingMode?: string; defaultTrackingMode?: string; marka?: string }>();
   const lotTrackedStokCodes = new Set<string>();
   productsSnap.forEach((d) => {
     const data = d.data() as Record<string, any>;
@@ -419,16 +425,18 @@ export async function getPaginatedDepotStock(params: {
     }
     const key = `${item.stokKodu}-${lot}-${miad}`;
     if (!grouped[key]) {
+      const product = productByCode.get(item.stokKodu || '');
       grouped[key] = {
         key,
         stokKodu: item.stokKodu || '',
         stokAdi: item.stokAdi || '',
         lotNumarasi: lot,
         miad,
-        anaBirim: productByCode.get(item.stokKodu || '')?.anaBirim || 'Adet',
+        anaBirim: product?.anaBirim || 'Adet',
         rafAdresi: item.rafAdresi || '',
         quantity: 0,
         itemIds: [],
+        marka: product?.marka || '',
       };
     }
     const qty = (item.adet && typeof item.adet === 'number') ? item.adet : 1;
@@ -503,6 +511,9 @@ export async function getPaginatedDepotStock(params: {
       riskyBoxes = Math.max(0, Math.ceil(riskyDays * dailyNeed));
     }
 
+    // Below-min flag — drives the "Min. Stok" legend chip and slate row stripe.
+    const belowMin = !!(rule && rule.min !== undefined && row.quantity <= rule.min);
+
     return {
       ...row,
       miadDays: Number.isFinite(miadDays) ? miadDays : undefined,
@@ -512,6 +523,7 @@ export async function getPaginatedDepotStock(params: {
       coverageLabel,
       dailyNeed,
       riskyBoxes,
+      belowMin,
     };
   });
 
@@ -540,6 +552,7 @@ export async function getPaginatedDepotStock(params: {
     lotNumarasi: [...new Set(rows.map(r => r.lotNumarasi).filter(Boolean))].sort(),
     miad: [...new Set(rows.map(r => r.miad).filter(Boolean))].sort(),
     rafAdresi: [...new Set(rows.map(r => r.rafAdresi).filter(Boolean))].sort(),
+    marka: [...new Set(rows.map(r => r.marka).filter((m): m is string => !!m))].sort((a, b) => a.localeCompare(b, 'tr')),
   };
 
   // Apply column filters

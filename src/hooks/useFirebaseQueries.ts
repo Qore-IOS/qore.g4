@@ -585,7 +585,7 @@ export function usePaginatedDepotStock(params: {
         return {
           rows: [], totalRows: 0, totalPages: 0, currentPage: 1,
           riskyRowsCount: 0, riskyBoxesTotal: 0,
-          columnValues: { stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [] },
+          columnValues: { stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [], marka: [] },
         };
       }
       const { getPaginatedDepotStock } = await import('@/actions/stokActions');
