@@ -3,17 +3,17 @@ import FormData from 'form-data';
 import { logger } from 'firebase-functions';
 
 /**
- * Sends a PDF document to a WhatsApp recipient (individual or group) using UltraMsg API.
+ * Sends a PDF document to a WhatsApp recipient via URL using UltraMsg API.
  * 
- * @param pdfBuffer The PDF file as a Buffer
- * @param fileName The name of the file to appear in WhatsApp
- * @param caption The message text to accompany the document
- * @param to The recipient (individual JID like 905xxx or group JID like xxxx@g.us)
- * @param instanceId UltraMsg Instance ID from functions config
- * @param token UltraMsg API Token from functions config
+ * @param documentUrl The public URL of the PDF file
+ * @param fileName The name of the file
+ * @param caption The message text
+ * @param to The recipient JID
+ * @param instanceId UltraMsg Instance ID
+ * @param token UltraMsg API Token
  */
 export async function sendWhatsAppDocument(
-  pdfBuffer: Buffer,
+  documentUrl: string,
   fileName: string,
   caption: string,
   to: string,
@@ -23,28 +23,24 @@ export async function sendWhatsAppDocument(
   try {
     const url = `https://api.ultramsg.com/${instanceId}/messages/document?token=${token}`;
     
-    const form = new FormData();
-    form.append('to', to);
-    form.append('filename', fileName);
-    form.append('caption', caption);
-    form.append('document', pdfBuffer, {
-      filename: fileName,
-      contentType: 'application/pdf',
-    });
-
     const response = await fetch(url, {
       method: 'POST',
-      body: form,
-      headers: form.getHeaders(),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        to,
+        filename: fileName,
+        document: documentUrl,
+        caption: caption
+      }),
     });
 
     const result = await response.json() as any;
 
     if (response.ok && (result.sent === 'true' || result.sent === true || result.id)) {
-      logger.info(`[WhatsApp] Document sent successfully to ${to}. MessageID: ${result.id}`);
+      logger.info(`[WhatsApp] Document URL sent successfully to ${to}.`);
       return { success: true, messageId: result.id };
     } else {
-      const errorMsg = result.error || JSON.stringify(result);
+      const errorMsg = typeof result.error === 'object' ? JSON.stringify(result.error) : (result.error || JSON.stringify(result));
       logger.error(`[WhatsApp] API returned error: ${errorMsg}`);
       return { success: false, error: errorMsg };
     }
