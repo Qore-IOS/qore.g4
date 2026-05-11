@@ -28,6 +28,7 @@ import {
   Package,
   X,
   ShoppingCart,
+  Warehouse,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
