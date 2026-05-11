@@ -71,7 +71,7 @@ import { autoPrintTutanakFromTransferId, isAutoTutanakEnabled } from '@/lib/tuta
 import { emitFefoOverride } from '@/lib/notifications';
 import { VirtualizedList } from '@/components/ui/virtualized-list';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
-import { formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
+import { formatUnitMultiplier, normalizeUnitLabel, formatQuantityWithUnit } from '@/lib/product-unit';
 
 
 const CameraScanner = dynamic(() => import('@/components/camera-barcode-scanner'), {
@@ -221,8 +221,7 @@ export default function DirektTransferPanel() {
 
   const { formats: barcodeFormats, loading: formatsLoading, parseAnyBarcode, resolveProductFromParsed, parseAndResolveBarcode } = useBarcodeParser();
   
-  const [productTracking, setProductTracking] = useState<Record<string, TrackingMode>>({});
-  const [productNames, setProductNames] = useState<Record<string, string>>({});
+
   
   const productMetaByCode = useMemo(() => {
     const map = new Map<string, ProductCode>();
@@ -354,7 +353,7 @@ export default function DirektTransferPanel() {
     }
   }, [templates.length, toast]);
 
-  useEffect(() => {
+  const { productTracking, productNames } = useMemo(() => {
     const trackingMap: Record<string, TrackingMode> = {};
     const nameMap: Record<string, string> = {};
     products.forEach(p => {
@@ -364,8 +363,7 @@ export default function DirektTransferPanel() {
           if ((p as any).trackingMode) trackingMap[stokKodu] = (p as any).trackingMode as TrackingMode;
       }
     });
-    setProductTracking(trackingMap);
-    setProductNames(nameMap);
+    return { productTracking: trackingMap, productNames: nameMap };
   }, [products]);
   
   const upsertGroupedRow = useCallback((partial: Partial<TransferRow>, inc = 1) => {
