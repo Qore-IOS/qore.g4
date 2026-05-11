@@ -5,6 +5,7 @@ import * as nodemailer from 'nodemailer';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import fetch from 'node-fetch';
+import { sendWhatsAppDocument } from './lib/whatsapp';
 
 const db = admin.firestore();
 
@@ -430,6 +431,8 @@ async function handleActionFormCreated(
     steps: [] as string[],
     error: null as string | null,
     emailSentTo: null as string | null,
+    whatsappSent: false,
+    whatsappError: null as string | null,
     smtpConfigured: false,
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   };
@@ -492,7 +495,50 @@ async function handleActionFormCreated(
     const pdfBuffer = await generateActionFormPDF(data, formType, formId);
     logEntry.steps.push(`PDF oluşturma: OK (${pdfBuffer.length} byte)`);
 
-    // 4. Compose email
+    // 4. WhatsApp Notification
+    const waConfig = functions.config().whatsapp;
+    if (waConfig && waConfig.instance_id && waConfig.token && waConfig.group_id) {
+      logEntry.steps.push('WhatsApp gönderimi: başladı');
+      const labName = data.labName || 'Bilinmeyen Laboratuvar';
+      const cihazAdi = data.cihazAdi || 'Bilinmeyen Cihaz';
+      const personnelName = data.createdByName || 'Bilinmeyen Kullanıcı';
+      const formTypeLabel = formType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon';
+      
+      const caption = 
+        `🚀 *${formTypeLabel} İşlemi Tamamlandı*\n\n` +
+        `🏥 *Kurum:* ${labName}\n` +
+        `🔬 *Cihaz:* ${cihazAdi}\n` +
+        `📋 *Form No:* ${formId}\n` +
+        `👨‍🔧 *Personel:* ${personnelName}\n\n` +
+        `QORE Sistemi üzerinden detaylara ulaşabilirsiniz.`;
+
+      const waFileName = `IslemFormu_${formType === 'teknik_servis' ? 'Teknik' : 'Aplikasyon'}_${formId.substring(0, 8)}.pdf`;
+
+      try {
+        const waResult = await sendWhatsAppDocument(
+          pdfBuffer,
+          waFileName,
+          caption,
+          waConfig.group_id,
+          waConfig.instance_id,
+          waConfig.token
+        );
+        if (waResult.success) {
+          logEntry.whatsappSent = true;
+          logEntry.steps.push(`WhatsApp gönderimi: OK (MsgID: ${waResult.messageId})`);
+        } else {
+          logEntry.whatsappError = waResult.error || 'Unknown error';
+          logEntry.steps.push(`WhatsApp gönderimi: BAŞARISIZ - ${waResult.error}`);
+        }
+      } catch (waErr: any) {
+        logEntry.whatsappError = waErr.message || String(waErr);
+        logEntry.steps.push(`WhatsApp gönderimi: HATA - ${waErr.message}`);
+      }
+    } else {
+      logEntry.steps.push('WhatsApp gönderimi: ATLADI (Yapılandırma eksik)');
+    }
+
+    // 5. Compose email
     const labName = hospitalData.name || data.labName || 'Bilinmeyen Laboratuvar';
     const cihazAdi = data.cihazAdi || 'Bilinmeyen Cihaz';
     const personnelName = data.createdByName || 'Bilinmeyen Kullanici';
