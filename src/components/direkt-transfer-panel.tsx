@@ -418,6 +418,12 @@ export default function DirektTransferPanel() {
       return depotStockLookups.byCode.get(stokKodu) || [];
   }, [depotStockLookups]);
 
+  // Lot-tracked items are stored as a single document with `adet: N`; serial-tracked
+  // items are one-document-per-unit (adet: 1). Available units = sum of adet, not doc count.
+  const sumStockAdet = useCallback((items: DepoStokItem[]): number => {
+      return items.reduce((sum, item) => sum + ((item as any).adet ?? 1), 0);
+  }, []);
+
   const alreadyQueued = useCallback((stokKodu: string, lot?: string, seri?: string) => {
     return directTransferItems
       .filter(r => r.stokKodu === stokKodu && (lot ? r.lotNumarasi === lot : !r.lotNumarasi) && (seri ? r.seriNumarasi === seri : true))
@@ -509,7 +515,8 @@ export default function DirektTransferPanel() {
           flashScanFeedback('error', `Seri No ${seri} bu depoda bulunamadı.`);
           return;
         }
-        if (alreadyQueued(stokKodu, undefined, seri) >= items.length) {
+        const serialAvailable = sumStockAdet(items);
+        if (alreadyQueued(stokKodu, undefined, seri) >= serialAvailable) {
           playFeedback(true);
           flashScanFeedback('error', `Seri No ${seri} için yeterli stok yok.`);
           return;
@@ -533,10 +540,11 @@ export default function DirektTransferPanel() {
           flashScanFeedback('error', `${stokKodu} (Lot: ${lot}) bu depoda bulunamadı.`);
           return;
         }
+        const lotAvailable = sumStockAdet(items);
         const queued = alreadyQueued(stokKodu, lot);
-        if (queued >= items.length) {
+        if (queued >= lotAvailable) {
           playFeedback(true);
-          flashScanFeedback('error', `${stokKodu} (Lot: ${lot}) için en fazla ${items.length} gönderilebilir.`);
+          flashScanFeedback('error', `${stokKodu} (Lot: ${lot}) için en fazla ${lotAvailable} gönderilebilir.`);
           return;
         }
         upsertGroupedRow(
@@ -555,10 +563,11 @@ export default function DirektTransferPanel() {
         flashScanFeedback('error', `${stokKodu} bu depoda bulunamadı.`);
         return;
       }
+      const codeAvailable = sumStockAdet(items);
       const queued = alreadyQueued(stokKodu);
-      if (queued >= items.length) {
+      if (queued >= codeAvailable) {
         playFeedback(true);
-        flashScanFeedback('error', `${stokKodu} için en fazla ${items.length} gönderilebilir.`);
+        flashScanFeedback('error', `${stokKodu} için en fazla ${codeAvailable} gönderilebilir.`);
         return;
       }
       upsertGroupedRow(
@@ -569,7 +578,7 @@ export default function DirektTransferPanel() {
       flashScanFeedback('success', `${stokAdi} eklendi.`);
       playFeedback();
     },
-    [selectedFormatId, barcodeFormats, products, toast, addDirectTransferItem, upsertGroupedRow, countStockBySerial, countStockByLot, countStockByCode, alreadyQueued, resolveProductFromParsed, parseAnyBarcode, parseAndResolveBarcode, directTransferItems, isBulkScanMode, flashScanFeedback]
+    [selectedFormatId, barcodeFormats, products, toast, addDirectTransferItem, upsertGroupedRow, countStockBySerial, countStockByLot, countStockByCode, sumStockAdet, alreadyQueued, resolveProductFromParsed, parseAnyBarcode, parseAndResolveBarcode, directTransferItems, isBulkScanMode, flashScanFeedback]
   );
   
   useHidScanner({
@@ -1127,7 +1136,10 @@ export default function DirektTransferPanel() {
       const stockItems = group.lotNumarasi
         ? (depotStockLookups.byLot.get(`${group.stokKodu}__${group.lotNumarasi}`) || [])
         : (depotStockLookups.byCode.get(group.stokKodu) || []);
-      map.set(key, stockItems.length);
+      // Sum the `adet` field — lot-tracked items are stored as a single doc with adet:N,
+      // so counting docs would under-report stock (root cause of the "1 adet okutabilirsiniz" bug).
+      const available = stockItems.reduce((sum, item) => sum + ((item as any).adet ?? 1), 0);
+      map.set(key, available);
     }
     return map;
   }, [groupedTransferItems, depotStockLookups]);
