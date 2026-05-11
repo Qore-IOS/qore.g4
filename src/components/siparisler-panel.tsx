@@ -211,6 +211,40 @@ export default function SiparislerPanel(): JSX.Element {
     return () => { if (unsubscribe) unsubscribe(); };
   }, [selectedDepotId]);
 
+  // Fallback Migration: Geriye dönük uyumluluk için eski (targetDepotId ile kaydedilmiş)
+  // siparişleri tespit edip depotId olarak veritabanında güncelliyoruz.
+  // Bu sayede hem siparişler hemen listeye düşer hem de kalıcı olarak onarılmış olur.
+  useEffect(() => {
+    if (!selectedDepotId) return;
+    const fixLegacyOrders = async () => {
+      try {
+        const qFix = query(collection(db, 'orders'), where('targetDepotId', '==', selectedDepotId));
+        const snap = await getDocs(qFix);
+        if (!snap.empty) {
+          const batch = writeBatch(db);
+          let count = 0;
+          snap.forEach(docSnap => {
+            const data = docSnap.data();
+            if (!data.depotId) {
+              batch.update(docSnap.ref, { 
+                depotId: data.targetDepotId,
+                depotName: data.targetDepotName || data.depotName || ''
+              });
+              count++;
+            }
+          });
+          if (count > 0) {
+            await batch.commit();
+            siparislerLogger.info(`${count} adet eski siparişin depotId fallback güncellemesi yapıldı.`);
+          }
+        }
+      } catch (error) {
+        siparislerLogger.warn('Eski siparişleri onarma sırasında hata', { error: error instanceof Error ? error.message : String(error) });
+      }
+    };
+    fixLegacyOrders();
+  }, [selectedDepotId]);
+
   // Perifer — depo atanmamış siparişleri dinle. Bu liste, seçili depodan
   // bağımsız olarak ofis lojistik görünümünde her zaman gösterilir.
   useEffect(() => {
