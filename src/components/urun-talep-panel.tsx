@@ -830,11 +830,26 @@ export default function UrunTalepPanel() {
 
       await setDoc(doc(db, 'orders', orderId), newOrder);
 
+      // Bildirim için kısa ürün özeti: ilk 3 ürünü "Ad x adet" formatıyla, fazlasını "+N kalem" olarak göster.
+      const totalAdetForNotif = orderItems.reduce((s, it) => s + (Number(it.adet) || 0), 0);
+      const preview = orderItems
+        .slice(0, 3)
+        .map(it => `${it.stokAdi} x${it.adet}`)
+        .join(', ');
+      const extra = orderItems.length > 3 ? ` (+${orderItems.length - 3} kalem)` : '';
+      const itemsSummary = `${preview}${extra}`;
+
       await emitOrderCreatedFromRequest({
         actor: { uid: currentUserProfile?.uid || '', name: currentUserProfile?.name || '' },
         orderId: orderId,
         labId: selectedLabId,
+        labName,
         depotId: isPeripheralFlow ? '' : selectedDepotId,
+        isPeripheral: isPeripheralFlow,
+        itemsSummary,
+        itemsCount: orderItems.length,
+        totalAdet: totalAdetForNotif,
+        urgency: isPeripheralFlow ? (urgency ?? 'normal') : undefined,
         audienceHint: {
           userId: currentUserProfile?.uid,
           role: currentUserProfile?.role,
