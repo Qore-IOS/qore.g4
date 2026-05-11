@@ -730,16 +730,17 @@ export default function UrunKullanimPanel() {
     const consumedStokKodu = itemToConsume.stokKodu;
     const consumedLot = itemToConsume.lotNumarasi || '';
     
-    // Use local labStock to update UI immediately
-    const lotRemaining = labStock.filter(i =>
-      i.stokKodu === consumedStokKodu &&
-      (i.lotNumarasi || '') === consumedLot &&
-      i.id !== consumedId
-    ).length;
-    const totalRemaining = labStock.filter(i =>
-      i.stokKodu === consumedStokKodu &&
-      i.id !== consumedId
-    ).length;
+    // Use local labStock to update UI immediately. Lot-tracked items live in a
+    // single doc with `adet: N`, so we sum adet rather than counting docs and
+    // subtract the 1 unit we just consumed.
+    const lotTotalAdet = labStock
+      .filter(i => i.stokKodu === consumedStokKodu && (i.lotNumarasi || '') === consumedLot)
+      .reduce((sum, i) => sum + (((i as any).adet as number | undefined) ?? 1), 0);
+    const codeTotalAdet = labStock
+      .filter(i => i.stokKodu === consumedStokKodu)
+      .reduce((sum, i) => sum + (((i as any).adet as number | undefined) ?? 1), 0);
+    const lotRemaining = Math.max(0, lotTotalAdet - 1);
+    const totalRemaining = Math.max(0, codeTotalAdet - 1);
     
     setLastScannedLotRemaining(lotRemaining);
     setLastScannedTotalRemaining(totalRemaining);
@@ -1398,7 +1399,8 @@ export default function UrunKullanimPanel() {
       .forEach(item => {
         const key = `${item.lotNumarasi || 'N/A'}|${item.miad || 'N/A'}`;
         const current = lots.get(key) || { miad: item.miad ?? 'N/A', count: 0 };
-        current.count += 1;
+        // Sum adet — lot batches transferred from depot live in a single doc.
+        current.count += resolveStockRowUnit(item);
         lots.set(key, current);
       });
     return Array.from(lots.entries()).map(([key, data]) => ({ key, label: `${key.split('|')[0]} / ${data.miad}`, count: data.count }));
@@ -1447,12 +1449,15 @@ export default function UrunKullanimPanel() {
 
     return Array.from(grouped.values())
       .map((row) => {
-        // Nihai adet her zaman canlı labStock belge sayısından türetilsin
-        const liveCount = labStock.filter((it) =>
-          it.stokKodu === row.stokKodu &&
-          (it.lotNumarasi || 'Lotsuz') === row.lotNumarasi &&
-          formatMiad(it.miad) === row.miad
-        ).length;
+        // Nihai adet canlı labStock belgelerinin `adet` toplamından türetilsin.
+        // Lot dokümanları tek satırda `adet: N` taşır; doküman sayısı yanlış olur.
+        const liveCount = labStock
+          .filter((it) =>
+            it.stokKodu === row.stokKodu &&
+            (it.lotNumarasi || 'Lotsuz') === row.lotNumarasi &&
+            formatMiad(it.miad) === row.miad
+          )
+          .reduce((sum, it) => sum + resolveStockRowUnit(it), 0);
         return { ...row, count: liveCount };
       })
       .sort((a, b) => (a.stokAdi || '').localeCompare(b.stokAdi || '', 'tr') || (a.lotNumarasi || '').localeCompare(b.lotNumarasi || '', 'tr'));
@@ -1502,7 +1507,8 @@ export default function UrunKullanimPanel() {
     }
 
     const groupKey = buildManualDeductionKey(selectedLab.id, stokKodu, lotNumarasi === 'Lotsuz' ? '' : lotNumarasi, miadRaw || '');
-    const currentlyAvailable = matchingItems.length;
+    // Lot dokümanları tek satırda `adet: N` tutar — gerçek mevcut adet = adet toplamı.
+    const currentlyAvailable = matchingItems.reduce((sum, it) => sum + resolveStockRowUnit(it), 0);
     if (currentlyAvailable <= 0) {
       toast({ title: 'Stok Bulunamadı', description: 'Bu satırın kullanılabilir stoğu tükenmiş görünüyor.', variant: 'destructive' });
       return;
@@ -1512,7 +1518,19 @@ export default function UrunKullanimPanel() {
     const templateItem = matchingItems[0];
     const ownerId = templateItem.hedefKurumId || laboratories.find(l => l.name === templateItem.hedefKurum)?.id || selectedLab.id;
     const ownerName = laboratories.find(l => l.id === ownerId)?.name || templateItem.hedefKurum || selectedLab.name || '';
-    const itemsToConsume = matchingItems.slice(0, quantityToDeduct);
+    // Adet-aware düşüm planı: her doküman için ne kadar düşüleceği. Doküman
+    // tamamı düşülürse silinir; kısmi düşümde `adet` decrement edilir. Eski
+    // `batch.delete` mantığı `adet: 50` olan bir dokümanı 1 birim için tamamen
+    // silerek 49 birim sessiz veri kaybına yol açıyordu.
+    let remainingToDeduct = quantityToDeduct;
+    const itemsToConsume: Array<{ id: string; take: number; docAdet: number; ref: DepoStokItem }> = [];
+    for (const stockItem of matchingItems) {
+      if (remainingToDeduct <= 0) break;
+      const docAdet = resolveStockRowUnit(stockItem);
+      const take = Math.min(docAdet, remainingToDeduct);
+      itemsToConsume.push({ id: stockItem.id, take, docAdet, ref: stockItem });
+      remainingToDeduct -= take;
+    }
     const shouldFullyConsumeLot = quantityToDeduct >= currentlyAvailable;
 
     try {
@@ -1545,10 +1563,16 @@ export default function UrunKullanimPanel() {
         batch.set(newTuketimDocRef, newRec);
       }
 
-      // Adet gerçekten düşsün: seçilen miktardaki gerçek depoStok satırlarını sil
-      itemsToConsume.forEach((stockItem) => {
-        const stokRef = doc(db, 'depoStok', stockItem.id);
-        batch.delete(stokRef);
+      // Adet-aware düşüm: tamamı düşülen doküman silinir; kısmi düşümde
+      // `adet` decrement edilir. Böylece bir lot dokümanından 1 birim
+      // düşerken kalan birimler kaybolmaz.
+      itemsToConsume.forEach((plan) => {
+        const stokRef = doc(db, 'depoStok', plan.id);
+        if (plan.take >= plan.docAdet) {
+          batch.delete(stokRef);
+        } else {
+          batch.update(stokRef, { adet: plan.docAdet - plan.take });
+        }
       });
 
       // Seri takipli ürünlerde seri numaralarını arka planda sakla (stoktan sayılmasın)
@@ -1582,7 +1606,10 @@ export default function UrunKullanimPanel() {
 
       // "Son Okutulan Ürün" ve "Son 10 Tüketim" kartlarını manuel/listeli düşümde de güncelle
       const remainingInSameLot = Math.max(0, currentlyAvailable - quantityToDeduct);
-      const totalForCode = labStock.filter((i) => i.stokKodu === stokKodu).length;
+      // Lot dokümanları `adet: N` formatında — doküman saymak yerine adet topla.
+      const totalForCode = labStock
+        .filter((i) => i.stokKodu === stokKodu)
+        .reduce((sum, i) => sum + resolveStockRowUnit(i), 0);
       const estimatedTotalRemaining = Math.max(0, totalForCode - quantityToDeduct);
       const manualRecordBase: ConsumptionRecord = {
         id: `manual-${Date.now()}`,
