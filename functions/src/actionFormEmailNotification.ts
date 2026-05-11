@@ -153,6 +153,10 @@ function getTransporter() {
 // --- PDF Generation (matching client-side template) ---
 async function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'aplikasyon', formId: string): Promise<Buffer> {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const padX = 40;
+
   // --- PREFETCH ASSETS ---
   const [fontBase64, headerLogo, sysLogo] = await Promise.all([
     loadTurkishFont(),
@@ -160,8 +164,6 @@ async function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'apl
     loadSystemLogo()
   ]);
 
-  // --- PREFETCH ASSETS ---
-  const fontBase64 = await loadTurkishFont();
   const useTurkish = fontBase64 ? setupTurkishFont(doc, fontBase64) : false;
   const FONT = useTurkish ? 'NotoSans' : 'helvetica';
   const ORANGE = { r: 199, g: 137, b: 65 };
