@@ -528,8 +528,30 @@ async function handleActionFormCreated(
       const waFileName = `IslemFormu_${formType === 'teknik_servis' ? 'Teknik' : 'Aplikasyon'}_${formId.substring(0, 8)}.pdf`;
 
       try {
+        // --- 4.1 Upload to Storage to get a URL ---
+        logger.info('[WhatsApp] Uploading PDF to storage for URL-based sending...');
+        const bucket = admin.storage().bucket();
+        const storagePath = `actionFormPDFs/${formId}_${Date.now()}.pdf`;
+        const file = bucket.file(storagePath);
+        
+        await file.save(pdfBuffer, {
+          contentType: 'application/pdf',
+          metadata: {
+            cacheControl: 'public, max-age=3600',
+          },
+        });
+
+        // Generate a signed URL valid for 24 hours
+        const [signedUrl] = await file.getSignedUrl({
+          action: 'read',
+          expires: Date.now() + 24 * 60 * 60 * 1000, // 24 hours
+        });
+        
+        logger.info(`[WhatsApp] PDF uploaded. Signed URL: ${signedUrl.substring(0, 50)}...`);
+
+        // --- 4.2 Send via WhatsApp ---
         const waResult = await sendWhatsAppDocument(
-          pdfBuffer,
+          signedUrl,
           waFileName,
           caption,
           waConfig.group_id,
