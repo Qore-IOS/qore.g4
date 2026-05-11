@@ -5,36 +5,68 @@ import * as nodemailer from 'nodemailer';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import fetch from 'node-fetch';
+import * as QRCode from 'qrcode';
 import { sendWhatsAppDocument } from './lib/whatsapp';
 
 const db = admin.firestore();
 
-// --- Turkish font cache ---
+// --- Assets cache ---
 let turkishFontBase64: string | null = null;
+let headerLogoBase64: string | null = null;
+let systemLogoBase64: string | null = null;
+
+async function loadAssetBase64(url: string): Promise<string | null> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return null;
+    const buffer = await response.buffer();
+    return buffer.toString('base64');
+  } catch (e) {
+    logger.warn(`[actionFormEmail] Could not load asset from ${url}:`, e);
+    return null;
+  }
+}
 
 async function loadTurkishFont(): Promise<string | null> {
   if (turkishFontBase64) return turkishFontBase64;
-  try {
-    const fontUrl = 'https://fonts.gstatic.com/s/notosans/v36/o-0IIpQlx3QUlC5A4PNr5TRA.ttf';
-    const response = await fetch(fontUrl);
-    if (!response.ok) return null;
-    const buffer = await response.buffer();
-    turkishFontBase64 = buffer.toString('base64');
-    return turkishFontBase64;
-  } catch (e) {
-    logger.warn('[actionFormEmail] Could not load Turkish font:', e);
-    return null;
+  turkishFontBase64 = await loadAssetBase64('https://fonts.gstatic.com/s/notosans/v36/o-0IIpQlx3QUlC5A4PNr5TRA.ttf');
+  return turkishFontBase64;
+}
+
+async function loadHeaderLogo(): Promise<string | null> {
+  if (headerLogoBase64) return headerLogoBase64;
+  // Fallback chain for logos
+  headerLogoBase64 = await loadAssetBase64('https://qorengine.com/invlogo.png');
+  if (!headerLogoBase64) {
+    headerLogoBase64 = await loadAssetBase64('https://qorengine.com/invitrolab_LOGO__-_Kopya__1_-removebg.png');
   }
+  return headerLogoBase64;
+}
+
+async function loadSystemLogo(): Promise<string | null> {
+  if (systemLogoBase64) return systemLogoBase64;
+  systemLogoBase64 = await loadAssetBase64('https://qorengine.com/newlogoblk.png');
+  return systemLogoBase64;
 }
 
 function setupTurkishFont(doc: jsPDF, fontBase64: string): boolean {
   try {
     doc.addFileToVFS('NotoSans-Regular.ttf', fontBase64);
     doc.addFont('NotoSans-Regular.ttf', 'NotoSans', 'normal');
+    doc.addFont('NotoSans-Regular.ttf', 'NotoSans', 'bold');
     return true;
   } catch (e) {
     logger.warn('[actionFormEmail] Could not setup Turkish font:', e);
     return false;
+  }
+}
+
+async function generateQRCodeDataUrl(text: string): Promise<string | null> {
+  try {
+    return await QRCode.toDataURL(text, { margin: 1, width: 200 });
+  } catch (e) {
+    logger.warn('[actionFormEmail] Could not generate QR code:', e);
+    return null;
   }
 }
 
@@ -121,31 +153,60 @@ function getTransporter() {
 // --- PDF Generation (matching client-side template) ---
 async function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'aplikasyon', formId: string): Promise<Buffer> {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-  const pageW = doc.internal.pageSize.getWidth();
-  const pageH = doc.internal.pageSize.getHeight();
-  const padX = 40;
+  // --- PREFETCH ASSETS ---
+  const [fontBase64, headerLogo, sysLogo] = await Promise.all([
+    loadTurkishFont(),
+    loadHeaderLogo(),
+    loadSystemLogo()
+  ]);
 
   // --- PREFETCH ASSETS ---
   const fontBase64 = await loadTurkishFont();
   const useTurkish = fontBase64 ? setupTurkishFont(doc, fontBase64) : false;
   const FONT = useTurkish ? 'NotoSans' : 'helvetica';
-
   const ORANGE = { r: 199, g: 137, b: 65 };
 
   doc.setFont(FONT);
 
   // --- Orange page border ---
   doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
-  doc.setLineWidth(2);
+  doc.setLineWidth(1.5);
   doc.rect(padX / 2, padX / 2, pageW - padX, pageH - padX);
 
-  // --- HEADER ---
-  const headerY = 30;
+  // --- HEADER SECTION ---
+  const headerY = 50;
+  
+  // Left: Title
   doc.setTextColor(0, 0, 0);
   doc.setFontSize(14);
   doc.setFont(FONT, 'bold');
   const title = formType === 'teknik_servis' ? 'Teknik Servis Formu' : 'Aplikasyon Formu';
-  doc.text(title, padX, headerY + 20);
+  doc.text(title, padX, headerY);
+
+  // Center: Company Logo
+  if (headerLogo) {
+    try {
+      doc.addImage(`data:image/png;base64,${headerLogo}`, 'PNG', pageW / 2 - 60, headerY - 25, 120, 45, undefined, 'FAST');
+    } catch (e) { logger.warn('Header logo addImage failed', e); }
+  }
+
+  // Right: QR Code
+  const detailUrl = `https://qorengine.com/forms/${formType === 'teknik_servis' ? 'technical' : 'application'}/${formId}`;
+  const qrBase64 = await generateQRCodeDataUrl(detailUrl);
+  if (qrBase64) {
+    try {
+      doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
+      doc.rect(pageW - padX - 70, headerY - 25, 70, 70);
+      doc.addImage(qrBase64, 'PNG', pageW - padX - 68, headerY - 23, 66, 66, undefined, 'FAST');
+    } catch (e) { logger.warn('QR code addImage failed', e); }
+  }
+
+  // System Logo below QR
+  if (sysLogo) {
+    try {
+      doc.addImage(`data:image/png;base64,${sysLogo}`, 'PNG', pageW - padX - 55, headerY + 48, 40, 30, undefined, 'FAST');
+    } catch (e) { logger.warn('System logo addImage failed', e); }
+  }
 
   // --- FORM INFO SECTION ---
   doc.setFontSize(10);
@@ -171,11 +232,12 @@ async function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'apl
   }
 
   const info: string[][] = [
-    ['Form No:', formId],
+    ['Form No:', data.formNo || formId],
     ['Laboratuvar:', data.labName || '-'],
     ['Cihaz:', `${data.cihazAdi || '-'} (SN: ${data.seriNumarasi || '-'})`],
     ['İşlemi Yapan:', personnelStr],
-    ['Tarih / Saat:', dateStr],
+    ['Başlangıç:', data.baslangicTarihi ? `${data.baslangicTarihi.split('-').reverse().join('.')} ${data.baslangicSaati || ''}` : '-'],
+    ['Bitiş:', data.bitisTarihi ? `${data.bitisTarihi.split('-').reverse().join('.')} ${data.bitisSaati || ''}` : dateStr],
   ];
 
   autoTable(doc, {
