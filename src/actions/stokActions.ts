@@ -280,7 +280,10 @@ export interface PaginatedStockResult {
   riskyBoxesTotal: number;
   /** Unique values per column – used for Excel-like column filters */
   columnValues: {
-    stokAdi: string[];
+    /** Stok Adı options carry the matching stokKodu so the filter UI can show
+     *  the product code and search by it. The `value` field is what the server
+     *  matches against `r.stokAdi` when the filter is applied. */
+    stokAdi: Array<{ value: string; code: string }>;
     lotNumarasi: string[];
     miad: string[];
     rafAdresi: string[];
@@ -516,9 +519,24 @@ export async function getPaginatedDepotStock(params: {
   const riskyRowsCount = rows.reduce((acc, r) => acc + ((r.riskyBoxes ?? 0) > 0 ? 1 : 0), 0);
   const riskyBoxesTotal = rows.reduce((acc, r) => acc + (r.riskyBoxes ?? 0), 0);
 
-  // Collect unique column values BEFORE filtering (so filter dropdowns show all options)
-  const columnValues = {
-    stokAdi: [...new Set(rows.map(r => r.stokAdi))].sort(),
+  // Collect unique column values BEFORE filtering (so filter dropdowns show all options).
+  // For stokAdi we also collect the matching stokKodu(s) so the filter dropdown can
+  // show the product code beside the name and let users search by either.
+  const stokAdiToCodes = new Map<string, Set<string>>();
+  for (const r of rows) {
+    if (!r.stokAdi) continue;
+    if (!stokAdiToCodes.has(r.stokAdi)) stokAdiToCodes.set(r.stokAdi, new Set());
+    if (r.stokKodu) stokAdiToCodes.get(r.stokAdi)!.add(r.stokKodu);
+  }
+  const stokAdiOptions = Array.from(stokAdiToCodes.entries())
+    .map(([stokAdi, codes]) => ({
+      value: stokAdi,
+      code: Array.from(codes).sort().join(', '),
+    }))
+    .sort((a, b) => a.value.localeCompare(b.value, 'tr'));
+
+  const columnValues: PaginatedStockResult['columnValues'] = {
+    stokAdi: stokAdiOptions,
     lotNumarasi: [...new Set(rows.map(r => r.lotNumarasi).filter(Boolean))].sort(),
     miad: [...new Set(rows.map(r => r.miad).filter(Boolean))].sort(),
     rafAdresi: [...new Set(rows.map(r => r.rafAdresi).filter(Boolean))].sort(),
