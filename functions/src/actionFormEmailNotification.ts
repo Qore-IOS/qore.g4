@@ -541,17 +541,17 @@ async function handleActionFormCreated(
           },
         });
 
-        // Generate a signed URL valid for 24 hours
-        const [signedUrl] = await file.getSignedUrl({
-          action: 'read',
-          expires: Date.now() + 24 * 60 * 60 * 1000, // 24 hours
-        });
+        // Make the file public so UltraMsg can access it
+        await file.makePublic();
         
-        logger.info(`[WhatsApp] PDF uploaded. Signed URL: ${signedUrl.substring(0, 50)}...`);
+        // Construct the public URL
+        const publicUrl = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+        
+        logger.info(`[WhatsApp] PDF uploaded and made public. URL: ${publicUrl}`);
 
         // --- 4.2 Send via WhatsApp ---
         const waResult = await sendWhatsAppDocument(
-          signedUrl,
+          publicUrl,
           waFileName,
           caption,
           waConfig.group_id,
