@@ -512,6 +512,8 @@ export default function UrunTalepPanel() {
     fetchData();
   }, [fetchData]);
 
+  // Fetch Min-Max rules and handle automated depot selection when a lab is selected
+  useEffect(() => {
     if (!selectedLabId) {
       setLabMinMaxRules([]);
       setOrderItems([]);
@@ -543,7 +545,7 @@ export default function UrunTalepPanel() {
       }
     };
     fetchRules();
-  }, [selectedLabId, toast]);
+  }, [selectedLabId, toast, allHospitals, isPeripheralFlow]);
 
 
   // -- Handlers --
