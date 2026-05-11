@@ -859,50 +859,12 @@ export default function UrunTalepPanel() {
         setLabMinMaxRules([]);
       }
       setUrgencyDialogOpen(false);
-
-    // 3. Arka Planda Kaydet
-    (async () => {
-      try {
-        const orderId = generateId();
-        const newOrder: Record<string, any> = {
-          id: orderId,
-          labId: previousLabId,
-          kurumAdi: labName,
-          items: previousOrderItems,
-          status: 'pending' as const,
-          createdAt: serverTimestamp(),
-          createdBy: currentUserProfile?.name || currentUser?.email || 'Unknown User',
-          createdById: currentUser?.uid || 'unknown',
-          requestSource: isPeripheralFlow ? ('lab_to_office' as const) : ('lab_to_depot' as const),
-          isPeripheral: isPeripheralFlow,
-          depotId: isPeripheralFlow ? null : previousDepotId,
-          depotName: isPeripheralFlow ? null : depotName,
-        };
-
-        await setDoc(doc(db, 'orders', orderId), newOrder);
-
-        // Notify other systems if needed (events etc)
-        // await emitOrderCreatedFromRequest(...) 
-        
-        playNotificationSound();
-        toast({
-          title: 'Talep Oluşturuldu',
-          description: isPeripheralFlow
-            ? 'Talebiniz ofis lojistiğine iletildi.'
-            : `Siparişiniz "${depotName}" deposuna iletildi.`,
-        });
-      } catch (err) {
-        console.error('Error creating order (Optimistic):', err);
-        // 4. ROLLBACK
-        setOrderItems(previousOrderItems);
-        setSelectedLabId(previousLabId);
-        toast({ 
-          title: 'Hata', 
-          description: 'Talep oluşturulurken bir sorun oluştu. Liste geri yüklendi.', 
-          variant: 'destructive' 
-        });
-      }
-    })();
+    } catch (err) {
+      console.error('Error creating order request:', err);
+      toast({ title: 'Hata', description: 'Sipariş talebi oluşturulamadı.', variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
   };
 
 
