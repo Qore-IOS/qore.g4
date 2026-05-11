@@ -175,6 +175,7 @@ export interface User {
   notificationPreferences?: string[]; // Array of notification types
   themePreference?: 'light' | 'dark' | 'system'; // User's theme preference stored in Firestore
   lastSelectedLabId?: string; // Last selected laboratory ID for teknisyen users (persisted in Firestore)
+  assignedLabGroups?: string[]; // NEW: Assigned laboratory groups for logistics responsible
 }
 
 export interface ScannedItem {

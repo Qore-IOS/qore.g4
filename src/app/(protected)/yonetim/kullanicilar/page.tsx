@@ -85,6 +85,7 @@ export default function KullaniciPanel() {
   const [depots, setDepots] = useState<Depot[]>([]);
   const [brands, setBrands] = useState<string[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [labGroups, setLabGroups] = useState<{ id: string; name: string }[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -100,6 +101,7 @@ export default function KullaniciPanel() {
         getDocs(collection(db, 'depots')),
         getDocs(collection(db, 'productCodes')),
         getDocs(collection(db, 'companies')),
+        getDocs(collection(db, 'def_labGroups')),
       ]);
       setUsers(filterByCompanyScope(
         uSnap.docs.map(d => ({ id: d.id, ...d.data() } as AppUser)),
@@ -117,6 +119,7 @@ export default function KullaniciPanel() {
         isSuperAdmin
       ));
       setCompanies(cSnap.docs.map(d => ({ id: d.id, ...d.data() } as Company)));
+      setLabGroups(lgSnap.docs.map(d => ({ id: d.id, name: d.data().name || d.id })));
       const productCodes = pSnap.docs.map(d => d.data() as ProductCode);
       const uniqueBrands = Array.from(new Set(productCodes.map(p => p.marka).filter(Boolean) as string[]));
       setBrands(uniqueBrands);
@@ -146,6 +149,7 @@ export default function KullaniciPanel() {
       setCurrentUser({
         ...user,
         primaryLaboratories: user.primaryLaboratories || [],
+        assignedLabGroups: user.assignedLabGroups || [],
         notificationPreferences: (user.notificationPreferences || []) as NotificationTypeUI[],
       });
     } else {
@@ -156,6 +160,7 @@ export default function KullaniciPanel() {
         notificationsEnabled: false,
         notificationPreferences: [],
         primaryLaboratories: [],
+        assignedLabGroups: [],
       });
     }
     setPassword('');
@@ -190,6 +195,7 @@ export default function KullaniciPanel() {
       primaryLaboratories: validPrimaryLabs,
       assignedDepots: currentUser.assignedDepots,
       assignedBrands: currentUser.assignedBrands,
+      assignedLabGroups: currentUser.assignedLabGroups,
       phoneNumber: currentUser.phoneNumber || '',
       notificationsEnabled: currentUser.notificationsEnabled ?? false,
       notificationPreferences: currentUser.notificationsEnabled ? (currentUser.notificationPreferences || []) : [],
@@ -628,6 +634,30 @@ export default function KullaniciPanel() {
                       </div>
                     ))}
                   </ScrollArea>
+
+                  {currentUser.role === 'lojistik_sorumlusu' && (
+                    <ScrollArea className="flex-1 min-h-0 border rounded-md p-2 bg-teal-50/50 dark:bg-teal-950/20">
+                      <h4 className="font-medium text-sm mb-2 text-teal-700 dark:text-teal-400">Atanan Laboratuvar Grupları</h4>
+                      {labGroups.length === 0 ? (
+                        <p className="text-xs text-muted-foreground italic">Henüz laboratuvar grubu tanımlanmamış</p>
+                      ) : (
+                        labGroups.map(lg => (
+                          <div key={lg.id} className="flex items-center space-x-2 mb-1">
+                            <Checkbox
+                              id={`lg-${lg.id}`}
+                              checked={currentUser.assignedLabGroups?.includes(lg.id)}
+                              onCheckedChange={(checked) => {
+                                const currentGroups = currentUser.assignedLabGroups || [];
+                                const newGroups = checked ? [...currentGroups, lg.id] : currentGroups.filter(id => id !== lg.id);
+                                setCurrentUser({ ...currentUser, assignedLabGroups: newGroups });
+                              }}
+                            />
+                            <label htmlFor={`lg-${lg.id}`} className="text-sm">{lg.name}</label>
+                          </div>
+                        ))
+                      )}
+                    </ScrollArea>
+                  )}
                 </div>
               </CardContent>
             </Card>
