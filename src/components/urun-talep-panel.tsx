@@ -615,8 +615,8 @@ export default function UrunTalepPanel() {
           createdById: currentUser?.uid || 'unknown',
           requestSource: isPeripheralFlow ? ('lab_to_office' as const) : ('lab_to_depot' as const),
           isPeripheral: isPeripheralFlow,
-          targetDepotId: isPeripheralFlow ? null : previousDepotId,
-          targetDepotName: isPeripheralFlow ? null : depotName,
+          depotId: isPeripheralFlow ? null : previousDepotId,
+          depotName: isPeripheralFlow ? null : depotName,
         };
 
         await setDoc(doc(db, 'orders', orderId), newOrder);
