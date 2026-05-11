@@ -577,11 +577,18 @@ export async function getPaginatedDepotStock(params: {
     const bVal = (b as any)[sortField] ?? '';
 
     if (sortField === 'miad') {
-      const dateA = parse(String(aVal), 'dd.MM.yyyy', new Date());
-      const dateB = parse(String(bVal), 'dd.MM.yyyy', new Date());
-      if (isValid(dateA) && isValid(dateB)) {
-        return sortDirection === 'asc' ? compareAsc(dateA, dateB) : compareAsc(dateB, dateA);
-      }
+      const aStr = String(aVal).trim();
+      const bStr = String(bVal).trim();
+      const dateA = aStr ? parse(aStr, 'dd.MM.yyyy', new Date()) : null;
+      const dateB = bStr ? parse(bStr, 'dd.MM.yyyy', new Date()) : null;
+      const validA = !!dateA && isValid(dateA);
+      const validB = !!dateB && isValid(dateB);
+      // "Blanks last": rows with no parseable miad sink to the bottom
+      // regardless of sort direction, so the nearest expiries always lead.
+      if (!validA && !validB) return 0;
+      if (!validA) return 1;
+      if (!validB) return -1;
+      return sortDirection === 'asc' ? compareAsc(dateA!, dateB!) : compareAsc(dateB!, dateA!);
     }
 
     if (sortField === 'quantity') {
