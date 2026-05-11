@@ -734,6 +734,17 @@ export default function AnaPanel(props: AnaPanelProps) {
             if (isInSession || isInDepot) {
               playFeedback(true);
               const location = isInSession ? 'bu oturumda' : 'depoda';
+              // Structured log: hata mesajı tekrar görüldüğünde stokKodu+seri eşleşmesini
+              // konsoldan doğrulamak için. Yanlış pozitif geliyorsa burada görülür.
+              malKabulLogger.warn('Mükerrer seri tespit edildi', {
+                stokKodu,
+                stokAdi: matchedProduct.stokAdi,
+                seriNumarasi,
+                isInSession,
+                isInDepot,
+                sessionSerialCount: sessionSerials?.size ?? 0,
+                depotSerialCount: depotSerials?.size ?? 0,
+              }, { correlationId: scanCorrelationId });
               flashScanFeedback('error', `SN ${seriNumarasi} (${matchedProduct.stokAdi}) ${location} zaten mevcut.`);
               if (source === 'barcode') { setScanStatus('error'); setTimeout(() => setScanStatus('idle'), 3000); }
               setIsProcessingScan(false);
@@ -1316,30 +1327,12 @@ export default function AnaPanel(props: AnaPanelProps) {
       });
 
       try {
-        // OPTIMIZED: Parallel serial verification with Promise.all
-        const serialsToVerify = itemsToProcess.map(i => i.seriNumarasi).filter(Boolean) as string[];
-        const existingSerialsInDb = new Set<string>();
-
-        if (serialsToVerify.length > 0) {
-          const chunks: string[][] = [];
-          for (let i = 0; i < serialsToVerify.length; i += 30) {
-            chunks.push(serialsToVerify.slice(i, i + 30));
-          }
-
-          for (let i = 0; i < chunks.length; i += 5) {
-            const batchChunks = chunks.slice(i, i + 5);
-            const results = await Promise.all(
-              batchChunks.map(async (chunk) => {
-                const q = query(collection(db, 'depoStok'), where('seriNumarasi', 'in', chunk));
-                const snap = await getDocs(q);
-                return snap.docs
-                  .filter(doc => matchesCompanyScope(doc.data() as any, currentCompanyId, isSuperAdmin))
-                  .map(doc => doc.data().seriNumarasi as string);
-              })
-            );
-            results.flat().forEach(serial => existingSerialsInDb.add(serial));
-          }
-        }
+        // NOTE: Mükerrer seri kontrolü artık tamamen `existingDepotSerials`
+        // üzerinden yapılıyor — `Map<stokKodu, Set<seriNumarasi>>` formatında,
+        // dolayısıyla farklı ürünler aynı seri numarasını paylaşabiliyor.
+        // Eski versiyonda burada `where('seriNumarasi', 'in', ...)` ile stokKodu
+        // filtresiz bir Firestore sorgusu vardı; sonucu hiçbir yerde
+        // okunmuyordu (ölü kod) ve çağrı başına gereksiz okuma üretiyordu.
 
         const docsToCreate: Array<{ ref: ReturnType<typeof doc>; data: any; serial?: string; item: ScanRow }> = [];
 
