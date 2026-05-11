@@ -33,6 +33,8 @@ type NewFromCount = {
 export function useLabCountMissingStock(params: {
   labId: string;
   labName: string;
+  // Keys: `${stokKodu}__${seriNumarasi}` — aynı seri farklı ürünlere
+  // tanımlı olabildiği için sadece seri yeterli değildir.
   existingLabSerials: Set<string>;
   productCodes: ProductCode[];
   barcodeFormats: BarcodeFormat[];
@@ -106,10 +108,18 @@ export function useLabCountMissingStock(params: {
       const candidates: any[] = [];
 
       if (isSerial) {
-        const snap = await getDocs(
-          query(stokRef, where('seriNumarasi', '==', serial), limit(5))
-        );
-        candidates.push(...snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        // Aynı seri numarası birden fazla ürüne tanımlı olabildiği için
+        // stokKodu olmadan sorgu yanlış ürünü döndürebilir. stokKodu varsa
+        // birlikte sorgula; yoksa fallback olarak seri ile çek.
+        const snap = stokKodu
+          ? await getDocs(
+              query(stokRef, where('stokKodu', '==', stokKodu), where('seriNumarasi', '==', serial), limit(5))
+            )
+          : await getDocs(
+              query(stokRef, where('seriNumarasi', '==', serial), limit(5))
+            );
+        const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        candidates.push(...(stokKodu ? rows.filter((r: any) => r.stokKodu === stokKodu) : rows));
       } else if (stokKodu && lot) {
         const snap = await getDocs(
           query(stokRef, where('stokKodu', '==', stokKodu), where('lotNumarasi', '==', lot), limit(10))
@@ -211,24 +221,38 @@ export function useLabCountMissingStock(params: {
       // Only serial-tracked items can be transferred from pool labs
       const serial = parsed?.seriNumarasi?.trim();
       if (!serial) return null;
+      const stokKodu = parsed?.stokKodu?.trim() || '';
 
       const stokRef = collection(db, 'depoStok');
 
-      // Search for the serial in pool member labs
-      const snap = await getDocs(
-        query(
-          stokRef,
-          where('seriNumarasi', '==', serial),
-          where('isShipped', '==', true),
-          limit(5)
-        )
-      );
+      // Aynı seri farklı ürünlere ait olabildiği için stokKodu varsa filtreye dahil et.
+      const snap = stokKodu
+        ? await getDocs(
+            query(
+              stokRef,
+              where('stokKodu', '==', stokKodu),
+              where('seriNumarasi', '==', serial),
+              where('isShipped', '==', true),
+              limit(5)
+            )
+          )
+        : await getDocs(
+            query(
+              stokRef,
+              where('seriNumarasi', '==', serial),
+              where('isShipped', '==', true),
+              limit(5)
+            )
+          );
 
-      // Find an item that belongs to a pool member lab
+      // Find an item that belongs to a pool member lab; if stokKodu was provided,
+      // make sure the matched item is for the same product.
       const poolSource = snap.docs
         .map(d => ({ id: d.id, ...d.data() }))
         .find((item: any) =>
-          matchesCompanyScope(item, currentCompanyId, isSuperAdmin) && (
+          matchesCompanyScope(item, currentCompanyId, isSuperAdmin) &&
+          (!stokKodu || item.stokKodu === stokKodu) &&
+          (
             poolMemberIds.includes(item.hedefKurumId) ||
             poolMemberNames.includes(item.hedefKurum)
           )
@@ -327,7 +351,8 @@ export function useLabCountMissingStock(params: {
       const finalParsed = resolveResult.parsed;
       const serial = finalParsed.seriNumarasi || '';
 
-      if (serial && existingLabSerials.has(serial)) {
+      const existingKey = serial ? `${finalParsed.stokKodu}__${serial}` : '';
+      if (existingKey && existingLabSerials.has(existingKey)) {
         return { parsed: finalParsed, stagedNew: false, staged: null, createdLabDoc: null };
       }
 
@@ -358,14 +383,15 @@ export function useLabCountMissingStock(params: {
         sourceLabName: transferResult?.sourceLabName,
       };
 
-      // Check for duplicates: use serial for serial-tracked items, or stokKodu+lot+miad for lot-tracked items
+      // Check for duplicates. Aynı seri numarası farklı ürünlere tanımlı
+      // olabildiği için seri-only karşılaştırma yanlış pozitif üretir;
+      // stokKodu da karşılaştırmaya dahil edilmeli.
       setNewFromCount(prev => {
         const isDuplicate = prev.some(p => {
-          // If both have serials, compare by serial (for serial-tracked items)
           if (staged.seriNumarasi && p.seriNumarasi) {
-            return p.seriNumarasi === staged.seriNumarasi;
+            return p.stokKodu === staged.stokKodu &&
+                   p.seriNumarasi === staged.seriNumarasi;
           }
-          // For lot-tracked items (no serial), compare by stokKodu + lot + miad
           if (!staged.seriNumarasi && !p.seriNumarasi) {
             return p.stokKodu === staged.stokKodu &&
                    p.lotNumarasi === staged.lotNumarasi &&
