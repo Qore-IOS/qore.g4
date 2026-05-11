@@ -160,6 +160,8 @@ async function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'apl
     loadSystemLogo()
   ]);
 
+  // --- PREFETCH ASSETS ---
+  const fontBase64 = await loadTurkishFont();
   const useTurkish = fontBase64 ? setupTurkishFont(doc, fontBase64) : false;
   const FONT = useTurkish ? 'NotoSans' : 'helvetica';
   const ORANGE = { r: 199, g: 137, b: 65 };
