@@ -219,20 +219,49 @@ export async function emitOrderCreatedFromRequest(params: {
   actor: Actor;
   orderId: string;
   labId?: string;
+  labName?: string;
   depotId?: string;
+  isPeripheral?: boolean;
+  itemsSummary?: string; // örn. "Reaktif A x5, Pipet B x2 (+3 kalem)"
+  itemsCount?: number;
+  totalAdet?: number;
+  urgency?: 'normal' | 'acil' | 'cok_acil';
   audienceHint?: AudienceHint;
 }) {
+  const urgencyLabel =
+    params.urgency === 'cok_acil' ? ' · ÇOK ACİL' :
+    params.urgency === 'acil'     ? ' · ACİL'     : '';
+  const titlePrefix = params.isPeripheral ? '[Perifer] ' : '';
+  const labPart = params.labName ? ` · ${params.labName}` : '';
+  const title = `${titlePrefix}Yeni Ürün Talebi${labPart}${urgencyLabel}`;
+
+  const summaryParts: string[] = [];
+  if (params.actor?.name) summaryParts.push(params.actor.name);
+  if (params.itemsCount != null && params.totalAdet != null) {
+    summaryParts.push(`${params.itemsCount} kalem · ${params.totalAdet} adet`);
+  }
+  if (params.itemsSummary) summaryParts.push(params.itemsSummary);
+  const message = summaryParts.length
+    ? summaryParts.join(' — ')
+    : `Talep sepetinden bir sipariş oluşturuldu. ID: ${params.orderId}`;
+
   await createNotification({
     type: "order_created_from_request",
-    title: "Ürün Talebinden Sipariş Oluşturuldu",
-    message: `Talep sepetinden bir sipariş oluşturuldu. ID: ${params.orderId}`,
+    title,
+    message,
     resource: { type: "order", id: params.orderId },
     actor: params.actor,
     targets: getTargetKeys({ includeAdmins: true, depotId: params.depotId }),
     meta: {
       orderId: params.orderId,
       labId: params.labId,
+      labName: params.labName,
       depotId: params.depotId,
+      isPeripheral: params.isPeripheral,
+      itemsCount: params.itemsCount,
+      totalAdet: params.totalAdet,
+      urgency: params.urgency,
+      createdByName: params.actor?.name,
     },
   });
 }
@@ -241,20 +270,44 @@ export async function emitOrderCreated(params: {
   actor: Actor;
   orderId: string;
   labId?: string;
+  labName?: string;
   depotId?: string;
+  isPeripheral?: boolean;
+  itemsSummary?: string;
+  itemsCount?: number;
+  totalAdet?: number;
   audienceHint?: AudienceHint;
 }) {
+  const titlePrefix = params.isPeripheral ? '[Perifer] ' : '';
+  const labPart = params.labName ? ` · ${params.labName}` : '';
+  const title = `${titlePrefix}Yeni Sipariş${labPart}`;
+
+  const summaryParts: string[] = [];
+  if (params.actor?.name) summaryParts.push(params.actor.name);
+  if (params.itemsCount != null && params.totalAdet != null) {
+    summaryParts.push(`${params.itemsCount} kalem · ${params.totalAdet} adet`);
+  }
+  if (params.itemsSummary) summaryParts.push(params.itemsSummary);
+  const message = summaryParts.length
+    ? summaryParts.join(' — ')
+    : `Yeni sipariş oluşturuldu. ID: ${params.orderId}`;
+
   await createNotification({
     type: "order_created",
-    title: "Yeni Sipariş Oluşturuldu",
-    message: `Yeni sipariş oluşturuldu. ID: ${params.orderId}`,
+    title,
+    message,
     resource: { type: "order", id: params.orderId },
     actor: params.actor,
     targets: getTargetKeys({ includeAdmins: true, depotId: params.depotId }),
     meta: {
       orderId: params.orderId,
       labId: params.labId,
+      labName: params.labName,
       depotId: params.depotId,
+      isPeripheral: params.isPeripheral,
+      itemsCount: params.itemsCount,
+      totalAdet: params.totalAdet,
+      createdByName: params.actor?.name,
     },
   });
 }
