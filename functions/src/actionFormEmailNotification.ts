@@ -578,11 +578,11 @@ async function handleActionFormCreated(
       const formTypeLabel = formType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon';
       
       const caption = 
-        `🚀 *${formTypeLabel} İşlemi Tamamlandı*\n\n` +
-        `🏥 *Kurum:* ${labName}\n` +
-        `🔬 *Cihaz:* ${cihazAdi}\n` +
-        `📋 *Form No:* ${formId}\n` +
-        `👨‍🔧 *Personel:* ${personnelName}\n\n` +
+        `*${formTypeLabel} İşlemi Tamamlandı*\n\n` +
+        `- *Kurum:* ${labName}\n` +
+        `- *Cihaz:* ${cihazAdi}\n` +
+        `- *Form No:* ${data.formNo || formId}\n` +
+        `- *Personel:* ${personnelName}\n\n` +
         `QORE Sistemi üzerinden detaylara ulaşabilirsiniz.`;
 
       const waFileName = `IslemFormu_${formType === 'teknik_servis' ? 'Teknik' : 'Aplikasyon'}_${formId.substring(0, 8)}.pdf`;
