@@ -440,6 +440,7 @@ async function handleActionFormCreated(
   try {
     // 1. Get hospital's sorumluEmail
     const hospitalId = data.hospitalId;
+    logger.info(`[actionFormEmail] hospitalId: ${hospitalId}`);
     if (!hospitalId) {
       logEntry.status = 'skipped';
       logEntry.error = 'Form üzerinde hospitalId bulunamadı';
@@ -475,6 +476,7 @@ async function handleActionFormCreated(
     }
     logEntry.steps.push(`sorumluEmail kontrolü: OK (${sorumluEmail.trim()})`);
     logEntry.emailSentTo = sorumluEmail.trim();
+    logger.info(`[actionFormEmail] sorumluEmail: ${sorumluEmail.trim()}`);
 
     // 2. Get transporter
     const transporter = getTransporter();
@@ -492,13 +494,24 @@ async function handleActionFormCreated(
 
     // 3. Generate PDF
     logEntry.steps.push('PDF oluşturma: başladı');
+    logger.info('[actionFormEmail] PDF generation starting...');
     const pdfBuffer = await generateActionFormPDF(data, formType, formId);
     logEntry.steps.push(`PDF oluşturma: OK (${pdfBuffer.length} byte)`);
+    logger.info(`[actionFormEmail] PDF generation OK: ${pdfBuffer.length} bytes`);
 
     // 4. WhatsApp Notification
     const waConfig = functions.config().whatsapp;
+    logger.info('[WhatsApp] Config check...', {
+      hasConfig: !!waConfig,
+      hasInstanceId: !!waConfig?.instance_id,
+      hasToken: !!waConfig?.token,
+      hasGroupId: !!waConfig?.group_id
+    });
+
     if (waConfig && waConfig.instance_id && waConfig.token && waConfig.group_id) {
       logEntry.steps.push('WhatsApp gönderimi: başladı');
+      logger.info(`[WhatsApp] Attempting to send to: ${waConfig.group_id}`);
+      
       const labName = data.labName || 'Bilinmeyen Laboratuvar';
       const cihazAdi = data.cihazAdi || 'Bilinmeyen Cihaz';
       const personnelName = data.createdByName || 'Bilinmeyen Kullanıcı';
@@ -523,6 +536,7 @@ async function handleActionFormCreated(
           waConfig.instance_id,
           waConfig.token
         );
+        logger.info(`[WhatsApp] Result: ${JSON.stringify(waResult)}`);
         if (waResult.success) {
           logEntry.whatsappSent = true;
           logEntry.steps.push(`WhatsApp gönderimi: OK (MsgID: ${waResult.messageId})`);
@@ -531,10 +545,12 @@ async function handleActionFormCreated(
           logEntry.steps.push(`WhatsApp gönderimi: BAŞARISIZ - ${waResult.error}`);
         }
       } catch (waErr: any) {
+        logger.error('[WhatsApp] Fatal error in notification flow:', waErr);
         logEntry.whatsappError = waErr.message || String(waErr);
         logEntry.steps.push(`WhatsApp gönderimi: HATA - ${waErr.message}`);
       }
     } else {
+      logger.warn('[WhatsApp] Skipping: Configuration is incomplete.');
       logEntry.steps.push('WhatsApp gönderimi: ATLADI (Yapılandırma eksik)');
     }
 
