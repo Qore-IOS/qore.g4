@@ -365,6 +365,38 @@ export default function StokYonetimiPanel() {
     riskyOnly: showOnlyRiskyStock,
   });
 
+  // Ceomed entegre depo seçilince son senkronizasyon diff'ini toast olarak göster.
+  useEffect(() => {
+    if (!selectedDepotId) return;
+    const depot = depots.find((d) => d.id === selectedDepotId) as any;
+    if (!depot?.ceomedEnabled) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { doc, getDoc } = await import('firebase/firestore');
+        const { db } = await import('@/lib/firebase');
+        const snap = await getDoc(doc(db, 'ceomedDepoStok', selectedDepotId));
+        if (cancelled || !snap.exists()) return;
+        const data = snap.data() as any;
+        const diff = (data.lastDiff || []) as Array<{ change: number }>;
+        const seenKey = `ceomedDiffSeen:${selectedDepotId}:${data.syncedAt?.seconds || ''}`;
+        if (diff.length === 0 || typeof window === 'undefined' || sessionStorage.getItem(seenKey)) return;
+        const inc = diff.filter((d) => d.change > 0);
+        const dec = diff.filter((d) => d.change < 0);
+        const totalIn = inc.reduce((s, d) => s + d.change, 0);
+        const totalOut = dec.reduce((s, d) => s + Math.abs(d.change), 0);
+        toast({
+          title: 'Ceomed güncellemesi',
+          description: `${diff.length} hareket: +${inc.length} kalem (${totalIn} adet giriş), -${dec.length} kalem (${totalOut} adet çıkış).`,
+        });
+        sessionStorage.setItem(seenKey, '1');
+      } catch (e) {
+        console.error('ceomed diff toast error', e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [selectedDepotId, depots, toast]);
+
   const paginatedRows = useMemo(
     () => (paginatedQuery.data?.rows ?? []) as GroupedStockRow[],
     [paginatedQuery.data],

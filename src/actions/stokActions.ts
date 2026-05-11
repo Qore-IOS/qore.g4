@@ -325,21 +325,60 @@ export async function getPaginatedDepotStock(params: {
 
   try {
 
-  // Fetch stock + depot rules + product catalog in parallel using Admin SDK
-  const [snapshot, rulesSnap, productsSnap] = await Promise.all([
-    adminDb.collection('depoStok')
-      .where('depotId', '==', depotId)
-      .where('isShipped', '==', false)
-      .get(),
-    adminDb.collection('depots').doc(depotId).collection('minMaxRules').get(),
-    adminDb.collection('productCodes').get(),
-  ]);
+  // Önce depo dokümanını oku — ceomedEnabled ise akış değişir (ceomedDepoStok'tan oku)
+  const depotDoc = await adminDb.collection('depots').doc(depotId).get();
+  const isCeomedDepot = !!(depotDoc.exists && (depotDoc.data() as any)?.ceomedEnabled);
 
-  const allItems = filterByCompanyScope(
-    snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
-    companyId,
-    isSuperAdmin,
-  );
+  let allItems: DepoStokItem[] = [];
+  let rulesSnap: FirebaseFirestore.QuerySnapshot;
+  let productsSnap: FirebaseFirestore.QuerySnapshot;
+
+  if (isCeomedDepot) {
+    // Ceomed entegre depo: ceomedDepoStok/{depotId} dokümanından oku
+    const [ceomedDoc, rules, products] = await Promise.all([
+      adminDb.collection('ceomedDepoStok').doc(depotId).get(),
+      adminDb.collection('depots').doc(depotId).collection('minMaxRules').get(),
+      adminDb.collection('productCodes').get(),
+    ]);
+    rulesSnap = rules;
+    productsSnap = products;
+
+    if (ceomedDoc.exists) {
+      const data = ceomedDoc.data() as any;
+      const items = (data.items || []) as Array<{
+        stokKodu: string; stokAdi: string; lot: string; miyat: string; adet: number;
+      }>;
+      // Ceomed itemleri DepoStokItem şekline normalize et
+      allItems = items.map((it, idx) => ({
+        id: `ceomed-${depotId}-${idx}`,
+        depotId,
+        stokKodu: it.stokKodu || '',
+        stokAdi: it.stokAdi || '',
+        lotNumarasi: it.lot || '',
+        miad: it.miyat || '',
+        adet: Number(it.adet) || 0,
+        rafAdresi: '',
+        isShipped: false,
+      } as unknown as DepoStokItem));
+    }
+  } else {
+    // Fetch stock + depot rules + product catalog in parallel using Admin SDK
+    const [snapshot, rules, products] = await Promise.all([
+      adminDb.collection('depoStok')
+        .where('depotId', '==', depotId)
+        .where('isShipped', '==', false)
+        .get(),
+      adminDb.collection('depots').doc(depotId).collection('minMaxRules').get(),
+      adminDb.collection('productCodes').get(),
+    ]);
+    rulesSnap = rules;
+    productsSnap = products;
+    allItems = filterByCompanyScope(
+      snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
+      companyId,
+      isSuperAdmin,
+    );
+  }
 
   // Build helper maps from the side-loaded master data
   const minMaxRules: Record<string, { max?: number; maxGun?: number; min?: number }> = {};
