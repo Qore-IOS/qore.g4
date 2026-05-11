@@ -21,10 +21,9 @@ export async function sendWhatsAppDocument(
   token: string
 ): Promise<{ success: boolean; error?: string; messageId?: string }> {
   try {
-    const url = `https://api.ultramsg.com/${instanceId}/messages/document`;
+    const url = `https://api.ultramsg.com/${instanceId}/messages/document?token=${token}`;
     
     const form = new FormData();
-    form.append('token', token);
     form.append('to', to);
     form.append('filename', fileName);
     form.append('caption', caption);
