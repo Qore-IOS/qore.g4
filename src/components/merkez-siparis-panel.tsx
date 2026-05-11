@@ -26,7 +26,18 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useToast } from '@/hooks/use-toast';
 import { exportDataToExcel, generateId } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
+import { 
+  useDepots, 
+  useHospitals, 
+  useProductCodes, 
+  useDeviceGroups, 
+  useDepoStok, 
+  useMinMaxRulesForDepot, 
+  useMinMaxRulesForHospital 
+} from '@/hooks/useFirebaseQueries';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { useQueries } from '@tanstack/react-query';
+import { Loader2 } from 'lucide-react';
 
 type LocationType = 'depot' | 'hospital';
 
@@ -106,6 +117,25 @@ interface CentralOrder {
   discrepancySummary?: { eksik: number; fazla: number };
 }
 
+function MerkezSiparisSkeleton() {
+  return (
+    <div className="space-y-6 p-6 animate-pulse">
+      <div className="flex gap-4 mb-4">
+        <div className="h-10 w-32 bg-muted rounded" />
+        <div className="h-10 w-32 bg-muted rounded" />
+        <div className="h-10 w-32 bg-muted rounded" />
+      </div>
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
+        <div className="xl:col-span-4 h-[600px] bg-muted rounded-xl" />
+        <div className="xl:col-span-8 space-y-6">
+          <div className="h-48 bg-muted rounded-xl" />
+          <div className="h-[400px] bg-muted rounded-xl" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const toDate = (value: unknown): Date | undefined => {
   if (!value) return undefined;
   if (value instanceof Date) return value;
@@ -124,17 +154,62 @@ export default function MerkezSiparisPanel() {
   const router = useRouter();
   const { currentUserProfile, currentUser, currentCompanyId, isSuperAdmin } = useAuth();
 
-  const [isLoading, setIsLoading] = useState(true);
+  // Optimized Fetching
+  const { data: depots = [], isLoading: depotsLoading } = useDepots();
+  const { data: hospitals = [], isLoading: hospitalsLoading } = useHospitals();
+  const { data: productCodes = [], isLoading: productsLoading } = useProductCodes();
+  const { data: depoStok = [], isLoading: stokLoading } = useDepoStok();
+  const { data: deviceGroups = [], isLoading: groupsLoading } = useDeviceGroups();
+
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  const [depots, setDepots] = useState<Depot[]>([]);
-  const [hospitals, setHospitals] = useState<Hospital[]>([]);
-  const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
-  const [deviceGroups, setDeviceGroups] = useState<DeviceGroup[]>([]);
-  const [depoStok, setDepoStok] = useState<DepoStokItem[]>([]);
-  const [depotRulesMap, setDepotRulesMap] = useState<Record<string, Record<string, MinMaxRule>>>({});
-  const [hospitalRulesMap, setHospitalRulesMap] = useState<Record<string, Record<string, MinMaxRule>>>({});
+  // Parallel fetching of min-max rules
+  const depotRulesQueries = useQueries({
+    queries: depots.map(d => ({
+      queryKey: ['minMaxRules', 'depot', d.id],
+      queryFn: async () => {
+        const snap = await getDocs(collection(db, 'depots', d.id, 'minMaxRules'));
+        return snap.docs.reduce<Record<string, MinMaxRule>>((acc, doc) => {
+          const r = doc.data() as MinMaxRule;
+          if (r?.stokKodu) acc[r.stokKodu] = r;
+          return acc;
+        }, {});
+      },
+      staleTime: 30 * 60 * 1000,
+    }))
+  });
+
+  const hospitalRulesQueries = useQueries({
+    queries: hospitals.map(h => ({
+      queryKey: ['minMaxRules', 'hospital', h.id],
+      queryFn: async () => {
+        const snap = await getDocs(collection(db, 'hospitals', h.id, 'minMaxRules'));
+        return snap.docs.reduce<Record<string, MinMaxRule>>((acc, doc) => {
+          const r = doc.data() as MinMaxRule;
+          if (r?.stokKodu) acc[r.stokKodu] = r;
+          return acc;
+        }, {});
+      },
+      staleTime: 30 * 60 * 1000,
+    }))
+  });
+
+  const depotRulesMap = useMemo(() => {
+    const map: Record<string, Record<string, MinMaxRule>> = {};
+    depots.forEach((d, i) => {
+      if (depotRulesQueries[i].data) map[d.id] = depotRulesQueries[i].data!;
+    });
+    return map;
+  }, [depots, depotRulesQueries]);
+
+  const hospitalRulesMap = useMemo(() => {
+    const map: Record<string, Record<string, MinMaxRule>> = {};
+    hospitals.forEach((h, i) => {
+      if (hospitalRulesQueries[i].data) map[h.id] = hospitalRulesQueries[i].data!;
+    });
+    return map;
+  }, [hospitals, hospitalRulesQueries]);
 
   const [selectedDepotIds, setSelectedDepotIds] = useState<string[]>([]);
   const [selectedLabIds, setSelectedLabIds] = useState<string[]>([]);
@@ -155,62 +230,15 @@ export default function MerkezSiparisPanel() {
   const [completedOrders, setCompletedOrders] = useState<CentralOrder[]>([]);
   const [cihazUstuMap, setCihazUstuMap] = useState<Record<string, Record<string, number>>>({});
 
+  const isLoading = depotsLoading || hospitalsLoading || productsLoading || stokLoading || groupsLoading;
+
   useEffect(() => {
-    const fetchData = async () => {
-      setIsLoading(true);
+    const fetchAdditional = async () => {
       try {
-        const [depotsSnap, hospitalsSnap, productsSnap, stokSnap, groupsSnap, centralOrdersSnap, cihazUstuSnap] = await Promise.all([
-          getDocs(collection(db, 'depots')),
-          getDocs(collection(db, 'hospitals')),
-          getDocs(collection(db, 'productCodes')),
-          getDocs(collection(db, 'depoStok')),
-          getDocs(collection(db, 'deviceGroups')),
+        const [centralOrdersSnap, cihazUstuSnap] = await Promise.all([
           getDocs(query(collection(db, 'centralOrders'), orderBy('createdAt', 'desc'))),
           getDocs(collection(db, 'cihazUstuGecmisi')),
         ]);
-
-        const depotsData = depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
-        const hospitalsData = hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital));
-        const productsData = productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode));
-        const stokData = filterByCompanyScope(
-          stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
-          currentCompanyId,
-          isSuperAdmin,
-        );
-        const deviceGroupsData = groupsSnap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceGroup));
-
-        setDepots(depotsData);
-        setHospitals(hospitalsData);
-        setProductCodes(productsData);
-        setDepoStok(stokData);
-        setDeviceGroups(deviceGroupsData);
-
-        const depotRuleEntries = await Promise.all(
-          depotsData.map(async depot => {
-            const rs = await getDocs(collection(db, 'depots', depot.id, 'minMaxRules'));
-            const rules = rs.docs.reduce<Record<string, MinMaxRule>>((acc, d) => {
-              const r = d.data() as MinMaxRule;
-              if (r?.stokKodu) acc[r.stokKodu] = r;
-              return acc;
-            }, {});
-            return [depot.id, rules] as const;
-          })
-        );
-
-        const hospitalRuleEntries = await Promise.all(
-          hospitalsData.map(async hospital => {
-            const rs = await getDocs(collection(db, 'hospitals', hospital.id, 'minMaxRules'));
-            const rules = rs.docs.reduce<Record<string, MinMaxRule>>((acc, d) => {
-              const r = d.data() as MinMaxRule;
-              if (r?.stokKodu) acc[r.stokKodu] = r;
-              return acc;
-            }, {});
-            return [hospital.id, rules] as const;
-          })
-        );
-
-        setDepotRulesMap(Object.fromEntries(depotRuleEntries));
-        setHospitalRulesMap(Object.fromEntries(hospitalRuleEntries));
 
         const cihazMap: Record<string, Record<string, number>> = {};
         cihazUstuSnap.docs.forEach(d => {
@@ -246,14 +274,10 @@ export default function MerkezSiparisPanel() {
         setCompletedOrders(orders.filter(o => o.status === 'completed'));
       } catch (error) {
         console.error(error);
-        toast({ title: 'Hata', description: 'Merkez sipariş verileri yüklenemedi.', variant: 'destructive' });
-      } finally {
-        setIsLoading(false);
       }
     };
-
-    fetchData();
-  }, [toast, currentCompanyId, isSuperAdmin]);
+    fetchAdditional();
+  }, []);
 
   const productByStockCode = useMemo(() => {
     return productCodes.reduce<Record<string, ProductCode>>((acc, product) => {
@@ -502,67 +526,74 @@ export default function MerkezSiparisPanel() {
     }
   };
 
-  const handleSave = async () => {
+  const handleSave = () => {
     if (generatedItems.length === 0) {
       toast({ title: 'Hata', description: 'Kaydedilecek sipariş satırı yok.', variant: 'destructive' });
       return;
     }
 
-    setIsSaving(true);
-    try {
-      const id = generateId();
-      const orderRef = doc(db, 'centralOrders', id);
+    // --- OPTIMISTIC UI ---
+    const previousGeneratedItems = [...generatedItems];
+    const previousOpenOrders = [...openOrders];
 
-      const items: CentralOrderItem[] = generatedItems.map(item => ({
-        stokKodu: item.stokKodu,
-        stokAdi: item.stokAdi,
-        orderedQty: item.siparisAdedi,
-        receivedQty: 0,
-        locationType: item.locationType,
-        locationId: item.locationId,
-        locationName: item.locationName,
-        marka: item.marka,
-        urunGrubu: item.urunGrubu,
-        cihazGrubu: item.cihazGrubu,
-      }));
+    const id = generateId();
+    const items: CentralOrderItem[] = generatedItems.map(item => ({
+      stokKodu: item.stokKodu,
+      stokAdi: item.stokAdi,
+      orderedQty: item.siparisAdedi,
+      receivedQty: 0,
+      locationType: item.locationType,
+      locationId: item.locationId,
+      locationName: item.locationName,
+      marka: item.marka,
+      urunGrubu: item.urunGrubu,
+      cihazGrubu: item.cihazGrubu,
+    }));
 
-      await setDoc(orderRef, {
-        id,
-        status: 'open',
-        createdAt: serverTimestamp(),
-        selectedDepotIds,
-        selectedLabIds,
-        selectedBrands,
-        selectedProductGroups,
-        selectedDeviceGroups,
-        yeterlilikGun: Number(yeterlilikGun),
-        createdBy: currentUserProfile?.name || currentUser?.email || 'Bilinmiyor',
-        createdById: currentUserProfile?.uid || currentUser?.uid || '',
-        items,
-      });
+    const newOrder = {
+      id,
+      status: 'open',
+      createdAt: new Date(),
+      selectedDepotIds,
+      selectedLabIds,
+      selectedBrands,
+      selectedProductGroups,
+      selectedDeviceGroups,
+      yeterlilikGun: Number(yeterlilikGun),
+      createdBy: currentUserProfile?.name || currentUser?.email || 'Bilinmiyor',
+      createdById: currentUserProfile?.uid || currentUser?.uid || '',
+      items,
+    };
 
-      toast({ title: 'Başarılı', description: 'Merkez sipariş oluşturuldu.' });
-      setOpenOrders(prev => [{
-        id,
-        status: 'open',
-        createdAt: new Date(),
-        selectedDepotIds,
-        selectedLabIds,
-        selectedBrands,
-        selectedProductGroups,
-        selectedDeviceGroups,
-        yeterlilikGun: Number(yeterlilikGun),
-        createdBy: currentUserProfile?.name || currentUser?.email || 'Bilinmiyor',
-        createdById: currentUserProfile?.uid || currentUser?.uid || '',
-        items,
-      }, ...prev]);
-      setGeneratedItems([]);
-    } catch (error) {
-      console.error(error);
-      toast({ title: 'Hata', description: 'Sipariş kaydedilemedi.', variant: 'destructive' });
-    } finally {
-      setIsSaving(false);
-    }
+    // Ekranı beklemeden temizle ve açık siparişlere anında ekle
+    setGeneratedItems([]);
+    setOpenOrders(prev => [newOrder as any, ...prev]);
+
+    toast({
+      title: 'Siparişiniz İletiliyor...',
+      description: 'Arka planda kaydediliyor, çıkış yapmayınız.',
+      duration: 3000
+    });
+
+    // --- ARKA PLAN İŞLEMİ (Fire and Forget) ---
+    (async () => {
+      try {
+        const orderRef = doc(db, 'centralOrders', id);
+        
+        await setDoc(orderRef, {
+          ...newOrder,
+          createdAt: serverTimestamp(), // Sunucu saati ile eziyoruz
+        });
+
+        toast({ title: 'Başarılı', description: 'Merkez sipariş oluşturuldu.' });
+      } catch (error) {
+        console.error(error);
+        // --- ROLLBACK ---
+        setGeneratedItems(previousGeneratedItems);
+        setOpenOrders(previousOpenOrders);
+        toast({ title: 'İşlem İptal Edildi (Rollback)', description: 'Sipariş kaydedilemedi, veritabanı hatası.', variant: 'destructive' });
+      }
+    })();
   };
 
   const renderMultiSelect = (
@@ -932,7 +963,7 @@ export default function MerkezSiparisPanel() {
         </TabsContent>
       </Tabs>
 
-      {isLoading && <p className="text-sm text-muted-foreground">Yükleniyor...</p>}
+      {isLoading && generatedItems.length === 0 && <MerkezSiparisSkeleton />}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { cn } from '@/lib/utils';
@@ -20,8 +20,18 @@ import {
   UserCircle,
   Gauge,
   X,
+  Bell,
+  AlertTriangle,
+  CheckCircle2,
+  Truck,
+  ListChecks,
+  Trash2,
 } from 'lucide-react';
-
+import { signOut } from 'firebase/auth';
+import { auth } from '@/lib/firebase';
+import { useDock } from '@/hooks/use-dock';
+import type { NotificationItem } from '@/hooks/use-dock';
+import { markAsRead, buildHrefForResource } from '@/lib/notifications';
 
 interface NavItem {
   key: string;
@@ -73,6 +83,91 @@ function QoreTechnicBrand({
 
 export function QoreTechnicBrandMark(props: React.ComponentProps<typeof QoreTechnicBrand>) {
   return <QoreTechnicBrand {...props} />;
+}
+
+function SidebarNotificationsBell({ collapsed }: { collapsed: boolean }) {
+  const router = useRouter();
+  const { currentUserProfile } = useAuth();
+  const { notifications, markAllAsRead } = useDock();
+  const [open, setOpen] = useState(false);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const uid = currentUserProfile?.uid || '';
+
+  const unread = useMemo(
+    () => notifications.filter((n: NotificationItem) => !(n.readBy || []).includes(uid)),
+    [notifications, uid]
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const handleClick = async (item: NotificationItem) => {
+    if (uid) markAsRead(item.id, uid);
+    const fallbackHref = buildHrefForResource(item.resource, {
+      labId: item.meta?.labId,
+      depotId: item.meta?.depotId,
+      tab: item.meta?.tab,
+    });
+    const to = item.href || fallbackHref;
+    if (to) router.push(to);
+    setOpen(false);
+  };
+
+  return (
+    <div className="relative" ref={panelRef}>
+      {open && (
+        <div className="qt-sidebar-notif-panel">
+          <div className="qt-sidebar-notif-panel__header">
+            <span className="text-sm font-semibold">Bildirimler</span>
+            {unread.length > 0 && (
+              <button type="button" className="qt-notif-clear-btn" onClick={() => markAllAsRead()}>
+                Temizle
+              </button>
+            )}
+          </div>
+          <div className="qt-sidebar-notif-panel__list">
+            {unread.length === 0 ? (
+              <div className="qt-notif-empty" style={{ padding: '24px 16px' }}>
+                <Bell className="h-6 w-6 opacity-30" />
+                <span style={{ fontSize: 12 }}>Bildirim yok</span>
+              </div>
+            ) : (
+              unread.slice(0, 20).map((item: NotificationItem) => (
+                <button key={item.id} type="button" className="qt-notif-item" onClick={() => handleClick(item)}>
+                  <span className="qt-notif-item__icon">{notifIconFor(item.type)}</span>
+                  <span className="qt-notif-item__body">
+                    <span className="qt-notif-item__title">{item.title}</span>
+                    {item.message && <span className="qt-notif-item__msg">{item.message}</span>}
+                  </span>
+                  <span className="qt-notif-item__time">{notifTimeAgo(item.createdAt)}</span>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className={cn('qore-technic-navitem', open && 'qore-technic-navitem--active')}
+        title={collapsed ? 'Bildirimler' : undefined}
+      >
+        <span className="qore-technic-navitem__icon" style={{ position: 'relative' }}>
+          <Bell className="h-[18px] w-[18px]" />
+          {unread.length > 0 && (
+            <span className="qt-sidebar-notif-dot" />
+          )}
+        </span>
+        <span className="qore-technic-navitem__label">Bildirimler</span>
+      </button>
+    </div>
+  );
 }
 
 export default function QoreTechnicShell({ children }: { children: React.ReactNode }) {
@@ -265,6 +360,7 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
         </nav>
 
         <div className="qore-technic-sidebar__footer" ref={profileMenuRef}>
+          <SidebarNotificationsBell collapsed={collapsed} />
           {profileMenuOpen && (
             <div className="qt-profile-popover" role="menu" aria-label="Profil menüsü">
               <button
@@ -515,6 +611,147 @@ export function QoreTechnicProfileButton({
                 <span className="qt-sheet__item-label">Çıkış Yap</span>
                 <ChevronRight className="h-4 w-4 opacity-60" />
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+const notifIconFor = (t: string) => {
+  switch (t) {
+    case 'fefo_override': return <AlertTriangle className="w-4 h-4 shrink-0 text-amber-500" />;
+    case 'order_created':
+    case 'order_created_from_request': return <ClipboardList className="w-4 h-4 shrink-0 text-blue-500" />;
+    case 'transfer_to_lab': return <Truck className="w-4 h-4 shrink-0 text-indigo-500" />;
+    case 'depot_count_completed':
+    case 'lab_count_completed': return <ListChecks className="w-4 h-4 shrink-0 text-green-500" />;
+    case 'fault_opened':
+    case 'fault_transferred': return <AlertTriangle className="w-4 h-4 shrink-0 text-red-500" />;
+    case 'fault_closed': return <CheckCircle2 className="w-4 h-4 shrink-0 text-green-600" />;
+    default: return <Package className="w-4 h-4 shrink-0 text-white/70" />;
+  }
+};
+
+const notifTimeAgo = (ts: any) => {
+  try {
+    const d = ts?.toDate ? ts.toDate() : (ts instanceof Date ? ts : new Date());
+    const diffMs = Date.now() - d.getTime();
+    const m = Math.floor(diffMs / 60000);
+    if (m < 1) return 'şimdi';
+    if (m < 60) return `${m} dk`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h} sa`;
+    const day = Math.floor(h / 24);
+    return `${day} g`;
+  } catch { return ''; }
+};
+
+export function QoreTechnicNotificationsButton({
+  className,
+}: {
+  className?: string;
+}) {
+  const router = useRouter();
+  const { currentUserProfile } = useAuth();
+  const { notifications, markAllAsRead } = useDock();
+  const [open, setOpen] = useState(false);
+  const uid = currentUserProfile?.uid || '';
+
+  const unread = useMemo(
+    () => notifications.filter((n: NotificationItem) => !(n.readBy || []).includes(uid)),
+    [notifications, uid]
+  );
+
+  const handleClick = async (item: NotificationItem) => {
+    if (uid) markAsRead(item.id, uid);
+    const fallbackHref = buildHrefForResource(item.resource, {
+      labId: item.meta?.labId,
+      depotId: item.meta?.depotId,
+      tab: item.meta?.tab,
+    });
+    const to = item.href || fallbackHref;
+    if (to) router.push(to);
+    setOpen(false);
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        className={cn('qt-status-btn qt-status-btn--notifications', className)}
+        onClick={() => setOpen(true)}
+      >
+        <Bell className="h-4 w-4" />
+        Bildirimler
+        {unread.length > 0 && (
+          <span className="qt-notif-badge">
+            {unread.length > 9 ? '9+' : unread.length}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="qt-sheet-overlay" onClick={() => setOpen(false)}>
+          <div className="qt-sheet qt-sheet--notifications" role="dialog" aria-label="Bildirimler" onClick={(e) => e.stopPropagation()}>
+            <div className="qt-sheet__handle" aria-hidden="true" />
+            <div className="qt-sheet__header">
+              <h2 className="qt-sheet__title">
+                Bildirimler
+                {unread.length > 0 && (
+                  <span className="qt-notif-header-badge">{unread.length}</span>
+                )}
+              </h2>
+              <div className="flex items-center gap-2">
+                {unread.length > 0 && (
+                  <button
+                    type="button"
+                    className="qt-notif-clear-btn"
+                    onClick={() => markAllAsRead()}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Temizle
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="qt-sheet__close"
+                  aria-label="Kapat"
+                  onClick={() => setOpen(false)}
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+            <div className="qt-notif-list">
+              {unread.length === 0 ? (
+                <div className="qt-notif-empty">
+                  <Bell className="h-8 w-8 opacity-30" />
+                  <span>Bildirim yok</span>
+                </div>
+              ) : (
+                unread.map((item: NotificationItem) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    className="qt-notif-item"
+                    onClick={() => handleClick(item)}
+                  >
+                    <span className="qt-notif-item__icon">
+                      {notifIconFor(item.type)}
+                    </span>
+                    <span className="qt-notif-item__body">
+                      <span className="qt-notif-item__title">{item.title}</span>
+                      {item.message && (
+                        <span className="qt-notif-item__msg">{item.message}</span>
+                      )}
+                    </span>
+                    <span className="qt-notif-item__time">
+                      {notifTimeAgo(item.createdAt)}
+                    </span>
+                  </button>
+                ))
+              )}
             </div>
           </div>
         </div>

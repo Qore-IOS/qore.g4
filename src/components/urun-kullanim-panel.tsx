@@ -701,149 +701,128 @@ export default function UrunKullanimPanel() {
 
     const batch = writeBatch(db);
     batch.set(newTuketimDocRef, newRec);
-    batch.delete(depoStokDocRef);
+    
+    const currentAdet = itemToConsume.adet ?? 1;
+    if (currentAdet > 1) {
+      // OPTIMIZED: If bulk document, just decrement quantity
+      batch.update(depoStokDocRef, { adet: currentAdet - 1 });
+    } else {
+      // Single item or last unit, delete doc
+      batch.delete(depoStokDocRef);
+    }
 
-    try {
-      await batch.commit();
+    // --- OPTIMISTIC UI START ---
+    // 1. Immediately provide visual/audio feedback
+    setScanStatus('success');
+    playFeedback();
+    
+    // 2. Update local session history immediately
+    const optimisticRecord = { 
+      ...newRec, 
+      id: newTuketimDocRef.id, 
+      consumptionTimestamp: new Date() 
+    };
+    setLastScannedProduct(optimisticRecord as any);
+    setSessionHistory(prev => [optimisticRecord, ...prev].slice(0, 10));
 
-      urunKullanimLogger.info('Tüketim kaydı başarıyla yazıldı', {
-        consumptionId: newTuketimDocRef.id,
-        stokKodu: itemToConsume.stokKodu,
-        seriNumarasi: itemToConsume.seriNumarasi
-      });
+    // 3. Compute and update remaining counts optimistically
+    const consumedId = itemToConsume.id;
+    const consumedStokKodu = itemToConsume.stokKodu;
+    const consumedLot = itemToConsume.lotNumarasi || '';
+    
+    // Use local labStock to update UI immediately. Lot-tracked items live in a
+    // single doc with `adet: N`, so we sum adet rather than counting docs and
+    // subtract the 1 unit we just consumed.
+    const lotTotalAdet = labStock
+      .filter(i => i.stokKodu === consumedStokKodu && (i.lotNumarasi || '') === consumedLot)
+      .reduce((sum, i) => sum + (((i as any).adet as number | undefined) ?? 1), 0);
+    const codeTotalAdet = labStock
+      .filter(i => i.stokKodu === consumedStokKodu)
+      .reduce((sum, i) => sum + (((i as any).adet as number | undefined) ?? 1), 0);
+    const lotRemaining = Math.max(0, lotTotalAdet - 1);
+    const totalRemaining = Math.max(0, codeTotalAdet - 1);
+    
+    setLastScannedLotRemaining(lotRemaining);
+    setLastScannedTotalRemaining(totalRemaining);
 
-      // Invalidate caches so data refreshes
-      invalidateDepoStok();
-      invalidateConsumption();
+    // Update image
+    setLastScannedDeviceGroupImage(null);
+    const productInfo = products.find(p => p.stokKodu === itemToConsume.stokKodu);
+    const imageUrl = productInfo?.cihazGrubu ? deviceGroups.find(dg => dg.name === productInfo.cihazGrubu)?.imageUrl || null : null;
+    setLastScannedDeviceGroupImage(imageUrl);
 
-      // Update daily consumption stats for dashboard KPI
-      incrementTodayStats(selectedLab.id).catch(err =>
-        urunKullanimLogger.warn('Günlük tüketim istatistikleri güncellenemedi', { error: err?.message })
-      );
+    toast({ 
+      title: "Başarılı", 
+      description: `${itemToConsume.seriNumarasi || itemToConsume.stokKodu} stoğundan düşüldü.` 
+    });
 
-      // Log serial history asynchronously (don't block on this)
-      logSerialHistory(itemToConsume.seriNumarasi || '', 'consumption', {
-        stokKodu: itemToConsume.stokKodu,
-        usageLabId: selectedLab.id,
-        deductedFromLabId: ownerId,
-        subPointId: selectedSubPoint?.id || '',
-        subPointName: selectedSubPoint?.name || '',
-      }).catch(err =>
-        urunKullanimLogger.warn('Seri geçmişi kaydedilemedi', { error: err?.message })
-      );
+    // Reset status after a delay
+    setTimeout(() => setScanStatus('idle'), 3000);
 
-      const finalRecord = {...newRec, id: newTuketimDocRef.id, consumptionTimestamp: new Date()};
-      setLastScannedProduct(finalRecord as any);
-      setSessionHistory(prev => [finalRecord, ...prev].slice(0, 10)); // Update local history
+    // --- BACKGROUND PROCESS ---
+    (async () => {
+      // Capture state for rollback
+      const prevHistory = [...sessionHistory];
+      const prevProduct = lastScannedProduct;
+      const prevLotRem = lastScannedLotRemaining;
+      const prevTotalRem = lastScannedTotalRemaining;
+      const prevImage = lastScannedDeviceGroupImage;
 
-      // Compute remaining lot and total counts for the consumed product.
-      // labStock may not have refreshed yet, so exclude the item we just consumed.
       try {
-        const consumedId = itemToConsume.id;
-        const consumedStokKodu = itemToConsume.stokKodu;
-        const consumedLot = itemToConsume.lotNumarasi || '';
-        const lotRemaining = labStock.filter(i =>
-          i.stokKodu === consumedStokKodu &&
-          (i.lotNumarasi || '') === consumedLot &&
-          i.id !== consumedId
-        ).length;
-        const totalRemaining = labStock.filter(i =>
-          i.stokKodu === consumedStokKodu &&
-          i.id !== consumedId
-        ).length;
-        setLastScannedLotRemaining(lotRemaining);
-        setLastScannedTotalRemaining(totalRemaining);
+        await batch.commit();
 
-        // Eğer lot tükendiyse manuel seri snapshot'ını temizle
+        urunKullanimLogger.info('Tüketim kaydı başarıyla yazıldı (Arka Plan)', {
+          consumptionId: newTuketimDocRef.id,
+          stokKodu: itemToConsume.stokKodu,
+        });
+
+        // Invalidate caches in background
+        invalidateDepoStok();
+        invalidateConsumption();
+
+        // Stats update
+        incrementTodayStats(selectedLab.id).catch(() => undefined);
+        
+        // Serial history
+        logSerialHistory(itemToConsume.seriNumarasi || '', 'consumption', {
+          stokKodu: itemToConsume.stokKodu,
+          usageLabId: selectedLab.id,
+          deductedFromLabId: ownerId,
+          subPointId: selectedSubPoint?.id || '',
+          subPointName: selectedSubPoint?.name || '',
+        }).catch(() => undefined);
+
+        // Cleanup snapshots if lot is empty
         if (lotRemaining === 0) {
           const miadRaw = String(itemToConsume.miad || '');
           const snapshotKey = buildManualDeductionKey(selectedLab.id, consumedStokKodu, consumedLot, miadRaw);
           deleteDoc(doc(db, 'labManualSerialSnapshots', snapshotKey)).catch(() => undefined);
         }
+      } catch (err: any) {
+        urunKullanimLogger.error('Tüketim kaydı yazılamadı (Rollback Uygulanıyor)', err);
+        
+        // --- ROLLBACK STATE ---
+        setSessionHistory(prevHistory);
+        setLastScannedProduct(prevProduct);
+        setLastScannedLotRemaining(prevLotRem);
+        setLastScannedTotalRemaining(prevTotalRem);
+        setLastScannedDeviceGroupImage(prevImage);
+        
+        // Feedback
+        setScanStatus('error');
+        playFeedback(true); // Distinct error sound
 
-        // Check for stock warnings: min stock reached, and qty=1 when max>2.
-        const rule = minMaxRules.find(r => r.stokKodu === consumedStokKodu);
-        const minStock = rule?.min ?? null;
-        const maxStock = rule?.max ?? null;
-        const reasons: string[] = [];
-        if (minStock != null && minStock > 0 && totalRemaining <= minStock) {
-          reasons.push(`Minimum stok seviyesine ulaşıldı (Min: ${minStock}, Kalan: ${totalRemaining})`);
-        }
-        // Only warn for qty=1 when max stock is 2 or greater
-        if (totalRemaining === 1 && (maxStock == null || maxStock >= 2)) {
-          reasons.push('Laboratuvar stoğunda yalnızca 1 adet kaldı');
-        }
-        if (reasons.length > 0) {
-          setStockWarnings(prev => {
-            const filtered = prev.filter(w => w.stokKodu !== consumedStokKodu);
-            return [
-              ...filtered,
-              {
-                stokKodu: consumedStokKodu,
-                stokAdi: itemToConsume.stokAdi || '',
-                lotNumarasi: itemToConsume.lotNumarasi,
-                totalRemaining,
-                minStock,
-                maxStock,
-                reasons,
-              },
-            ];
-          });
-        }
-      } catch (computeErr: any) {
-        urunKullanimLogger.warn('Kalan stok hesaplanamadı', { error: computeErr?.message });
+        toast({ 
+          title: "Kayıt Başarısız (Geri Alındı)", 
+          description: "Stok güncellenirken bir sorun oluştu. Ürün başka bir kullanıcı tarafından düşülmüş olabilir.", 
+          variant: 'destructive' 
+        });
+
+        setTimeout(() => setScanStatus('idle'), 3000);
       }
+    })();
 
-      setLastScannedDeviceGroupImage(null);
-      setTimeout(() => {
-        const productInfo = products.find(p => p.stokKodu === itemToConsume.stokKodu);
-        const imageUrl = productInfo?.cihazGrubu ? deviceGroups.find(dg => dg.name === productInfo.cihazGrubu)?.imageUrl || null : null;
-        setLastScannedDeviceGroupImage(imageUrl);
-      }, 50);
-
-      setScanStatus('success');
-      playFeedback();
-      toast({ title: "Başarılı", description: `${itemToConsume.seriNumarasi || itemToConsume.stokKodu} ${ownerName} stoğundan düşüldü.` });
-      setTimeout(() => setScanStatus('idle'), 3000);
-
-      return newTuketimDocRef.id;
-    } catch (err: any) {
-      // Detailed error classification
-      const errorCode = err?.code || 'unknown';
-      const errorMessage = err?.message || 'Bilinmeyen hata';
-
-      urunKullanimLogger.error('Tüketim kaydı yazılamadı', err, {
-        stokKodu: itemToConsume.stokKodu,
-        seriNumarasi: itemToConsume.seriNumarasi,
-        itemId: itemToConsume.id,
-        errorCode,
-        errorMessage
-      });
-
-      // Classify error for better user feedback
-      let userMessage = 'Tüketim kaydedilirken hata oluştu.';
-
-      if (errorCode === 'permission-denied') {
-        userMessage = 'Yetkiniz yok. Lütfen sistem yöneticisiyle iletişime geçin.';
-      } else if (errorCode === 'not-found') {
-        userMessage = 'Ürün stokta bulunamadı (başka bir kullanıcı düşmüş olabilir).';
-      } else if (errorCode === 'unavailable' || errorCode === 'deadline-exceeded') {
-        userMessage = 'Sunucuya bağlanılamadı. İnternet bağlantınızı kontrol edin.';
-      } else if (errorMessage.includes('network')) {
-        userMessage = 'Ağ hatası. İnternet bağlantınızı kontrol edin.';
-      }
-
-      setScanStatus('error');
-      toast({
-        title: "Kayıt Hatası",
-        description: userMessage,
-        variant: 'destructive'
-      });
-      setTimeout(() => setScanStatus('idle'), 3000);
-
-      // Propagate error for retry mechanism
-      throw err;
-    }
+    return newTuketimDocRef.id;
   }, [currentUserProfile, selectedLab, laboratories, toast, selectedSubPoint, products, deviceGroups, invalidateDepoStok, invalidateConsumption, labStock, minMaxRules]);
   
   const pickEarliest = (items: DepoStokItem[]) => {
@@ -1085,10 +1064,23 @@ export default function UrunKullanimPanel() {
 
     // STEP 2: Duplicate check - use Firestore for recent consumption (more reliable than cache)
     if (item.irsaliyeNumarasi !== 'İSTİSNA GİRİŞİ' && item.seriNumarasi) {
-        // First check cache (fast)
-        const cachedDuplicate = tuketimKayitlari.some(c => c.stokKodu === stokKodu && c.seriNumarasi === item!.seriNumarasi);
+        // First check cache (fast). NOT: Aynı seri farklı ürünlere tanımlı
+        // olabildiği için stokKodu da karşılaştırılıyor. Bu kontrol yanlış
+        // pozitif veriyorsa `matched` log'unda mismatch görünecek.
+        const matched = tuketimKayitlari.find(c => c.stokKodu === stokKodu && c.seriNumarasi === item!.seriNumarasi);
+        const cachedDuplicate = !!matched;
 
         if (cachedDuplicate) {
+            urunKullanimLogger.warn('Cache mükerrer tüketim tespit edildi', {
+              stokKodu,
+              seriNumarasi: item.seriNumarasi,
+              matchedRecord: matched ? {
+                id: (matched as any).id,
+                stokKodu: matched.stokKodu,
+                seriNumarasi: matched.seriNumarasi,
+                consumptionTimestamp: (matched as any).consumptionTimestamp?.toString?.() || (matched as any).consumptionTimestamp,
+              } : null,
+            });
             toast({ title: 'Zaten Tüketilmiş', description: `${stokKodu} - Seri No ${item.seriNumarasi} daha önce stoktan düşülmüş.`, variant: 'destructive' });
             playFeedback(true);
             setScanStatus('error');
@@ -1420,7 +1412,8 @@ export default function UrunKullanimPanel() {
       .forEach(item => {
         const key = `${item.lotNumarasi || 'N/A'}|${item.miad || 'N/A'}`;
         const current = lots.get(key) || { miad: item.miad ?? 'N/A', count: 0 };
-        current.count += 1;
+        // Sum adet — lot batches transferred from depot live in a single doc.
+        current.count += resolveStockRowUnit(item);
         lots.set(key, current);
       });
     return Array.from(lots.entries()).map(([key, data]) => ({ key, label: `${key.split('|')[0]} / ${data.miad}`, count: data.count }));
@@ -1469,12 +1462,15 @@ export default function UrunKullanimPanel() {
 
     return Array.from(grouped.values())
       .map((row) => {
-        // Nihai adet her zaman canlı labStock belge sayısından türetilsin
-        const liveCount = labStock.filter((it) =>
-          it.stokKodu === row.stokKodu &&
-          (it.lotNumarasi || 'Lotsuz') === row.lotNumarasi &&
-          formatMiad(it.miad) === row.miad
-        ).length;
+        // Nihai adet canlı labStock belgelerinin `adet` toplamından türetilsin.
+        // Lot dokümanları tek satırda `adet: N` taşır; doküman sayısı yanlış olur.
+        const liveCount = labStock
+          .filter((it) =>
+            it.stokKodu === row.stokKodu &&
+            (it.lotNumarasi || 'Lotsuz') === row.lotNumarasi &&
+            formatMiad(it.miad) === row.miad
+          )
+          .reduce((sum, it) => sum + resolveStockRowUnit(it), 0);
         return { ...row, count: liveCount };
       })
       .sort((a, b) => (a.stokAdi || '').localeCompare(b.stokAdi || '', 'tr') || (a.lotNumarasi || '').localeCompare(b.lotNumarasi || '', 'tr'));
@@ -1524,7 +1520,8 @@ export default function UrunKullanimPanel() {
     }
 
     const groupKey = buildManualDeductionKey(selectedLab.id, stokKodu, lotNumarasi === 'Lotsuz' ? '' : lotNumarasi, miadRaw || '');
-    const currentlyAvailable = matchingItems.length;
+    // Lot dokümanları tek satırda `adet: N` tutar — gerçek mevcut adet = adet toplamı.
+    const currentlyAvailable = matchingItems.reduce((sum, it) => sum + resolveStockRowUnit(it), 0);
     if (currentlyAvailable <= 0) {
       toast({ title: 'Stok Bulunamadı', description: 'Bu satırın kullanılabilir stoğu tükenmiş görünüyor.', variant: 'destructive' });
       return;
@@ -1534,7 +1531,19 @@ export default function UrunKullanimPanel() {
     const templateItem = matchingItems[0];
     const ownerId = templateItem.hedefKurumId || laboratories.find(l => l.name === templateItem.hedefKurum)?.id || selectedLab.id;
     const ownerName = laboratories.find(l => l.id === ownerId)?.name || templateItem.hedefKurum || selectedLab.name || '';
-    const itemsToConsume = matchingItems.slice(0, quantityToDeduct);
+    // Adet-aware düşüm planı: her doküman için ne kadar düşüleceği. Doküman
+    // tamamı düşülürse silinir; kısmi düşümde `adet` decrement edilir. Eski
+    // `batch.delete` mantığı `adet: 50` olan bir dokümanı 1 birim için tamamen
+    // silerek 49 birim sessiz veri kaybına yol açıyordu.
+    let remainingToDeduct = quantityToDeduct;
+    const itemsToConsume: Array<{ id: string; take: number; docAdet: number; ref: DepoStokItem }> = [];
+    for (const stockItem of matchingItems) {
+      if (remainingToDeduct <= 0) break;
+      const docAdet = resolveStockRowUnit(stockItem);
+      const take = Math.min(docAdet, remainingToDeduct);
+      itemsToConsume.push({ id: stockItem.id, take, docAdet, ref: stockItem });
+      remainingToDeduct -= take;
+    }
     const shouldFullyConsumeLot = quantityToDeduct >= currentlyAvailable;
 
     try {
@@ -1567,10 +1576,16 @@ export default function UrunKullanimPanel() {
         batch.set(newTuketimDocRef, newRec);
       }
 
-      // Adet gerçekten düşsün: seçilen miktardaki gerçek depoStok satırlarını sil
-      itemsToConsume.forEach((stockItem) => {
-        const stokRef = doc(db, 'depoStok', stockItem.id);
-        batch.delete(stokRef);
+      // Adet-aware düşüm: tamamı düşülen doküman silinir; kısmi düşümde
+      // `adet` decrement edilir. Böylece bir lot dokümanından 1 birim
+      // düşerken kalan birimler kaybolmaz.
+      itemsToConsume.forEach((plan) => {
+        const stokRef = doc(db, 'depoStok', plan.id);
+        if (plan.take >= plan.docAdet) {
+          batch.delete(stokRef);
+        } else {
+          batch.update(stokRef, { adet: plan.docAdet - plan.take });
+        }
       });
 
       // Seri takipli ürünlerde seri numaralarını arka planda sakla (stoktan sayılmasın)
@@ -1604,7 +1619,10 @@ export default function UrunKullanimPanel() {
 
       // "Son Okutulan Ürün" ve "Son 10 Tüketim" kartlarını manuel/listeli düşümde de güncelle
       const remainingInSameLot = Math.max(0, currentlyAvailable - quantityToDeduct);
-      const totalForCode = labStock.filter((i) => i.stokKodu === stokKodu).length;
+      // Lot dokümanları `adet: N` formatında — doküman saymak yerine adet topla.
+      const totalForCode = labStock
+        .filter((i) => i.stokKodu === stokKodu)
+        .reduce((sum, i) => sum + resolveStockRowUnit(i), 0);
       const estimatedTotalRemaining = Math.max(0, totalForCode - quantityToDeduct);
       const manualRecordBase: ConsumptionRecord = {
         id: `manual-${Date.now()}`,

@@ -30,6 +30,12 @@ import { db } from '@/lib/firebase';
 import { VIEWS } from '@/lib/constants';
 import { getExchangeRates } from '@/lib/exchange-rates';
 import { matchesCompanyScope } from '@/lib/company-scope';
+import { 
+  useDeviceFaultReports, 
+  usePurchasingTasks, 
+  useExpiringProductsCount 
+} from '@/hooks/useFirebaseQueries';
+import { Skeleton } from '@/components/ui/skeleton';
 
 const motionProps = {
   initial: { scale: 1, y: 0 },
@@ -73,84 +79,48 @@ type StockBrandBreakdown = {
   locations: StockLocationBreakdown[];
 };
 
+function DashboardSkeleton() {
+  return (
+    <div className="p-4 sm:p-8 space-y-8 animate-pulse">
+      <div className="h-10 w-64 bg-muted rounded-lg mb-8" />
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-6">
+        {[1, 2, 3, 4, 5].map(i => (
+          <div key={i} className="h-32 bg-muted rounded-2xl shadow-sm" />
+        ))}
+      </div>
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
+        <div className="xl:col-span-8 h-[500px] bg-muted rounded-2xl shadow-sm" />
+        <div className="xl:col-span-4 h-[500px] bg-muted rounded-2xl shadow-sm" />
+      </div>
+    </div>
+  );
+}
+
 const STOCK_COST_SNAPSHOT_KEY = 'dashboard_stock_cost_snapshot_v1';
 const STOCK_COST_SNAPSHOT_TTL = 1000 * 60 * 60 * 24; // 24 saat
 
 export default function DashboardPanel({
     hospitals,
     tuketimKayitlari,
+    efficiencyHistoryRecords,
 }: DashboardPanelProps) {
   const [isConsumptionModalOpen, setIsConsumptionModalOpen] = useState(false);
   const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { theme } = useTheme();
-  const [faultReports, setFaultReports] = useState<DeviceFaultReport[]>([]);
-  const [purchasingTasks, setPurchasingTasks] = useState<PurchasingTask[]>([]);
-  const [expiringProductsCount, setExpiringProductsCount] = useState<number | null>(null);
+
+  // Optimized Fetching
+  const { data: faultReports = [], isLoading: faultsLoading } = useDeviceFaultReports();
+  const { data: purchasingTasks = [], isLoading: tasksLoading } = usePurchasingTasks();
+  const { data: expiringCountServer = 0, isLoading: expiringLoading } = useExpiringProductsCount();
 
   const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>('weekly');
   const [trendDate, setTrendDate] = useState(new Date());
 
   const calendarScrollRef = useRef<HTMLDivElement | null>(null);
 
-  // Fetch expiring products count (client-side)
-  useEffect(() => {
-    (async () => {
-      try {
-        const snapshot = await getDocs(collection(db, 'depoStok'));
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const seenKeys = new Set<string>();
-        let count = 0;
+  const expiringProductsCount = expiringCountServer;
 
-        for (const docSnap of snapshot.docs) {
-          const data = docSnap.data();
-          if (!matchesCompanyScope(data as any, currentCompanyId, isSuperAdmin)) continue;
-          if (data.isShipped === true) continue;
-          const miadStr = typeof data.miad === 'string' ? data.miad : '';
-          if (!miadStr) continue;
-          const miadDate = parse(miadStr, 'dd.MM.yyyy', new Date());
-          if (!isValid(miadDate)) continue;
-          const days = differenceInDays(miadDate, today);
-          if (days <= 45) {
-            const key = `${data.stokKodu}-${data.lotNumarasi || ''}-${miadStr}`;
-            if (!seenKeys.has(key)) { seenKeys.add(key); count++; }
-          }
-        }
-        console.log('[Dashboard] depoStok docs:', snapshot.docs.length, 'expiring:', count);
-        setExpiringProductsCount(count);
-      } catch (err) {
-        console.error('[Dashboard] getExpiringProductsCount error:', err);
-        setExpiringProductsCount(0);
-      }
-    })();
-  }, [currentCompanyId, isSuperAdmin]);
-
-  useEffect(() => {
-    const faultQuery = query(collection(db, 'deviceFaultReports'));
-    const unsubscribeFaults = onSnapshot(
-      faultQuery,
-      (snapshot) => {
-        const reports = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })) as DeviceFaultReport[];
-        setFaultReports(reports);
-      },
-      (error) => console.error('deviceFaultReports fetch error:', error)
-    );
-
-    const taskQuery = query(collection(db, 'purchasingTasks'));
-    const unsubscribeTasks = onSnapshot(
-      taskQuery,
-      (snapshot) => {
-        const tasks = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })) as PurchasingTask[];
-        setPurchasingTasks(tasks);
-      },
-      (error) => console.error('purchasingTasks fetch error:', error)
-    );
-
-    return () => {
-      unsubscribeFaults();
-      unsubscribeTasks();
-    };
-  }, []);
+  const isLoading = faultsLoading || tasksLoading || expiringLoading;
 
   // Total stock cost + risky cost – client-side calculation
   const [totalStockCost, setTotalStockCost] = useState<number | null>(null);
@@ -784,6 +754,8 @@ export default function DashboardPanel({
       progressClass: 'bg-emerald-400/70',
     },
   ];
+
+  if (isLoading) return <DashboardSkeleton />;
 
   return (
     <>

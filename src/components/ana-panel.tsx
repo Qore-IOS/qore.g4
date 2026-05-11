@@ -23,7 +23,7 @@ import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
 
 // Hooks
 import { useToast } from "@/hooks/use-toast";
-import { useDepots, useProductCodes, useAddressDefinitions, useBarcodeFormatsQuery, useUsers, useDepoStokByDepot, useInvalidateQueries, touchStockMetadata } from '@/hooks/useFirebaseQueries';
+import { useDepots, useProductCodes, useAddressDefinitions, useBarcodeFormatsQuery, useUsers, useDepoStokByDepot, useInvalidateQueries, touchStockMetadata, useDepotCountSessions, useScannedItems, useIrsaliyeFiles } from '@/hooks/useFirebaseQueries';
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import useHidScanner from '@/hooks/useHidScanner';
 import { useAuth } from '@/contexts/auth-context';
@@ -38,6 +38,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { VirtualizedList } from '@/components/ui/virtualized-list';
 
 // Icons
 import { Trash2, CheckSquare, PlusCircle, Loader2, Search, History, Camera, ScanLine, Package, MapPin, FileText, X, Undo2, AlertTriangle, QrCode, Download, Sparkles } from 'lucide-react';
@@ -61,10 +62,39 @@ import { formatQuantityWithUnit, formatUnitMultiplier, normalizeUnitLabel } from
 import { matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
 
 // Child Components
-import ManualInlineAdder from '@/components/mal-kabul/ManualInlineAdder';
-import IrsaliyeOcrModal from '@/components/mal-kabul/IrsaliyeOcrModal';
-import BulkBarcodeScanModal, { type BulkScanResultItem } from '@/components/mal-kabul/BulkBarcodeScanModal';
-import { VirtualizedList } from '@/components/ui/virtualized-list';
+const ManualInlineAdder = dynamic(() => import('@/components/mal-kabul/ManualInlineAdder'), {
+  ssr: false,
+  loading: () => <div className="h-10 animate-pulse bg-muted rounded-md" />
+});
+
+const IrsaliyeOcrModal = dynamic(() => import('@/components/mal-kabul/IrsaliyeOcrModal'), {
+  ssr: false,
+});
+
+const BulkBarcodeScanModal = dynamic(() => import('@/components/mal-kabul/BulkBarcodeScanModal'), {
+  ssr: false,
+});
+
+function AnaPanelSkeleton() {
+  return (
+    <div className="flex flex-col gap-6 p-6 animate-pulse">
+      <div className="flex justify-between items-center mb-4">
+        <div className="h-10 w-48 bg-muted rounded" />
+        <div className="h-10 w-64 bg-muted rounded" />
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 space-y-6">
+          <div className="h-64 bg-muted rounded-xl" />
+          <div className="h-96 bg-muted rounded-xl" />
+        </div>
+        <div className="space-y-6">
+          <div className="h-80 bg-muted rounded-xl" />
+          <div className="h-40 bg-muted rounded-xl" />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // =============================================================================
 // DYNAMIC IMPORTS
@@ -242,6 +272,7 @@ function upsertGroupedRow(
     return [row, ...prev];
   });
 }
+
 
 const turkishFold = (value: string) =>
   (value || '')
@@ -495,7 +526,6 @@ export default function AnaPanel(props: AnaPanelProps) {
   const [showManualInline, setShowManualInline] = useState(false);
   
   const [isSessionModalOpen, setIsSessionModalOpen] = useState(false);
-  const [availableSessions, setAvailableSessions] = useState<DepotStockCountSession[]>([]);
   const [activeSession, setActiveSession] = useState<DepotStockCountSession | null>(null);
   const [selectedParticipants, setSelectedParticipants] = useState<string[]>([]);
   const [joining, setJoining] = useState(false);
@@ -550,6 +580,54 @@ export default function AnaPanel(props: AnaPanelProps) {
     }
   }, [sourceDepots, selectedDepotId]);
 
+  // --- Optimized Data Fetching Hooks ---
+  const sessionsQuery = useDepotCountSessions(selectedDepotId);
+  const scannedItemsQuery = useScannedItems(activeSession?.id ?? null);
+  const irsaliyeQuery = useIrsaliyeFiles(selectedDepotId);
+
+  // Derive state from queries
+  const availableSessions = useMemo(() => 
+    (sessionsQuery.data ?? []).filter(s => s.status === 'active'),
+    [sessionsQuery.data]
+  );
+
+  useEffect(() => {
+    if (activeSession && sessionsQuery.data) {
+      const stillExists = sessionsQuery.data.some(s => s.id === activeSession.id && s.status === 'active');
+      if (!stillExists) {
+        setActiveSession(null);
+        setScannedItems([]);
+        toast({ title: "Oturum Sona Erdi", description: "Mevcut sayım oturumu kapatıldı." });
+      }
+    }
+  }, [sessionsQuery.data, activeSession, toast]);
+
+  useEffect(() => {
+    if (scannedItemsQuery.data) {
+      const sessionItems = (scannedItemsQuery.data as any[]).map(d => ({...d, id: d.id}) as ScanRow);
+      setScannedItems(sessionItems.sort((a,b) => {
+        const aTime = a.timestamp instanceof Date ? a.timestamp.getTime() : (a.timestamp as any)?.toDate?.()?.getTime?.() || 0;
+        const bTime = b.timestamp instanceof Date ? b.timestamp.getTime() : (b.timestamp as any)?.toDate?.()?.getTime?.() || 0;
+        return bTime - aTime;
+      }));
+    }
+  }, [scannedItemsQuery.data]);
+
+  useEffect(() => {
+    if (irsaliyeQuery.data) {
+      const files = irsaliyeQuery.data ?? [];
+      const count = files.filter(f => {
+        const expiresAt = (f as any)?.expiresAt;
+        if (!expiresAt) return false;
+        const expiryTime = expiresAt instanceof Date ? expiresAt.getTime() : (expiresAt.toDate?.()?.getTime() || 0);
+        const notExpired = expiryTime > Date.now();
+        const depotMatch = (f as any)?.locationType === 'depot' && (f as any)?.locationId === selectedDepotId;
+        return notExpired && depotMatch;
+      }).length;
+      setPendingIrsaliyeCount(count);
+    }
+  }, [irsaliyeQuery.data, selectedDepotId]);
+
   // Build existing serials map from TanStack Query data (polling instead of real-time listener)
   // This reduces Firestore reads dramatically
   const existingDepotSerials = useMemo(() => {
@@ -567,66 +645,6 @@ export default function AnaPanel(props: AnaPanelProps) {
     return serialsByProduct;
   }, [depotStockData]);
   
-  useEffect(() => {
-    if (!selectedDepotId) {
-      setAvailableSessions([]);
-      if (activeSession) setActiveSession(null);
-      return;
-    }
-    const q = query(collection(db, 'depotCountSessions'), where('depotId', '==', selectedDepotId), where('status', '==', 'active'));
-    const unsub = onSnapshot(q, snap => {
-      const sessions = snap.docs.map(d => ({ id: d.id, ...d.data() } as DepotStockCountSession));
-      setAvailableSessions(sessions);
-
-      if (activeSession) {
-        const updatedSession = sessions.find(s => s.id === activeSession.id);
-        if (!updatedSession) { // Session ended or deleted
-          setActiveSession(null);
-          setScannedItems([]); // Clear local items
-          toast({ title: "Oturum Sona Erdi", description: "Mevcut sayım oturumu kapatıldı." });
-        }
-      }
-    });
-    return () => unsub();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedDepotId]);
-
-  useEffect(() => {
-    if (!activeSession || !activeSession.id) return;
-    const unsub = onSnapshot(collection(db, 'depotCountSessions', activeSession.id, 'scannedItems'), (snapshot) => {
-        const sessionItems = snapshot.docs.map(d => ({...d.data(), id: d.id}) as ScanRow);
-        setScannedItems(sessionItems.sort((a,b) => {
-          const aTime = a.timestamp instanceof Date ? a.timestamp.getTime() : (a.timestamp as any)?.toDate?.()?.getTime?.() || 0;
-          const bTime = b.timestamp instanceof Date ? b.timestamp.getTime() : (b.timestamp as any)?.toDate?.()?.getTime?.() || 0;
-          return bTime - aTime;
-        }));
-    });
-    return () => unsub();
-  }, [activeSession]);
-
-  useEffect(() => {
-    if (!selectedDepotId) {
-      setPendingIrsaliyeCount(0);
-      return;
-    }
-    const unsub = onSnapshot(
-      query(collection(db, 'irsaliyeDosyalari'), orderBy('uploadedAt', 'desc')),
-      (snapshot) => {
-        let count = 0;
-        snapshot.forEach((docSnap) => {
-          const data = docSnap.data() as any;
-          const inScope = matchesCompanyScope(data, currentCompanyId, isSuperAdmin);
-          const notExpired = data?.expiresAt?.toMillis?.() > Date.now();
-          const depotMatch = data?.locationType === 'depot' && data?.locationId === selectedDepotId;
-          if (inScope && notExpired && depotMatch) count += 1;
-        });
-        setPendingIrsaliyeCount(count);
-      },
-      () => setPendingIrsaliyeCount(0)
-    );
-    return () => unsub();
-  }, [selectedDepotId, currentCompanyId, isSuperAdmin]);
-
   const processScan = useCallback(async (barcodeData: string, source: 'barcode' | 'bulk_item' = 'barcode') => {
     const scanCorrelationId = createCorrelationId();
     const trimmedData = (barcodeData || '').trim();
@@ -716,6 +734,17 @@ export default function AnaPanel(props: AnaPanelProps) {
             if (isInSession || isInDepot) {
               playFeedback(true);
               const location = isInSession ? 'bu oturumda' : 'depoda';
+              // Structured log: hata mesajı tekrar görüldüğünde stokKodu+seri eşleşmesini
+              // konsoldan doğrulamak için. Yanlış pozitif geliyorsa burada görülür.
+              malKabulLogger.warn('Mükerrer seri tespit edildi', {
+                stokKodu,
+                stokAdi: matchedProduct.stokAdi,
+                seriNumarasi,
+                isInSession,
+                isInDepot,
+                sessionSerialCount: sessionSerials?.size ?? 0,
+                depotSerialCount: depotSerials?.size ?? 0,
+              }, { correlationId: scanCorrelationId });
               flashScanFeedback('error', `SN ${seriNumarasi} (${matchedProduct.stokAdi}) ${location} zaten mevcut.`);
               if (source === 'barcode') { setScanStatus('error'); setTimeout(() => setScanStatus('idle'), 3000); }
               setIsProcessingScan(false);
@@ -1262,150 +1291,152 @@ export default function AnaPanel(props: AnaPanelProps) {
     }
   };
 
-  const performGoodsReceipt = async (itemsToProcess: ScanRow[]) => {
-    setMalKabulIsLoading(true);
-    setCommitInfo(null);
-    const processedIds = new Set<string>();
+  const performGoodsReceipt = (itemsToProcess: ScanRow[]) => {
+    // 1. Durumu Yedekle (Rollback için)
+    const previousScannedItems = [...scannedItems];
+    const processedIds = new Set(itemsToProcess.map(i => i.id).filter(Boolean) as string[]);
     const depotName = sourceDepots.find(d => d.id === selectedDepotId)?.name || 'Bilinmeyen Depo';
 
-    const queue = new BatchQueue({
-      chunkSize: 450,
-      onProgress: (info) => setCommitInfo(info),
+    // 2. Optimistic UI - Anında Ekranı Güncelle (0 ms tepki)
+    setIsPreCheckModalOpen(false);
+    setScannedItems(prev => prev.filter(i => i.id && !processedIds.has(i.id)));
+    
+    // Geçici olarak map'i temizle ve kalan öğeleri yeniden ekle
+    scannedSerialsRef.current.clear();
+    scannedItems.forEach(item => {
+      if (item.id && !processedIds.has(item.id) && item.seriNumarasi && item.stokKodu) {
+        if (!scannedSerialsRef.current.has(item.stokKodu)) {
+          scannedSerialsRef.current.set(item.stokKodu, new Set());
+        }
+        scannedSerialsRef.current.get(item.stokKodu)!.add(item.seriNumarasi);
+      }
     });
 
-    try {
-      // OPTIMIZED: Parallel serial verification with Promise.all
-      const serialsToVerify = itemsToProcess.map(i => i.seriNumarasi).filter(Boolean) as string[];
-      const existingSerialsInDb = new Set<string>();
+    toast({
+      title: 'İşlem Kaydediliyor...',
+      description: `${itemsToProcess.length} kalem arka planda işleniyor. Çıkış yapmayınız.`,
+      duration: 3000
+    });
 
-      if (serialsToVerify.length > 0) {
-        // Create chunks and query them in parallel (max 5 concurrent queries to avoid rate limiting)
-        const chunks: string[][] = [];
-        for (let i = 0; i < serialsToVerify.length; i += 30) {
-          chunks.push(serialsToVerify.slice(i, i + 30));
-        }
+    // 3. Arka Plan İşlemi (Fire and Forget)
+    (async () => {
+      setCommitInfo(null);
+      const queue = new BatchQueue({
+        chunkSize: 450,
+        onProgress: (info) => setCommitInfo(info),
+      });
 
-        // Process chunks in parallel batches of 5
-        for (let i = 0; i < chunks.length; i += 5) {
-          const batchChunks = chunks.slice(i, i + 5);
-          const results = await Promise.all(
-            batchChunks.map(async (chunk) => {
-              const q = query(collection(db, 'depoStok'), where('seriNumarasi', 'in', chunk));
-              const snap = await getDocs(q);
-              return snap.docs
-                .filter(doc => matchesCompanyScope(doc.data() as any, currentCompanyId, isSuperAdmin))
-                .map(doc => doc.data().seriNumarasi as string);
-            })
-          );
-          results.flat().forEach(serial => existingSerialsInDb.add(serial));
-        }
-      }
+      try {
+        // NOTE: Mükerrer seri kontrolü artık tamamen `existingDepotSerials`
+        // üzerinden yapılıyor — `Map<stokKodu, Set<seriNumarasi>>` formatında,
+        // dolayısıyla farklı ürünler aynı seri numarasını paylaşabiliyor.
+        // Eski versiyonda burada `where('seriNumarasi', 'in', ...)` ile stokKodu
+        // filtresiz bir Firestore sorgusu vardı; sonucu hiçbir yerde
+        // okunmuyordu (ölü kod) ve çağrı başına gereksiz okuma üretiyordu.
 
-      // Pre-compute all doc data to batch them efficiently
-      const docsToCreate: Array<{ ref: ReturnType<typeof doc>; data: any; serial?: string; item: ScanRow }> = [];
+        const docsToCreate: Array<{ ref: ReturnType<typeof doc>; data: any; serial?: string; item: ScanRow }> = [];
 
-      for (const item of itemsToProcess) {
-        // Mükerrer kontrolü: aynı stokKodu için aynı seri numarası kontrol edilir
-        const depotProductSerials = item.stokKodu ? existingDepotSerials.get(item.stokKodu) : undefined;
-        if(item.seriNumarasi && depotProductSerials?.has(item.seriNumarasi)) {
-          continue;
-        }
-
-        const serialsToProcess = item.isGroup ? (item.scannedSerials || []) : [item.seriNumarasi];
-
-        const createDocData = (serial = '') => ({
-          depotId: selectedDepotId,
-          depotName,
-          stokKodu: item.stokKodu || '',
-          stokAdi: item.stokAdi || '',
-          lotNumarasi: item.lotNumarasi || '',
-          miad: item.miad ? normalizeMiad(item.miad) : '',
-          seriNumarasi: serial,
-          rafAdresi: item.rafAdresi || '',
-          irsaliyeNumarasi: item.irsaliyeNumarasi || '',
-          eklenmeTarihi: toFsTimestamp(item.timestamp),
-          isShipped: false,
-          createdByName: currentUserProfile?.name || currentUser?.email || 'Unknown',
-          createdByUid: currentUser?.uid || null,
-        });
-
-        if (item.isGroup && serialsToProcess.length === 0) {
-          const adet = Math.max(1, item.adet ?? 1);
-          for (let i = 0; i < adet; i++) {
-            docsToCreate.push({
-              ref: doc(collection(db, 'depoStok')),
-              data: withCompanyScope(createDocData(), currentCompanyId),
-              item,
-            });
+        for (const item of itemsToProcess) {
+          const depotProductSerials = item.stokKodu ? existingDepotSerials.get(item.stokKodu) : undefined;
+          if (item.seriNumarasi && depotProductSerials?.has(item.seriNumarasi)) {
+            continue;
           }
-        } else {
-          for (const serial of (serialsToProcess.filter(Boolean) as string[])) {
-            docsToCreate.push({
-              ref: doc(collection(db, 'depoStok')),
-              data: withCompanyScope(createDocData(serial), currentCompanyId),
-              serial,
-              item,
-            });
-          }
-        }
-        if (item.id) processedIds.add(item.id);
-      }
 
-      // OPTIMIZED: Batch all writes together
-      for (const docInfo of docsToCreate) {
-        await queue.set(docInfo.ref, docInfo.data);
+          const serialsToProcess = item.isGroup ? (item.scannedSerials || []) : [item.seriNumarasi];
 
-        if (docInfo.serial) {
-          await enqueueSerialHistory(queue, docInfo.serial, 'intake', {
-            stokKodu: docInfo.item.stokKodu || '',
-            stokAdi: docInfo.item.stokAdi || '',
+          const createDocData = (serial = '') => ({
             depotId: selectedDepotId,
             depotName,
-            rafAdresi: docInfo.item.rafAdresi || '',
-            irsaliyeNumarasi: docInfo.item.irsaliyeNumarasi || '',
+            stokKodu: item.stokKodu || '',
+            stokAdi: item.stokAdi || '',
+            lotNumarasi: item.lotNumarasi || '',
+            miad: item.miad ? normalizeMiad(item.miad) : '',
+            seriNumarasi: serial,
+            rafAdresi: item.rafAdresi || '',
+            irsaliyeNumarasi: item.irsaliyeNumarasi || '',
+            eklenmeTarihi: toFsTimestamp(item.timestamp),
+            isShipped: false,
+            createdByName: currentUserProfile?.name || currentUser?.email || 'Unknown',
+            createdByUid: currentUser?.uid || null,
           });
-        }
-      }
 
-      await queue.flush();
-
-      // Signal stock change to all listeners (other users/tabs)
-      await touchStockMetadata();
-
-      // Invalidate depoStok cache so it refetches fresh data
-      invalidateDepoStok();
-
-      const txId = await recordMalKabulTransaction(itemsToProcess, 'unverified');
-      toast({
-        title: 'Kabul tamamlandı',
-        description: `${itemsToProcess.length} kalem için geçmiş kaydı oluşturuldu. ID: ${txId}`,
-        action: (
-          <Button variant="default" onClick={() => router.push(`/mal-kabul/gecmis?open=${encodeURIComponent(txId)}`)}>
-            Geçmişte Aç
-          </Button>
-        ),
-      });
-
-      setScannedItems(prev => prev.filter(i => i.id && !processedIds.has(i.id)));
-      // Map'i temizle ve kalan öğeleri yeniden ekle
-      scannedSerialsRef.current.clear();
-      scannedItems.forEach(item => {
-        if (item.id && !processedIds.has(item.id) && item.seriNumarasi && item.stokKodu) {
-          if (!scannedSerialsRef.current.has(item.stokKodu)) {
-            scannedSerialsRef.current.set(item.stokKodu, new Set());
+          if (item.isGroup && serialsToProcess.length === 0) {
+            // OPTIMIZED: Create ONE document with 'adet' instead of 1000 separate ones
+            docsToCreate.push({
+              ref: doc(collection(db, 'depoStok')),
+              data: withCompanyScope({ 
+                ...createDocData(), 
+                adet: Math.max(1, item.adet ?? 1) 
+              }, currentCompanyId),
+              item,
+            });
+          } else {
+            for (const serial of (serialsToProcess.filter(Boolean) as string[])) {
+              docsToCreate.push({
+                ref: doc(collection(db, 'depoStok')),
+                data: withCompanyScope({ 
+                  ...createDocData(serial),
+                  adet: 1 // Serial items always have adet: 1
+                }, currentCompanyId),
+                serial,
+                item,
+              });
+            }
           }
-          scannedSerialsRef.current.get(item.stokKodu)!.add(item.seriNumarasi);
         }
-      });
 
-    } catch (error: any) {
-      console.error("Mal kabul hatası:", error);
-      toast({ title: "Veritabanı Hatası", description: safeStr(error?.message) || 'Ürünler stoğa eklenirken bir hata oluştu.', variant: "destructive" });
-    } finally {
-      setCommitInfo(null);
-      setMalKabulIsLoading(false);
-      setIsPreCheckModalOpen(false);
-    }
+        for (const docInfo of docsToCreate) {
+          await queue.set(docInfo.ref, docInfo.data);
+
+          if (docInfo.serial) {
+            await enqueueSerialHistory(queue, docInfo.serial, 'intake', {
+              stokKodu: docInfo.item.stokKodu || '',
+              stokAdi: docInfo.item.stokAdi || '',
+              depotId: selectedDepotId,
+              depotName,
+              rafAdresi: docInfo.item.rafAdresi || '',
+              irsaliyeNumarasi: docInfo.item.irsaliyeNumarasi || '',
+            });
+          }
+        }
+
+        await queue.flush();
+        await touchStockMetadata();
+        invalidateDepoStok();
+
+        const txId = await recordMalKabulTransaction(itemsToProcess, 'unverified');
+        toast({
+          title: 'Kabul Tamamlandı',
+          description: `${itemsToProcess.length} kalem işlem başarıyla kaydedildi.`,
+          action: (
+            <Button variant="default" onClick={() => router.push(`/mal-kabul/gecmis?open=${encodeURIComponent(txId)}`)}>
+              Geçmişte Aç
+            </Button>
+          ),
+        });
+
+      } catch (error: any) {
+        console.error("Mal kabul hatası:", error);
+        // 4. ROLLBACK (Geri Alma)
+        setScannedItems(previousScannedItems);
+        scannedSerialsRef.current.clear();
+        previousScannedItems.forEach(item => {
+          if (item.seriNumarasi && item.stokKodu) {
+            if (!scannedSerialsRef.current.has(item.stokKodu)) {
+              scannedSerialsRef.current.set(item.stokKodu, new Set());
+            }
+            scannedSerialsRef.current.get(item.stokKodu)!.add(item.seriNumarasi);
+          }
+        });
+        toast({ 
+          title: "İşlem İptal Edildi (Rollback)", 
+          description: safeStr(error?.message) || 'Kayıt sırasında bir hata oluştu, liste eski haline döndürüldü.', 
+          variant: "destructive" 
+        });
+      } finally {
+        setCommitInfo(null);
+      }
+    })();
   };
 
   const handlePreCheckAndDogrulamasizMalKabul = async () => {
@@ -1469,6 +1500,10 @@ export default function AnaPanel(props: AnaPanelProps) {
     scannedItems.reduce((n, it) => n + (it.adet ?? 1), 0),
     [scannedItems]
   );
+
+  if (isLoading && scannedItems.length === 0) {
+    return <AnaPanelSkeleton />;
+  }
 
   return (
     <div className="cihaz-shell px-3 py-4 sm:px-5 sm:py-6 space-y-4 sm:space-y-5 min-h-screen">

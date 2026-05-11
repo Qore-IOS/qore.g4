@@ -40,8 +40,12 @@ import type {
   MinMaxRule,
   BarcodeFormat,
   AddressDefinition,
-  User as AppUser
+  User as AppUser,
+  DeviceFaultReport,
+  PurchasingTask
 } from '@/lib/types';
+import { DepotStockCountSession } from '@/lib/mal-kabul/types';
+import { SayimSession } from '@/lib/cost-analytics';
 import { filterByCompanyScope } from '@/lib/company-scope';
 
 // Helper to convert Firestore timestamps
@@ -113,6 +117,23 @@ export function useHospitals() {
 }
 
 /**
+ * Borc Depots - Used in transfer and payment panels
+ */
+export function useBorcDepots() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['borcDepots', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const snap = await getDocs(collection(db, 'borcDepots'));
+      const depots = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Depot));
+      return filterByCompanyScope(depots, currentCompanyId, isSuperAdmin);
+    },
+    staleTime: 60 * 60 * 1000,
+    gcTime: 2 * 60 * 60 * 1000,
+  });
+}
+
+/**
  * Devices
  */
 export function useDevices() {
@@ -127,6 +148,96 @@ export function useDevices() {
     staleTime: 30 * 60 * 1000, // 30 minutes
     gcTime: 60 * 60 * 1000,
     refetchOnWindowFocus: true,
+  });
+}
+
+/**
+ * Purchasing Tasks - Used in Dashboard and Task Planner
+ */
+export function usePurchasingTasks() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['purchasingTasks', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const snap = await getDocs(collection(db, 'purchasingTasks'));
+      const tasks = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as PurchasingTask));
+      return filterByCompanyScope(tasks, currentCompanyId, isSuperAdmin);
+    },
+    staleTime: 10 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+}
+
+/**
+ * Expiring Products Count - Used in Dashboard for KPI
+ */
+export function useExpiringProductsCount() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['expiringProductsCount', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const { getExpiringProductsCountServer } = await import('@/actions/stokActions');
+      return getExpiringProductsCountServer(currentCompanyId, isSuperAdmin);
+    },
+    staleTime: 60 * 60 * 1000, // 1 hour
+    gcTime: 2 * 60 * 60 * 1000,
+  });
+}
+
+/**
+ * Device Groups
+ */
+export function useDeviceGroups() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['deviceGroups', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const snap = await getDocs(collection(db, 'deviceGroups'));
+      const groups = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DeviceGroup));
+      return filterByCompanyScope(groups, currentCompanyId, isSuperAdmin);
+    },
+    staleTime: 60 * 60 * 1000,
+    gcTime: 2 * 60 * 60 * 1000,
+  });
+}
+
+/**
+ * Min-Max Rules for a specific depot
+ */
+export function useMinMaxRulesForDepot(depotId: string) {
+  return useQuery({
+    queryKey: ['minMaxRules', 'depot', depotId],
+    queryFn: async () => {
+      if (!depotId) return {};
+      const snap = await getDocs(collection(db, 'depots', depotId, 'minMaxRules'));
+      return snap.docs.reduce<Record<string, MinMaxRule>>((acc, d) => {
+        const r = d.data() as MinMaxRule;
+        if (r?.stokKodu) acc[r.stokKodu] = { ...r, id: d.id };
+        return acc;
+      }, {});
+    },
+    enabled: !!depotId,
+    staleTime: 30 * 60 * 1000,
+  });
+}
+
+/**
+ * Min-Max Rules for a specific hospital
+ */
+export function useMinMaxRulesForHospital(hospitalId: string) {
+  return useQuery({
+    queryKey: ['minMaxRules', 'hospital', hospitalId],
+    queryFn: async () => {
+      if (!hospitalId) return {};
+      const snap = await getDocs(collection(db, 'hospitals', hospitalId, 'minMaxRules'));
+      return snap.docs.reduce<Record<string, MinMaxRule>>((acc, d) => {
+        const r = d.data() as MinMaxRule;
+        if (r?.stokKodu) acc[r.stokKodu] = { ...r, id: d.id };
+        return acc;
+      }, {});
+    },
+    enabled: !!hospitalId,
+    staleTime: 30 * 60 * 1000,
   });
 }
 
@@ -197,6 +308,211 @@ export function useUsers() {
   });
 }
 
+/**
+ * Hospital ↔ Device Assignments
+ * Used by device management and maintenance panels.
+ */
+export function useHospitalDeviceAssignments() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['hospitalDeviceAssignments', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const snap = await getDocs(collection(db, 'hospitalDeviceAssignments'));
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+    },
+    staleTime: 30 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+  });
+}
+
+/**
+ * Personnel Availability records (office / training windows)
+ */
+export function usePersonnelAvailability() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['personnelAvailability', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const snap = await getDocs(collection(db, 'personnelAvailability'));
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+}
+
+/**
+ * Device Fault Reports (arıza yönetimi)
+ * Returns the full collection scoped to the user's company.
+ * Cached briefly because faults can be opened/closed frequently throughout the day.
+ */
+export function useDeviceFaultReports() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['deviceFaultReports', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const snap = await getDocs(collection(db, 'deviceFaultReports'));
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DeviceFaultReport));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+    },
+    staleTime: 60 * 1000, // 1 minute — faults change frequently
+    gcTime: 10 * 60 * 1000,
+  });
+}
+
+/**
+ * Teknik Servis action forms (deviceActionForms collection).
+ */
+export function useDeviceActionForms() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['deviceActionForms', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const snap = await getDocs(collection(db, 'deviceActionForms'));
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+}
+
+/**
+ * Aplikasyon action forms (aplikasyonActionForms collection).
+ */
+export function useAplikasyonActionForms() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['aplikasyonActionForms', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const snap = await getDocs(collection(db, 'aplikasyonActionForms'));
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+}
+
+/**
+ * Maintenance plans
+ */
+export function useMaintenancePlans() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['maintenancePlans', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const snap = await getDocs(collection(db, 'maintenancePlans'));
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+    },
+    staleTime: 30 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+  });
+}
+
+/**
+ * Maintenance logs
+ */
+export function useMaintenanceLogs() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['maintenanceLogs', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const snap = await getDocs(collection(db, 'maintenanceLogs'));
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+}
+
+/**
+ * Active Device Lab Pools (active == true).
+ * Used by teknik-servis and aplikasyon panels.
+ */
+export function useDeviceLabPools() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['deviceLabPools', 'active', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const q = query(collection(db, 'deviceLabPools'), where('active', '==', true));
+      const snap = await getDocs(q);
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+    },
+    staleTime: 30 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+  });
+}
+
+/**
+ * Fault Definitions, scoped by type ('teknik_servis' | 'aplikasyon').
+ * Static catalog — long cache.
+ */
+export function useFaultDefinitions(type: 'teknik_servis' | 'aplikasyon' | null) {
+  return useQuery({
+    queryKey: ['faultDefinitions', type],
+    queryFn: async () => {
+      if (!type) return [];
+      const q = query(collection(db, 'faultDefinitions'), where('type', '==', type));
+      const snap = await getDocs(q);
+      return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+    },
+    enabled: !!type,
+    staleTime: 60 * 60 * 1000, // 1 hour
+    gcTime: 2 * 60 * 60 * 1000,
+  });
+}
+
+/**
+ * Maintenance plans for a specific device (optionally filtered by type).
+ */
+export function useMaintenancePlansForDevice(
+  deviceId: string | null,
+  planType?: 'teknik_servis' | 'aplikasyon',
+) {
+  return useQuery({
+    queryKey: ['maintenancePlans', 'forDevice', deviceId, planType ?? null],
+    queryFn: async () => {
+      if (!deviceId) return [];
+      const constraints = [where('deviceId', '==', deviceId)];
+      if (planType) constraints.push(where('type', '==', planType));
+      const q = query(collection(db, 'maintenancePlans'), ...constraints);
+      const snap = await getDocs(q);
+      return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+    },
+    enabled: !!deviceId,
+    staleTime: 10 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+}
+
+/**
+ * Maintenance logs for a specific device, ordered by completedAt desc.
+ */
+export function useMaintenanceLogsForDevice(deviceId: string | null) {
+  return useQuery({
+    queryKey: ['maintenanceLogs', 'forDevice', deviceId],
+    queryFn: async () => {
+      if (!deviceId) return [];
+      const q = query(
+        collection(db, 'maintenanceLogs'),
+        where('deviceId', '==', deviceId),
+        orderBy('completedAt', 'desc'),
+      );
+      const snap = await getDocs(q);
+      return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+    },
+    enabled: !!deviceId,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+}
+
 // ============================================================================
 // DYNAMIC DATA HOOKS - Shorter cache times, more frequent updates
 // ============================================================================
@@ -224,10 +540,105 @@ export function useDepoStokByDepot(depotId: string | null) {
 }
 
 /**
- * All Depot Stock - For dashboard summaries
+ * Server-side paginated grouped depot stock.
+ *
+ * Calls the `getPaginatedDepotStock` server action so that only the requested
+ * page of grouped rows + aggregate metadata travel down the wire. Risk
+ * metadata (miadDays, coverageDays, riskyBoxes, severities) is computed on the
+ * server using the depot's minMaxRules and the productCodes catalog — clients
+ * no longer need to ship the full depoStok dataset just to render the table.
+ *
+ * Cache key encodes every parameter so navigating between pages / sorts / filters
+ * is instant on revisit. After mutating writes (mal kabul, transfer, ürün kullanım)
+ * the metadata listener invalidates the `depoStokPaginated` query family.
+ */
+export function usePaginatedDepotStock(params: {
+  depotId: string | null;
+  page: number;
+  pageSize: number;
+  sortField: string;
+  sortDirection: 'asc' | 'desc';
+  columnFilters?: Record<string, string[]>;
+  riskyOnly?: boolean;
+}) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  const {
+    depotId, page, pageSize, sortField, sortDirection, columnFilters, riskyOnly,
+  } = params;
+
+  // Stable cache key derived from sorted column filter entries.
+  const filterKey = columnFilters
+    ? Object.entries(columnFilters)
+        .map(([k, v]) => `${k}:${[...v].sort().join('|')}`)
+        .sort()
+        .join(';')
+    : '';
+
+  return useQuery({
+    queryKey: [
+      'depoStokPaginated', depotId, page, pageSize,
+      sortField, sortDirection, filterKey, !!riskyOnly,
+      currentCompanyId, isSuperAdmin,
+    ],
+    queryFn: async () => {
+      if (!depotId) {
+        return {
+          rows: [], totalRows: 0, totalPages: 0, currentPage: 1,
+          riskyRowsCount: 0, riskyBoxesTotal: 0,
+          columnValues: { stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [] },
+        };
+      }
+      const { getPaginatedDepotStock } = await import('@/actions/stokActions');
+      return getPaginatedDepotStock({
+        depotId,
+        page,
+        pageSize,
+        sortField,
+        sortDirection,
+        columnFilters,
+        riskyOnly,
+        companyId: currentCompanyId,
+        isSuperAdmin,
+      });
+    },
+    enabled: !!depotId,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    placeholderData: (prev) => prev,
+  });
+}
+
+/**
+ * Unshipped depot stock - server-side filtered by (depotId, isShipped=false).
+ * Used by panels that only operate on un-shipped inventory (e.g., StokYonetimi).
+ * Returns ALL un-shipped items for the depot (no client-side cap).
+ */
+export function useUnshippedDepoStokByDepot(depotId: string | null) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['depoStok', 'unshipped', depotId, currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      if (!depotId) return [];
+      const q = query(
+        collection(db, 'depoStok'),
+        where('depotId', '==', depotId),
+        where('isShipped', '==', false),
+      );
+      const snap = await getDocs(q);
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+    },
+    enabled: !!depotId,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+}
+
+/**
+ * All Depot Stock - For dashboard summaries and order calculations
  * No polling - invalidated via metadata listener when stock changes
  */
-export function useAllDepoStok() {
+export function useDepoStok() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['depoStok', 'all', currentCompanyId, isSuperAdmin],
@@ -467,6 +878,28 @@ export function useMinMaxRules(hospitalId: string | null) {
 }
 
 /**
+ * Min/Max Rules for a specific depot, returned as a stokKodu → rule map.
+ */
+export function useDepotMinMaxRules(depotId: string | null) {
+  return useQuery({
+    queryKey: ['depotMinMaxRules', depotId],
+    queryFn: async () => {
+      const map: Record<string, MinMaxRule> = {};
+      if (!depotId) return map;
+      const snap = await getDocs(collection(db, 'depots', depotId, 'minMaxRules'));
+      snap.forEach((d) => {
+        const rule = d.data() as MinMaxRule;
+        if (rule.stokKodu) map[rule.stokKodu] = rule;
+      });
+      return map;
+    },
+    enabled: !!depotId,
+    staleTime: 30 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+  });
+}
+
+/**
  * All Min/Max Rules for all hospitals
  */
 export function useAllMinMaxRules(hospitalIds: string[]) {
@@ -557,6 +990,7 @@ export function useStockUpdateListener() {
         // Invalidate all depoStok queries when metadata changes
         if (snapshot.exists()) {
           queryClient.invalidateQueries({ queryKey: ['depoStok'] });
+          queryClient.invalidateQueries({ queryKey: ['depoStokPaginated'] });
         }
       },
       (error) => {
@@ -753,7 +1187,10 @@ export function useInvalidateQueries() {
   const queryClient = useQueryClient();
 
   return {
-    invalidateDepoStok: () => queryClient.invalidateQueries({ queryKey: ['depoStok'] }),
+    invalidateDepoStok: () => Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['depoStok'] }),
+      queryClient.invalidateQueries({ queryKey: ['depoStokPaginated'] }),
+    ]),
     invalidateConsumption: () => queryClient.invalidateQueries({ queryKey: ['tuketimKayitlari'] }),
     invalidateShipments: () => queryClient.invalidateQueries({ queryKey: ['shipments'] }),
     invalidateProductCodes: () => queryClient.invalidateQueries({ queryKey: ['productCodes'] }),
@@ -800,4 +1237,93 @@ export function useLightweightDashboardData() {
       labPoolsQuery.refetch();
     },
   };
+}
+
+/**
+ * Depot Stock Count Sessions (Mal Kabul)
+ */
+export function useDepotCountSessions(depotId: string | null) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['depotCountSessions', currentCompanyId, isSuperAdmin, depotId],
+    queryFn: async () => {
+      if (!depotId) return [];
+      const q = query(
+        collection(db, 'depotStockCountSessions'),
+        where('depotId', '==', depotId),
+        orderBy('createdAt', 'desc')
+      );
+      const snap = await getDocs(q);
+      const sessions = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as unknown as DepotStockCountSession));
+      return filterByCompanyScope(sessions, currentCompanyId, isSuperAdmin);
+    },
+    enabled: !!depotId,
+    staleTime: 1000 * 60 * 5, // 5 minutes
+  });
+}
+
+/**
+ * Scanned Items (Mal Kabul)
+ */
+export function useScannedItems(sessionId: string | null) {
+  return useQuery({
+    queryKey: ['scannedItems', sessionId],
+    queryFn: async () => {
+      if (!sessionId) return [];
+      const snap = await getDocs(collection(db, 'depotStockCountSessions', sessionId, 'scannedItems'));
+      return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+    },
+    enabled: !!sessionId,
+    staleTime: 1000 * 30, // 30 seconds
+  });
+}
+
+/**
+ * Irsaliye Files (Mal Kabul)
+ */
+export function useIrsaliyeFiles(depotId: string | null) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['irsaliyeFiles', currentCompanyId, isSuperAdmin, depotId],
+    queryFn: async () => {
+      if (!depotId) return [];
+      const q = query(collection(db, 'irsaliyeFiles'), where('depotId', '==', depotId));
+      const snap = await getDocs(q);
+      const files = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+      return filterByCompanyScope(files, currentCompanyId, isSuperAdmin);
+    },
+    enabled: !!depotId,
+    staleTime: 1000 * 60 * 10, // 10 minutes
+  });
+}
+
+/**
+ * Maliyet Sayım Sessions (Dashboard)
+ */
+export function useMaliyetSayimSessions() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['maliyetSayimSessions', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const q = query(collection(db, 'maliyetSayimSessions'), orderBy('createdAt', 'desc'));
+      const snap = await getDocs(q);
+      const sessions = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as unknown as SayimSession));
+      return filterByCompanyScope(sessions, currentCompanyId, isSuperAdmin);
+    },
+    staleTime: 1000 * 60 * 30, // 30 minutes
+  });
+}
+
+/**
+ * Exchange Rates
+ */
+export function useExchangeRates() {
+  return useQuery({
+    queryKey: ['exchangeRates'],
+    queryFn: async () => {
+      const { getExchangeRates } = await import('@/lib/exchange-rates');
+      return getExchangeRates({ cacheStrategy: 'daily' });
+    },
+    staleTime: 1000 * 60 * 60, // 1 hour
+  });
 }

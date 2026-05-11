@@ -1,0 +1,15 @@
+{
+  "name": "ceomed-sync",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ceomed ERP -> Firestore irsaliye sync worker",
+  "scripts": {
+    "login": "node login.js",
+    "list": "node fetchIrsaliyeMaster.js",
+    "barkod": "node fetchOkutulanBarkod.js",
+    "sync": "node syncToFirestore.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.7.0"
+  }
+}

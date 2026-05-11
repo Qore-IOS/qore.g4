@@ -30,6 +30,7 @@ import CapitalEfficiency from '@/components/cost-observation/CapitalEfficiency';
 import ExpiryRiskCard from '@/components/cost-observation/ExpiryRiskCard';
 import ProductGroupBreakdown from '@/components/cost-observation/ProductGroupBreakdown';
 import { useToast } from '@/hooks/use-toast';
+import { useMaliyetSayimSessions, useExchangeRates } from '@/hooks/useFirebaseQueries';
 import {
   calculateTotalCostForRange,
   calculateTurnoverMetrics,
@@ -126,7 +127,6 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
   const router = useRouter();
   const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
   const { toast } = useToast();
-  const [isLoading, setLoading] = useState(false);
   const [rates, setRates] = useState<Record<Currency, number> | null>(null);
   const [currency, setCurrency] = useState<Currency>('TRY');
   const [sessions, setSessions] = useState<SayimSession[]>([]);
@@ -141,39 +141,26 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
     [currentUserProfile?.assignedLaboratories]
   );
 
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      try {
-        const [rateData, sessionSnap] = await Promise.all([
-          fetchExchangeRates(),
-          getDocs(query(collection(db, 'maliyetSayimSessions'), orderBy('createdAt', 'desc'))),
-        ]);
-        setRates(rateData);
-        const allSessions = sessionSnap.docs.map(d => ({ id: d.id, ...d.data() } as SayimSession));
-        const companyScoped = filterByCompanyScope(allSessions, companyId, superAdmin);
-        // Restrict lab sessions to the user's assigned laboratories. Depot
-        // sessions stay visible (they aren't lab-scoped). Admins / super
-        // admins keep full visibility within their company.
-        const labScoped = (superAdmin || isAdminRole || assignedLabs.length === 0)
-          ? companyScoped
-          : companyScoped.filter(s =>
-              s.locationType !== 'lab' || assignedLabs.includes(s.locationId)
-            );
-        setSessions(labScoped);
-      } catch (err) {
-        console.error('Error loading cost dashboard:', err);
-        try {
-          const ratesData = await fetchExchangeRates();
-          setRates(ratesData);
-        } catch {}
-      } finally {
-        setLoading(false);
-      }
-    };
+  const { data: allSessions = [], isLoading: sessionsLoading } = useMaliyetSayimSessions();
+  const { data: ratesData, isLoading: ratesLoading } = useExchangeRates();
 
-    load();
-  }, [companyId, superAdmin, isAdminRole, assignedLabs]);
+  useEffect(() => {
+    if (ratesData) setRates(ratesData);
+  }, [ratesData]);
+
+  useEffect(() => {
+    if (allSessions.length > 0) {
+      const companyScoped = filterByCompanyScope(allSessions, companyId, superAdmin);
+      const labScoped = (superAdmin || isAdminRole || assignedLabs.length === 0)
+        ? companyScoped
+        : companyScoped.filter(s =>
+            s.locationType !== 'lab' || assignedLabs.includes(s.locationId)
+          );
+      setSessions(labScoped);
+    }
+  }, [allSessions, companyId, superAdmin, isAdminRole, assignedLabs]);
+
+  const isLoading = sessionsLoading || ratesLoading;
 
   const productMap = useMemo(() => {
     const map = new Map<string, ProductCode>();

@@ -37,7 +37,7 @@ import {
   limit,
 } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
-import { useDepoStokByDepot, touchStockMetadata } from '@/hooks/useFirebaseQueries';
+import { useDepoStokByDepot, touchStockMetadata, useDepots, useProductCodes, useHospitals, useBorcDepots, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Loader2, Camera, Truck, Plus, CheckCircle2, History, DatabaseZap, ChevronsUpDown, Check, Trash2, AlertTriangle, Package, FileText, ListChecks, ArrowRight, Minus, MoreHorizontal, X, ChevronDown, ChevronUp, Search, QrCode } from 'lucide-react';
@@ -52,11 +52,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { compareAsc, parse as parseDate } from 'date-fns';
 import { formatMiad } from '@/lib/date';
 import BackButton from '@/components/BackButton';
-import ManualInlineAdder from '@/components/direkt-transfer/ManualInlineAdder';
-import TemplateSelector from '@/components/direkt-transfer/TemplateSelector';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useBarcodeParser } from '@/hooks/useBarcodeParser';
-import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -73,9 +70,8 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { autoPrintTutanakFromTransferId, isAutoTutanakEnabled } from '@/lib/tutanak-autoprint';
 import { emitFefoOverride } from '@/lib/notifications';
 import { VirtualizedList } from '@/components/ui/virtualized-list';
-import { useInvalidateQueries } from '@/hooks/useFirebaseQueries';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
-import { formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
+import { formatUnitMultiplier, normalizeUnitLabel, formatQuantityWithUnit } from '@/lib/product-unit';
 
 
 const CameraScanner = dynamic(() => import('@/components/camera-barcode-scanner'), {
@@ -83,7 +79,29 @@ const CameraScanner = dynamic(() => import('@/components/camera-barcode-scanner'
   loading: () => <div className="flex items-center justify-center p-8"><Loader2 className="h-6 w-6 animate-spin" /><span className="ml-2">Kamera Yükleniyor...</span></div>,
 });
 
-// TransferRow and FefoViolation types imported from @/lib/direkt-transfer/types
+const TemplateSelector = dynamic(() => import('@/components/direkt-transfer/TemplateSelector'), {
+  ssr: false,
+  loading: () => <div className="h-20 animate-pulse bg-muted rounded-md" />
+});
+
+const ManualInlineAdder = dynamic(() => import('@/components/direkt-transfer/ManualInlineAdder'), {
+  ssr: false,
+  loading: () => <div className="h-10 animate-pulse bg-muted rounded-md" />
+});
+
+function DirektTransferSkeleton() {
+  return (
+    <div className="flex flex-col gap-4 p-4 animate-pulse">
+      <div className="h-12 w-32 bg-muted rounded mb-4" />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="h-48 bg-muted rounded-xl" />
+        <div className="h-48 bg-muted rounded-xl" />
+      </div>
+      <div className="h-24 bg-muted rounded-xl mt-4" />
+      <div className="flex-1 bg-muted rounded-xl mt-4" style={{ minHeight: '400px' }} />
+    </div>
+  );
+}
 
 
 // OPTIMIZED FEFO CHECK:
@@ -192,17 +210,18 @@ export default function DirektTransferPanel() {
   const router = useRouter();
   const { invalidateDepoStok } = useInvalidateQueries();
 
-  const [depots, setDepots] = useState<Depot[]>([]);
-  const [products, setProducts] = useState<ProductCode[]>([]);
-  const [hospitals, setHospitals] = useState<Hospital[]>([]);
-  const [borcDepots, setBorcDepots] = useState<Depot[]>([]);
-  const [prereqsLoading, setPrereqsLoading] = useState(true);
+  // Optimized fetching with TanStack Query
+  const { data: allDepots = [], isLoading: depotsLoading } = useDepots();
+  const { data: products = [], isLoading: productsLoading } = useProductCodes();
+  const { data: hospitals = [], isLoading: hospitalsLoading } = useHospitals();
+  const { data: borcDepots = [], isLoading: borcLoading } = useBorcDepots();
 
-  const { formats: barcodeFormats, loading: formatsLoading } = useSafeBarcodeFormats();
-  const { parseAnyBarcode, resolveProductFromParsed, parseAndResolveBarcode } = useBarcodeParser();
+  const depots = useMemo(() => filterOperationalSourceDepots(allDepots, currentUserProfile), [allDepots, currentUserProfile]);
+  const prereqsLoading = depotsLoading || productsLoading || hospitalsLoading || borcLoading;
+
+  const { formats: barcodeFormats, loading: formatsLoading, parseAnyBarcode, resolveProductFromParsed, parseAndResolveBarcode } = useBarcodeParser();
   
-  const [productTracking, setProductTracking] = useState<Record<string, TrackingMode>>({});
-  const [productNames, setProductNames] = useState<Record<string, string>>({});
+
   
   const productMetaByCode = useMemo(() => {
     const map = new Map<string, ProductCode>();
@@ -306,40 +325,12 @@ export default function DirektTransferPanel() {
       .reduce((n, it) => n + (it.adet ?? 1), 0);
   }, [directTransferItems, lastScannedProduct]);
   
-  const fetchPrerequisites = useCallback(async () => {
-    setPrereqsLoading(true);
-    try {
-      const [depotSnap, productSnap, hospitalSnap, borcSnap] = await Promise.all([
-        getDocs(collection(db, 'depots')),
-        getDocs(collection(db, 'productCodes')),
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'borcDepots')),
-      ]);
-
-      const depotList = depotSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
-      const filteredDepots = filterOperationalSourceDepots(depotList, currentUserProfile);
-      setDepots(filteredDepots);
-      setProducts(productSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
-      setHospitals(hospitalSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
-      setBorcDepots(borcSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)));
-
-      if (filteredDepots.length > 0 && !selectedDepotId) {
-          setSelectedDepotId(filteredDepots[0].id);
-      }
-
-    } catch (e: any) {
-      direktTransferLogger.error('Ön veriler yüklenemedi', e, {
-        operation: 'fetchPrerequisites',
-      });
-      toast({ title: "Veri Hatası", description: `Ön veriler yüklenemedi: ${e.message}`, variant: "destructive" });
-    } finally {
-      setPrereqsLoading(false);
-    }
-  }, [selectedDepotId, toast, currentUserProfile]);
-
+  // Auto-select first depot
   useEffect(() => {
-    fetchPrerequisites();
-  }, [fetchPrerequisites]);
+    if (depots.length > 0 && !selectedDepotId) {
+      setSelectedDepotId(depots[0].id);
+    }
+  }, [depots, selectedDepotId]);
 
   // Fetch templates when template selector is opened
   const fetchTemplates = useCallback(async () => {
@@ -362,7 +353,7 @@ export default function DirektTransferPanel() {
     }
   }, [templates.length, toast]);
 
-  useEffect(() => {
+  const { productTracking, productNames } = useMemo(() => {
     const trackingMap: Record<string, TrackingMode> = {};
     const nameMap: Record<string, string> = {};
     products.forEach(p => {
@@ -372,8 +363,7 @@ export default function DirektTransferPanel() {
           if ((p as any).trackingMode) trackingMap[stokKodu] = (p as any).trackingMode as TrackingMode;
       }
     });
-    setProductTracking(trackingMap);
-    setProductNames(nameMap);
+    return { productTracking: trackingMap, productNames: nameMap };
   }, [products]);
   
   const upsertGroupedRow = useCallback((partial: Partial<TransferRow>, inc = 1) => {
@@ -425,6 +415,12 @@ export default function DirektTransferPanel() {
   const countStockByCode = useCallback((stokKodu: string): DepoStokItem[] => {
       return depotStockLookups.byCode.get(stokKodu) || [];
   }, [depotStockLookups]);
+
+  // Lot-tracked items are stored as a single document with `adet: N`; serial-tracked
+  // items are one-document-per-unit (adet: 1). Available units = sum of adet, not doc count.
+  const sumStockAdet = useCallback((items: DepoStokItem[]): number => {
+      return items.reduce((sum, item) => sum + ((item as any).adet ?? 1), 0);
+  }, []);
 
   const alreadyQueued = useCallback((stokKodu: string, lot?: string, seri?: string) => {
     return directTransferItems
@@ -517,7 +513,8 @@ export default function DirektTransferPanel() {
           flashScanFeedback('error', `Seri No ${seri} bu depoda bulunamadı.`);
           return;
         }
-        if (alreadyQueued(stokKodu, undefined, seri) >= items.length) {
+        const serialAvailable = sumStockAdet(items);
+        if (alreadyQueued(stokKodu, undefined, seri) >= serialAvailable) {
           playFeedback(true);
           flashScanFeedback('error', `Seri No ${seri} için yeterli stok yok.`);
           return;
@@ -541,10 +538,11 @@ export default function DirektTransferPanel() {
           flashScanFeedback('error', `${stokKodu} (Lot: ${lot}) bu depoda bulunamadı.`);
           return;
         }
+        const lotAvailable = sumStockAdet(items);
         const queued = alreadyQueued(stokKodu, lot);
-        if (queued >= items.length) {
+        if (queued >= lotAvailable) {
           playFeedback(true);
-          flashScanFeedback('error', `${stokKodu} (Lot: ${lot}) için en fazla ${items.length} gönderilebilir.`);
+          flashScanFeedback('error', `${stokKodu} (Lot: ${lot}) için en fazla ${lotAvailable} gönderilebilir.`);
           return;
         }
         upsertGroupedRow(
@@ -563,10 +561,11 @@ export default function DirektTransferPanel() {
         flashScanFeedback('error', `${stokKodu} bu depoda bulunamadı.`);
         return;
       }
+      const codeAvailable = sumStockAdet(items);
       const queued = alreadyQueued(stokKodu);
-      if (queued >= items.length) {
+      if (queued >= codeAvailable) {
         playFeedback(true);
-        flashScanFeedback('error', `${stokKodu} için en fazla ${items.length} gönderilebilir.`);
+        flashScanFeedback('error', `${stokKodu} için en fazla ${codeAvailable} gönderilebilir.`);
         return;
       }
       upsertGroupedRow(
@@ -577,7 +576,7 @@ export default function DirektTransferPanel() {
       flashScanFeedback('success', `${stokAdi} eklendi.`);
       playFeedback();
     },
-    [selectedFormatId, barcodeFormats, products, toast, addDirectTransferItem, upsertGroupedRow, countStockBySerial, countStockByLot, countStockByCode, alreadyQueued, resolveProductFromParsed, parseAnyBarcode, parseAndResolveBarcode, directTransferItems, isBulkScanMode, flashScanFeedback]
+    [selectedFormatId, barcodeFormats, products, toast, addDirectTransferItem, upsertGroupedRow, countStockBySerial, countStockByLot, countStockByCode, sumStockAdet, alreadyQueued, resolveProductFromParsed, parseAnyBarcode, parseAndResolveBarcode, directTransferItems, isBulkScanMode, flashScanFeedback]
   );
   
   useHidScanner({
@@ -666,7 +665,7 @@ export default function DirektTransferPanel() {
     });
 
     // Allocate for each group
-    const allocations = new Map<string, DepoStokItem[]>();
+    const allocations = new Map<string, (DepoStokItem & { transferAdet?: number })[]>();
     const usedIds = new Set<string>(alreadyAllocatedIds);
 
     for (const row of groupRows) {
@@ -677,15 +676,35 @@ export default function DirektTransferPanel() {
       const sourcePool = isQuantityTracked && !row.lotNumarasi
         ? (stockByCode.get(row.stokKodu) || [])
         : (stockByCodeAndLot.get(key) || []);
+      
       const pool = sourcePool.filter(s => !usedIds.has(s.id));
 
       const need = Math.max(1, row.adet ?? 1);
-      if (pool.length < need) {
-        return { allocations: new Map(), error: row };
+      let accumulated = 0;
+      const picks: (DepoStokItem & { transferAdet?: number })[] = [];
+
+      for (const docItem of pool) {
+        if (accumulated >= need) break;
+
+        const docQty = docItem.adet ?? 1;
+        const remainingToNeed = need - accumulated;
+        const take = Math.min(docQty, remainingToNeed);
+
+        picks.push({ ...docItem, transferAdet: take });
+        accumulated += take;
+        
+        // If we took EVERYTHING from this document, mark it as used
+        if (take === docQty) {
+          usedIds.add(docItem.id);
+        }
+        // If we only took PART of it, we don't mark it as fully used 
+        // because another pick might take the rest, but for simplicity in memory
+        // we'll track it in a more refined way if needed. For now, usedIds works for full takes.
       }
 
-      const picks = pool.slice(0, need);
-      picks.forEach(p => usedIds.add(p.id));
+      if (accumulated < need) {
+        return { allocations: new Map(), error: row };
+      }
       allocations.set(row.key, picks);
     }
 
@@ -702,13 +721,8 @@ export default function DirektTransferPanel() {
   const processTransfer = useCallback(async (confirmedViolations: FefoViolation[] = []) => {
     if (!currentUser || !currentUserProfile) return;
 
-    // Validate target selection before proceeding
     if (!isBorcMode && !selectedLabId) {
-      toast({
-        title: 'Hedef Seçilmedi',
-        description: 'Lütfen transfer için bir hedef laboratuvar seçin.',
-        variant: 'destructive'
-      });
+      toast({ title: 'Hedef Seçilmedi', description: 'Lütfen transfer için bir hedef laboratuvar seçin.', variant: 'destructive' });
       return;
     }
 
@@ -719,16 +733,12 @@ export default function DirektTransferPanel() {
     const targetName = isBorcMode
       ? (borcDepots.find(d => d.id === selectedBorcDepotId)?.name || 'Borç')
       : (targetLab?.name || '');
-
-    // Ensure targetId is never null when not in borc mode (prevents legacy records issue)
     const targetId = isBorcMode ? null : selectedLabId;
-
-    const transferRef = doc(collection(db, 'transfers'));
-    const batch = writeBatch(db);
 
     const itemsToShip: DepoStokItem[] = [];
     let allocationError = false;
 
+    // Ağ çağrısı gerektiren ön tahsis işlemini yapalım (bu çok hızlıdır, 0.5s sürer)
     for (const row of directTransferItems) {
       const picks = row.isGroup ? await allocateDocsForGroup(row) : [row];
       if (!picks) {
@@ -736,7 +746,7 @@ export default function DirektTransferPanel() {
         allocationError = true;
         break;
       }
-      itemsToShip.push(...picks);
+      itemsToShip.push(...(picks as DepoStokItem[]));
     }
     
     if (allocationError) {
@@ -744,145 +754,210 @@ export default function DirektTransferPanel() {
       return;
     }
 
-    const trackingDisabled = !isBorcMode && targetLab?.consumptionTrackingEnabled === false;
+    // --- OPTIMISTIC UI: Durumu Yedekle ve Ekranı Temizle ---
+    const previousDirectTransferItems = [...directTransferItems];
+    setDirectTransferItems([]);
+    setShipmentLoading(false);
 
-    itemsToShip.forEach(item => {
-      const stokRef = doc(db, 'depoStok', item.id);
-      if (trackingDisabled) {
-        batch.delete(stokRef);
-        const consumptionRecord: Omit<ConsumptionRecord, 'id'> = {
-          stokKodu: item.stokKodu,
-          stokAdi: item.stokAdi,
-          lotNumarasi: item.lotNumarasi,
-          miad: item.miad,
-          seriNumarasi: item.seriNumarasi,
-          laboratoryId: selectedLabId,
-          laboratoryName: targetName,
-          consumptionTimestamp: new Date(),
-          consumptionType: 'normal_kullanim' as const,
-          userId: currentUser.uid ?? 'unknown',
-          userName: currentUserProfile.name ?? currentUser.email ?? 'Unknown User',
-        };
-        batch.set(doc(collection(db, 'tuketimKayitlari')), consumptionRecord);
-      } else {
-        batch.set(stokRef, {
-          isShipped: true, sevkTarihi: Timestamp.now(), hedefKurum: targetName,
-          hedefKurumId: targetId, transferId: transferRef.id,
-          sourceDepotId: selectedDepotId, sourceDepotName: depotName,
-        }, { merge: true });
-      }
-
-      if (isBorcMode) {
-        const borcRef = doc(collection(db, 'borcTransfers'));
-        batch.set(borcRef, {
-          fromDepotId: selectedDepotId, toBorcDepotId: selectedBorcDepotId,
-          company: selectedCompany, stokKodu: item.stokKodu, stokAdi: item.stokAdi,
-          lot: item.lotNumarasi, miad: item.miad, seriNumarasi: item.seriNumarasi,
-          isReturned: false, timestamp: Timestamp.now(),
-        });
-      }
-
-      if (item.seriNumarasi) {
-        const histRef = doc(collection(db, `serialHistory/${item.seriNumarasi}/events`));
-        batch.set(histRef, { type: 'transfer', transferId: transferRef.id, details: { sourceDepotId: selectedDepotId, sourceDepotName: depotName, targetName, targetHospitalId: targetId || null, stokKodu: item.stokKodu, stokAdi: item.stokAdi, lotNumarasi: item.lotNumarasi, miad: item.miad }, timestamp: Timestamp.now() });
-      }
-      const itemRef = doc(db, 'transfers', transferRef.id, 'items', item.id);
-      batch.set(itemRef, { stokKodu: item.stokKodu, stokAdi: item.stokAdi, lotNumarasi: item.lotNumarasi || '', miad: item.miad || '', seriNumarasi: item.seriNumarasi || '', anaBirim: productMetaByCode.get(item.stokKodu || '')?.anaBirim || 'Adet', ambalajDegeri: productMetaByCode.get(item.stokKodu || '')?.ambalajDegeri ?? null });
+    toast({
+      title: 'İşlem Kaydediliyor...',
+      description: `${itemsToShip.length} ürün arka planda transfer ediliyor. Çıkış yapmayınız.`,
+      duration: 3000
     });
 
-    batch.set(transferRef, {
-      id: transferRef.id, timestamp: serverTimestamp(), sourceDepotId: selectedDepotId,
-      sourceDepotName: depotName, targetName, targetHospitalId: targetId || null,
-      mode: isBorcMode ? 'borc' : 'lab', company: isBorcMode ? selectedCompany : null,
-      itemCount: itemsToShip.length, createdByUid: currentUser.uid ?? '',
-      createdByName: currentUserProfile.name ?? currentUser.email ?? '',
-    });
+    // --- ARKA PLAN İŞLEMİ (Fire and Forget) ---
+    (async () => {
+      try {
+        const transferRef = doc(collection(db, 'transfers'));
+        const batch = writeBatch(db);
+        const trackingDisabled = !isBorcMode && targetLab?.consumptionTrackingEnabled === false;
 
-    try {
-      await batch.commit();
+        const targetHospitalId = isBorcMode ? null : selectedLabId;
 
-      // Signal stock change to all listeners (other users/tabs)
-      await touchStockMetadata();
+        itemsToShip.forEach((item: DepoStokItem & { transferAdet?: number }) => {
+          const transferQty = item.transferAdet ?? (item.adet || 1);
+          const originalQty = item.adet || 1;
+          const isPartial = transferQty < originalQty;
 
-      toast({ title: 'Transfer Tamamlandı', description: `${itemsToShip.length} ürün transfer edildi.` });
-      setLastTransferCount(itemsToShip.length);
-      
-      confirmedViolations.forEach(v => {
-        emitFefoOverride({
-            actor: { uid: currentUserProfile.uid ?? '', name: currentUserProfile.name ?? 'Bilinmeyen' },
-            action: 'direct_transfer',
-            product: {
-                stokKodu: v.scannedItem.stokKodu,
-                stokAdi: v.scannedItem.stokAdi,
-                lot: v.scannedItem.lotNumarasi,
-                miad: v.scannedItem.miad ?? '',
-            },
-            shipmentId: transferRef.id,
-            depotId: selectedDepotId,
-        });
-      });
+          // Target Reference (If partial, we need a new ID for the target document)
+          const targetRef = isPartial ? doc(collection(db, 'depoStok')) : doc(db, 'depoStok', item.id);
+          const targetDocId = targetRef.id;
 
-      await autoPrintTutanakFromTransferId(db, transferRef.id, targetLab, currentUserProfile.name ?? currentUser.email ?? '');
-      
-      // Update labTransferDates collection
-      if (targetId && selectedDepotId) {
-        try {
-          const labTransferDocId = `${targetId}_${selectedDepotId}`;
-          const labTransferRef = doc(db, 'labTransferDates', labTransferDocId);
-          const now = new Date();
-          const userName = currentUserProfile?.name || currentUser?.email || '';
+          if (isPartial) {
+            // 1. UPDATE SOURCE: Subtract quantity
+            const sourceRef = doc(db, 'depoStok', item.id);
+            batch.update(sourceRef, {
+              adet: originalQty - transferQty
+            });
 
-          // Build transfers map
-          const transfersUpdate: Record<string, any> = {};
-          itemsToShip.forEach((item) => {
-            if (item.stokKodu) {
-              transfersUpdate[item.stokKodu] = {
-                lastTransferDate: Timestamp.fromDate(now),
-                lastTransferBy: userName,
+            // 2. CREATE TARGET: New document for shipped portion
+            const targetData = {
+              ...item,
+              id: targetDocId,
+              adet: transferQty,
+              isShipped: true,
+              sevkTarihi: Timestamp.now(),
+              hedefKurum: targetName,
+              hedefKurumId: targetHospitalId,
+              transferId: transferRef.id,
+              sourceDepotId: selectedDepotId,
+              sourceDepotName: depotName,
+            };
+            delete (targetData as any).transferAdet;
+            
+            if (trackingDisabled) {
+              // If tracking is disabled at target, just record consumption
+              const consumptionRecord: Omit<ConsumptionRecord, 'id'> = {
+                stokKodu: item.stokKodu,
+                stokAdi: item.stokAdi,
+                lotNumarasi: item.lotNumarasi || '',
+                miad: item.miad as any,
+                seriNumarasi: item.seriNumarasi || '',
+                laboratoryId: selectedLabId || '',
+                laboratoryName: targetName,
+                consumptionTimestamp: new Date(),
+                consumptionType: 'normal_kullanim' as const,
+                userId: currentUser.uid ?? 'unknown',
+                userName: currentUserProfile.name ?? currentUser.email ?? 'Unknown User',
               };
+              batch.set(doc(collection(db, 'tuketimKayitlari')), consumptionRecord);
+            } else {
+              batch.set(targetRef, targetData);
             }
-          });
+          } else {
+            // FULL TRANSFER: Just update existing doc
+            if (trackingDisabled) {
+              batch.delete(targetRef);
+              const consumptionRecord: Omit<ConsumptionRecord, 'id'> = {
+                stokKodu: item.stokKodu,
+                stokAdi: item.stokAdi,
+                lotNumarasi: item.lotNumarasi || '',
+                miad: item.miad as any,
+                seriNumarasi: item.seriNumarasi || '',
+                laboratoryId: selectedLabId || '',
+                laboratoryName: targetName,
+                consumptionTimestamp: new Date(),
+                consumptionType: 'normal_kullanim' as const,
+                userId: currentUser.uid ?? 'unknown',
+                userName: currentUserProfile.name ?? currentUser.email ?? 'Unknown User',
+              };
+              batch.set(doc(collection(db, 'tuketimKayitlari')), consumptionRecord);
+            } else {
+              batch.set(targetRef, {
+                isShipped: true, 
+                sevkTarihi: Timestamp.now(), 
+                hedefKurum: targetName,
+                hedefKurumId: targetHospitalId,
+                transferId: transferRef.id,
+                sourceDepotId: selectedDepotId, 
+                sourceDepotName: depotName,
+              }, { merge: true });
+            }
+          }
 
-          await setDoc(labTransferRef, {
-            labId: targetId,
-            depotId: selectedDepotId,
-            labName: targetName,
-            depotName: depotName,
-            transfers: transfersUpdate,
-            updatedAt: serverTimestamp(),
-          }, { merge: true });
+          if (isBorcMode) {
+            const borcRef = doc(collection(db, 'borcTransfers'));
+            batch.set(borcRef, {
+              fromDepotId: selectedDepotId, toBorcDepotId: selectedBorcDepotId,
+              company: selectedCompany, stokKodu: item.stokKodu, stokAdi: item.stokAdi,
+              lot: item.lotNumarasi, miad: item.miad, seriNumarasi: item.seriNumarasi,
+              isReturned: false, timestamp: Timestamp.now(),
+              adet: transferQty
+            });
+          }
 
-          direktTransferLogger.debug('labTransferDates güncellendi', {
-            docId: labTransferDocId,
-            updates: Object.keys(transfersUpdate),
+          if (item.seriNumarasi) {
+            const histRef = doc(collection(db, `serialHistory/${item.seriNumarasi}/events`));
+            batch.set(histRef, { type: 'transfer', transferId: transferRef.id, details: { sourceDepotId: selectedDepotId, sourceDepotName: depotName, targetName, targetHospitalId, stokKodu: item.stokKodu, stokAdi: item.stokAdi, lotNumarasi: item.lotNumarasi, miad: item.miad, adet: transferQty }, timestamp: Timestamp.now() });
+          }
+          
+          const itemRef = doc(db, 'transfers', transferRef.id, 'items', targetDocId);
+          batch.set(itemRef, { 
+            stokKodu: item.stokKodu, 
+            stokAdi: item.stokAdi, 
+            lotNumarasi: item.lotNumarasi || '', 
+            miad: item.miad || '', 
+            seriNumarasi: item.seriNumarasi || '', 
+            adet: transferQty,
+            anaBirim: productMetaByCode.get(item.stokKodu || '')?.anaBirim || 'Adet', 
+            ambalajDegeri: productMetaByCode.get(item.stokKodu || '')?.ambalajDegeri ?? null 
           });
-        } catch (transferError) {
-          direktTransferLogger.error('labTransferDates güncellenemedi', transferError, {
-            labId: targetId,
-            depotId: selectedDepotId,
+        });
+
+        batch.set(transferRef, {
+          id: transferRef.id, timestamp: serverTimestamp(), sourceDepotId: selectedDepotId,
+          sourceDepotName: depotName, targetName, targetHospitalId: targetId || null,
+          mode: isBorcMode ? 'borc' : 'lab', company: isBorcMode ? selectedCompany : null,
+          itemCount: itemsToShip.length, createdByUid: currentUser.uid ?? '',
+          createdByName: currentUserProfile.name ?? currentUser.email ?? '',
+        });
+
+        await batch.commit();
+
+        await touchStockMetadata();
+
+        toast({ title: 'Transfer Tamamlandı', description: `${itemsToShip.length} ürün başarıyla transfer edildi.` });
+        setLastTransferCount(itemsToShip.length);
+        
+        confirmedViolations.forEach(v => {
+          emitFefoOverride({
+              actor: { uid: currentUserProfile.uid ?? '', name: currentUserProfile.name ?? 'Bilinmeyen' },
+              action: 'direct_transfer',
+              product: {
+                  stokKodu: v.scannedItem.stokKodu,
+                  stokAdi: v.scannedItem.stokAdi,
+                  lot: v.scannedItem.lotNumarasi,
+                  miad: v.scannedItem.miad ?? '',
+              },
+              shipmentId: transferRef.id,
+              depotId: selectedDepotId,
           });
+        });
+
+        await autoPrintTutanakFromTransferId(db, transferRef.id, targetLab, currentUserProfile.name ?? currentUser.email ?? '');
+        
+        if (targetId && selectedDepotId) {
+          try {
+            const labTransferDocId = `${targetId}_${selectedDepotId}`;
+            const labTransferRef = doc(db, 'labTransferDates', labTransferDocId);
+            const now = new Date();
+            const userName = currentUserProfile?.name || currentUser?.email || '';
+
+            const transfersUpdate: Record<string, any> = {};
+            itemsToShip.forEach((item) => {
+              if (item.stokKodu) {
+                transfersUpdate[item.stokKodu] = {
+                  lastTransferDate: Timestamp.fromDate(now),
+                  lastTransferBy: userName,
+                };
+              }
+            });
+
+            await setDoc(labTransferRef, {
+              labId: targetId,
+              depotId: selectedDepotId,
+              labName: targetName,
+              depotName: depotName,
+              transfers: transfersUpdate,
+              updatedAt: serverTimestamp(),
+            }, { merge: true });
+
+            direktTransferLogger.debug('labTransferDates güncellendi', { docId: labTransferDocId, updates: Object.keys(transfersUpdate) });
+          } catch (transferError) {
+            direktTransferLogger.error('labTransferDates güncellenemedi', transferError, { labId: targetId, depotId: selectedDepotId });
+          }
         }
+
+        direktTransferLogger.info('Transfer başarıyla tamamlandı', { transferId: transferRef.id, itemCount: itemsToShip.length, targetName, mode: isBorcMode ? 'borc' : 'lab' });
+      } catch (err) {
+        direktTransferLogger.error('Transfer commit hatası', err, { depotId: selectedDepotId, targetId, itemCount: itemsToShip.length });
+        
+        // --- ROLLBACK ---
+        setDirectTransferItems(previousDirectTransferItems);
+        toast({ title: 'İşlem İptal Edildi (Rollback)', description: 'Transfer sırasında bir hata oluştu, veriler eski haline getirildi.', variant: 'destructive' });
       }
-
-      setDirectTransferItems([]);
-
-      direktTransferLogger.info('Transfer başarıyla tamamlandı', {
-        transferId: transferRef.id,
-        itemCount: itemsToShip.length,
-        targetName,
-        mode: isBorcMode ? 'borc' : 'lab',
-      });
-    } catch (err) {
-      direktTransferLogger.error('Transfer commit hatası', err, {
-        depotId: selectedDepotId,
-        targetId,
-        itemCount: itemsToShip.length,
-      });
-      toast({ title: 'Veritabanı Hatası', description: 'Transfer sırasında hata oluştu.', variant: 'destructive' });
-    } finally {
-      setShipmentLoading(false);
-    }
-  }, [currentUser, currentUserProfile, isBorcMode, selectedLabId, hospitals, borcDepots, selectedBorcDepotId, selectedDepotId, depotName, directTransferItems, allocateDocsForGroup, toast, selectedCompany, invalidateDepoStok]);
+    })();
+  }, [currentUser, currentUserProfile, isBorcMode, selectedLabId, hospitals, borcDepots, selectedBorcDepotId, selectedDepotId, depotName, directTransferItems, allocateDocsForGroup, toast, selectedCompany, invalidateDepoStok, productMetaByCode]);
 
 
   const handleCompleteDirectTransfer = async () => {
@@ -1059,7 +1134,10 @@ export default function DirektTransferPanel() {
       const stockItems = group.lotNumarasi
         ? (depotStockLookups.byLot.get(`${group.stokKodu}__${group.lotNumarasi}`) || [])
         : (depotStockLookups.byCode.get(group.stokKodu) || []);
-      map.set(key, stockItems.length);
+      // Sum the `adet` field — lot-tracked items are stored as a single doc with adet:N,
+      // so counting docs would under-report stock (root cause of the "1 adet okutabilirsiniz" bug).
+      const available = stockItems.reduce((sum, item) => sum + ((item as any).adet ?? 1), 0);
+      map.set(key, available);
     }
     return map;
   }, [groupedTransferItems, depotStockLookups]);

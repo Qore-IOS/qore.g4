@@ -514,21 +514,52 @@ export function parseAndResolveBarcode(
 }
 
 export function resolveProductFromParsed(parsed: ParsedGeneric, productCodes: ProductCode[]) {
-  let product =
-    (parsed.stokKodu ? productCodes.find(p => p.stokKodu === parsed.stokKodu) : undefined) ||
-    (parsed.barcodeNumber ? productCodes.find(p => (p as any).barcodeNumber === parsed.barcodeNumber) : undefined);
+  // Adayları topla: stokKodu, barcodeNumber ve barcodeFormatId üzerinden eşleşen
+  // tüm ürünler. Tek bir ürün birden çok yolla eşleşebilir; aynı ürün birden çok
+  // kez sayılmasın diye id ile dedupe et.
+  const stokKoduMatches = parsed.stokKodu
+    ? productCodes.filter(p => p.stokKodu === parsed.stokKodu)
+    : [];
+  const barcodeNumberMatches = parsed.barcodeNumber
+    ? productCodes.filter(p => (p as any).barcodeNumber === parsed.barcodeNumber)
+    : [];
+  const formatMatches = parsed.matchedFormatId
+    ? productCodes.filter(p => {
+        const formatIds = (p as any).barcodeFormatIds;
+        const singleFormatId = (p as any).barcodeFormatId;
+        if (Array.isArray(formatIds) && formatIds.includes(parsed.matchedFormatId)) return true;
+        return singleFormatId === parsed.matchedFormatId;
+      })
+    : [];
 
-  if (!product && parsed.matchedFormatId) {
-    // Önce çoklu format desteğini kontrol et (yeni sistem)
-    product = productCodes.find(p => {
-      const formatIds = (p as any).barcodeFormatIds;
-      const singleFormatId = (p as any).barcodeFormatId;
-
-      if (Array.isArray(formatIds) && formatIds.includes(parsed.matchedFormatId)) {
-        return true;
+  const seen = new Set<string>();
+  const candidates: ProductCode[] = [];
+  for (const list of [stokKoduMatches, barcodeNumberMatches, formatMatches]) {
+    for (const p of list) {
+      const key = (p as any).id || p.stokKodu;
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        candidates.push(p);
       }
-      // Geriye uyumluluk için tek format kontrolü (eski sistem)
-      return singleFormatId === parsed.matchedFormatId;
+    }
+  }
+
+  const product = candidates[0];
+
+  // Veri tutarsızlığı uyarısı: aynı barkod birden fazla ürünle eşleşiyorsa
+  // konsola yazılır. Yanlış pozitif "mükerrer seri" hatalarının kaynağı genellikle
+  // burada — aynı GTIN/format birden çok ürüne tanımlanmış olabilir.
+  if (candidates.length > 1 && typeof console !== 'undefined') {
+    console.warn('[barcode.resolveProductFromParsed] Birden fazla aday ürün:', {
+      parsed: {
+        stokKodu: parsed.stokKodu,
+        barcodeNumber: parsed.barcodeNumber,
+        matchedFormatId: parsed.matchedFormatId,
+        seriNumarasi: parsed.seriNumarasi,
+        lotNumarasi: parsed.lotNumarasi,
+      },
+      candidates: candidates.map(p => ({ stokKodu: p.stokKodu, stokAdi: (p as any).stokAdi })),
+      picked: { stokKodu: product?.stokKodu, stokAdi: (product as any)?.stokAdi },
     });
   }
 

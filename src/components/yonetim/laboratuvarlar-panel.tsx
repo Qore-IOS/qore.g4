@@ -40,6 +40,7 @@ export default function LaboratuvarPanel() {
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
   const [addressDefinitions, setAddressDefinitions] = useState<AddressDefinition[]>([]);
   const [depoStok, setDepoStok] = useState<DepoStokItem[]>([]);
+  const [depots, setDepots] = useState<Depot[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentHospital, setCurrentHospital] = useState<Partial<Hospital>>({});
@@ -112,13 +113,14 @@ export default function LaboratuvarPanel() {
   const fetchHospitalsAndProducts = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [hSnap, pSnap, addrSnap, poolsSnap, stokSnap, effPoolsSnap] = await Promise.all([
+      const [hSnap, pSnap, addrSnap, poolsSnap, stokSnap, effPoolsSnap, dSnap] = await Promise.all([
         getDocs(collection(db, 'hospitals')),
         getDocs(collection(db, 'productCodes')),
         getDocs(collection(db, 'addressDefinitions')),
         getDocs(query(collection(db, 'labPools'), orderBy('createdAt', 'desc'))),
         getDocs(collection(db, 'depoStok')),
         getDocs(query(collection(db, 'efficiencyPools'), orderBy('createdAt', 'desc'))),
+        getDocs(collection(db, 'depots')),
       ]);
       setHospitals(filterByCompanyScope(hSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)), currentCompanyId, isSuperAdmin));
       setProductCodes(pSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
@@ -126,6 +128,7 @@ export default function LaboratuvarPanel() {
       setLabPools(filterByCompanyScope(poolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as LabPool)), currentCompanyId, isSuperAdmin));
       setDepoStok(filterByCompanyScope(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)), currentCompanyId, isSuperAdmin));
       setEfficiencyPools(filterByCompanyScope(effPoolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as EfficiencyPool)), currentCompanyId, isSuperAdmin));
+      setDepots(filterByCompanyScope(dSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)), currentCompanyId, isSuperAdmin));
 
     } catch (e) {
       toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
@@ -233,6 +236,8 @@ export default function LaboratuvarPanel() {
       const dataToSave: Partial<Hospital> = {
         name: currentHospital.name.trim(),
         kod: (currentHospital.kod || '').trim().toUpperCase(),
+        ceomedCariKodu: (currentHospital.ceomedCariKodu || '').trim().toUpperCase() || null,
+        ekHizmetLabIds: currentHospital.ekHizmetLabIds || [],
         address: currentHospital.address || '',
         lat: currentHospital.lat || null,
         lng: currentHospital.lng || null,
@@ -242,6 +247,8 @@ export default function LaboratuvarPanel() {
         visualDeductionEnabled: (currentHospital.manualDeductionEnabled ?? false) ? (currentHospital.visualDeductionEnabled ?? false) : false,
         fefoEnabled: currentHospital.fefoEnabled ?? true,
         perifer: currentHospital.perifer ?? false,
+        defaultDepotId: currentHospital.defaultDepotId || null,
+        defaultDepotName: currentHospital.defaultDepotId ? (depots.find(d => d.id === currentHospital.defaultDepotId)?.name || null) : null,
         autoTutanak: (currentHospital as any).autoTutanak ?? false,
         sorumluEmails: responsibleEmails,
         sorumluEmail: responsibleEmails[0] || '',
@@ -742,6 +749,7 @@ export default function LaboratuvarPanel() {
             <div className="space-y-4">
               <Input placeholder="Laboratuvar Adı" value={currentHospital.name || ''} onChange={(e) => setCurrentHospital({ ...currentHospital, name: e.target.value })} />
               <Input placeholder="Laboratuvar Kodu (Max 3 Karakter)" value={currentHospital.kod || ''} onChange={(e) => setCurrentHospital({ ...currentHospital, kod: e.target.value.toUpperCase() })} maxLength={3} />
+              <Input placeholder="Ceomed Cari Kodu (örn. M51001)" value={currentHospital.ceomedCariKodu || ''} onChange={(e) => setCurrentHospital({ ...currentHospital, ceomedCariKodu: e.target.value.trim().toUpperCase() })} />
               <Input placeholder="Adres" value={currentHospital.address || ''} onChange={(e) => handleAddressInputChange(e.target.value)} />
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -752,6 +760,35 @@ export default function LaboratuvarPanel() {
                   onChange={(e) => setResponsibleEmailsInput(e.target.value)}
                   className="pl-9 min-h-[96px]"
                 />
+              </div>
+
+              <div className="rounded-md border p-3 space-y-2">
+                <Label className="text-sm font-medium">Ek Hizmet Laboratuvarları</Label>
+                <p className="text-xs text-muted-foreground">
+                  Bu ana laboratuvara bağlı alt/ek hizmet labları. Ceomed irsaliyelerinde ana laboratuvar üzerinden gelen ürünler buralara yönlendirilebilir.
+                </p>
+                <div className="max-h-40 overflow-y-auto space-y-1">
+                  {hospitals
+                    .filter((h) => h.id !== currentHospital.id)
+                    .map((h) => {
+                      const checked = (currentHospital.ekHizmetLabIds || []).includes(h.id);
+                      return (
+                        <label key={h.id} className="flex items-center gap-2 text-sm cursor-pointer hover:bg-muted/50 rounded px-2 py-1">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => {
+                              const cur = currentHospital.ekHizmetLabIds || [];
+                              const next = e.target.checked ? [...cur, h.id] : cur.filter((id) => id !== h.id);
+                              setCurrentHospital({ ...currentHospital, ekHizmetLabIds: next });
+                            }}
+                          />
+                          <span className="font-mono text-xs text-muted-foreground">{h.kod || '—'}</span>
+                          <span>{h.name}</span>
+                        </label>
+                      );
+                    })}
+                </div>
               </div>
 
               <div className="space-y-4">
@@ -847,6 +884,32 @@ export default function LaboratuvarPanel() {
                         </p>
                     </Label>
                 </div>
+
+                {!(currentHospital.perifer) && (
+                  <div className="rounded-md border p-3 space-y-2 bg-amber-50/30 dark:bg-amber-900/10">
+                      <Label className="text-sm font-medium flex items-center gap-2">
+                        <Warehouse className="h-4 w-4 text-amber-500" />
+                        Varsayılan Depo (Otomatik Yönlendirme)
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        Bu laboratuvar için bir depo atandığında, ürün talebi oluştururken depo seçme adımı atlanır ve talepler otomatik olarak bu depoya yönlendirilir.
+                      </p>
+                      <Select 
+                        value={currentHospital.defaultDepotId || "none"} 
+                        onValueChange={(val) => setCurrentHospital({ ...currentHospital, defaultDepotId: val === "none" ? undefined : val })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Depo Seçin (Opsiyonel)" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Seçilmedi (Manuel Seçim)</SelectItem>
+                          {depots.map(d => (
+                            <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                  </div>
+                )}
               </div>
               <div className="mt-4 rounded-lg border border-white/10 bg-background/40 p-3">
                 <div className="flex items-center gap-2 mb-2">

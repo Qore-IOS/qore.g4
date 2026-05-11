@@ -798,10 +798,11 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
             );
         }
         if (cancelled) return;
-        // Group by stokKodu
+        // Group by stokKodu and sum quantity
         const grouped: Record<string, number> = {};
         stockItems.forEach(item => {
-          grouped[item.stokKodu] = (grouped[item.stokKodu] || 0) + 1;
+          const qty = item.adet || 1;
+          grouped[item.stokKodu] = (grouped[item.stokKodu] || 0) + qty;
         });
         setLocationStock(grouped);
       } catch (err) {
@@ -1048,65 +1049,83 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
         return entry.counted || hasManualData;
       });
 
-      if (sessionMode === 'collaborative' && activeSessionId && activeSession) {
-        // Collaborative mode: use completeSession to save with attribution
-        const finalItems = countedEntries.map(entry => {
-          const sessionItem = activeSession.countData?.[entry.stokKodu];
-          return {
-            stokKodu: entry.stokKodu,
-            stokAdi: entry.stokAdi,
-            marka: entry.marka,
-            stokAdedi: parseInt(entry.stokAdedi) || 0,
-            cihazUstuAdedi: parseInt(entry.cihazUstuAdedi) || 0,
-            countedByUid: sessionItem?.countedByUid || currentUserProfile?.uid || '',
-            countedByName: sessionItem?.countedByName || currentUserProfile?.name || '',
-            updates: sessionItem?.updates || [],
-          };
-        });
-
-        await completeSession(activeSessionId, finalItems, {
-          locationType,
-          locationId: selectedLocationId,
-          locationName,
-          createdByUid: activeSession.createdByUid,
-          createdByName: activeSession.createdByName,
-          totalBrands,
-          participants: activeSession.participants,
-          companyId: currentCompanyId,
-        });
-      } else {
-        // Solo mode: legacy save
-        const items = countedEntries.map(entry => ({
-          stokKodu: entry.stokKodu,
-          stokAdi: entry.stokAdi,
-          marka: entry.marka,
-          stokAdedi: parseInt(entry.stokAdedi) || 0,
-          cihazUstuAdedi: parseInt(entry.cihazUstuAdedi) || 0,
-        }));
-
-        await addDoc(collection(db, 'maliyetSayimSessions'), {
-          locationType,
-          locationId: selectedLocationId,
-          locationName,
-          createdAt: serverTimestamp(),
-          createdByUid: currentUserProfile?.uid ?? '',
-          createdByName: currentUserProfile?.name ?? '',
-          items,
-          totalBrands,
-          totalProducts: items.length,
-          companyId: normalizeCompanyId(currentCompanyId),
-        });
-      }
-
-      toast({ title: 'Sayım kaydedildi', description: `${countedEntries.length} ürün ${locationName} için kaydedildi.` });
+      // --- OPTIMISTIC UI ---
+      toast({ title: 'Sayım Kaydediliyor', description: `${countedEntries.length} ürün için veriler arka planda işleniyor.` });
+      
+      // Reset UI immediately (0ms delay)
       resetToLocationSelection();
+
+      // --- BACKGROUND PROCESS ---
+      (async () => {
+        try {
+          if (sessionMode === 'collaborative' && activeSessionId && activeSession) {
+            // Collaborative mode: use completeSession to save with attribution
+            const finalItems = countedEntries.map(entry => {
+              const sessionItem = activeSession.countData?.[entry.stokKodu];
+              return {
+                stokKodu: entry.stokKodu,
+                stokAdi: entry.stokAdi,
+                marka: entry.marka,
+                stokAdedi: parseInt(entry.stokAdedi) || 0,
+                cihazUstuAdedi: parseInt(entry.cihazUstuAdedi) || 0,
+                countedByUid: sessionItem?.countedByUid || currentUserProfile?.uid || '',
+                countedByName: sessionItem?.countedByName || currentUserProfile?.name || '',
+                updates: sessionItem?.updates || [],
+              };
+            });
+
+            await completeSession(activeSessionId, finalItems, {
+              locationType,
+              locationId: selectedLocationId,
+              locationName,
+              createdByUid: activeSession.createdByUid,
+              createdByName: activeSession.createdByName,
+              totalBrands,
+              participants: activeSession.participants,
+              companyId: currentCompanyId,
+            });
+          } else {
+            // Solo mode: legacy save
+            const items = countedEntries.map(entry => ({
+              stokKodu: entry.stokKodu,
+              stokAdi: entry.stokAdi,
+              marka: entry.marka,
+              stokAdedi: parseInt(entry.stokAdedi) || 0,
+              cihazUstuAdedi: parseInt(entry.cihazUstuAdedi) || 0,
+            }));
+
+            await addDoc(collection(db, 'maliyetSayimSessions'), {
+              locationType,
+              locationId: selectedLocationId,
+              locationName,
+              createdAt: serverTimestamp(),
+              createdByUid: currentUserProfile?.uid ?? '',
+              createdByName: currentUserProfile?.name ?? '',
+              items,
+              totalBrands,
+              totalProducts: items.length,
+              companyId: normalizeCompanyId(currentCompanyId),
+            });
+          }
+
+          toast({ title: 'Sayım Kaydedildi', description: `${locationName} için veriler başarıyla veritabanına işlendi.` });
+        } catch (err) {
+          console.error('Error saving session (Optimistic):', err);
+          toast({ 
+            title: 'Kayıt Hatası', 
+            description: 'Sayım verileri arka planda kaydedilirken bir sorun oluştu. Lütfen bağlantınızı kontrol edin.', 
+            variant: 'destructive' 
+          });
+        } finally {
+          setIsSaving(false);
+        }
+      })();
+
       return true;
     } catch (err) {
-      console.error('Error saving session:', err);
-      toast({ title: 'Hata', description: 'Sayım kaydedilemedi.', variant: 'destructive' });
-      return false;
-    } finally {
+      console.error('saveSessionToFirestore error:', err);
       setIsSaving(false);
+      return false;
     }
   }, [locationType, selectedLocationId, locationName, countData, currentUserProfile, totalBrands, isSaving, toast, sessionMode, activeSessionId, activeSession, resetToLocationSelection, currentCompanyId]);
 
