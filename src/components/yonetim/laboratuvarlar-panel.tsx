@@ -40,6 +40,7 @@ export default function LaboratuvarPanel() {
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
   const [addressDefinitions, setAddressDefinitions] = useState<AddressDefinition[]>([]);
   const [depoStok, setDepoStok] = useState<DepoStokItem[]>([]);
+  const [depots, setDepots] = useState<Depot[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentHospital, setCurrentHospital] = useState<Partial<Hospital>>({});
@@ -112,13 +113,14 @@ export default function LaboratuvarPanel() {
   const fetchHospitalsAndProducts = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [hSnap, pSnap, addrSnap, poolsSnap, stokSnap, effPoolsSnap] = await Promise.all([
+      const [hSnap, pSnap, addrSnap, poolsSnap, stokSnap, effPoolsSnap, dSnap] = await Promise.all([
         getDocs(collection(db, 'hospitals')),
         getDocs(collection(db, 'productCodes')),
         getDocs(collection(db, 'addressDefinitions')),
         getDocs(query(collection(db, 'labPools'), orderBy('createdAt', 'desc'))),
         getDocs(collection(db, 'depoStok')),
         getDocs(query(collection(db, 'efficiencyPools'), orderBy('createdAt', 'desc'))),
+        getDocs(collection(db, 'depots')),
       ]);
       setHospitals(filterByCompanyScope(hSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)), currentCompanyId, isSuperAdmin));
       setProductCodes(pSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
@@ -126,6 +128,7 @@ export default function LaboratuvarPanel() {
       setLabPools(filterByCompanyScope(poolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as LabPool)), currentCompanyId, isSuperAdmin));
       setDepoStok(filterByCompanyScope(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)), currentCompanyId, isSuperAdmin));
       setEfficiencyPools(filterByCompanyScope(effPoolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as EfficiencyPool)), currentCompanyId, isSuperAdmin));
+      setDepots(filterByCompanyScope(dSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)), currentCompanyId, isSuperAdmin));
 
     } catch (e) {
       toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
@@ -244,6 +247,8 @@ export default function LaboratuvarPanel() {
         visualDeductionEnabled: (currentHospital.manualDeductionEnabled ?? false) ? (currentHospital.visualDeductionEnabled ?? false) : false,
         fefoEnabled: currentHospital.fefoEnabled ?? true,
         perifer: currentHospital.perifer ?? false,
+        defaultDepotId: currentHospital.defaultDepotId || null,
+        defaultDepotName: currentHospital.defaultDepotId ? (depots.find(d => d.id === currentHospital.defaultDepotId)?.name || null) : null,
         autoTutanak: (currentHospital as any).autoTutanak ?? false,
         sorumluEmails: responsibleEmails,
         sorumluEmail: responsibleEmails[0] || '',
@@ -879,6 +884,32 @@ export default function LaboratuvarPanel() {
                         </p>
                     </Label>
                 </div>
+
+                {!(currentHospital.perifer) && (
+                  <div className="rounded-md border p-3 space-y-2 bg-amber-50/30 dark:bg-amber-900/10">
+                      <Label className="text-sm font-medium flex items-center gap-2">
+                        <Warehouse className="h-4 w-4 text-amber-500" />
+                        Varsayılan Depo (Otomatik Yönlendirme)
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        Bu laboratuvar için bir depo atandığında, ürün talebi oluştururken depo seçme adımı atlanır ve talepler otomatik olarak bu depoya yönlendirilir.
+                      </p>
+                      <Select 
+                        value={currentHospital.defaultDepotId || "none"} 
+                        onValueChange={(val) => setCurrentHospital({ ...currentHospital, defaultDepotId: val === "none" ? undefined : val })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Depo Seçin (Opsiyonel)" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Seçilmedi (Manuel Seçim)</SelectItem>
+                          {depots.map(d => (
+                            <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                  </div>
+                )}
               </div>
               <div className="mt-4 rounded-lg border border-white/10 bg-background/40 p-3">
                 <div className="flex items-center gap-2 mb-2">

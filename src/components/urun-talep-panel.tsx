@@ -431,7 +431,7 @@ export default function UrunTalepPanel() {
 
   // Show/hide logic
   const showLabPicker = !singleAutoLab;
-  const showDepotPicker = !isPeripheralFlow;
+  const showDepotPicker = !isPeripheralFlow && !selectedLab?.defaultDepotId;
 
   // Available products (min-max defined)
   const availableProducts = useMemo(() => {
@@ -512,13 +512,21 @@ export default function UrunTalepPanel() {
     fetchData();
   }, [fetchData]);
 
-  // Fetch Min-Max rules when a lab is selected
-  useEffect(() => {
     if (!selectedLabId) {
       setLabMinMaxRules([]);
       setOrderItems([]);
+      setSelectedDepotId('');
       return;
     }
+
+    // Auto-select depot if laboratory has a default assignment
+    const lab = allHospitals.find(h => h.id === selectedLabId);
+    if (lab?.defaultDepotId) {
+      setSelectedDepotId(lab.defaultDepotId);
+    } else if (!isPeripheralFlow) {
+      setSelectedDepotId('');
+    }
+
     const fetchRules = async () => {
       setLoading(true);
       try {
@@ -777,14 +785,33 @@ export default function UrunTalepPanel() {
 
         {/* Single-lab info banner */}
         {singleAutoLab && (
-          <div className="cihaz-card p-3 sm:p-4 flex items-center gap-2 flex-1">
-            <FlaskConical className="h-4 w-4 text-purple-400 flex-shrink-0" />
-            <span className="text-sm font-semibold text-[var(--dashboard-text)]">{singleAutoLab.name}</span>
-            {singleAutoLab.perifer && (
-              <span className="text-[10px] font-bold uppercase tracking-wide text-purple-500 px-1.5 py-0.5 rounded bg-purple-500/10">
-                Perifer
-              </span>
+          <div className="cihaz-card p-3 sm:p-4 flex flex-col justify-center gap-1 flex-1 min-w-[200px]">
+            <div className="flex items-center gap-2">
+              <FlaskConical className="h-4 w-4 text-purple-400 flex-shrink-0" />
+              <span className="text-sm font-semibold text-[var(--dashboard-text)]">{singleAutoLab.name}</span>
+              {singleAutoLab.perifer && (
+                <span className="text-[10px] font-bold uppercase tracking-wide text-purple-500 px-1.5 py-0.5 rounded bg-purple-500/10">
+                  Perifer
+                </span>
+              )}
+            </div>
+            {singleAutoLab.defaultDepotId && !singleAutoLab.perifer && (
+              <div className="flex items-center gap-1.5 text-amber-500/80">
+                <Warehouse className="h-3.5 w-3.5" />
+                <span className="text-[11px] font-medium">Otomatik Yönlendirme: {singleAutoLab.defaultDepotName || 'Depo'}</span>
+              </div>
             )}
+          </div>
+        )}
+
+        {/* Selected lab info if not single-lab but depot is auto-selected */}
+        {!singleAutoLab && selectedLabId && !showDepotPicker && !isPeripheralFlow && (
+          <div className="cihaz-card p-3 sm:p-4 flex flex-col justify-center gap-1 flex-1 min-w-[200px]">
+            <div className="flex items-center gap-1.5 text-amber-500/80">
+                <Warehouse className="h-3.5 w-3.5" />
+                <span className="text-[11px] font-medium">Hedef Depo: {selectedLab?.defaultDepotName || 'Varsayılan Depo'}</span>
+            </div>
+            <p className="text-[10px] text-[var(--dashboard-muted)]">Laboratuvara özel varsayılan depo atandığı için seçim adımı atlandı.</p>
           </div>
         )}
       </div>
