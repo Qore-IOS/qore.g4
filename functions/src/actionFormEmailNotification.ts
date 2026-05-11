@@ -125,7 +125,7 @@ async function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'apl
   const pageH = doc.internal.pageSize.getHeight();
   const padX = 40;
 
-  // Load Turkish font for proper ş, ğ, ü, ö, ç, ı, İ support
+  // --- PREFETCH ASSETS ---
   const fontBase64 = await loadTurkishFont();
   const useTurkish = fontBase64 ? setupTurkishFont(doc, fontBase64) : false;
   const FONT = useTurkish ? 'NotoSans' : 'helvetica';
@@ -518,18 +518,40 @@ async function handleActionFormCreated(
       const formTypeLabel = formType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon';
       
       const caption = 
-        `🚀 *${formTypeLabel} İşlemi Tamamlandı*\n\n` +
-        `🏥 *Kurum:* ${labName}\n` +
-        `🔬 *Cihaz:* ${cihazAdi}\n` +
-        `📋 *Form No:* ${formId}\n` +
-        `👨‍🔧 *Personel:* ${personnelName}\n\n` +
+        `*${formTypeLabel} İşlemi Tamamlandı*\n\n` +
+        `- *Kurum:* ${labName}\n` +
+        `- *Cihaz:* ${cihazAdi}\n` +
+        `- *Form No:* ${data.formNo || formId}\n` +
+        `- *Personel:* ${personnelName}\n\n` +
         `QORE Sistemi üzerinden detaylara ulaşabilirsiniz.`;
 
       const waFileName = `IslemFormu_${formType === 'teknik_servis' ? 'Teknik' : 'Aplikasyon'}_${formId.substring(0, 8)}.pdf`;
 
       try {
+        // --- 4.1 Upload to Storage to get a URL ---
+        logger.info('[WhatsApp] Uploading PDF to storage for URL-based sending...');
+        const bucket = admin.storage().bucket();
+        const storagePath = `actionFormPDFs/${formId}_${Date.now()}.pdf`;
+        const file = bucket.file(storagePath);
+        
+        await file.save(pdfBuffer, {
+          contentType: 'application/pdf',
+          metadata: {
+            cacheControl: 'public, max-age=3600',
+          },
+        });
+
+        // Make the file public so UltraMsg can access it
+        await file.makePublic();
+        
+        // Construct the public URL
+        const publicUrl = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+        
+        logger.info(`[WhatsApp] PDF uploaded and made public. URL: ${publicUrl}`);
+
+        // --- 4.2 Send via WhatsApp ---
         const waResult = await sendWhatsAppDocument(
-          pdfBuffer,
+          publicUrl,
           waFileName,
           caption,
           waConfig.group_id,
