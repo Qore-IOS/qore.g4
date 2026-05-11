@@ -315,13 +315,20 @@ export default function LaboratuvarYonetimiPanel() {
   const summaryList: GroupedStockItem[] = useMemo(
     () => Object.entries(groupedMap).map(([groupKey, grp]) => {
       const firstValidId = grp.items.find(it => typeof it.id === 'string' && it.id.length > 0)?.id ?? '';
+      // Lot dokümanları tek satırda `adet: N` taşıyor (direkt-transfer hedef
+      // dokümanı `adet: transferQty` ile yazıyor). Doküman sayısı yerine
+      // `adet` toplamı alınmalı.
+      const quantity = grp.items.reduce((sum, it) => {
+        const raw = Number((it as any).quantity ?? (it as any).adet ?? 1);
+        return sum + (Number.isFinite(raw) && raw > 0 ? Math.max(1, Math.ceil(raw)) : 1);
+      }, 0);
       return {
         groupKey,
         stokKodu: grp.stokKodu,
         stokAdi: grp.stokAdi,
         lot: grp.lot,
         miad: grp.miad,
-        quantity: grp.items.length,
+        quantity,
         anaBirim: productMeta[grp.stokKodu]?.anaBirim || 'Kutu',
         firstId: firstValidId
       };
@@ -638,7 +645,13 @@ export default function LaboratuvarYonetimiPanel() {
     const group = groupedMap[groupKey];
     if (!group || !selectedLabId) return;
 
-    const currentQty = group.items.length;
+    // Lot dokümanları tek satırda `adet: N` tutar — gerçek mevcut adet
+    // doküman sayısı değil, `adet` toplamıdır.
+    const docAdetOf = (item: DepoStokItem): number => {
+      const raw = Number((item as any).quantity ?? (item as any).adet ?? 1);
+      return Number.isFinite(raw) && raw > 0 ? Math.max(1, Math.ceil(raw)) : 1;
+    };
+    const currentQty = group.items.reduce((sum, it) => sum + docAdetOf(it), 0);
     const newQty = editQuantity;
 
     if (newQty < 0 || !Number.isInteger(newQty)) {
@@ -655,60 +668,70 @@ export default function LaboratuvarYonetimiPanel() {
 
     try {
       if (newQty > currentQty) {
-        // Add new documents
+        // Add a single doc carrying the delta as `adet`, matching depo→lab
+        // transfer storage format (one doc per lot batch with adet: N).
         const toAdd = newQty - currentQty;
         const referenceItem = group.items[0];
-        const BATCH_SIZE = 450;
-
-        for (let i = 0; i < toAdd; i += BATCH_SIZE) {
-          const batch = writeBatch(db);
-          const chunkSize = Math.min(BATCH_SIZE, toAdd - i);
-
-          for (let j = 0; j < chunkSize; j++) {
-            const docRef = doc(collection(db, 'depoStok'));
-            batch.set(docRef, withCompanyScope({
-              stokKodu: referenceItem.stokKodu ?? group.stokKodu,
-              stokAdi: referenceItem.stokAdi ?? group.stokAdi,
-              lotNumarasi: referenceItem.lotNumarasi ?? group.lot ?? null,
-              miad: referenceItem.miad ?? null,
-              seriNumarasi: null,
-              isShipped: true,
-              hedefKurumId: selectedLabId,
-              hedefKurum: selectedLabName,
-              eklenmeTarihi: Timestamp.now(),
-              sevkTarihi: referenceItem.sevkTarihi ?? Timestamp.now(),
-              kaynak: 'admin_quantity_edit',
-            }, currentCompanyId));
-          }
-          await batch.commit();
-        }
+        const batch = writeBatch(db);
+        const docRef = doc(collection(db, 'depoStok'));
+        batch.set(docRef, withCompanyScope({
+          stokKodu: referenceItem.stokKodu ?? group.stokKodu,
+          stokAdi: referenceItem.stokAdi ?? group.stokAdi,
+          lotNumarasi: referenceItem.lotNumarasi ?? group.lot ?? null,
+          miad: referenceItem.miad ?? null,
+          seriNumarasi: null,
+          adet: toAdd,
+          isShipped: true,
+          hedefKurumId: selectedLabId,
+          hedefKurum: selectedLabName,
+          eklenmeTarihi: Timestamp.now(),
+          sevkTarihi: referenceItem.sevkTarihi ?? Timestamp.now(),
+          kaynak: 'admin_quantity_edit',
+        }, currentCompanyId));
+        await batch.commit();
 
         await touchStockMetadata();
         await invalidateDepoStok();
         toast({ title: 'Adet Güncellendi', description: `${toAdd} adet eklendi. Yeni toplam: ${newQty}` });
       } else {
-        // Delete excess documents
-        const toRemove = currentQty - newQty;
-        const itemsToDelete = group.items.slice(0, toRemove).filter(item => item.id);
+        // Walk docs and decrement `adet` (or delete fully-consumed docs).
+        // Eski mantık her birim için ayrı doküman sayıyordu; `adet: 50` olan bir
+        // dokümanın yarısını silmek isteyince tüm 50 birim siliniyordu.
+        let toRemove = currentQty - newQty;
+        const updates: Array<{ id: string; newAdet: number | null }> = [];
+        const itemsWithId = group.items.filter(it => typeof it.id === 'string' && it.id.length > 0);
+        for (const item of itemsWithId) {
+          if (toRemove <= 0) break;
+          const docAdet = docAdetOf(item);
+          if (toRemove >= docAdet) {
+            updates.push({ id: item.id!, newAdet: null }); // delete
+            toRemove -= docAdet;
+          } else {
+            updates.push({ id: item.id!, newAdet: docAdet - toRemove });
+            toRemove = 0;
+          }
+        }
 
-        if (itemsToDelete.length === 0) {
+        if (updates.length === 0) {
           toast({ title: 'Hata', description: 'Silinecek kayıt bulunamadı.', variant: 'destructive' });
           return;
         }
 
         const BATCH_SIZE = 450;
-        for (let i = 0; i < itemsToDelete.length; i += BATCH_SIZE) {
+        for (let i = 0; i < updates.length; i += BATCH_SIZE) {
           const batch = writeBatch(db);
-          const chunk = itemsToDelete.slice(i, i + BATCH_SIZE);
-          for (const item of chunk) {
-            batch.delete(doc(db, 'depoStok', item.id!));
+          const chunk = updates.slice(i, i + BATCH_SIZE);
+          for (const u of chunk) {
+            const ref = doc(db, 'depoStok', u.id);
+            if (u.newAdet === null) batch.delete(ref);
+            else batch.update(ref, { adet: u.newAdet });
           }
           await batch.commit();
         }
 
         await touchStockMetadata();
         await invalidateDepoStok();
-        toast({ title: 'Adet Güncellendi', description: `${toRemove} adet silindi. Yeni toplam: ${newQty}` });
+        toast({ title: 'Adet Güncellendi', description: `${currentQty - newQty} adet silindi. Yeni toplam: ${newQty}` });
       }
 
       handleCancelEdit();
