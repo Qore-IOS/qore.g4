@@ -1,5 +1,5 @@
 import fetch from 'node-fetch';
-import * as FormData from 'form-data';
+import FormData from 'form-data';
 import { logger } from 'firebase-functions';
 
 /**
