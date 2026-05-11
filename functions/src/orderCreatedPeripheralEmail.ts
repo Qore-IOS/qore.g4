@@ -23,6 +23,17 @@ type OrderDoc = {
   createdById?: string;
   requestSource?: string;
   isPeripheral?: boolean;
+  urgency?: 'normal' | 'acil' | 'cok_acil';
+  note?: string;
+};
+
+const URGENCY_META: Record<
+  NonNullable<OrderDoc['urgency']>,
+  { label: string; emailBg: string; emailText: string; xlBg: string; xlText: string; emailBadgeBorder: string }
+> = {
+  normal:   { label: 'Normal',    emailBg: '#dcfce7', emailText: '#14532d', xlBg: 'FFDCFCE7', xlText: 'FF14532D', emailBadgeBorder: '#16a34a' },
+  acil:     { label: 'Acil',      emailBg: '#fef3c7', emailText: '#78350f', xlBg: 'FFFEF3C7', xlText: 'FF78350F', emailBadgeBorder: '#f59e0b' },
+  cok_acil: { label: 'Çok Acil',  emailBg: '#fee2e2', emailText: '#7f1d1d', xlBg: 'FFFEE2E2', xlText: 'FF7F1D1D', emailBadgeBorder: '#ef4444' },
 };
 
 const THIN_BORDER: Partial<exceljs.Borders> = {
@@ -145,7 +156,6 @@ async function buildExcelBuffer(orderId: string, order: OrderDoc): Promise<Buffe
   workbook.created = new Date();
 
   const sheet = workbook.addWorksheet('Perifer Talep', {
-    views: [{ state: 'frozen', ySplit: 8 }],
     properties: { defaultRowHeight: 18 },
   });
 
@@ -155,6 +165,9 @@ async function buildExcelBuffer(orderId: string, order: OrderDoc): Promise<Buffe
   const labName = order.kurumAdi || '-';
   const createdBy = order.createdBy || '-';
   const totalQty = (order.items || []).reduce((s, it) => s + Number(it.adet || 0), 0);
+  const urgencyKey = (order.urgency && URGENCY_META[order.urgency] ? order.urgency : 'normal') as keyof typeof URGENCY_META;
+  const urgencyMeta = URGENCY_META[urgencyKey];
+  const noteText = (order.note || '').trim();
 
   // --- Title row (merged across columns) ---
   sheet.mergeCells('A1:G1');
@@ -171,19 +184,45 @@ async function buildExcelBuffer(orderId: string, order: OrderDoc): Promise<Buffe
   sheet.getRow(1).height = 28;
 
   // --- Info rows: label + value, both bordered with distinct colours ---
-  const infoRows: Array<{ label: string; value: string; labelFill: string; valueFill: string }> = [
+  type InfoRow = {
+    label: string;
+    value: string;
+    labelFill: string;
+    valueFill: string;
+    valueBold?: boolean;
+    valueColor?: string;
+    valueSize?: number;
+  };
+  const infoRows: InfoRow[] = [
     { label: 'Sipariş ID',     value: orderId,                 labelFill: 'FFE0F2FE', valueFill: 'FFFFFFFF' },
     { label: 'Laboratuvar',    value: labName,                 labelFill: 'FFE0E7FF', valueFill: 'FFFFFFFF' },
     { label: 'Laboratuvar ID', value: labId || '-',            labelFill: 'FFCCFBF1', valueFill: 'FFFFFFFF' },
     { label: 'Talep Eden',     value: createdBy,               labelFill: 'FFFEF3C7', valueFill: 'FFFFFFFF' },
     { label: 'Tarih',          value: createdAtText,           labelFill: 'FFFEE2E2', valueFill: 'FFFFFFFF' },
+    {
+      label: 'Aciliyet',
+      value: urgencyMeta.label.toLocaleUpperCase('tr-TR'),
+      labelFill: urgencyMeta.xlBg,
+      valueFill: urgencyMeta.xlBg,
+      valueBold: true,
+      valueColor: urgencyMeta.xlText,
+      valueSize: 13,
+    },
     { label: 'Toplam Kalem / Toplam Adet', value: `${(order.items || []).length} kalem  ·  ${totalQty} adet`, labelFill: 'FFDCFCE7', valueFill: 'FFFFFFFF' },
   ];
+  if (noteText) {
+    infoRows.push({
+      label: 'Açıklama',
+      value: noteText,
+      labelFill: 'FFF1F5F9',
+      valueFill: 'FFFFFFFF',
+    });
+  }
 
   infoRows.forEach((info, idx) => {
     const rowIdx = idx + 2; // start at row 2
     const row = sheet.getRow(rowIdx);
-    row.height = 20;
+    row.height = info.label === 'Açıklama' ? 36 : 20;
 
     const labelCell = row.getCell(1);
     labelCell.value = info.label;
@@ -195,14 +234,24 @@ async function buildExcelBuffer(orderId: string, order: OrderDoc): Promise<Buffe
     sheet.mergeCells(rowIdx, 2, rowIdx, 7);
     const valueCell = row.getCell(2);
     valueCell.value = info.value;
-    valueCell.font = { size: 11, color: { argb: 'FF0F172A' } };
-    valueCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
+    valueCell.font = {
+      size: info.valueSize ?? 11,
+      bold: info.valueBold ?? false,
+      color: { argb: info.valueColor ?? 'FF0F172A' },
+    };
+    valueCell.alignment = {
+      vertical: 'middle',
+      horizontal: 'left',
+      indent: 1,
+      wrapText: info.label === 'Açıklama',
+    };
     valueCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: info.valueFill } };
     valueCell.border = THIN_BORDER;
   });
 
-  // --- Header row (row 8) ---
-  const HEADER_ROW = 8;
+  // --- Header row sits right after info rows ---
+  const HEADER_ROW = 2 + infoRows.length;
+  sheet.views = [{ state: 'frozen', ySplit: HEADER_ROW }];
   const headers = ['#', 'Stok Kodu', 'Stok Adı', 'Lab Stok', '30 Günlük Max', 'Yakın Miad Lot Adedi', 'Talep Adedi'];
   const headerRow = sheet.getRow(HEADER_ROW);
   headerRow.height = 32;
@@ -343,6 +392,8 @@ export const onPeripheralOrderCreatedSendMail = functions
       isPeripheral: order?.isPeripheral ?? null,
       requestSource: order?.requestSource ?? null,
       itemsCount: (order?.items || []).length,
+      urgency: order?.urgency ?? null,
+      hasNote: !!(order?.note && order.note.trim().length > 0),
       status: 'processing',
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       recipients: [] as string[],
@@ -396,32 +447,51 @@ export const onPeripheralOrderCreatedSendMail = functions
       const labName = order.kurumAdi || 'Bilinmeyen Laboratuvar';
       const itemsCount = (order.items || []).length;
       const totalQty = (order.items || []).reduce((sum, item) => sum + Number(item.adet || 0), 0);
+      const urgencyKey = (order.urgency && URGENCY_META[order.urgency] ? order.urgency : 'normal') as keyof typeof URGENCY_META;
+      const urgencyMeta = URGENCY_META[urgencyKey];
+      const noteText = (order.note || '').trim();
+      const subjectPrefix =
+        urgencyKey === 'cok_acil' ? '[ÇOK ACİL] ' :
+        urgencyKey === 'acil'     ? '[ACİL] '     : '';
 
+      steps.push(`Aciliyet: ${urgencyMeta.label}${noteText ? ' · açıklama mevcut' : ''}`);
       steps.push('Excel oluşturma: başladı');
       const excelBuffer = await buildExcelBuffer(orderId, order);
       steps.push(`Excel oluşturma: OK (${excelBuffer.length} byte)`);
 
+      const noteHtml = noteText
+        ? `<tr><td style="padding:6px 12px; background:#f1f5f9; border:1px solid #94a3b8; vertical-align:top;"><b>Açıklama</b></td><td style="padding:6px 12px; border:1px solid #94a3b8; white-space:pre-wrap;">${noteText.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] || c))}</td></tr>`
+        : '';
+
       await transporter.sendMail({
         from: senderEmail,
         to: emails.join(','),
-        subject: `[Perifer Talep] Yeni Sipariş — ${labName} (${totalQty} adet)`,
+        subject: `${subjectPrefix}[Perifer Talep] ${labName} — ${totalQty} adet (${urgencyMeta.label})`,
         text:
           `Perifer laboratuvardan yeni sipariş talebi açıldı.\n` +
+          `Aciliyet: ${urgencyMeta.label}\n` +
           `Sipariş ID: ${orderId}\n` +
           `Laboratuvar: ${labName}\n` +
+          `Talep Eden: ${order.createdBy || '-'}\n` +
           `Kalem Sayısı: ${itemsCount}\n` +
-          `Toplam Adet: ${totalQty}\n\n` +
-          `Detaylar ekteki Excel dosyasındadır.`,
+          `Toplam Adet: ${totalQty}\n` +
+          (noteText ? `Açıklama: ${noteText}\n` : '') +
+          `\nDetaylar ekteki Excel dosyasındadır.`,
         html: `
           <div style="font-family: -apple-system, Segoe UI, Roboto, sans-serif; color:#0f172a;">
-            <h2 style="margin:0 0 12px 0; color:#1e293b;">Perifer Laboratuvar Ürün Talebi</h2>
+            <h2 style="margin:0 0 8px 0; color:#1e293b;">Perifer Laboratuvar Ürün Talebi</h2>
+            <div style="display:inline-block; margin:0 0 14px 0; padding:6px 14px; border-radius:999px; background:${urgencyMeta.emailBg}; color:${urgencyMeta.emailText}; border:2px solid ${urgencyMeta.emailBadgeBorder}; font-weight:bold; font-size:13px; letter-spacing:0.5px;">
+              ACİLİYET: ${urgencyMeta.label.toLocaleUpperCase('tr-TR')}
+            </div>
             <p style="margin:0 0 12px 0;">Aşağıdaki perifer laboratuvardan yeni bir ürün talebi açıldı:</p>
             <table style="border-collapse:collapse; font-size:14px;">
               <tr><td style="padding:6px 12px; background:#e0f2fe; border:1px solid #94a3b8;"><b>Sipariş ID</b></td><td style="padding:6px 12px; border:1px solid #94a3b8;">${orderId}</td></tr>
               <tr><td style="padding:6px 12px; background:#e0e7ff; border:1px solid #94a3b8;"><b>Laboratuvar</b></td><td style="padding:6px 12px; border:1px solid #94a3b8;">${labName}</td></tr>
               <tr><td style="padding:6px 12px; background:#fef3c7; border:1px solid #94a3b8;"><b>Talep Eden</b></td><td style="padding:6px 12px; border:1px solid #94a3b8;">${order.createdBy || '-'}</td></tr>
+              <tr><td style="padding:6px 12px; background:${urgencyMeta.emailBg}; border:1px solid #94a3b8;"><b>Aciliyet</b></td><td style="padding:6px 12px; border:1px solid #94a3b8; color:${urgencyMeta.emailText}; font-weight:bold;">${urgencyMeta.label}</td></tr>
               <tr><td style="padding:6px 12px; background:#fee2e2; border:1px solid #94a3b8;"><b>Kalem Sayısı</b></td><td style="padding:6px 12px; border:1px solid #94a3b8;">${itemsCount}</td></tr>
               <tr><td style="padding:6px 12px; background:#dcfce7; border:1px solid #94a3b8;"><b>Toplam Adet</b></td><td style="padding:6px 12px; border:1px solid #94a3b8; font-weight:bold; font-size:16px;">${totalQty}</td></tr>
+              ${noteHtml}
             </table>
             <p style="margin:16px 0 0 0;">Sipariş detayları (lab stok, max adet, talep adedi) ekteki Excel dosyasındadır.</p>
           </div>`,
