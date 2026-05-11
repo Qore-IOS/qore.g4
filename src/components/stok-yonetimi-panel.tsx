@@ -198,6 +198,7 @@ function ColumnFilterPopover({
   sortDirection,
   onSort,
   searchPlaceholder,
+  triggerStyle = 'header',
 }: {
   column: string;
   label: string;
@@ -210,6 +211,9 @@ function ColumnFilterPopover({
   sortDirection: 'asc' | 'desc';
   onSort: (field: string) => void;
   searchPlaceholder?: string;
+  /** `header` renders the trigger as an uppercase column header with sort
+   *  indicators (default). `pill` renders a small toolbar button. */
+  triggerStyle?: 'header' | 'pill';
 }) {
   const [open, setOpen] = useState(false);
   const [localSelected, setLocalSelected] = useState<string[]>(selectedValues);
@@ -272,51 +276,73 @@ function ColumnFilterPopover({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button className={cn(
-          "flex items-center gap-1 text-left text-xs font-semibold uppercase tracking-wider transition-colors group",
-          isActive ? "text-orange-600" : "text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]"
-        )}>
-          {label}
-          <span className="flex flex-col items-center ml-0.5">
-            {isSorted ? (
-              sortDirection === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
-            ) : (
-              <ChevronsUpDown className="h-3 w-3 opacity-40 group-hover:opacity-100" />
+        {triggerStyle === 'pill' ? (
+          <button
+            type="button"
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
+              isActive
+                ? "bg-orange-500/15 border-orange-500/40 text-orange-600 hover:bg-orange-500/25"
+                : "bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] hover:bg-[var(--dashboard-surface)]",
             )}
-          </span>
-          {isActive && (
-            <span className="ml-1 flex h-4 w-4 items-center justify-center rounded-full bg-orange-500 text-[9px] text-white font-bold">{selectedValues.length}</span>
-          )}
-        </button>
+          >
+            <Filter className="h-3 w-3" />
+            {label}
+            {isActive && (
+              <span className="flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-orange-500 px-1 text-[9px] text-white font-bold">
+                {selectedValues.length}
+              </span>
+            )}
+          </button>
+        ) : (
+          <button className={cn(
+            "flex items-center gap-1 text-left text-xs font-semibold uppercase tracking-wider transition-colors group",
+            isActive ? "text-orange-600" : "text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]"
+          )}>
+            {label}
+            <span className="flex flex-col items-center ml-0.5">
+              {isSorted ? (
+                sortDirection === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
+              ) : (
+                <ChevronsUpDown className="h-3 w-3 opacity-40 group-hover:opacity-100" />
+              )}
+            </span>
+            {isActive && (
+              <span className="ml-1 flex h-4 w-4 items-center justify-center rounded-full bg-orange-500 text-[9px] text-white font-bold">{selectedValues.length}</span>
+            )}
+          </button>
+        )}
       </PopoverTrigger>
       <PopoverContent
         className="w-64 p-0 bg-[var(--dashboard-surface)] border border-[var(--dashboard-stroke)] text-[var(--dashboard-text)] shadow-lg"
         align="start"
         onWheel={(e) => e.stopPropagation()}
       >
-        {/* Sort buttons */}
-        <div className="flex border-b border-[var(--dashboard-stroke)]">
-          <button
-            type="button"
-            className={cn(
-              "flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs transition-colors hover:bg-[var(--dashboard-surface-2)]",
-              isSorted && sortDirection === 'asc' && "bg-[var(--dashboard-surface-2)] font-semibold text-orange-600",
-            )}
-            onClick={() => { onSort(column); setOpen(false); }}
-          >
-            <ChevronUp className="h-3 w-3" /> A→Z
-          </button>
-          <button
-            type="button"
-            className={cn(
-              "flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs transition-colors border-l border-[var(--dashboard-stroke)] hover:bg-[var(--dashboard-surface-2)]",
-              isSorted && sortDirection === 'desc' && "bg-[var(--dashboard-surface-2)] font-semibold text-orange-600",
-            )}
-            onClick={() => { onSort(column); setOpen(false); }}
-          >
-            <ChevronDown className="h-3 w-3" /> Z→A
-          </button>
-        </div>
+        {/* Sort buttons (omitted when the filter is not bound to a sortable column) */}
+        {triggerStyle === 'header' && (
+          <div className="flex border-b border-[var(--dashboard-stroke)]">
+            <button
+              type="button"
+              className={cn(
+                "flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs transition-colors hover:bg-[var(--dashboard-surface-2)]",
+                isSorted && sortDirection === 'asc' && "bg-[var(--dashboard-surface-2)] font-semibold text-orange-600",
+              )}
+              onClick={() => { onSort(column); setOpen(false); }}
+            >
+              <ChevronUp className="h-3 w-3" /> A→Z
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs transition-colors border-l border-[var(--dashboard-stroke)] hover:bg-[var(--dashboard-surface-2)]",
+                isSorted && sortDirection === 'desc' && "bg-[var(--dashboard-surface-2)] font-semibold text-orange-600",
+              )}
+              onClick={() => { onSort(column); setOpen(false); }}
+            >
+              <ChevronDown className="h-3 w-3" /> Z→A
+            </button>
+          </div>
+        )}
         {/* Filter search */}
         <div className="p-2 border-b border-[var(--dashboard-stroke)]">
           <Input
@@ -428,6 +454,105 @@ function ColumnFilterPopover({
 }
 
 /* ────────────────────────────────────────────
+   Severity Quick-Filter Chip
+   Renders the miad-coverage legend as a clickable toggle that drives the
+   `miadSeverity` / `belowMin` server filter. Active state mirrors the row
+   stripe colour so the legend stays self-describing.
+   ──────────────────────────────────────────── */
+function SeverityChip({
+  color,
+  label,
+  active,
+  onClick,
+}: {
+  color: string;
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] font-medium transition-colors",
+        active
+          ? "bg-orange-500/15 border-orange-500/40 text-orange-600 shadow-sm"
+          : "bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] hover:bg-[var(--dashboard-surface)]",
+      )}
+    >
+      <span className={cn("w-2 h-2 rounded-full", color)} />
+      {label}
+    </button>
+  );
+}
+
+/* ────────────────────────────────────────────
+   Active filter chip labels
+   The active filter row consumes `columnFilters` directly. Most keys hold
+   plain values that are fine to show as-is, but `miadSeverity` and
+   `belowMin` carry technical strings (e.g. "expired", "true") that need
+   friendly Turkish labels and a clearable group chip.
+   ──────────────────────────────────────────── */
+const MIAD_SEVERITY_CHIP_LABEL: Record<string, string> = {
+  expired: 'Süresi Geçmiş',
+  critical: 'Kritik (≤3 gün)',
+  warning: 'Uyarı (≤10 gün)',
+  caution: 'Dikkat (<45 gün)',
+  notice: 'Bilgi (<60 gün)',
+};
+
+function renderActiveFilterChips(
+  col: string,
+  vals: string[],
+  handleColumnFilter: (col: string, values: string[]) => void,
+) {
+  // belowMin renders as a single boolean chip rather than per-value chips.
+  if (col === 'belowMin') {
+    if (!vals.includes('true')) return null;
+    return (
+      <span
+        key="belowMin"
+        className="inline-flex items-center gap-1 rounded-full bg-slate-200 text-slate-700 px-2.5 py-0.5 text-[11px] font-medium"
+      >
+        Min. Stok
+        <button
+          onClick={() => handleColumnFilter('belowMin', [])}
+          className="hover:bg-slate-300 rounded-full p-0.5"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      </span>
+    );
+  }
+
+  return vals.map((v: string) => {
+    const label =
+      col === 'miadSeverity' ? (MIAD_SEVERITY_CHIP_LABEL[v] ?? v) : v;
+    return (
+      <span
+        key={`${col}-${v}`}
+        className="inline-flex items-center gap-1 rounded-full bg-orange-100 text-orange-700 px-2.5 py-0.5 text-[11px] font-medium"
+      >
+        {label}
+        <button
+          onClick={() =>
+            handleColumnFilter(
+              col,
+              vals.filter((x: string) => x !== v),
+            )
+          }
+          className="hover:bg-orange-200 rounded-full p-0.5"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      </span>
+    );
+  });
+}
+
+/* ────────────────────────────────────────────
    Stok Yonetimi Panel – Main Component
    ──────────────────────────────────────────── */
 export default function StokYonetimiPanel() {
@@ -531,7 +656,7 @@ export default function StokYonetimiPanel() {
   const paginatedTotalRows = paginatedQuery.data?.totalRows ?? 0;
   const paginatedTotalPages = paginatedQuery.data?.totalPages ?? 1;
   const paginatedColumnValues: PaginatedStockResult['columnValues'] =
-    paginatedQuery.data?.columnValues ?? { stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [] };
+    paginatedQuery.data?.columnValues ?? { stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [], marka: [] };
   const riskyRowsCount = paginatedQuery.data?.riskyRowsCount ?? 0;
 
   // ─── Lazy full-stock fetch (on-demand) ───
@@ -635,6 +760,51 @@ export default function StokYonetimiPanel() {
   };
 
   const hasActiveColumnFilters = Object.values(columnFilters).some((v: string[]) => v.length > 0);
+
+  /* ─── Severity chip filters (legend → clickable filters) ───
+     Each chip toggles a coherent group of `miadSeverity` values (or the
+     `belowMin` flag) in the column filter state, so chips compose with the
+     existing column-header filters and the active-filter chip row. */
+  const SEVERITY_GROUPS = {
+    expired: ['expired'] as const,
+    urgent: ['critical', 'warning', 'caution'] as const, // < 45 days (excluding already expired)
+    soon: ['notice'] as const,                            // 45–60 days
+  };
+
+  const toggleMiadSeverityGroup = (group: keyof typeof SEVERITY_GROUPS) => {
+    const severities = SEVERITY_GROUPS[group] as readonly string[];
+    setColumnFilters((prev) => {
+      const next = { ...prev };
+      const current = next['miadSeverity'] ?? [];
+      const allActive = severities.every((s) => current.includes(s));
+      const remaining = current.filter((s) => !severities.includes(s));
+      const merged = allActive
+        ? remaining
+        : Array.from(new Set([...remaining, ...severities]));
+      if (merged.length === 0) delete next['miadSeverity'];
+      else next['miadSeverity'] = merged;
+      return next;
+    });
+    setCurrentPage(1);
+  };
+
+  const toggleBelowMin = () => {
+    setColumnFilters((prev) => {
+      const next = { ...prev };
+      const isOn = (next['belowMin'] ?? []).includes('true');
+      if (isOn) delete next['belowMin'];
+      else next['belowMin'] = ['true'];
+      return next;
+    });
+    setCurrentPage(1);
+  };
+
+  const isMiadSeverityGroupActive = (group: keyof typeof SEVERITY_GROUPS) => {
+    const severities = SEVERITY_GROUPS[group] as readonly string[];
+    const current = columnFilters['miadSeverity'] ?? [];
+    return severities.every((s) => current.includes(s));
+  };
+  const isBelowMinActive = (columnFilters['belowMin'] ?? []).includes('true');
 
   /* ─── Risk metadata accessors ───
      Prefer server-computed metadata on the row; fall back to client-side
@@ -1512,12 +1682,7 @@ export default function StokYonetimiPanel() {
       {(hasActiveColumnFilters || activeFilters.length > 0 || showOnlyRiskyStock) && (
         <div className="cihaz-card flex flex-wrap items-center gap-2 px-3 py-2">
           {Object.entries(columnFilters).map(([col, vals]: [string, string[]]) =>
-            vals.map((v: string) => (
-              <span key={`${col}-${v}`} className="inline-flex items-center gap-1 rounded-full bg-orange-100 text-orange-700 px-2.5 py-0.5 text-[11px] font-medium">
-                {v}
-                <button onClick={() => handleColumnFilter(col, vals.filter((x: string) => x !== v))} className="hover:bg-orange-200 rounded-full p-0.5"><X className="h-3 w-3" /></button>
-              </span>
-            ))
+            renderActiveFilterChips(col, vals, handleColumnFilter)
           )}
           {activeFilters.map(f => (
             <span key={`${f.group}-${f.value}`} className="inline-flex items-center gap-1 rounded-full bg-blue-100 text-blue-700 px-2.5 py-0.5 text-[11px] font-medium">
@@ -1541,13 +1706,50 @@ export default function StokYonetimiPanel() {
             <span className="font-medium">Toplam: <span className="text-[var(--dashboard-text)] font-bold">{totalRows}</span> kayıt</span>
             {totalPages > 1 && <span>Sayfa <span className="text-[var(--dashboard-text)] font-bold">{currentPage}</span>/{totalPages}</span>}
           </div>
-          <div className="flex items-center gap-3">
-            {/* Miad legend */}
-            <div className="hidden sm:flex items-center gap-3 text-[10px] text-[var(--dashboard-muted)]">
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500" /> &lt;45 gün</span>
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> &lt;60 gün</span>
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-400" /> Min. Stok</span>
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            {/* Severity quick-filter chips — clicking toggles a server-side miad
+                severity filter for matching rows. Doubles as a colour legend. */}
+            <div className="hidden sm:flex items-center gap-1.5">
+              <SeverityChip
+                color="bg-red-700"
+                label="Süresi Geçmiş"
+                active={isMiadSeverityGroupActive('expired')}
+                onClick={() => toggleMiadSeverityGroup('expired')}
+              />
+              <SeverityChip
+                color="bg-red-500"
+                label="<45 gün"
+                active={isMiadSeverityGroupActive('urgent')}
+                onClick={() => toggleMiadSeverityGroup('urgent')}
+              />
+              <SeverityChip
+                color="bg-amber-500"
+                label="<60 gün"
+                active={isMiadSeverityGroupActive('soon')}
+                onClick={() => toggleMiadSeverityGroup('soon')}
+              />
+              <SeverityChip
+                color="bg-slate-400"
+                label="Min. Stok"
+                active={isBelowMinActive}
+                onClick={toggleBelowMin}
+              />
             </div>
+            {/* Marka filter (Excel-style popover) */}
+            {colValues.marka.length > 0 && (
+              <ColumnFilterPopover
+                column="marka"
+                label="Marka"
+                triggerStyle="pill"
+                uniqueValues={colValues.marka}
+                selectedValues={columnFilters['marka'] ?? []}
+                onApply={handleColumnFilter}
+                sortField={sortField}
+                sortDirection={sortDirection}
+                onSort={handleSort}
+                searchPlaceholder="Marka filtrele..."
+              />
+            )}
           </div>
         </div>
 
