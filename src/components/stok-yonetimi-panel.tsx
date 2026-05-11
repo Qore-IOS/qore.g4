@@ -186,6 +186,8 @@ const FiltreDialog: React.FC<{
 /* ────────────────────────────────────────────
    Excel-Like Column Filter Popover
    ──────────────────────────────────────────── */
+type ColumnFilterOption = { value: string; secondary?: string };
+
 function ColumnFilterPopover({
   column,
   label,
@@ -195,15 +197,19 @@ function ColumnFilterPopover({
   sortField,
   sortDirection,
   onSort,
+  searchPlaceholder,
 }: {
   column: string;
   label: string;
-  uniqueValues: string[];
+  /** Accepts plain strings or `{value, secondary}` objects. The `secondary`
+   *  field (e.g. stok kodu) is rendered beside the value and is searchable. */
+  uniqueValues: ReadonlyArray<string | ColumnFilterOption>;
   selectedValues: string[];
   onApply: (column: string, values: string[]) => void;
   sortField: string;
   sortDirection: 'asc' | 'desc';
   onSort: (field: string) => void;
+  searchPlaceholder?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [localSelected, setLocalSelected] = useState<string[]>(selectedValues);
@@ -212,12 +218,56 @@ function ColumnFilterPopover({
   const isSorted = sortField === column;
 
   useEffect(() => {
-    if (open) setLocalSelected(selectedValues);
+    if (open) {
+      setLocalSelected(selectedValues);
+      setFilterText('');
+    }
   }, [open, selectedValues]);
 
-  const filteredValues = filterText
-    ? uniqueValues.filter(v => v.toLowerCase().includes(filterText.toLowerCase()))
-    : uniqueValues;
+  // Normalize the incoming options to a uniform shape so the rest of the
+  // component does not need to branch on the input type.
+  const options = useMemo<ColumnFilterOption[]>(
+    () =>
+      uniqueValues.map((v) =>
+        typeof v === 'string' ? { value: v } : { value: v.value, secondary: v.secondary },
+      ),
+    [uniqueValues],
+  );
+
+  const normalizedFilter = filterText.trim().toLocaleLowerCase('tr');
+  const filteredOptions = normalizedFilter
+    ? options.filter((o) => {
+        const inValue = o.value.toLocaleLowerCase('tr').includes(normalizedFilter);
+        const inSecondary = o.secondary
+          ? o.secondary.toLocaleLowerCase('tr').includes(normalizedFilter)
+          : false;
+        return inValue || inSecondary;
+      })
+    : options;
+
+  // Excel-like behavior: "Select All" / "Clear" affect only the currently
+  // visible (filtered) items, preserving selections outside the filter.
+  const filteredValuesSet = useMemo(
+    () => new Set(filteredOptions.map((o) => o.value)),
+    [filteredOptions],
+  );
+  const selectAllFiltered = () => {
+    setLocalSelected((prev) => {
+      const next = new Set(prev);
+      filteredOptions.forEach((o) => next.add(o.value));
+      return Array.from(next);
+    });
+  };
+  const clearFiltered = () => {
+    setLocalSelected((prev) => prev.filter((v) => !filteredValuesSet.has(v)));
+  };
+
+  const filteredSelectedCount = filteredOptions.reduce(
+    (acc, o) => acc + (localSelected.includes(o.value) ? 1 : 0),
+    0,
+  );
+  const allFilteredSelected =
+    filteredOptions.length > 0 && filteredSelectedCount === filteredOptions.length;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -239,61 +289,138 @@ function ColumnFilterPopover({
           )}
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-56 p-0" align="start">
+      <PopoverContent
+        className="w-64 p-0 bg-[var(--dashboard-surface)] border border-[var(--dashboard-stroke)] text-[var(--dashboard-text)] shadow-lg"
+        align="start"
+        onWheel={(e) => e.stopPropagation()}
+      >
         {/* Sort buttons */}
-        <div className="flex border-b">
+        <div className="flex border-b border-[var(--dashboard-stroke)]">
           <button
-            className={cn("flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs hover:bg-[var(--dashboard-surface-2)]", isSorted && sortDirection === 'asc' && "bg-[var(--dashboard-surface-2)] font-bold")}
+            type="button"
+            className={cn(
+              "flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs transition-colors hover:bg-[var(--dashboard-surface-2)]",
+              isSorted && sortDirection === 'asc' && "bg-[var(--dashboard-surface-2)] font-semibold text-orange-600",
+            )}
             onClick={() => { onSort(column); setOpen(false); }}
           >
             <ChevronUp className="h-3 w-3" /> A→Z
           </button>
           <button
-            className={cn("flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs hover:bg-[var(--dashboard-surface-2)]", isSorted && sortDirection === 'desc' && "bg-[var(--dashboard-surface-2)] font-bold")}
+            type="button"
+            className={cn(
+              "flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs transition-colors border-l border-[var(--dashboard-stroke)] hover:bg-[var(--dashboard-surface-2)]",
+              isSorted && sortDirection === 'desc' && "bg-[var(--dashboard-surface-2)] font-semibold text-orange-600",
+            )}
             onClick={() => { onSort(column); setOpen(false); }}
           >
             <ChevronDown className="h-3 w-3" /> Z→A
           </button>
         </div>
         {/* Filter search */}
-        <div className="p-2 border-b">
+        <div className="p-2 border-b border-[var(--dashboard-stroke)]">
           <Input
-            placeholder="Filtrele..."
+            placeholder={searchPlaceholder ?? 'Filtrele...'}
             value={filterText}
-            onChange={e => setFilterText(e.target.value)}
-            className="h-7 text-xs"
+            onChange={(e) => setFilterText(e.target.value)}
+            className="h-7 text-xs bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)]"
           />
         </div>
-        {/* Select all / Clear */}
-        <div className="flex items-center justify-between px-3 py-1.5 border-b">
-          <button className="text-[10px] text-blue-600 hover:underline" onClick={() => setLocalSelected(uniqueValues)}>Tümünü Seç</button>
-          <button className="text-[10px] text-red-500 hover:underline" onClick={() => setLocalSelected([])}>Temizle</button>
+        {/* Select all / Clear (applies to the filtered subset) */}
+        <div className="flex items-center justify-between px-3 py-1.5 border-b border-[var(--dashboard-stroke)]">
+          <label
+            className={cn(
+              "flex items-center gap-2 text-[10px] font-medium cursor-pointer select-none",
+              filteredOptions.length === 0
+                ? "text-[var(--dashboard-muted)] opacity-50 cursor-not-allowed"
+                : "text-[var(--dashboard-text)]",
+            )}
+          >
+            <Checkbox
+              checked={
+                allFilteredSelected
+                  ? true
+                  : filteredSelectedCount > 0
+                    ? 'indeterminate'
+                    : false
+              }
+              onCheckedChange={(checked) => {
+                if (filteredOptions.length === 0) return;
+                if (checked) selectAllFiltered();
+                else clearFiltered();
+              }}
+              disabled={filteredOptions.length === 0}
+              className="h-3.5 w-3.5"
+            />
+            Tümünü Seç
+            {normalizedFilter && filteredOptions.length > 0 && (
+              <span className="text-[var(--dashboard-muted)]">({filteredOptions.length})</span>
+            )}
+          </label>
+          <button
+            type="button"
+            className="text-[10px] text-red-500 hover:underline disabled:opacity-50 disabled:no-underline"
+            onClick={clearFiltered}
+            disabled={filteredSelectedCount === 0}
+          >
+            Temizle
+          </button>
         </div>
-        {/* Values list */}
-        <ScrollArea className="max-h-48">
+        {/* Values list — native scroll for reliable wheel events inside the Popover */}
+        <div
+          className="max-h-56 overflow-y-auto overscroll-contain"
+          onWheel={(e) => e.stopPropagation()}
+        >
           <div className="p-1">
-            {filteredValues.length === 0 ? (
-              <p className="px-3 py-2 text-xs text-muted-foreground">Sonuç yok</p>
+            {filteredOptions.length === 0 ? (
+              <p className="px-3 py-3 text-xs text-[var(--dashboard-muted)] text-center">Sonuç yok</p>
             ) : (
-              filteredValues.map(val => (
-                <label key={val} className="flex items-center gap-2 px-2 py-1 text-xs rounded hover:bg-[var(--dashboard-surface-2)] cursor-pointer">
+              filteredOptions.map((opt) => (
+                <label
+                  key={opt.value}
+                  className="flex items-center gap-2 px-2 py-1.5 text-xs rounded hover:bg-[var(--dashboard-surface-2)] cursor-pointer"
+                >
                   <Checkbox
-                    checked={localSelected.includes(val)}
+                    checked={localSelected.includes(opt.value)}
                     onCheckedChange={(checked) => {
-                      setLocalSelected(prev => checked ? [...prev, val] : prev.filter(v => v !== val));
+                      setLocalSelected((prev) =>
+                        checked ? [...prev, opt.value] : prev.filter((v) => v !== opt.value),
+                      );
                     }}
                     className="h-3.5 w-3.5"
                   />
-                  <span className="truncate">{val || '(Boş)'}</span>
+                  <div className="min-w-0 flex-1 leading-tight">
+                    <div className="truncate text-[var(--dashboard-text)]">
+                      {opt.value || '(Boş)'}
+                    </div>
+                    {opt.secondary && (
+                      <div className="truncate font-mono text-[9px] text-[var(--dashboard-muted)]">
+                        {opt.secondary}
+                      </div>
+                    )}
+                  </div>
                 </label>
               ))
             )}
           </div>
-        </ScrollArea>
+        </div>
         {/* Apply */}
-        <div className="border-t p-2 flex gap-2">
-          <Button size="sm" variant="outline" className="flex-1 h-7 text-xs" onClick={() => { onApply(column, []); setOpen(false); }}>Sıfırla</Button>
-          <Button size="sm" className="flex-1 h-7 text-xs" onClick={() => { onApply(column, localSelected); setOpen(false); }}>Uygula</Button>
+        <div className="border-t border-[var(--dashboard-stroke)] p-2 flex gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            className="flex-1 h-7 text-xs"
+            onClick={() => { onApply(column, []); setOpen(false); }}
+          >
+            Sıfırla
+          </Button>
+          <Button
+            size="sm"
+            className="flex-1 h-7 text-xs"
+            onClick={() => { onApply(column, localSelected); setOpen(false); }}
+          >
+            Uygula
+          </Button>
         </div>
       </PopoverContent>
     </Popover>
@@ -460,6 +587,14 @@ export default function StokYonetimiPanel() {
   const totalRows = paginatedTotalRows;
   const totalPages = paginatedTotalPages;
   const colValues = paginatedColumnValues;
+
+  // Adapt the server's {value, code} payload to the ColumnFilterPopover's
+  // {value, secondary} option shape. The stok kodu is rendered beside the
+  // product name and is included in the search match.
+  const stokAdiOptionsForFilter = useMemo(
+    () => colValues.stokAdi.map((o) => ({ value: o.value, secondary: o.code })),
+    [colValues.stokAdi],
+  );
 
   // Filter out pool warehouses for the depot selector
   const availableDepots = useMemo(
@@ -1431,9 +1566,11 @@ export default function StokYonetimiPanel() {
                   <th className="w-1.5" />
                   <th className="text-left px-3 py-2.5 sticky left-0 z-20 bg-[var(--dashboard-surface-2)]">
                     <ColumnFilterPopover
-                      column="stokAdi" label="Stok Adı" uniqueValues={colValues.stokAdi}
+                      column="stokAdi" label="Stok Adı"
+                      uniqueValues={stokAdiOptionsForFilter}
                       selectedValues={columnFilters['stokAdi'] ?? []} onApply={handleColumnFilter}
                       sortField={sortField} sortDirection={sortDirection} onSort={handleSort}
+                      searchPlaceholder="Ad veya stok kodu ile filtrele..."
                     />
                   </th>
                   <th className="text-left px-3 py-2.5">
