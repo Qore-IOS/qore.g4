@@ -1064,10 +1064,23 @@ export default function UrunKullanimPanel() {
 
     // STEP 2: Duplicate check - use Firestore for recent consumption (more reliable than cache)
     if (item.irsaliyeNumarasi !== 'İSTİSNA GİRİŞİ' && item.seriNumarasi) {
-        // First check cache (fast)
-        const cachedDuplicate = tuketimKayitlari.some(c => c.stokKodu === stokKodu && c.seriNumarasi === item!.seriNumarasi);
+        // First check cache (fast). NOT: Aynı seri farklı ürünlere tanımlı
+        // olabildiği için stokKodu da karşılaştırılıyor. Bu kontrol yanlış
+        // pozitif veriyorsa `matched` log'unda mismatch görünecek.
+        const matched = tuketimKayitlari.find(c => c.stokKodu === stokKodu && c.seriNumarasi === item!.seriNumarasi);
+        const cachedDuplicate = !!matched;
 
         if (cachedDuplicate) {
+            urunKullanimLogger.warn('Cache mükerrer tüketim tespit edildi', {
+              stokKodu,
+              seriNumarasi: item.seriNumarasi,
+              matchedRecord: matched ? {
+                id: (matched as any).id,
+                stokKodu: matched.stokKodu,
+                seriNumarasi: matched.seriNumarasi,
+                consumptionTimestamp: (matched as any).consumptionTimestamp?.toString?.() || (matched as any).consumptionTimestamp,
+              } : null,
+            });
             toast({ title: 'Zaten Tüketilmiş', description: `${stokKodu} - Seri No ${item.seriNumarasi} daha önce stoktan düşülmüş.`, variant: 'destructive' });
             playFeedback(true);
             setScanStatus('error');
