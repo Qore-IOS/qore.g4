@@ -238,6 +238,8 @@ export interface PeripheralFulfillment {
   updatedBy?: string;
 }
 
+export type OrderUrgency = 'normal' | 'acil' | 'cok_acil';
+
 export interface Order {
   id: string; // Firestore document ID
   depotId?: string; // The depot that should fulfill this.
@@ -255,6 +257,8 @@ export interface Order {
   transferredBy?: string;
   isPeripheral?: boolean; // True when the target lab is perifer; orders routed to office logistics flow
   peripheralFulfillment?: PeripheralFulfillment; // Office-managed fulfillment state for perifer orders
+  urgency?: OrderUrgency; // Peripheral talep aciliyeti — normal | acil | cok_acil
+  note?: string;          // Talep açıklaması (opsiyonel, perifer akışta girilir)
 }
 
 

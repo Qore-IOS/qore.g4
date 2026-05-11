@@ -39,7 +39,9 @@ import {
   setDoc,
   serverTimestamp,
 } from 'firebase/firestore';
-import type { Depot, Hospital, ProductCode, MinMaxRule, OrderItem } from '@/lib/types';
+import type { Depot, Hospital, ProductCode, MinMaxRule, OrderItem, OrderUrgency } from '@/lib/types';
+import { Textarea } from '@/components/ui/textarea';
+import { AlertTriangle, AlertCircle, Flame } from 'lucide-react';
 import { generateId, playNotificationSound, cn } from '@/lib/utils';
 import BackButton from '@/components/BackButton';
 import { emitOrderCreatedFromRequest } from '@/lib/notifications';
@@ -366,6 +368,192 @@ function QuantityDialog({ open, onOpenChange, product, existingQty, onConfirm }:
 
 
 /* =======================================================
+   URGENCY + NOTE DIALOG (peripheral flow only)
+   ======================================================= */
+
+interface UrgencyDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  totalItems: number;
+  totalAdet: number;
+  loading: boolean;
+  onConfirm: (urgency: OrderUrgency, note: string) => void;
+}
+
+const URGENCY_OPTIONS: Array<{
+  value: OrderUrgency;
+  label: string;
+  description: string;
+  icon: React.ComponentType<{ className?: string }>;
+  classes: { ring: string; bg: string; text: string; dot: string };
+}> = [
+  {
+    value: 'normal',
+    label: 'Normal',
+    description: 'Standart süreçte karşılansın',
+    icon: AlertCircle,
+    classes: {
+      ring: 'ring-emerald-500 border-emerald-500',
+      bg: 'bg-emerald-500/10',
+      text: 'text-emerald-700 dark:text-emerald-400',
+      dot: 'bg-emerald-500',
+    },
+  },
+  {
+    value: 'acil',
+    label: 'Acil',
+    description: 'Mümkün olan en kısa sürede',
+    icon: AlertTriangle,
+    classes: {
+      ring: 'ring-amber-500 border-amber-500',
+      bg: 'bg-amber-500/10',
+      text: 'text-amber-700 dark:text-amber-400',
+      dot: 'bg-amber-500',
+    },
+  },
+  {
+    value: 'cok_acil',
+    label: 'Çok Acil',
+    description: 'Aynı gün — kritik',
+    icon: Flame,
+    classes: {
+      ring: 'ring-red-500 border-red-500',
+      bg: 'bg-red-500/10',
+      text: 'text-red-700 dark:text-red-400',
+      dot: 'bg-red-500',
+    },
+  },
+];
+
+function UrgencyDialog({ open, onOpenChange, totalItems, totalAdet, loading, onConfirm }: UrgencyDialogProps) {
+  const [urgency, setUrgency] = useState<OrderUrgency>('normal');
+  const [note, setNote] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setUrgency('normal');
+      setNote('');
+    }
+  }, [open]);
+
+  const handleSubmit = () => {
+    if (loading) return;
+    onConfirm(urgency, note.trim());
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!loading) onOpenChange(o); }}>
+      <DialogContent className="max-w-md sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="text-xl font-bold text-[var(--dashboard-text)]">
+            Talebi Onayla
+          </DialogTitle>
+          <DialogDescription className="text-sm text-[var(--dashboard-muted)]">
+            Aciliyet durumunu seçin ve dilerseniz kısa bir açıklama ekleyin. Talep onaylandıktan sonra ofis lojistiğine iletilecek ve otomatik e-posta gönderilecek.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-5 py-2">
+          {/* Summary */}
+          <div className="flex items-center gap-3 px-3 py-2 rounded-xl bg-[var(--dashboard-surface-2)] text-xs">
+            <ShoppingCart className="h-4 w-4 text-[var(--dashboard-muted)]" />
+            <span className="text-[var(--dashboard-muted)]">
+              <span className="font-bold text-[var(--dashboard-text)]">{totalItems}</span> kalem
+              {' · '}
+              <span className="font-bold text-[var(--dashboard-text)]">{totalAdet}</span> adet
+            </span>
+          </div>
+
+          {/* Urgency chips */}
+          <div>
+            <div className="text-xs font-semibold text-[var(--dashboard-text)] mb-2">
+              Aciliyet Durumu <span className="text-red-500">*</span>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {URGENCY_OPTIONS.map(opt => {
+                const Icon = opt.icon;
+                const selected = urgency === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setUrgency(opt.value)}
+                    disabled={loading}
+                    className={cn(
+                      'group flex flex-col items-center gap-1.5 px-2 py-3 rounded-xl border-2 transition-all text-center',
+                      selected
+                        ? cn('ring-2', opt.classes.ring, opt.classes.bg)
+                        : 'border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)] hover:border-[var(--dashboard-accent)]/60'
+                    )}
+                    aria-pressed={selected}
+                  >
+                    <div className={cn('p-1.5 rounded-lg', selected ? opt.classes.bg : 'bg-[var(--dashboard-surface-2)]')}>
+                      <Icon className={cn('h-4 w-4', selected ? opt.classes.text : 'text-[var(--dashboard-muted)]')} />
+                    </div>
+                    <div className={cn('text-sm font-bold', selected ? opt.classes.text : 'text-[var(--dashboard-text)]')}>
+                      {opt.label}
+                    </div>
+                    <div className="text-[10px] text-[var(--dashboard-muted)] leading-tight">
+                      {opt.description}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Note */}
+          <div>
+            <div className="text-xs font-semibold text-[var(--dashboard-text)] mb-2">
+              Açıklama <span className="text-[var(--dashboard-muted)] font-normal">(opsiyonel)</span>
+            </div>
+            <Textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Örn. Hafta sonu nöbeti için kritik..."
+              maxLength={500}
+              rows={3}
+              disabled={loading}
+              className="resize-none"
+            />
+            <div className="text-[10px] text-[var(--dashboard-muted)] text-right mt-1">
+              {note.length}/500
+            </div>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="flex items-center gap-2 pt-2">
+          <button
+            type="button"
+            onClick={() => onOpenChange(false)}
+            disabled={loading}
+            className="flex-1 py-2.5 rounded-xl text-sm font-semibold bg-[var(--dashboard-surface-2)] text-[var(--dashboard-text)] hover:bg-[var(--dashboard-surface)] shadow-[var(--dashboard-pressed)] disabled:opacity-50"
+          >
+            İptal
+          </button>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={loading}
+            className={cn(
+              'flex-[1.5] flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all',
+              loading
+                ? 'bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] cursor-not-allowed'
+                : 'bg-green-600 text-white shadow-[var(--dashboard-raised)] hover:shadow-[var(--dashboard-raised-soft)] hover:-translate-y-0.5 active:translate-y-0'
+            )}
+          >
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+            {loading ? 'Gönderiliyor...' : 'Onayla ve Gönder'}
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+
+/* =======================================================
    MAIN PANEL
    ======================================================= */
 
@@ -395,6 +583,9 @@ export default function UrunTalepPanel() {
   // Quantity dialog
   const [qtyDialogOpen, setQtyDialogOpen] = useState(false);
   const [qtyDialogProduct, setQtyDialogProduct] = useState<ProductCode | null>(null);
+
+  // Urgency confirmation dialog (peripheral flow only)
+  const [urgencyDialogOpen, setUrgencyDialogOpen] = useState(false);
 
   // More menu
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
@@ -579,7 +770,10 @@ export default function UrunTalepPanel() {
     setOrderItems(prev => prev.filter(item => item.id !== productId));
   };
 
-  const createOrderRequest = async () => {
+  // Entry point bound to both "Talep Oluştur" buttons. For peripheral labs we
+  // open the urgency/note dialog and let it call submitOrderRequest after
+  // confirmation; for non-peripheral flow we submit immediately.
+  const handleCreateClick = () => {
     if (!selectedLabId || orderItems.length === 0) {
       toast({ title: 'Eksik Bilgi', description: 'Laboratuvar ve en az bir ürün seçmelisiniz.', variant: 'destructive' });
       return;
@@ -589,26 +783,82 @@ export default function UrunTalepPanel() {
       return;
     }
 
-    // --- OPTIMISTIC UI ---
-    // 1. Durumu Yedekle
-    const previousOrderItems = [...orderItems];
-    const previousLabId = selectedLabId;
-    const previousDepotId = selectedDepotId;
-    const labName = allHospitals.find(h => h.id === selectedLabId)?.name || 'Bilinmeyen Kurum';
-    const depotName = depots.find(d => d.id === selectedDepotId)?.name || 'Bilinmeyen Depo';
-
-    // 2. Hemen Ekranı Temizle (0 ms tepki)
-    setOrderItems([]);
-    if (!singleAutoLab) {
-      setSelectedLabId('');
-      setLabMinMaxRules([]);
+    if (isPeripheralFlow) {
+      setUrgencyDialogOpen(true);
+      return;
     }
+    submitOrderRequest();
+  };
 
-    toast({ 
-      title: 'Talep Kaydediliyor...', 
-      description: `${previousOrderItems.length} kalem ürün talebi arka planda işleniyor.`,
-      duration: 3000
-    });
+  const submitOrderRequest = async (urgency?: OrderUrgency, note?: string) => {
+    if (!selectedLabId || orderItems.length === 0) return;
+    if (!isPeripheralFlow && !selectedDepotId) return;
+
+    setLoading(true);
+    try {
+      const orderId = generateId();
+      const labName = allHospitals.find(h => h.id === selectedLabId)?.name || 'Bilinmeyen Kurum';
+      const depotName = depots.find(d => d.id === selectedDepotId)?.name || '';
+
+      // Perifer talepleri depo ataması yapmadan kayıt edilir; hangi depoya
+      // yönlendirileceğine ofis lojistik sorumlusu karar verir.
+      const newOrder: Record<string, any> = {
+        id: orderId,
+        labId: selectedLabId,
+        kurumAdi: labName,
+        items: orderItems,
+        status: 'pending' as const,
+        createdAt: serverTimestamp(),
+        createdBy: currentUserProfile?.name || currentUser?.email || 'Unknown User',
+        createdById: currentUser?.uid || 'unknown',
+        requestSource: isPeripheralFlow ? ('lab_to_office' as const) : ('lab_to_depot' as const),
+        isPeripheral: isPeripheralFlow,
+        transferredAt: null,
+      };
+      if (!isPeripheralFlow) {
+        newOrder.depotId = selectedDepotId;
+        newOrder.depotName = depotName || 'Bilinmeyen Depo';
+      } else {
+        newOrder.depotId = null;
+        newOrder.depotName = null;
+      }
+      if (isPeripheralFlow) {
+        newOrder.urgency = urgency ?? 'normal';
+        if (note && note.length > 0) newOrder.note = note;
+      }
+
+      await setDoc(doc(db, 'orders', orderId), newOrder);
+
+      await emitOrderCreatedFromRequest({
+        actor: { uid: currentUserProfile?.uid || '', name: currentUserProfile?.name || '' },
+        orderId: orderId,
+        labId: selectedLabId,
+        depotId: isPeripheralFlow ? '' : selectedDepotId,
+        audienceHint: {
+          userId: currentUserProfile?.uid,
+          role: currentUserProfile?.role,
+          views: currentUserProfile?.accessibleViews,
+          labIds: currentUserProfile?.assignedLaboratories,
+          depotIds: currentUserProfile?.assignedDepots,
+        }
+      });
+
+      playNotificationSound();
+      toast({
+        title: 'Talep Oluşturuldu',
+        description: isPeripheralFlow
+          ? 'Talebiniz ofis lojistiğine iletildi.'
+          : `Siparişiniz "${depotName}" deposuna iletildi.`,
+      });
+
+      // Reset form — but keep the auto-selected lab so the user can
+      // immediately create another request without re-picking it.
+      setOrderItems([]);
+      if (!singleAutoLab) {
+        setSelectedLabId('');
+        setLabMinMaxRules([]);
+      }
+      setUrgencyDialogOpen(false);
 
     // 3. Arka Planda Kaydet
     (async () => {
@@ -683,7 +933,7 @@ export default function UrunTalepPanel() {
 
         {/* CTA — Create Order (top right) */}
         <button
-          onClick={createOrderRequest}
+          onClick={handleCreateClick}
           disabled={!isCreateReady || loading}
           className={cn(
             "hidden sm:flex items-center gap-2 px-5 py-2.5 rounded-2xl text-sm font-bold transition-all",
@@ -1099,7 +1349,7 @@ export default function UrunTalepPanel() {
               <div className="flex-1" />
               {/* Mobile CTA */}
               <button
-                onClick={createOrderRequest}
+                onClick={handleCreateClick}
                 disabled={!isCreateReady || loading}
                 className={cn(
                   "sm:hidden flex items-center gap-2 px-4 py-2.5 rounded-2xl text-sm font-bold transition-all",
@@ -1144,6 +1394,16 @@ export default function UrunTalepPanel() {
         product={qtyDialogProduct}
         existingQty={qtyDialogProduct ? (orderItems.find(i => i.stokKodu === qtyDialogProduct.stokKodu)?.adet ?? 0) : 0}
         onConfirm={handleQtyConfirm}
+      />
+
+      {/* ====================== URGENCY DIALOG (peripheral) ====================== */}
+      <UrgencyDialog
+        open={urgencyDialogOpen}
+        onOpenChange={setUrgencyDialogOpen}
+        totalItems={totalDraftItems}
+        totalAdet={totalDraftAdet}
+        loading={loading}
+        onConfirm={(urgency, note) => { submitOrderRequest(urgency, note); }}
       />
     </div>
   );
