@@ -545,6 +545,27 @@ async function handleFaultResolved(reportId: string, after: any): Promise<void> 
           logEntry.whatsappError = waResult.error || 'Unknown error';
           logEntry.steps.push(`WhatsApp BASARISIZ: ${waResult.error}`);
         }
+
+        // --- Also send to parts group if fault contains part changes ---
+        const partsGroupId: string | undefined = waConfig.parts_group_id || '905362835871-1624522639@g.us';
+        if (partChanges.length > 0 && partsGroupId) {
+          logger.info(`[faultReport] Fault has part changes; also sending to parts group: ${partsGroupId}`);
+          try {
+            const partsResult = await sendWhatsAppDocument(
+              publicUrl, waFileName, caption,
+              partsGroupId, waConfig.instance_id, waConfig.token,
+            );
+            logger.info(`[faultReport] Parts group result: ${JSON.stringify(partsResult)}`);
+            if (partsResult.success) {
+              logEntry.steps.push(`WhatsApp (parca grubu) gonderildi (msgId: ${partsResult.messageId})`);
+            } else {
+              logEntry.steps.push(`WhatsApp (parca grubu) BASARISIZ: ${partsResult.error}`);
+            }
+          } catch (partsErr: any) {
+            logger.error('[faultReport] Parts group send error', partsErr);
+            logEntry.steps.push(`WhatsApp (parca grubu) HATA: ${partsErr?.message || partsErr}`);
+          }
+        }
       } catch (waErr: any) {
         logger.error('[faultReport] WhatsApp fatal error', waErr);
         logEntry.whatsappError = waErr?.message || String(waErr);
