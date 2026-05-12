@@ -527,34 +527,32 @@ async function handleActionFormCreated(
     logEntry.steps.push('Hospital dokümanı sorgusu: OK');
 
     const hospitalData = hospitalDoc.data()!;
-    const sorumluEmail = hospitalData.sorumluEmail;
+    const sorumluEmailRaw = hospitalData.sorumluEmail;
+    const sorumluEmail = (sorumluEmailRaw && typeof sorumluEmailRaw === 'string') ? sorumluEmailRaw.trim() : '';
     logEntry.labName = hospitalData.name || data.labName || null;
 
-    if (!sorumluEmail || !sorumluEmail.trim()) {
-      logEntry.status = 'skipped';
-      logEntry.error = `Hospital ${hospitalId} için sorumluEmail tanımlı değil`;
-      logEntry.steps.push('sorumluEmail kontrolü: BAŞARISIZ - email tanımlı değil');
-      logger.info(`[actionFormEmail] No sorumluEmail for hospital ${hospitalId}, skipping email.`);
-      await db.collection('emailNotificationLogs').add(logEntry);
-      return;
+    let emailEnabled = true;
+    if (!sorumluEmail) {
+      emailEnabled = false;
+      logEntry.steps.push('sorumluEmail kontrolü: ATLANDI - email tanımlı değil (WhatsApp denenecek)');
+      logger.info(`[actionFormEmail] No sorumluEmail for hospital ${hospitalId}, skipping email but continuing with WhatsApp.`);
+    } else {
+      logEntry.steps.push(`sorumluEmail kontrolü: OK (${sorumluEmail})`);
+      logEntry.emailSentTo = sorumluEmail;
+      logger.info(`[actionFormEmail] sorumluEmail: ${sorumluEmail}`);
     }
-    logEntry.steps.push(`sorumluEmail kontrolü: OK (${sorumluEmail.trim()})`);
-    logEntry.emailSentTo = sorumluEmail.trim();
-    logger.info(`[actionFormEmail] sorumluEmail: ${sorumluEmail.trim()}`);
 
-    // 2. Get transporter
-    const transporter = getTransporter();
-    if (!transporter) {
-      logEntry.status = 'failed';
+    // 2. Get transporter (only required for email; WhatsApp still proceeds without SMTP)
+    const transporter = emailEnabled ? getTransporter() : null;
+    if (emailEnabled && !transporter) {
+      emailEnabled = false;
       logEntry.smtpConfigured = false;
-      logEntry.error = 'SMTP yapılandırması eksik. SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS ortam değişkenlerini kontrol edin.';
-      logEntry.steps.push('SMTP yapılandırma kontrolü: BAŞARISIZ - ortam değişkenleri eksik');
-      logger.error(`[actionFormEmail] SMTP not configured, cannot send email for form ${formId}.`);
-      await db.collection('emailNotificationLogs').add(logEntry);
-      return;
+      logEntry.steps.push('SMTP yapılandırma kontrolü: BAŞARISIZ - ortam değişkenleri eksik (WhatsApp denenecek)');
+      logger.error(`[actionFormEmail] SMTP not configured, skipping email for form ${formId} but continuing with WhatsApp.`);
+    } else if (transporter) {
+      logEntry.smtpConfigured = true;
+      logEntry.steps.push('SMTP yapılandırma kontrolü: OK');
     }
-    logEntry.smtpConfigured = true;
-    logEntry.steps.push('SMTP yapılandırma kontrolü: OK');
 
     // 3. Generate PDF
     logEntry.steps.push('PDF oluşturma: başladı');
@@ -640,43 +638,55 @@ async function handleActionFormCreated(
       logEntry.steps.push('WhatsApp gönderimi: ATLADI (Yapılandırma eksik)');
     }
 
-    // 5. Compose email
-    const labName = hospitalData.name || data.labName || 'Bilinmeyen Laboratuvar';
-    const cihazAdi = data.cihazAdi || 'Bilinmeyen Cihaz';
-    const personnelName = data.createdByName || 'Bilinmeyen Kullanici';
-    const formTypeLabel = formType === 'teknik_servis' ? 'teknik servis' : 'aplikasyon';
+    // 5. Compose email (only if email is enabled)
+    if (emailEnabled && transporter) {
+      const labName = hospitalData.name || data.labName || 'Bilinmeyen Laboratuvar';
+      const cihazAdi = data.cihazAdi || 'Bilinmeyen Cihaz';
+      const personnelName = data.createdByName || 'Bilinmeyen Kullanici';
+      const formTypeLabel = formType === 'teknik_servis' ? 'teknik servis' : 'aplikasyon';
 
-    const subject = `Islem Formu - ${labName} - ${cihazAdi}`;
-    const body = `Sorumlusu oldugunuz ${labName} laboratuvarindaki ${cihazAdi} cihazina ${formTypeLabel} personeli ${personnelName} tarafindan islem formu kaydedilmistir. Ilgili belge ektedir.`;
+      const subject = `Islem Formu - ${labName} - ${cihazAdi}`;
+      const body = `Sorumlusu oldugunuz ${labName} laboratuvarindaki ${cihazAdi} cihazina ${formTypeLabel} personeli ${personnelName} tarafindan islem formu kaydedilmistir. Ilgili belge ektedir.`;
 
-    const senderEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
-    const pdfFileName = `IslemFormu_${formType === 'teknik_servis' ? 'TeknikServis' : 'Aplikasyon'}_${formId.substring(0, 8)}.pdf`;
+      const senderEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
+      const pdfFileName = `IslemFormu_${formType === 'teknik_servis' ? 'TeknikServis' : 'Aplikasyon'}_${formId.substring(0, 8)}.pdf`;
 
-    logEntry.steps.push(`Email hazırlandı: from=${senderEmail}, to=${sorumluEmail.trim()}, subject=${subject}`);
+      logEntry.steps.push(`Email hazırlandı: from=${senderEmail}, to=${sorumluEmail}, subject=${subject}`);
 
-    try {
-      await transporter.sendMail({
-        from: senderEmail,
-        to: sorumluEmail.trim(),
-        subject,
-        text: body,
-        attachments: [
-          {
-            filename: pdfFileName,
-            content: pdfBuffer,
-            contentType: 'application/pdf',
-          },
-        ],
-      });
+      try {
+        await transporter.sendMail({
+          from: senderEmail,
+          to: sorumluEmail,
+          subject,
+          text: body,
+          attachments: [
+            {
+              filename: pdfFileName,
+              content: pdfBuffer,
+              contentType: 'application/pdf',
+            },
+          ],
+        });
 
-      logEntry.status = 'sent';
-      logEntry.steps.push('Email gönderimi: BAŞARILI');
-      logger.info(`[actionFormEmail] Email sent to ${sorumluEmail} for form ${formId}`);
-    } catch (error: any) {
-      logEntry.status = 'failed';
-      logEntry.error = error?.message || String(error);
-      logEntry.steps.push(`Email gönderimi: BAŞARISIZ - ${error?.message || error}`);
-      logger.error(`[actionFormEmail] Failed to send email for form ${formId}:`, error?.message || error);
+        logEntry.status = 'sent';
+        logEntry.steps.push('Email gönderimi: BAŞARILI');
+        logger.info(`[actionFormEmail] Email sent to ${sorumluEmail} for form ${formId}`);
+      } catch (error: any) {
+        logEntry.status = 'failed';
+        logEntry.error = error?.message || String(error);
+        logEntry.steps.push(`Email gönderimi: BAŞARISIZ - ${error?.message || error}`);
+        logger.error(`[actionFormEmail] Failed to send email for form ${formId}:`, error?.message || error);
+      }
+    } else {
+      // Email skipped; reflect final status based on WhatsApp result
+      if (logEntry.whatsappSent) {
+        logEntry.status = 'sent';
+        logEntry.steps.push('Email gönderimi: ATLANDI (sorumluEmail/SMTP yok), WhatsApp ile bildirildi');
+      } else {
+        logEntry.status = 'skipped';
+        logEntry.steps.push('Email gönderimi: ATLANDI (sorumluEmail/SMTP yok)');
+      }
+      logger.info(`[actionFormEmail] Email step skipped for form ${formId} (emailEnabled=false).`);
     }
   } catch (outerError: any) {
     logEntry.status = 'error';
