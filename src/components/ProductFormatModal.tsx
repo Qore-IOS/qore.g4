@@ -179,6 +179,9 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
         currency: versionDraft.currency || product.currency || 'EUR',
         marka: versionDraft.marka || product.marka || null,
         laboratuvarGrubu: versionDraft.laboratuvarGrubu || product.laboratuvarGrubu || null,
+        laboratuvarGruplari: (versionDraft.laboratuvarGruplari && versionDraft.laboratuvarGruplari.length > 0)
+          ? versionDraft.laboratuvarGruplari
+          : (product.laboratuvarGruplari || (product.laboratuvarGrubu ? [product.laboratuvarGrubu] : null)),
         testGrubu: versionDraft.testGrubu || product.testGrubu || null,
         cihazGrubu: versionDraft.cihazGrubu || product.cihazGrubu || null,
         testAdi: versionDraft.testAdi || product.testAdi || null,
@@ -243,7 +246,10 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
       cost: product.cost || 0,
       currency: product.currency || 'EUR',
       marka: product.marka?.trim() || null,
-      laboratuvarGrubu: product.laboratuvarGrubu?.trim() || null,
+      laboratuvarGrubu: product.laboratuvarGrubu?.trim() || (product.laboratuvarGruplari?.[0] || null),
+      laboratuvarGruplari: (product.laboratuvarGruplari && product.laboratuvarGruplari.length > 0)
+        ? product.laboratuvarGruplari
+        : (product.laboratuvarGrubu ? [product.laboratuvarGrubu] : null),
       testGrubu: product.testGrubu?.trim() || null,
       cihazGrubu: product.cihazGrubu?.trim() || null,
       testAdi: product.testAdi?.trim() || null,
@@ -408,13 +414,56 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
 
           {/* Section: Sınıflandırma */}
           <Section title="Sınıflandırma" icon={<Tag className="h-4 w-4" />} defaultOpen={isEditMode}>
-            <NeuSelect
-              label="Laboratuvar Grubu"
-              value={product.laboratuvarGrubu || ''}
-              onValueChange={(v) => handleSelectChange('laboratuvarGrubu', v)}
-              placeholder="Seçin..."
-              options={definitions.labGroups}
-            />
+            <div>
+              <label className="text-xs font-semibold text-[var(--dashboard-text)] block mb-1.5">
+                Laboratuvar Grupları
+                <span className="ml-1 text-[10px] font-normal text-[var(--dashboard-muted)]">
+                  (lojistik sorumlusuna atama için – bir veya birden fazla seçilebilir)
+                </span>
+              </label>
+              <div className="rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] p-2 max-h-44 overflow-y-auto space-y-1">
+                {definitions.labGroups.length === 0 && (
+                  <p className="text-xs text-[var(--dashboard-muted)] px-1 py-1">Tanımlı laboratuvar grubu yok.</p>
+                )}
+                {definitions.labGroups.map(lg => {
+                  const selected = (product.laboratuvarGruplari && product.laboratuvarGruplari.includes(lg))
+                    || (!product.laboratuvarGruplari?.length && product.laboratuvarGrubu === lg);
+                  return (
+                    <label
+                      key={lg}
+                      className={cn(
+                        'flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer text-sm transition-colors',
+                        selected ? 'bg-[var(--device-accent-weak)] text-[var(--device-accent)] font-semibold' : 'hover:bg-[var(--dashboard-surface)]'
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={!!selected}
+                        onChange={(e) => {
+                          setProduct(prev => {
+                            const current = new Set(prev.laboratuvarGruplari && prev.laboratuvarGruplari.length > 0
+                              ? prev.laboratuvarGruplari
+                              : (prev.laboratuvarGrubu ? [prev.laboratuvarGrubu] : []));
+                            if (e.target.checked) current.add(lg); else current.delete(lg);
+                            const arr = Array.from(current);
+                            return {
+                              ...prev,
+                              laboratuvarGruplari: arr,
+                              laboratuvarGrubu: arr[0] || undefined,
+                            };
+                          });
+                        }}
+                        className="h-3.5 w-3.5"
+                      />
+                      <span>{lg}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              <p className="text-[10px] text-[var(--dashboard-muted)] mt-1">
+                Seçilen gruplara atanmış lojistik sorumlusu kullanıcılar bu ürünü görür.
+              </p>
+            </div>
             <div className="grid grid-cols-2 gap-3">
               <NeuSelect
                 label="Test Grubu"

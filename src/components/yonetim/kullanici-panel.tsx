@@ -82,7 +82,7 @@ export default function KullaniciPanel() {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [uSnap, hSnap, dSnap, pSnap] = await Promise.all([
+      const [uSnap, hSnap, dSnap, pSnap, lgSnap] = await Promise.all([
         getDocs(collection(db, 'users')),
         getDocs(collection(db, 'hospitals')),
         getDocs(collection(db, 'depots')),
@@ -92,7 +92,7 @@ export default function KullaniciPanel() {
       setUsers(uSnap.docs.map(d => ({ id: d.id, ...d.data() } as AppUser)));
       setHospitals(hSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
       setDepots(dSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)));
-      setLabGroups(lgSnap.docs.map(d => ({ id: d.id, name: d.data().name || d.id })));
+      setLabGroups(lgSnap.docs.map(d => ({ id: d.id, name: (d.data() as any).name || d.id })));
       const productCodes = pSnap.docs.map(d => d.data() as ProductCode);
       const uniqueBrands = Array.from(new Set(productCodes.map(p => p.marka).filter(Boolean) as string[]));
       setBrands(uniqueBrands);
@@ -471,20 +471,25 @@ export default function KullaniciPanel() {
                             {labGroups.length === 0 ? (
                                 <p className="text-xs text-muted-foreground italic">Henüz laboratuvar grubu tanımlanmamış</p>
                             ) : (
-                                labGroups.map(lg => (
-                                    <div key={lg.id} className="flex items-center space-x-2 mb-1">
-                                        <Checkbox
-                                            id={`lg-${lg.id}`}
-                                            checked={currentUser.assignedLabGroups?.includes(lg.id)}
-                                            onCheckedChange={(checked) => {
-                                                const currentGroups = currentUser.assignedLabGroups || [];
-                                                const newGroups = checked ? [...currentGroups, lg.id] : currentGroups.filter(id => id !== lg.id);
-                                                setCurrentUser({ ...currentUser, assignedLabGroups: newGroups });
-                                            }}
-                                        />
-                                        <label htmlFor={`lg-${lg.id}`} className="text-sm">{lg.name}</label>
-                                    </div>
-                                ))
+                                labGroups.map(lg => {
+                                    const isChecked = currentUser.assignedLabGroups?.includes(lg.name)
+                                        || currentUser.assignedLabGroups?.includes(lg.id);
+                                    return (
+                                        <div key={lg.id} className="flex items-center space-x-2 mb-1">
+                                            <Checkbox
+                                                id={`lg-${lg.id}`}
+                                                checked={isChecked}
+                                                onCheckedChange={(checked) => {
+                                                    const currentGroups = (currentUser.assignedLabGroups || [])
+                                                        .filter(k => k !== lg.id && k !== lg.name);
+                                                    const newGroups = checked ? [...currentGroups, lg.name] : currentGroups;
+                                                    setCurrentUser({ ...currentUser, assignedLabGroups: newGroups });
+                                                }}
+                                            />
+                                            <label htmlFor={`lg-${lg.id}`} className="text-sm">{lg.name}</label>
+                                        </div>
+                                    );
+                                })
                             )}
                         </ScrollArea>
                     )}
