@@ -10,6 +10,25 @@ import { sendWhatsAppDocument } from './lib/whatsapp';
 
 const db = admin.firestore();
 
+// --- Turkish -> ASCII transliteration for PDF (font does not support TR glyphs) ---
+const TR_ASCII_MAP: Record<string, string> = {
+  'ç': 'c', 'Ç': 'C',
+  'ğ': 'g', 'Ğ': 'G',
+  'ı': 'i', 'İ': 'I',
+  'ö': 'o', 'Ö': 'O',
+  'ş': 's', 'Ş': 'S',
+  'ü': 'u', 'Ü': 'U',
+};
+
+function tr(s: any): string {
+  if (s === null || s === undefined) return '';
+  return String(s).replace(/[çÇğĞıİöÖşŞüÜ]/g, (ch) => TR_ASCII_MAP[ch] ?? ch);
+}
+
+function trRows(rows: any[][]): string[][] {
+  return rows.map((row) => row.map((cell) => tr(cell)));
+}
+
 // --- Assets cache ---
 let turkishFontBase64: string | null = null;
 let headerLogoBase64: string | null = null;
@@ -183,7 +202,7 @@ async function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'apl
   doc.setFontSize(14);
   doc.setFont(FONT, 'bold');
   const title = formType === 'teknik_servis' ? 'Teknik Servis Formu' : 'Aplikasyon Formu';
-  doc.text(title, padX, headerY);
+  doc.text(tr(title), padX, headerY);
 
   // Center: Company Logo
   if (headerLogo) {
@@ -243,7 +262,7 @@ async function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'apl
   ];
 
   autoTable(doc, {
-    body: info,
+    body: trRows(info),
     startY: currentY,
     theme: 'plain',
     styles: { font: FONT, fontSize: 10, cellPadding: { top: 4, bottom: 4 } },
@@ -256,11 +275,11 @@ async function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'apl
     doc.setFont(FONT, 'bold');
     doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
     doc.line(padX, currentY, pageW - padX, currentY);
-    doc.text('Açıklama', padX, currentY + 12);
+    doc.text(tr('Açıklama'), padX, currentY + 12);
     currentY += 18;
 
     autoTable(doc, {
-      body: [[data.aciklama]],
+      body: [[tr(data.aciklama)]],
       startY: currentY,
       theme: 'grid',
       styles: { font: FONT, fontSize: 10, cellPadding: { top: 6, bottom: 6 } },
@@ -277,7 +296,7 @@ async function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'apl
     doc.setFont(FONT, 'bold');
     doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
     doc.line(padX, currentY, pageW - padX, currentY);
-    doc.text('İşlem Türüne Özel Detaylar', padX, currentY + 12);
+    doc.text(tr('İşlem Türüne Özel Detaylar'), padX, currentY + 12);
     currentY += 18;
 
     const detailRows: string[][] = [];
@@ -304,7 +323,7 @@ async function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'apl
     }
 
     autoTable(doc, {
-      body: detailRows,
+      body: trRows(detailRows),
       startY: currentY,
       theme: 'grid',
       styles: { font: FONT, fontSize: 10, cellPadding: { top: 5, bottom: 5 } },
@@ -319,7 +338,7 @@ async function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'apl
   doc.setFontSize(10);
   doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
   doc.line(padX, currentY, pageW - padX, currentY);
-  doc.text('İşlem Tipi ve Türü', padX, currentY + 12);
+  doc.text(tr('İşlem Tipi ve Türü'), padX, currentY + 12);
   currentY += 18;
   doc.setFont(FONT, 'normal');
 
@@ -331,7 +350,7 @@ async function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'apl
   islemRows.push(['İşlem Türü:', turuLabels[data.islemTuru || ''] || data.islemTuru || '-']);
 
   autoTable(doc, {
-    body: islemRows,
+    body: trRows(islemRows),
     startY: currentY,
     theme: 'plain',
     styles: { font: FONT, fontSize: 10, cellPadding: { top: 3, bottom: 3 } },
@@ -347,15 +366,15 @@ async function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'apl
     doc.setFont(FONT, 'bold');
     doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
     doc.line(padX, currentY, pageW - padX, currentY);
-    doc.text('Yapılan İşlemler', padX, currentY + 12);
+    doc.text(tr('Yapılan İşlemler'), padX, currentY + 12);
     currentY += 18;
 
     autoTable(doc, {
-      head: [['İşlem', 'Adet']],
-      body: operations.map((act: any) => [
+      head: [[tr('İşlem'), tr('Adet')]],
+      body: trRows(operations.map((act: any) => [
         operationLabels[act.action] || act.action,
         String(act.quantity),
-      ]),
+      ])),
       startY: currentY,
       theme: 'grid',
       styles: { font: FONT, fontSize: 10 },
@@ -371,12 +390,12 @@ async function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'apl
     doc.setFont(FONT, 'bold');
     doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
     doc.line(padX, currentY, pageW - padX, currentY);
-    doc.text('Değişen Parçalar', padX, currentY + 12);
+    doc.text(tr('Değişen Parçalar'), padX, currentY + 12);
     currentY += 18;
 
     autoTable(doc, {
-      head: [['Parça', 'Kod', 'Adet', 'Birim']],
-      body: parts.map((act: any) => {
+      head: [[tr('Parça'), tr('Kod'), tr('Adet'), tr('Birim')]],
+      body: trRows(parts.map((act: any) => {
         let partName = act.stokAdi || act.action;
         if (act.isManualEntry && act.stokKodu && act.stokAdi) {
           partName = `${act.stokKodu} - ${act.stokAdi}`;
@@ -387,7 +406,7 @@ async function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'apl
           String(act.quantity),
           act.anaBirim ? act.anaBirim.toLowerCase() : 'adet',
         ];
-      }),
+      })),
       startY: currentY,
       theme: 'grid',
       styles: { font: FONT, fontSize: 10 },
@@ -401,7 +420,7 @@ async function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'apl
   doc.setFont(FONT, 'bold');
   doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
   doc.line(padX, currentY, pageW - padX, currentY);
-  doc.text('Cihaz Durumu', padX, currentY + 12);
+  doc.text(tr('Cihaz Durumu'), padX, currentY + 12);
   currentY += 18;
 
   let cihazDurumuStr = CIHAZ_DURUMU_LABELS[data.cihazDurumu || ''] || '-';
@@ -410,7 +429,7 @@ async function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'apl
   }
 
   autoTable(doc, {
-    body: [['Durum:', cihazDurumuStr]],
+    body: trRows([['Durum:', cihazDurumuStr]]),
     startY: currentY,
     theme: 'plain',
     styles: { font: FONT, fontSize: 10, cellPadding: { top: 3, bottom: 3 } },
@@ -426,15 +445,15 @@ async function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'apl
     doc.setFont(FONT, 'bold');
     doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
     doc.line(padX, signatureY - 15, pageW - padX, signatureY - 15);
-    doc.text('İmzalar', padX, signatureY - 3);
+    doc.text(tr('İmzalar'), padX, signatureY - 3);
 
     doc.setFont(FONT, 'normal');
     doc.setFontSize(10);
 
     // Personnel signature with name
-    doc.text('İşlemi Yapan Personel', padX, signatureY + 15);
+    doc.text(tr('İşlemi Yapan Personel'), padX, signatureY + 15);
     doc.setFont(FONT, 'bold');
-    doc.text(data.createdByName || '-', padX, signatureY + 28);
+    doc.text(tr(data.createdByName || '-'), padX, signatureY + 28);
     doc.setFont(FONT, 'normal');
     doc.line(padX, signatureY + 32, padX + 150, signatureY + 32);
     if (data.personnelSignature) {
@@ -444,9 +463,9 @@ async function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'apl
     }
 
     // Technician signature with name
-    doc.text('Teknisyen', pageW / 2 + 20, signatureY + 15);
+    doc.text(tr('Teknisyen'), pageW / 2 + 20, signatureY + 15);
     doc.setFont(FONT, 'bold');
-    doc.text(data.technicianName || '-', pageW / 2 + 20, signatureY + 28);
+    doc.text(tr(data.technicianName || '-'), pageW / 2 + 20, signatureY + 28);
     doc.setFont(FONT, 'normal');
     doc.line(pageW / 2 + 20, signatureY + 32, pageW / 2 + 170, signatureY + 32);
     if (data.technicianSignature) {
