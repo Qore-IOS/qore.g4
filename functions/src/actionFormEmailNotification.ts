@@ -647,6 +647,32 @@ async function handleActionFormCreated(
           logEntry.whatsappError = waResult.error || 'Unknown error';
           logEntry.steps.push(`WhatsApp gönderimi: BAŞARISIZ - ${waResult.error}`);
         }
+
+        // --- 4.3 Send to parts group too if form contains part changes ---
+        const hasPartChanges = Array.isArray(data.actions) && data.actions.some((a: any) => a?.type === 'part_change');
+        const partsGroupId: string | undefined = waConfig.parts_group_id || '905362835871-1624522639@g.us';
+        if (hasPartChanges && partsGroupId) {
+          logger.info(`[WhatsApp] Form has part changes; also sending to parts group: ${partsGroupId}`);
+          try {
+            const partsResult = await sendWhatsAppDocument(
+              publicUrl,
+              waFileName,
+              caption,
+              partsGroupId,
+              waConfig.instance_id,
+              waConfig.token
+            );
+            logger.info(`[WhatsApp] Parts group result: ${JSON.stringify(partsResult)}`);
+            if (partsResult.success) {
+              logEntry.steps.push(`WhatsApp (parça grubu) gönderimi: OK (MsgID: ${partsResult.messageId})`);
+            } else {
+              logEntry.steps.push(`WhatsApp (parça grubu) gönderimi: BAŞARISIZ - ${partsResult.error}`);
+            }
+          } catch (partsErr: any) {
+            logger.error('[WhatsApp] Parts group send error', partsErr);
+            logEntry.steps.push(`WhatsApp (parça grubu) gönderimi: HATA - ${partsErr?.message || partsErr}`);
+          }
+        }
       } catch (waErr: any) {
         logger.error('[WhatsApp] Fatal error in notification flow:', waErr);
         logEntry.whatsappError = waErr.message || String(waErr);
