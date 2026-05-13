@@ -321,7 +321,8 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
                           record.efficiencyMetrics.genelVerimlilik >= 70 ? 'text-yellow-600' :
                           record.efficiencyMetrics.genelVerimlilik >= 50 ? 'text-orange-600' : 'text-red-600'
                         }`}
-                        aria-label="Laboratuvar dönem hesap detayını aç"
+                        aria-label="Laboratuvar dönem hesap detay panelini aç"
+                        title="Hesap detay panelini aç"
                       >
                         %{record.efficiencyMetrics.genelVerimlilik.toFixed(1)}
                       </Link>
@@ -360,7 +361,8 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
                         <Link
                           href={calculationDetailHref}
                           className={`w-fit text-left text-lg font-bold underline-offset-4 hover:underline focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 ${record.efficiencyMetrics.stokDogrulukSkoru >= 90 ? 'text-green-600' : record.efficiencyMetrics.stokDogrulukSkoru >= 70 ? 'text-yellow-600' : 'text-red-600'}`}
-                          aria-label="Laboratuvar dönem hesap detayını aç"
+                          aria-label="Laboratuvar dönem hesap detay panelini aç"
+                          title="Hesap detay panelini aç"
                         >
                           %{record.efficiencyMetrics.stokDogrulukSkoru.toFixed(1)}
                         </Link>
@@ -575,6 +577,7 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
                             <Link
                               href={`/total-verimlilik/gecmis/${record.id}/hesap-detay/${encodeURIComponent(row.labId)}`}
                               className="text-xs font-medium text-primary underline-offset-4 hover:underline"
+                              title="Hesap detay panelini aç"
                             >
                               Hesap Detayı
                             </Link>
