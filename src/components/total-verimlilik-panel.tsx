@@ -127,6 +127,163 @@ interface TableRow {
 
 type EditableField = 'baslangicStokuKutu' | 'ayBasiCihazUstuTest' | 'ayBasiSevkiyatKutu' | 'goztepeSevkiyat' | 'kurumlarArasiSevk' | 'lojistikAraTransfer' | 'kumulatifTotal' | 'donemSonuStokKutu' | 'donemSonuCihazUstuTest' | 'hakEdis';
 
+
+interface EfficiencyMetrics {
+  toplamKumulatif: number;
+  toplamBeklenenTuketim: number;
+  toplamHakEdis: number;
+  stokSapmaYuzde: number;
+  kitSapmaYuzde: number;
+  stokDogrulukSkoru: number;
+  kitVerimlilikSkoru: number;
+  genelVerimlilik: number;
+  toplamEtkiDegeri: number;
+  maliyetAgirlikli: boolean;
+  hesaplananSatirSayisi: number;
+  algoritma: 'value-impact-efficiency-index';
+}
+
+type ExchangeRateMap = { EUR: number; USD: number; TRY: number };
+
+const emptyEfficiencyMetrics = (): EfficiencyMetrics => ({
+  toplamKumulatif: 0,
+  toplamBeklenenTuketim: 0,
+  toplamHakEdis: 0,
+  stokSapmaYuzde: 0,
+  kitSapmaYuzde: 0,
+  stokDogrulukSkoru: 100,
+  kitVerimlilikSkoru: 100,
+  genelVerimlilik: 100,
+  toplamEtkiDegeri: 0,
+  maliyetAgirlikli: false,
+  hesaplananSatirSayisi: 0,
+  algoritma: 'value-impact-efficiency-index',
+});
+
+const clampEfficiencyScore = (value: number) => Math.max(0, Math.min(100, value));
+
+const deviationToScore = (deviation: number, denominator: number) => {
+  if (denominator <= 0) return 100;
+  return clampEfficiencyScore(100 - (Math.abs(deviation) / denominator) * 100);
+};
+
+const getUnitCostInEur = (
+  row: TableRow,
+  productCodes: ProductCode[],
+  costCheckpointData: Record<string, { cost: number; currency: 'EUR' | 'USD' | 'TRY' }> | null,
+  exchangeRates: ExchangeRateMap | null,
+): number | null => {
+  if (!exchangeRates) return null;
+
+  const checkpointCost = costCheckpointData?.[row.stokKodu];
+  const product = productCodes.find(p => p.stokKodu === row.stokKodu);
+  const productCost = checkpointCost?.cost ?? product?.cost;
+  const productCurrency = checkpointCost?.currency ?? (product?.currency as 'EUR' | 'USD' | 'TRY' | undefined) ?? 'EUR';
+
+  if (!productCost || productCost <= 0) return null;
+
+  const packageCostInEur = productCurrency === 'EUR'
+    ? productCost
+    : productCurrency === 'USD'
+      ? productCost / exchangeRates.USD
+      : productCost / exchangeRates.TRY;
+
+  return packageCostInEur / (row.ambalajDegeri || 1);
+};
+
+const calculateEfficiencyMetrics = (
+  rows: TableRow[],
+  productCodes: ProductCode[],
+  costCheckpointData: Record<string, { cost: number; currency: 'EUR' | 'USD' | 'TRY' }> | null,
+  exchangeRates: ExchangeRateMap | null,
+): EfficiencyMetrics => {
+  if (rows.length === 0) return emptyEfficiencyMetrics();
+
+  let toplamKumulatif = 0;
+  let toplamBeklenenTuketim = 0;
+  let toplamHakEdis = 0;
+  let toplamEtkiDegeri = 0;
+  let weightedStockScore = 0;
+  let weightedKitScore = 0;
+  let weightedGeneralScore = 0;
+  let hesaplananSatirSayisi = 0;
+  let rowsWithCost = 0;
+  let rowsWithoutCost = 0;
+
+  const rowInputs = rows.map(row => {
+    const beklenenTuketim = row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest;
+    const volume = Math.max(0, row.kumulatifTotal || 0);
+    const stockScore = deviationToScore(row.stokDogrulukFark, volume);
+    const kitScore = deviationToScore(row.kitVerimlilikFark, volume);
+    const generalScore = (stockScore + kitScore) / 2;
+    const unitCostInEur = getUnitCostInEur(row, productCodes, costCheckpointData, exchangeRates);
+
+    toplamKumulatif += row.kumulatifTotal;
+    toplamBeklenenTuketim += beklenenTuketim;
+    toplamHakEdis += row.hakEdis;
+
+    if (volume > 0) {
+      if (unitCostInEur && unitCostInEur > 0) rowsWithCost += 1;
+      else rowsWithoutCost += 1;
+    }
+
+    return { volume, stockScore, kitScore, generalScore, unitCostInEur };
+  });
+
+  const useCostWeighting = rowsWithCost > 0 && rowsWithoutCost === 0;
+
+  rowInputs.forEach(({ volume, stockScore, kitScore, generalScore, unitCostInEur }) => {
+    if (volume <= 0) return;
+
+    const impact = useCostWeighting ? (unitCostInEur || 0) * volume : volume;
+    if (impact <= 0) return;
+
+    toplamEtkiDegeri += impact;
+    weightedStockScore += stockScore * impact;
+    weightedKitScore += kitScore * impact;
+    weightedGeneralScore += generalScore * impact;
+    hesaplananSatirSayisi += 1;
+  });
+
+  const stokSapmaYuzde = toplamKumulatif !== 0
+    ? ((toplamBeklenenTuketim - toplamKumulatif) / toplamKumulatif) * 100
+    : 0;
+
+  const kitSapmaYuzde = toplamKumulatif !== 0
+    ? ((toplamKumulatif - toplamHakEdis) / toplamKumulatif) * 100
+    : 0;
+
+  if (toplamEtkiDegeri === 0) {
+    return {
+      ...emptyEfficiencyMetrics(),
+      toplamKumulatif,
+      toplamBeklenenTuketim,
+      toplamHakEdis,
+      stokSapmaYuzde,
+      kitSapmaYuzde,
+    };
+  }
+
+  const stokDogrulukSkoru = weightedStockScore / toplamEtkiDegeri;
+  const kitVerimlilikSkoru = weightedKitScore / toplamEtkiDegeri;
+  const genelVerimlilik = weightedGeneralScore / toplamEtkiDegeri;
+
+  return {
+    toplamKumulatif,
+    toplamBeklenenTuketim,
+    toplamHakEdis,
+    stokSapmaYuzde,
+    kitSapmaYuzde,
+    stokDogrulukSkoru,
+    kitVerimlilikSkoru,
+    genelVerimlilik,
+    toplamEtkiDegeri,
+    maliyetAgirlikli: useCostWeighting,
+    hesaplananSatirSayisi,
+    algoritma: 'value-impact-efficiency-index',
+  };
+};
+
 interface HakEdisDefinition {
   id: string;
   sutKodu: string;
@@ -1624,26 +1781,7 @@ export default function TotalVerimlilikPanel({
       const selectedPool = efficiencyPools.find(p => p.id === selectedPoolId);
       const docId = `${selectedPoolId}-${selectedYear}-${selectedMonth}`;
 
-      // Verimlilik metriklerini hesapla
-      let toplamKumulatif = 0;
-      let toplamBeklenenTuketim = 0;
-      let toplamHakEdis = 0;
-
-      rows.forEach(row => {
-        toplamKumulatif += row.kumulatifTotal;
-        toplamBeklenenTuketim += (row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest);
-        toplamHakEdis += row.hakEdis;
-      });
-
-      const stokSapmaYuzde = toplamKumulatif !== 0
-        ? ((toplamBeklenenTuketim - toplamKumulatif) / toplamKumulatif) * 100
-        : 0;
-      const kitSapmaYuzde = toplamKumulatif !== 0
-        ? ((toplamKumulatif - toplamHakEdis) / toplamKumulatif) * 100
-        : 0;
-      const stokDogrulukSkoru = Math.max(0, Math.min(100, 100 - Math.abs(stokSapmaYuzde)));
-      const kitVerimlilikSkoru = Math.max(0, Math.min(100, 100 - Math.abs(kitSapmaYuzde)));
-      const genelVerimlilik = (stokDogrulukSkoru + kitVerimlilikSkoru) / 2;
+      const efficiencyMetrics = calculateEfficiencyMetrics(rows, productCodes, costCheckpointData, exchangeRates);
 
       const dataToSave = {
         poolId: selectedPoolId,
@@ -1652,16 +1790,8 @@ export default function TotalVerimlilikPanel({
         year: selectedYear,
         rows: rows,
         // Verimlilik metrikleri
-        efficiencyMetrics: {
-          toplamKumulatif,
-          toplamBeklenenTuketim,
-          toplamHakEdis,
-          stokSapmaYuzde,
-          kitSapmaYuzde,
-          stokDogrulukSkoru,
-          kitVerimlilikSkoru,
-          genelVerimlilik,
-        },
+        efficiencyMetrics,
+        lastCalculatedGenelVerimlilik: efficiencyMetrics.genelVerimlilik,
         createdAt: Timestamp.now(),
         createdByUid: currentUser?.uid || '',
         createdByName: currentUser?.name || currentUser?.email || '',
@@ -1669,7 +1799,7 @@ export default function TotalVerimlilikPanel({
       };
 
       await setDoc(doc(db, 'totalEfficiencyRecords', docId), dataToSave, { merge: true });
-      toast({ title: 'Kaydedildi', description: `Total verimlilik verileri kaydedildi. Genel Verimlilik: %${genelVerimlilik.toFixed(1)}` });
+      toast({ title: 'Kaydedildi', description: `Total verimlilik verileri kaydedildi. Genel Verimlilik: %${efficiencyMetrics.genelVerimlilik.toFixed(1)}` });
     } catch (error) {
       totalVerimlilikLogger.error('Total verimlilik kaydedilirken hata oluştu', error, {
         poolId: selectedPoolId,
@@ -1681,7 +1811,7 @@ export default function TotalVerimlilikPanel({
     } finally {
       setIsSaving(false);
     }
-  }, [selectedPoolId, rows, selectedYear, selectedMonth, currentUser, efficiencyPools, toast]);
+  }, [selectedPoolId, rows, selectedYear, selectedMonth, currentUser, efficiencyPools, toast, productCodes, costCheckpointData, exchangeRates]);
 
   // Ara Kayıt (Checkpoint) Kaydetme
   const handleAraKayitSave = useCallback(async () => {
@@ -1691,6 +1821,7 @@ export default function TotalVerimlilikPanel({
     try {
       const selectedPool = efficiencyPools.find(p => p.id === selectedPoolId);
       const araKayitDocId = `araKayit-${selectedPoolId}-${selectedYear}-${selectedMonth}`;
+      const efficiencyMetrics = calculateEfficiencyMetrics(rows, productCodes, costCheckpointData, exchangeRates);
 
       const dataToSave = {
         poolId: selectedPoolId,
@@ -1699,6 +1830,8 @@ export default function TotalVerimlilikPanel({
         year: selectedYear,
         rows: rows,
         interLabTransfers: interLabTransfers, // Kurumlar arası transferleri de kaydet
+        efficiencyMetrics, // Ara kayıt anındaki verimlilik metriklerini dashboard/geçmiş için kaydet
+        lastCalculatedGenelVerimlilik: efficiencyMetrics.genelVerimlilik,
         isAraKayit: true, // Ara kayıt olduğunu belirt
         createdAt: araKayitInfo?.exists ? araKayitInfo.savedAt : Timestamp.now(),
         createdByUid: currentUser?.uid || '',
@@ -1716,7 +1849,7 @@ export default function TotalVerimlilikPanel({
 
       toast({
         title: 'Ara Kayıt Alındı',
-        description: `${selectedPool?.name} havuzu için ${MONTHS[selectedMonth]?.label} ${selectedYear} dönemi ara kaydı alındı.`,
+        description: `${selectedPool?.name} havuzu için ${MONTHS[selectedMonth]?.label} ${selectedYear} dönemi ara kaydı alındı. Genel Verimlilik: %${efficiencyMetrics.genelVerimlilik.toFixed(1)}`,
       });
     } catch (error) {
       console.error('Error saving ara kayit:', error);
@@ -1724,7 +1857,7 @@ export default function TotalVerimlilikPanel({
     } finally {
       setIsSavingAraKayit(false);
     }
-  }, [selectedPoolId, rows, selectedYear, selectedMonth, currentUser, efficiencyPools, interLabTransfers, araKayitInfo, toast]);
+  }, [selectedPoolId, rows, selectedYear, selectedMonth, currentUser, efficiencyPools, interLabTransfers, araKayitInfo, toast, productCodes, costCheckpointData, exchangeRates]);
 
   // Laboratuvar gruplarını hesapla (aynı laboratuvarın satırlarını gruplamak için)
   const labGroups = useMemo(() => {
@@ -1912,58 +2045,9 @@ export default function TotalVerimlilikPanel({
   }, [columnFilters, sortConfig, searchTerm]);
 
   // Genel Verimlilik Hesaplaması
-  const efficiencyMetrics = useMemo(() => {
-    if (rows.length === 0) {
-      return {
-        toplamKumulatif: 0,
-        toplamBeklenenTuketim: 0,
-        toplamHakEdis: 0,
-        stokSapmaYuzde: 0,
-        kitSapmaYuzde: 0,
-        stokDogrulukSkoru: 100,
-        kitVerimlilikSkoru: 100,
-        genelVerimlilik: 100,
-      };
-    }
-
-    // Toplam değerleri hesapla
-    let toplamKumulatif = 0;
-    let toplamBeklenenTuketim = 0;
-    let toplamHakEdis = 0;
-
-    rows.forEach(row => {
-      toplamKumulatif += row.kumulatifTotal;
-      toplamBeklenenTuketim += (row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest);
-      toplamHakEdis += row.hakEdis;
-    });
-
-    // Sapma oranlarını hesapla (kümülatif 0 ise 0 sapma)
-    const stokSapmaYuzde = toplamKumulatif !== 0
-      ? ((toplamBeklenenTuketim - toplamKumulatif) / toplamKumulatif) * 100
-      : 0;
-
-    const kitSapmaYuzde = toplamKumulatif !== 0
-      ? ((toplamKumulatif - toplamHakEdis) / toplamKumulatif) * 100
-      : 0;
-
-    // Verimlilik skorları (sapma → verimlilik dönüşümü, 0-100 arası)
-    const stokDogrulukSkoru = Math.max(0, Math.min(100, 100 - Math.abs(stokSapmaYuzde)));
-    const kitVerimlilikSkoru = Math.max(0, Math.min(100, 100 - Math.abs(kitSapmaYuzde)));
-
-    // Genel verimlilik
-    const genelVerimlilik = (stokDogrulukSkoru + kitVerimlilikSkoru) / 2;
-
-    return {
-      toplamKumulatif,
-      toplamBeklenenTuketim,
-      toplamHakEdis,
-      stokSapmaYuzde,
-      kitSapmaYuzde,
-      stokDogrulukSkoru,
-      kitVerimlilikSkoru,
-      genelVerimlilik,
-    };
-  }, [rows]);
+  const efficiencyMetrics = useMemo(() => (
+    calculateEfficiencyMetrics(rows, productCodes, costCheckpointData, exchangeRates)
+  ), [rows, productCodes, costCheckpointData, exchangeRates]);
 
   // Sütun 23: Maliyet hesaplama yardımcı fonksiyonu
   const calculateRowCost = useCallback((row: TableRow): { cost: number; hasData: boolean } => {
