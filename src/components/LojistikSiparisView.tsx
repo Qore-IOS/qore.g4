@@ -295,18 +295,43 @@ export default function LojistikSiparisView() {
       }
 
       try {
-        const q = query(
-          collection(db, 'depoStok'),
-          where('isShipped', '==', true)
+        // Use indexed queries instead of scanning the entire depoStok collection.
+        // Primary key: hedefKurumId. Fallback for legacy docs missing that field:
+        // match by hedefKurum (hospital name or 'ad' alias). isShipped filter is
+        // applied client-side so no composite index is required.
+        const queryPromises: Array<Promise<FirebaseFirestore.QuerySnapshot> | null> = [];
+        queryPromises.push(
+          getDocs(query(collection(db, 'depoStok'), where('hedefKurumId', '==', hospital.id))) as any
         );
-        const snap = await getDocs(q);
-        const allShipped = snap.docs.map((d) => ({ id: d.id, ...d.data() } as DepoStokItem));
-        const filtered = allShipped.filter(st => {
-          if (st.hedefKurumId && st.hedefKurumId === hospital.id) return true;
-          if (!st.hedefKurumId && st.hedefKurum && (hospital.name === st.hedefKurum || hospital.ad === st.hedefKurum)) return true;
-          return false;
+        if (hospital.name) {
+          queryPromises.push(
+            getDocs(query(collection(db, 'depoStok'), where('hedefKurum', '==', hospital.name))) as any
+          );
+        }
+        if (hospital.ad && hospital.ad !== hospital.name) {
+          queryPromises.push(
+            getDocs(query(collection(db, 'depoStok'), where('hedefKurum', '==', hospital.ad))) as any
+          );
+        }
+        const snaps = await Promise.all(queryPromises as any[]);
+        const deduped = new Map<string, DepoStokItem>();
+        snaps.forEach((snap: any) => {
+          snap.docs.forEach((d: any) => {
+            const item = { id: d.id, ...d.data() } as DepoStokItem;
+            if (!item.isShipped) return;
+            // Honour the legacy fallback rules so we don't surface stock for a
+            // different hospital that happens to share an id/name field.
+            if (item.hedefKurumId) {
+              if (item.hedefKurumId !== hospital.id) return;
+            } else if (item.hedefKurum) {
+              if (item.hedefKurum !== hospital.name && item.hedefKurum !== hospital.ad) return;
+            } else {
+              return;
+            }
+            deduped.set(d.id, item);
+          });
         });
-        if (!cancelled) setLabStock(filtered);
+        if (!cancelled) setLabStock(Array.from(deduped.values()));
       } finally {
         if (!cancelled) setIsLabStockLoading(false);
       }
