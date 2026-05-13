@@ -24,14 +24,33 @@ type RequestHistoryItem = {
   itemCount: number;
   createdBy: string;
   createdAt: string | null;
+  status: string;
+  urgency: string;
 };
 
 const DEFAULT_PAGE_SIZE = 20;
 
+function getStatusBadge(status: string) {
+  switch (status) {
+    case 'pending':
+      return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">Beklemede</span>;
+    case 'toplaniyor':
+      return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400">Hazırlanıyor</span>;
+    case 'completed':
+      return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400">Teslim Edildi</span>;
+    case 'eksik':
+      return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400">Eksik Onaylandı</span>;
+    case 'cancelled':
+      return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400">İptal</span>;
+    default:
+      return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-800 dark:bg-slate-900/30 dark:text-slate-400">{status}</span>;
+  }
+}
+
 export default function UrunTalepGecmisPanel() {
   const router = useRouter();
   const { toast } = useToast();
-  const { currentUser } = useAuth();
+  const { currentUser, currentUserProfile } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [orders, setOrders] = useState<RequestHistoryItem[]>([]);
@@ -46,15 +65,19 @@ export default function UrunTalepGecmisPanel() {
 
   const totalPages = Math.max(1, Math.ceil(totalCount / rowsPerPage));
 
+  // Determine labIds from profile
+  const labIds = (currentUserProfile?.assignedLaboratories || []).join(',');
+
   /**
-   * Fetch total count from the server (uses Firestore count aggregation)
+   * Fetch total count from the server
    */
-  const fetchTotalCount = useCallback(async (uid: string, signal: AbortSignal) => {
+  const fetchTotalCount = useCallback(async (uid: string, labs: string, signal: AbortSignal) => {
     try {
-      const response = await fetch(
-        `/api/urun-talep-gecmis?createdById=${uid}&countOnly=true`,
-        { signal, cache: 'no-store' }
-      );
+      let url = `/api/urun-talep-gecmis?countOnly=true`;
+      if (labs) url += `&labIds=${labs}`;
+      else url += `&createdById=${uid}`;
+
+      const response = await fetch(url, { signal, cache: 'no-store' });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.error || 'Sayım alınamadı.');
       setTotalCount(payload.totalCount ?? 0);
@@ -65,10 +88,11 @@ export default function UrunTalepGecmisPanel() {
   }, []);
 
   /**
-   * Fetch a page of data from the server (cursor-based pagination)
+   * Fetch a page of data from the server
    */
   const fetchPage = useCallback(async (
     uid: string,
+    labs: string,
     pageNum: number,
     pageSize: number,
     cursors: (string | null)[],
@@ -76,10 +100,12 @@ export default function UrunTalepGecmisPanel() {
   ) => {
     setLoading(true);
     try {
-      // For page 1, no cursor. For page N, use cursor from page N-1.
       const startAfterId = pageNum > 1 ? cursors[pageNum - 2] : null;
 
-      let url = `/api/urun-talep-gecmis?createdById=${uid}&pageSize=${pageSize}`;
+      let url = `/api/urun-talep-gecmis?pageSize=${pageSize}`;
+      if (labs) url += `&labIds=${labs}`;
+      else url += `&createdById=${uid}`;
+
       if (startAfterId) {
         url += `&startAfterId=${startAfterId}`;
       }
@@ -93,7 +119,6 @@ export default function UrunTalepGecmisPanel() {
 
       setOrders(payload.data || []);
 
-      // Store cursor (lastDocId) for this page
       if (payload.lastDocId) {
         const newCursors = [...cursors];
         newCursors[pageNum - 1] = payload.lastDocId;
@@ -118,13 +143,13 @@ export default function UrunTalepGecmisPanel() {
     cursorStackRef.current = [];
   }, [rowsPerPage]);
 
-  // Fetch total count on mount and when page size changes (to refresh)
+  // Fetch total count on mount and when labs change
   useEffect(() => {
     if (!currentUser?.uid) return;
     const controller = new AbortController();
-    fetchTotalCount(currentUser.uid, controller.signal);
+    fetchTotalCount(currentUser.uid, labIds, controller.signal);
     return () => controller.abort();
-  }, [currentUser?.uid, fetchTotalCount]);
+  }, [currentUser?.uid, labIds, fetchTotalCount]);
 
   // Fetch current page data
   useEffect(() => {
@@ -133,9 +158,9 @@ export default function UrunTalepGecmisPanel() {
       return;
     }
     const controller = new AbortController();
-    fetchPage(currentUser.uid, page, rowsPerPage, cursorStackRef.current, controller.signal);
+    fetchPage(currentUser.uid, labIds, page, rowsPerPage, cursorStackRef.current, controller.signal);
     return () => controller.abort();
-  }, [currentUser?.uid, page, rowsPerPage, fetchPage]);
+  }, [currentUser?.uid, labIds, page, rowsPerPage, fetchPage]);
 
   return (
     <div className="p-4 space-y-4">
@@ -147,7 +172,7 @@ export default function UrunTalepGecmisPanel() {
             Ürün Talep Geçmişi
           </CardTitle>
           <CardDescription>
-            Önceki taleplerinizi görüntüleyin. Satıra tıklayarak sipariş detayını açabilirsiniz.
+            {labIds ? 'Laboratuvarınıza ait talepleri görüntüleyin.' : 'Önceki taleplerinizi görüntüleyin.'} Satıra tıklayarak sipariş detayını açabilirsiniz.
             {totalCount > 0 && (
               <span className="ml-2 font-medium">({totalCount} kayıt)</span>
             )}
@@ -164,6 +189,7 @@ export default function UrunTalepGecmisPanel() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Sipariş ID</TableHead>
+                  <TableHead>Durum</TableHead>
                   <TableHead>Kalem Sayısı</TableHead>
                   <TableHead>Açan Kişi</TableHead>
                   <TableHead>Tarih & Saat</TableHead>
@@ -172,7 +198,7 @@ export default function UrunTalepGecmisPanel() {
               <TableBody>
                 {orders.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center text-muted-foreground">
+                    <TableCell colSpan={5} className="text-center text-muted-foreground">
                       Geçmiş sipariş bulunamadı.
                     </TableCell>
                   </TableRow>
@@ -180,11 +206,12 @@ export default function UrunTalepGecmisPanel() {
                   orders.map((order) => (
                     <TableRow
                       key={order.id}
-                      className="cursor-pointer"
+                      className="cursor-pointer hover:bg-muted/50 transition-colors"
                       onClick={() => router.push(`/urun-talep/gecmis/${order.id}`)}
                     >
-                      <TableCell className="font-mono text-xs">{order.id}</TableCell>
-                      <TableCell>{order.itemCount}</TableCell>
+                      <TableCell className="font-mono text-xs font-semibold">{order.id.slice(-8).toUpperCase()}</TableCell>
+                      <TableCell>{getStatusBadge(order.status)}</TableCell>
+                      <TableCell className="font-medium">{order.itemCount} kalem</TableCell>
                       <TableCell>{order.createdBy || '-'}</TableCell>
                       <TableCell>
                         {order.createdAt
@@ -230,7 +257,7 @@ export default function UrunTalepGecmisPanel() {
               >
                 Önceki
               </Button>
-              <span className="text-sm">
+              <span className="text-sm font-medium">
                 Sayfa {page} / {totalPages}
               </span>
               <Button

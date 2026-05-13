@@ -24,6 +24,8 @@ function buildHistoryData(snapshot: FirebaseFirestore.QuerySnapshot<FirebaseFire
       itemCount: Array.isArray(order.items) ? order.items.length : 0,
       createdBy: order.createdBy || '-',
       createdAt: toIsoString(order.createdAt),
+      status: order.status || 'pending',
+      urgency: order.urgency || 'normal',
     };
   });
 }
@@ -35,39 +37,38 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const createdById = searchParams.get('createdById');
+    const labId = searchParams.get('labId');
+    const labIds = searchParams.get('labIds')?.split(',').filter(Boolean);
     const pageSizeParam = searchParams.get('pageSize');
     const startAfterId = searchParams.get('startAfterId');
     const countOnly = searchParams.get('countOnly');
 
-    if (!createdById) {
-      return NextResponse.json({ error: 'createdById zorunludur.' }, { status: 400 });
+    // Build base query
+    let baseQuery: FirebaseFirestore.Query = adminDb.collection('orders')
+      .where('requestSource', '==', 'lab_to_depot');
+
+    if (labIds && labIds.length > 0) {
+      // If we have multiple labs, we use 'in' operator (limited to 30 labs)
+      baseQuery = baseQuery.where('labId', 'in', labIds.slice(0, 30));
+    } else if (labId) {
+      baseQuery = baseQuery.where('labId', '==', labId);
+    } else if (createdById) {
+      baseQuery = baseQuery.where('createdById', '==', createdById);
+    } else {
+      return NextResponse.json({ error: 'Filtreleme kriteri (labId veya createdById) zorunludur.' }, { status: 400 });
     }
 
-    // Count-only request: return total count efficiently
+    // Count-only request
     if (countOnly === 'true') {
       try {
-        const countSnapshot = await adminDb
-          .collection('orders')
-          .where('requestSource', '==', 'lab_to_depot')
-          .where('createdById', '==', createdById)
-          .count()
-          .get();
-
+        const countSnapshot = await baseQuery.count().get();
         return NextResponse.json({ totalCount: countSnapshot.data().count });
       } catch (error: any) {
         if (!isMissingIndexError(error)) throw error;
 
-        // Fallback: count via filtered query
-        const fallbackSnapshot = await adminDb
-          .collection('orders')
-          .where('createdById', '==', createdById)
-          .get();
-
-        const count = fallbackSnapshot.docs.filter(
-          (doc) => doc.data().requestSource === 'lab_to_depot'
-        ).length;
-
-        return NextResponse.json({ totalCount: count });
+        // Fallback count
+        const fallbackSnapshot = await baseQuery.get();
+        return NextResponse.json({ totalCount: fallbackSnapshot.docs.length });
       }
     }
 
@@ -77,21 +78,15 @@ export async function GET(request: NextRequest) {
     );
 
     try {
-      let queryRef: FirebaseFirestore.Query = adminDb
-        .collection('orders')
-        .where('requestSource', '==', 'lab_to_depot')
-        .where('createdById', '==', createdById)
+      let queryRef: FirebaseFirestore.Query = baseQuery
         .orderBy('createdAt', 'desc')
         .limit(pageSize);
 
-      // Cursor-based pagination: start after the given document
+      // Cursor-based pagination
       if (startAfterId) {
         const cursorDoc = await adminDb.collection('orders').doc(startAfterId).get();
         if (cursorDoc.exists) {
-          queryRef = adminDb
-            .collection('orders')
-            .where('requestSource', '==', 'lab_to_depot')
-            .where('createdById', '==', createdById)
+          queryRef = baseQuery
             .orderBy('createdAt', 'desc')
             .startAfter(cursorDoc)
             .limit(pageSize);
@@ -114,22 +109,19 @@ export async function GET(request: NextRequest) {
         throw error;
       }
 
-      // Fallback: index henüz deploy edilmemiş ortamlarda çalışmaya devam et
-      const fallbackSnapshot = await adminDb
-        .collection('orders')
-        .where('createdById', '==', createdById)
-        .get();
+      // Fallback: manually filter and sort if index is missing
+      // Note: For 'in' queries, we'd need more complex fallback.
+      // Usually index is better.
+      const fallbackSnapshot = await baseQuery.get();
 
       const allData = fallbackSnapshot.docs
         .map((doc) => ({ id: doc.id, ...doc.data() }))
-        .filter((order: any) => order.requestSource === 'lab_to_depot')
         .sort((a: any, b: any) => {
           const aTime = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0;
           const bTime = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0;
           return bTime - aTime;
         });
 
-      // Apply cursor-based pagination manually for fallback
       let startIndex = 0;
       if (startAfterId) {
         const cursorIndex = allData.findIndex((item) => item.id === startAfterId);
@@ -144,6 +136,8 @@ export async function GET(request: NextRequest) {
         itemCount: Array.isArray(order.items) ? order.items.length : 0,
         createdBy: order.createdBy || '-',
         createdAt: toIsoString(order.createdAt),
+        status: order.status || 'pending',
+        urgency: order.urgency || 'normal',
       }));
 
       const lastDocId = data.length > 0 ? data[data.length - 1].id : null;

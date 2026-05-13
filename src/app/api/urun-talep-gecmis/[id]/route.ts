@@ -31,6 +31,8 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
         depotName: order.depotName || '-',
         createdAt: toIsoString(order.createdAt),
         items: Array.isArray(order.items) ? order.items : [],
+        status: order.status || 'pending',
+        urgency: order.urgency || 'normal',
       },
     });
   } catch (error: any) {
