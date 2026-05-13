@@ -24,6 +24,7 @@ export interface ProductCode {
   currency?: 'EUR' | 'USD' | 'TRY';
   marka?: string;
   laboratuvarGrubu?: string;
+  laboratuvarGruplari?: string[]; // Çoklu lab grubu ataması - lojistik sorumlusu eşleştirmesi için
   testGrubu?: string;
   cihazGrubu?: string;
   testAdi?: string; // Ürünün çalıştığı testin adı (Total Verimlilik paneli için)

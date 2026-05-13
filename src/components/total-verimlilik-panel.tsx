@@ -3604,7 +3604,21 @@ export default function TotalVerimlilikPanel({
             {/* Edge glow (green spotlight) */}
             <div ref={greenGlowLeftRef} className="pointer-events-none absolute left-0 top-0 bottom-0 w-20 z-30" style={{ opacity: 0, background: 'linear-gradient(to right, rgba(34,197,94,0.18), transparent)', transition: 'opacity 120ms' }} />
             <div ref={greenGlowRightRef} className="pointer-events-none absolute right-0 top-0 bottom-0 w-20 z-30" style={{ opacity: 0, background: 'linear-gradient(to left, rgba(34,197,94,0.18), transparent)', transition: 'opacity 120ms' }} />
-            <ScrollArea className="w-full h-full" ref={scrollContainerRef}>
+            {/* Minimalist horizontal scroll slider */}
+            <div className="px-3 py-1 border-b border-zinc-200/70 dark:border-zinc-700/60 bg-white/60 dark:bg-zinc-900/60 backdrop-blur-sm">
+              <input
+                ref={sliderRef}
+                type="range"
+                min={0}
+                max={100}
+                step={0.1}
+                defaultValue={0}
+                onChange={handleSliderChange}
+                aria-label="Tabloyu yatay kaydır"
+                className="table-hscroll-slider"
+              />
+            </div>
+            <ScrollArea className="w-full h-[calc(100%-22px)]" ref={scrollContainerRef}>
               <div ref={tableParentRef} style={{ minWidth: visibleCols.reduce((s, c) => s + c.w, 0) + 36 }}>
                 <table className="border-separate border-spacing-0 w-full">
                   <thead>
