@@ -685,7 +685,7 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
       </Card>
 
       <Dialog open={showStockAlgorithmModal} onOpenChange={setShowStockAlgorithmModal}>
-        <DialogContent className="max-w-5xl">
+        <DialogContent className="max-w-5xl max-h-[85vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle>Stok Doğruluk Hesaplama Algoritması</DialogTitle>
             <DialogDescription>
@@ -694,7 +694,7 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
           </DialogHeader>
 
           {record?.efficiencyMetrics && (
-            <div className="space-y-4">
+            <div className="flex min-h-0 flex-1 flex-col gap-4">
               <div className="grid gap-3 md:grid-cols-3">
                 <div className="rounded-lg border bg-muted/30 p-3">
                   <div className="text-xs text-muted-foreground">Stok Doğruluk Skoru</div>
@@ -731,7 +731,7 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
                 </ol>
               </div>
 
-              <ScrollArea className="max-h-[360px] rounded-lg border">
+              <ScrollArea className="min-h-[220px] flex-1 rounded-lg border">
                 <Table aria-label="Stok doğruluk algoritması satır hesapları">
                   <TableHeader>
                     <TableRow>
