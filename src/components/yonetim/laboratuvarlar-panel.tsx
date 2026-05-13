@@ -63,6 +63,7 @@ export default function LaboratuvarPanel() {
   const [isMapEditorOpen, setIsMapEditorOpen] = useState(false);
   
   const [labPools, setLabPools] = useState<LabPool[]>([]);
+  const [labGroups, setLabGroups] = useState<{ id: string; name: string }[]>([]);
   const [isPoolListModalOpen, setIsPoolListModalOpen] = useState(false);
   const [poolDetailsModal, setPoolDetailsModal] = useState<{ open: boolean; pool: LabPool | null }>({ open: false, pool: null });
 
@@ -113,7 +114,7 @@ export default function LaboratuvarPanel() {
   const fetchHospitalsAndProducts = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [hSnap, pSnap, addrSnap, poolsSnap, stokSnap, effPoolsSnap, dSnap] = await Promise.all([
+      const [hSnap, pSnap, addrSnap, poolsSnap, stokSnap, effPoolsSnap, dSnap, lgSnap] = await Promise.all([
         getDocs(collection(db, 'hospitals')),
         getDocs(collection(db, 'productCodes')),
         getDocs(collection(db, 'addressDefinitions')),
@@ -121,6 +122,7 @@ export default function LaboratuvarPanel() {
         getDocs(collection(db, 'depoStok')),
         getDocs(query(collection(db, 'efficiencyPools'), orderBy('createdAt', 'desc'))),
         getDocs(collection(db, 'depots')),
+        getDocs(collection(db, 'def_labGroups')),
       ]);
       setHospitals(filterByCompanyScope(hSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)), currentCompanyId, isSuperAdmin));
       setProductCodes(pSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
@@ -129,6 +131,7 @@ export default function LaboratuvarPanel() {
       setDepoStok(filterByCompanyScope(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)), currentCompanyId, isSuperAdmin));
       setEfficiencyPools(filterByCompanyScope(effPoolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as EfficiencyPool)), currentCompanyId, isSuperAdmin));
       setDepots(filterByCompanyScope(dSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)), currentCompanyId, isSuperAdmin));
+      setLabGroups(lgSnap.docs.map(d => ({ id: d.id, name: (d.data() as any)?.name || d.id })).sort((a, b) => a.name.localeCompare(b.name)));
 
     } catch (e) {
       toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
@@ -247,6 +250,7 @@ export default function LaboratuvarPanel() {
         visualDeductionEnabled: (currentHospital.manualDeductionEnabled ?? false) ? (currentHospital.visualDeductionEnabled ?? false) : false,
         fefoEnabled: currentHospital.fefoEnabled ?? true,
         perifer: currentHospital.perifer ?? false,
+        labGroupId: currentHospital.labGroupId || null,
         defaultDepotId: currentHospital.defaultDepotId || null,
         defaultDepotName: currentHospital.defaultDepotId ? (depots.find(d => d.id === currentHospital.defaultDepotId)?.name || null) : null,
         autoTutanak: (currentHospital as any).autoTutanak ?? false,
@@ -883,6 +887,27 @@ export default function LaboratuvarPanel() {
                             Aktifse, bu laboratuvardan açılan siparişler depo toplama yerine ofis lojistik panelinde (Siparişi Gör) yönetilir.
                         </p>
                     </Label>
+                </div>
+
+                <div className="rounded-md border p-3 space-y-2">
+                    <Label className="text-sm font-medium">Laboratuvar Grubu</Label>
+                    <p className="text-xs text-muted-foreground">
+                        Bu laboratuvardan perifer talep oluşturulduğunda, ilgili gruba atanmış lojistik sorumlularına otomatik WhatsApp bildirimi gönderilir.
+                    </p>
+                    <Select
+                        value={currentHospital.labGroupId || 'none'}
+                        onValueChange={(val) => setCurrentHospital({ ...currentHospital, labGroupId: val === 'none' ? undefined : val })}
+                    >
+                        <SelectTrigger>
+                            <SelectValue placeholder="Laboratuvar grubu seçin..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="none">Atanmamış</SelectItem>
+                            {labGroups.map(lg => (
+                                <SelectItem key={lg.id} value={lg.id}>{lg.name}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
                 </div>
 
                 {!(currentHospital.perifer) && (

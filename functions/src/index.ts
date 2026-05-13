@@ -15,6 +15,7 @@ export { nfcLoginWithSerial } from './nfc-login';
 export { onTeknikServisFormCreated, onAplikasyonFormCreated } from './actionFormEmailNotification';
 export { onDeviceFaultReportResolved } from './faultReportNotification';
 export { onPeripheralOrderCreatedSendMail } from './orderCreatedPeripheralEmail';
+export { onPeripheralOrderCreatedSendWhatsApp } from './peripheralOrderWhatsApp';
 
 function chunk<T>(arr: T[], size = 500): T[][] {
   const out: T[][] = [];
