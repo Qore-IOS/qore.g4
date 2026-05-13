@@ -3,11 +3,13 @@ import * as functions from 'firebase-functions';
 import { logger } from 'firebase-functions';
 import { sendWhatsAppText } from './lib/whatsapp';
 import {
-  buildItemGroupMap,
+  buildItemInfoMap,
+  groupMapFromInfo,
   loadLabGroupNamesByDocId,
   loadLojistikUsers,
   filterItemsForUserGroups,
   resolveUserGroupNames,
+  ProductInfo,
   RawOrderItem,
 } from './lib/peripheralRecipients';
 
@@ -39,11 +41,21 @@ function normalizePhoneForWa(raw: unknown): string | null {
   return digits;
 }
 
+function formatItemLine(it: RawOrderItem, info: ProductInfo | undefined): string {
+  const name = it.stokAdi || it.stokKodu || '-';
+  const adet = Number(it.adet ?? 1) || 1;
+  const anaBirim = (info?.anaBirim || it.anaBirim || '').trim();
+  const birimSuffix = anaBirim ? ` ${anaBirim}` : '';
+  const ambalaj = info?.ambalajDegeri;
+  const multiplier = typeof ambalaj === 'number' && ambalaj > 0 ? ` (${adet * ambalaj} adet)` : '';
+  return `- ${name} x ${adet}${birimSuffix}${multiplier}`;
+}
+
 function buildMessage(
   order: OrderDoc,
   labName: string,
   filteredItems: RawOrderItem[],
-  itemGroupMap: Map<string, string>,
+  itemInfoMap: Map<string, ProductInfo>,
 ): string {
   const urgency = URGENCY_LABELS[order.urgency || 'normal'] || 'Normal';
   const totalAdet = filteredItems.reduce((s, it) => s + (Number(it.adet) || 0), 0);
@@ -61,17 +73,14 @@ function buildMessage(
   // Group items by laboratuvarGrubu for a more readable layout
   const itemsByGroup = new Map<string, RawOrderItem[]>();
   for (const it of filteredItems) {
-    const g = itemGroupMap.get((it.stokKodu || '').trim()) || 'Diğer';
+    const g = itemInfoMap.get((it.stokKodu || '').trim())?.group || 'Diğer';
     if (!itemsByGroup.has(g)) itemsByGroup.set(g, []);
     itemsByGroup.get(g)!.push(it);
   }
   for (const [groupName, groupItems] of itemsByGroup) {
     lines.push(`*${groupName}:*`);
     for (const it of groupItems.slice(0, 30)) {
-      const name = it.stokAdi || it.stokKodu || '-';
-      const adet = it.adet ?? 1;
-      const birim = it.anaBirim ? ` ${it.anaBirim}` : '';
-      lines.push(`- ${name} x ${adet}${birim}`);
+      lines.push(formatItemLine(it, itemInfoMap.get((it.stokKodu || '').trim())));
     }
     if (groupItems.length > 30) lines.push(`...ve ${groupItems.length - 30} kalem daha`);
     lines.push('');
@@ -132,11 +141,12 @@ export const onPeripheralOrderCreatedSendWhatsApp = functions
         return;
       }
 
-      const [itemGroupMap, labGroupNamesById, users] = await Promise.all([
-        buildItemGroupMap(items),
+      const [itemInfoMap, labGroupNamesById, users] = await Promise.all([
+        buildItemInfoMap(items),
         loadLabGroupNamesByDocId(),
         loadLojistikUsers(),
       ]);
+      const itemGroupMap = groupMapFromInfo(itemInfoMap);
       logEntry.steps.push(`Veri yükleme OK (kalem grup eşlemesi: ${itemGroupMap.size}, def_labGroups: ${labGroupNamesById.size}, lojistik kullanıcı: ${users.length})`);
 
       const orderGroups = new Set(Array.from(itemGroupMap.values()));
@@ -171,7 +181,7 @@ export const onPeripheralOrderCreatedSendWhatsApp = functions
         }
 
         const to = `${phone}@c.us`;
-        const messageBody = buildMessage(order, labName, filtered, itemGroupMap);
+        const messageBody = buildMessage(order, labName, filtered, itemInfoMap);
         baseResult.to = to;
         baseResult.messagePreview = messageBody.substring(0, 200);
         try {
