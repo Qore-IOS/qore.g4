@@ -6,22 +6,6 @@
  */
 
 /** @type {import('next').NextConfig} */
-const ContentSecurityPolicy = `
-  default-src 'self';
-  script-src 'self' 'unsafe-eval' 'unsafe-inline' https://*.google.com https://*.googleapis.com https://*.gstatic.com https://apis.google.com https://cdnjs.cloudflare.com;
-  style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://*.googleapis.com;
-  img-src 'self' blob: data: https://*.google.com https://*.googleapis.com https://*.gstatic.com https://*.firebaseusercontent.com https://firebasestorage.googleapis.com https://qorengine.com;
-  font-src 'self' https://fonts.gstatic.com data:;
-  object-src 'none';
-  base-uri 'self';
-  form-action 'self';
-  frame-ancestors 'none';
-  frame-src 'self' https://*.firebaseapp.com https://*.google.com;
-  connect-src 'self' https://*.google.com https://*.googleapis.com https://*.gstatic.com https://*.firebaseio.com wss://*.firebaseio.com https://firebasestorage.googleapis.com https://api.freecurrencyapi.com;
-  block-all-mixed-content;
-  upgrade-insecure-requests;
-`;
-
 const config = {
   // Enable React Strict Mode for highlighting potential problems
   reactStrictMode: true,
@@ -87,10 +71,6 @@ const config = {
       {
         source: '/:path*',
         headers: [
-          {
-            key: 'Content-Security-Policy',
-            value: ContentSecurityPolicy.replace(/\s{2,}/g, ' ').trim(),
-          },
           {
             key: 'X-DNS-Prefetch-Control',
             value: 'on',
