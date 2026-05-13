@@ -24,7 +24,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cleanupExpiredIrsaliyeDosyalari = exports.maintenanceUpcomingReminder = exports.faultInterventionReminder = exports.onNotificationCreated = exports.onPeripheralOrderCreatedSendMail = exports.onAplikasyonFormCreated = exports.onTeknikServisFormCreated = exports.nfcLoginWithSerial = exports.mirrorPresenceToFirestore = exports.createCustomTokenForNfcUser = exports.revokeUserSessions = void 0;
+exports.cleanupExpiredIrsaliyeDosyalari = exports.maintenanceUpcomingReminder = exports.faultInterventionReminder = exports.onNotificationCreated = exports.onPeripheralOrderCreatedSendWhatsApp = exports.onPeripheralOrderCreatedSendMail = exports.onDeviceFaultReportResolved = exports.onAplikasyonFormCreated = exports.onTeknikServisFormCreated = exports.nfcLoginWithSerial = exports.mirrorPresenceToFirestore = exports.createCustomTokenForNfcUser = exports.revokeUserSessions = void 0;
 const admin = __importStar(require("firebase-admin"));
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firebase_functions_1 = require("firebase-functions");
@@ -43,8 +43,12 @@ Object.defineProperty(exports, "nfcLoginWithSerial", { enumerable: true, get: fu
 var actionFormEmailNotification_1 = require("./actionFormEmailNotification");
 Object.defineProperty(exports, "onTeknikServisFormCreated", { enumerable: true, get: function () { return actionFormEmailNotification_1.onTeknikServisFormCreated; } });
 Object.defineProperty(exports, "onAplikasyonFormCreated", { enumerable: true, get: function () { return actionFormEmailNotification_1.onAplikasyonFormCreated; } });
+var faultReportNotification_1 = require("./faultReportNotification");
+Object.defineProperty(exports, "onDeviceFaultReportResolved", { enumerable: true, get: function () { return faultReportNotification_1.onDeviceFaultReportResolved; } });
 var orderCreatedPeripheralEmail_1 = require("./orderCreatedPeripheralEmail");
 Object.defineProperty(exports, "onPeripheralOrderCreatedSendMail", { enumerable: true, get: function () { return orderCreatedPeripheralEmail_1.onPeripheralOrderCreatedSendMail; } });
+var peripheralOrderWhatsApp_1 = require("./peripheralOrderWhatsApp");
+Object.defineProperty(exports, "onPeripheralOrderCreatedSendWhatsApp", { enumerable: true, get: function () { return peripheralOrderWhatsApp_1.onPeripheralOrderCreatedSendWhatsApp; } });
 function chunk(arr, size = 500) {
     const out = [];
     for (let i = 0; i < arr.length; i += size)
