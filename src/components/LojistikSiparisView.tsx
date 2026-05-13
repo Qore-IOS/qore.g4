@@ -55,7 +55,7 @@ import OrderConfirmAnimation from '@/components/lojistik-terminal/order-confirm-
 import DeliveryHistory, { type PartialDelivery } from '@/components/lojistik-terminal/delivery-history';
 import { exportOrdersToExcel } from '@/lib/lojistik/export-orders';
 
-type LojFilter = 'all' | 'pending' | 'toplaniyor' | 'teslim_bekliyor' | 'eksik';
+type LojFilter = 'all' | 'pending' | 'toplaniyor' | 'eksik';
 
 type RowState = {
   itemId: string;
@@ -361,11 +361,6 @@ export default function LojistikSiparisView() {
     let list = peripheralOrders;
     if (filter === 'pending') list = list.filter((o) => o.status === 'pending');
     else if (filter === 'toplaniyor') list = list.filter((o) => o.status === 'toplaniyor');
-    else if (filter === 'teslim_bekliyor') {
-      list = list.filter((o) =>
-        ['shipped', 'transfer_pending', 'teslim_bekliyor', 'yolda'].includes(String(o.status || ''))
-      );
-    }
     else if (filter === 'eksik') list = list.filter((o) => o.status === 'eksik');
     if (search.trim()) {
       const q = search.trim().toLowerCase();
@@ -435,7 +430,9 @@ export default function LojistikSiparisView() {
         // move into "Hazırlanan" (toplaniyor); they only graduate to
         // "completed" when an irsaliye-based lab acceptance reconciles
         // the items. Partially approved orders are flagged "eksik".
-        status: isFullyApproved ? 'toplaniyor' : 'eksik',
+        // Approval moves the order into "Hazırlanıyor" (toplaniyor).
+        // It will only graduate to "completed" when an irsaliye-based lab acceptance reconciles the items.
+        status: 'toplaniyor',
         approvedAt: serverTimestamp(),
         approvedById: currentUser?.uid || null,
         approvedBy: currentUserProfile?.name || currentUser?.email || null,
@@ -445,12 +442,10 @@ export default function LojistikSiparisView() {
       setShowSaveFx(true);
 
       toast({
-        title: isFullyApproved ? 'Sipariş Hazırlanıyor' : 'Sipariş Eksik Onaylandı',
-        description: isFullyApproved
-          ? 'Sipariş hazırlanan listesine taşındı; irsaliye kabulü ile tamamlanacak.'
-          : 'Sipariş eksik kalemler ile bekleyen listede güncellendi.',
+        title: 'Sipariş Hazırlanıyor',
+        description: 'Sipariş hazırlanan listesine taşındı; irsaliye kabulü ile otomatik tamamlanacak.',
       });
-      if (isFullyApproved) setSelectedOrderId(null);
+      setSelectedOrderId(null);
     } catch (e) {
       console.error(e);
       toast({ title: 'Hata', description: 'Sipariş kaydedilemedi.', variant: 'destructive' });
@@ -569,12 +564,6 @@ export default function LojistikSiparisView() {
         cls: 'loj-status-badge loj-status-badge--info',
         Icon: Truck,
       };
-    if (['shipped', 'transfer_pending', 'teslim_bekliyor', 'yolda'].includes(String(s)))
-      return {
-        label: 'Yolda',
-        cls: 'loj-status-badge loj-status-badge--accent',
-        Icon: Truck,
-      };
     if (s === 'completed')
       return {
         label: 'Teslim',
@@ -597,8 +586,7 @@ export default function LojistikSiparisView() {
   const getOrderStage = (order: Order | null): number => {
     if (!order) return 0;
     const s = String(order.status || '');
-    if (s === 'completed') return 4;
-    if (['shipped', 'transfer_pending', 'teslim_bekliyor', 'yolda'].includes(s)) return 3;
+    if (s === 'completed') return 3;
     if (s === 'toplaniyor') return 2;
     if (s === 'eksik') return 2;
     if (s === 'pending') return 1;
@@ -801,7 +789,6 @@ export default function LojistikSiparisView() {
               ['all', 'Tümü'],
               ['pending', 'Bekleyen'],
               ['toplaniyor', 'Hazırlanan'],
-              ['teslim_bekliyor', 'Yolda'],
               ['eksik', 'Eksik'],
             ] as [LojFilter, string][]).map(([key, label]) => (
               <button
@@ -922,7 +909,7 @@ export default function LojistikSiparisView() {
             const stage = getOrderStage(order);
             const headerStatus = getStatusInfo(order);
             const HeaderStatusIcon = headerStatus.Icon;
-            const stageNames = ['Beklemede', 'Hazırlanıyor', 'Yolda', 'Teslim Edildi'];
+            const stageNames = ['Beklemede', 'Hazırlanıyor', 'Teslim Edildi'];
 
             return (
               <div className="flex flex-col h-full">
