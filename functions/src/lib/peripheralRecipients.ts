@@ -149,15 +149,26 @@ export function filterItemsForUserGroups(
   });
 }
 
-/** Resolve a lojistik user's assigned group IDs to group names via def_labGroups. */
+/** Resolve a lojistik user's assigned group IDs or names to group names via def_labGroups. */
 export function resolveUserGroupNames(
   user: LojistikUser,
   labGroupNamesById: Map<string, string>,
 ): Set<string> {
   const out = new Set<string>();
-  for (const id of user.assignedLabGroups) {
-    const name = labGroupNamesById.get(id);
-    if (name) out.add(name);
+  const knownNames = new Set(labGroupNamesById.values());
+
+  for (const idOrName of user.assignedLabGroups) {
+    const nameFromId = labGroupNamesById.get(idOrName);
+    if (nameFromId) {
+      out.add(nameFromId);
+    } else {
+      // If not an ID, use it directly. 
+      // It might be a name already saved by the UI, or a legacy name.
+      out.add(idOrName);
+      if (!knownNames.has(idOrName)) {
+        logger.debug(`[peripheralRecipients] User ${user.uid} has assigned group "${idOrName}" which is not in def_labGroups.`);
+      }
+    }
   }
   return out;
 }
