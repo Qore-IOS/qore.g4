@@ -34,6 +34,7 @@ import BackButton from '@/components/BackButton';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { exportDataToExcel } from '@/lib/utils';
 import { calculateEfficiencyMetrics } from '@/lib/verimlilik/validation';
 
@@ -110,6 +111,7 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
   const [isLoading, setIsLoading] = useState(true);
   const [showResultsOnly, setShowResultsOnly] = useState(false);
   const [column22Mode, setColumn22Mode] = useState<'kumulatif' | 'hakedis'>('kumulatif');
+  const [showStockAlgorithmModal, setShowStockAlgorithmModal] = useState(false);
 
   useEffect(() => {
     const fetchRecord = async () => {
@@ -190,6 +192,37 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
     const fileName = `Total_Verimlilik_Gecmis_${record.poolName}_${record.year}-${String(record.month + 1).padStart(2, '0')}`;
     exportDataToExcel(dataToExport, fileName, 'Veriler', toast);
   };
+
+  const stockAlgorithmRows = useMemo(() => {
+    if (!record?.rows.length) return [];
+
+    return record.rows.map(row => {
+      const expectedConsumption = row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest;
+      const volume = Math.max(0, row.kumulatifTotal || 0);
+      const stockScore = volume > 0
+        ? Math.max(0, Math.min(100, 100 - (Math.abs(row.stokDogrulukFark) / volume) * 100))
+        : 100;
+
+      return {
+        id: row.id,
+        labName: row.labName,
+        stokAdi: row.stokAdi,
+        expectedConsumption,
+        volume,
+        stockDiff: row.stokDogrulukFark,
+        stockScore,
+        impact: volume,
+      };
+    });
+  }, [record]);
+
+  const stockAlgorithmTotals = useMemo(() => {
+    const hakEdisVerisiGirildi = record?.efficiencyMetrics?.hakEdisVerisiGirildi
+      ?? record?.rows.some(row => Number(row.hakEdis || 0) > 0)
+      ?? false;
+
+    return { hakEdisVerisiGirildi };
+  }, [record]);
 
   if (isLoading) {
     return (
