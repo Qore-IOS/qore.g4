@@ -200,6 +200,16 @@ export interface EfficiencyMetrics {
   kitVerimlilikSkoru: number;
   /** Overall efficiency score (0-100) */
   genelVerimlilik: number;
+  /** Total impact value used by the value-impact efficiency index */
+  toplamEtkiDegeri: number;
+  /** Whether all calculable rows were weighted by product cost × cumulative volume */
+  maliyetAgirlikli: boolean;
+  /** Number of rows included in the weighted efficiency calculation */
+  hesaplananSatirSayisi: number;
+  /** Whether at least one earned amount (Column 19 - Hak Ediş) was entered */
+  hakEdisVerisiGirildi: boolean;
+  /** Efficiency algorithm identifier */
+  algoritma: 'value-impact-efficiency-index';
 }
 
 /**
