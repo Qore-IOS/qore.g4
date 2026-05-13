@@ -1034,20 +1034,29 @@ export default function DirektTransferPanel() {
     if (!selectedDepotId) return;
     const q = query(collection(db, 'depoStok'), where('depotId', '==', selectedDepotId), where('isShipped', '==', false));
     const snap = await getDocs(q);
+    // Lot/adet takipli ürünler `adet: N` taşıyan tek bir doküman; seri takipli
+    // ürünler doküman başına `adet: 1`. Her ikisinde de dokümandaki gerçek
+    // adet kullanılmalı — yoksa lot dokümanları listede 1 birim olarak görünür.
     const items = filterByCompanyScope(
-        snap.docs.map(d => ({
-            ...d.data(),
-            id: d.id,
-            adet: 1,
-            key: d.id,
-            isGroup: false,
-        } as TransferRow)),
+        snap.docs.map(d => {
+            const data = d.data() as any;
+            const docAdet = Number(data.adet);
+            const safeAdet = Number.isFinite(docAdet) && docAdet > 0 ? Math.max(1, Math.floor(docAdet)) : 1;
+            return {
+                ...data,
+                id: d.id,
+                adet: safeAdet,
+                key: d.id,
+                isGroup: false,
+            } as TransferRow;
+        }),
         currentCompanyId,
         isSuperAdmin,
     );
 
     setDirectTransferItems(items);
-    flashScanFeedback('success', `${items.length} adet ürün transfer listesine eklendi.`);
+    const totalAdet = items.reduce((sum, it) => sum + (it.adet ?? 1), 0);
+    flashScanFeedback('success', `${items.length} kalem (${totalAdet} adet) transfer listesine eklendi.`);
   };
   
   const groupedTransferItems = useMemo(() => {
