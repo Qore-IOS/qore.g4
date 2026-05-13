@@ -20,7 +20,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
@@ -247,6 +247,11 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
     );
   }
 
+  const firstLabId = record.rows[0]?.labId;
+  const calculationDetailHref = firstLabId
+    ? `/total-verimlilik/gecmis/${record.id}/hesap-detay/${encodeURIComponent(firstLabId)}`
+    : null;
+
   return (
     <div className="p-4 space-y-6" role="main" aria-label="Total Verimlilik Geçmiş Detayı">
       <BackButton fallback="/total-verimlilik/gecmis" />
@@ -308,13 +313,27 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
                     />
                   </svg>
                   <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className={`text-2xl font-bold ${
-                      record.efficiencyMetrics.genelVerimlilik >= 90 ? 'text-green-600' :
-                      record.efficiencyMetrics.genelVerimlilik >= 70 ? 'text-yellow-600' :
-                      record.efficiencyMetrics.genelVerimlilik >= 50 ? 'text-orange-600' : 'text-red-600'
-                    }`}>
-                      %{record.efficiencyMetrics.genelVerimlilik.toFixed(1)}
-                    </span>
+                    {calculationDetailHref ? (
+                      <Link
+                        href={calculationDetailHref}
+                        className={`text-2xl font-bold underline-offset-4 hover:underline focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 ${
+                          record.efficiencyMetrics.genelVerimlilik >= 90 ? 'text-green-600' :
+                          record.efficiencyMetrics.genelVerimlilik >= 70 ? 'text-yellow-600' :
+                          record.efficiencyMetrics.genelVerimlilik >= 50 ? 'text-orange-600' : 'text-red-600'
+                        }`}
+                        aria-label="Laboratuvar dönem hesap detayını aç"
+                      >
+                        %{record.efficiencyMetrics.genelVerimlilik.toFixed(1)}
+                      </Link>
+                    ) : (
+                      <span className={`text-2xl font-bold ${
+                        record.efficiencyMetrics.genelVerimlilik >= 90 ? 'text-green-600' :
+                        record.efficiencyMetrics.genelVerimlilik >= 70 ? 'text-yellow-600' :
+                        record.efficiencyMetrics.genelVerimlilik >= 50 ? 'text-orange-600' : 'text-red-600'
+                      }`}>
+                        %{record.efficiencyMetrics.genelVerimlilik.toFixed(1)}
+                      </span>
+                    )}
                     <span className="text-xs text-muted-foreground">Genel</span>
                   </div>
                 </div>
@@ -337,14 +356,19 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
                     </div>
                     <div className="flex flex-col">
                       <span className="text-sm font-medium">Stok Doğruluk</span>
-                      <button
-                        type="button"
-                        onClick={() => setShowStockAlgorithmModal(true)}
-                        className={`w-fit text-left text-lg font-bold underline-offset-4 hover:underline focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 ${record.efficiencyMetrics.stokDogrulukSkoru >= 90 ? 'text-green-600' : record.efficiencyMetrics.stokDogrulukSkoru >= 70 ? 'text-yellow-600' : 'text-red-600'}`}
-                        aria-label="Stok doğruluk hesaplama algoritmasını göster"
-                      >
-                        %{record.efficiencyMetrics.stokDogrulukSkoru.toFixed(1)}
-                      </button>
+                      {calculationDetailHref ? (
+                        <Link
+                          href={calculationDetailHref}
+                          className={`w-fit text-left text-lg font-bold underline-offset-4 hover:underline focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 ${record.efficiencyMetrics.stokDogrulukSkoru >= 90 ? 'text-green-600' : record.efficiencyMetrics.stokDogrulukSkoru >= 70 ? 'text-yellow-600' : 'text-red-600'}`}
+                          aria-label="Laboratuvar dönem hesap detayını aç"
+                        >
+                          %{record.efficiencyMetrics.stokDogrulukSkoru.toFixed(1)}
+                        </Link>
+                      ) : (
+                        <span className={`text-lg font-bold ${record.efficiencyMetrics.stokDogrulukSkoru >= 90 ? 'text-green-600' : record.efficiencyMetrics.stokDogrulukSkoru >= 70 ? 'text-yellow-600' : 'text-red-600'}`}>
+                          %{record.efficiencyMetrics.stokDogrulukSkoru.toFixed(1)}
+                        </span>
+                      )}
                       <span className="text-xs text-muted-foreground">Sapma: %{record.efficiencyMetrics.stokSapmaYuzde.toFixed(2)}</span>
                     </div>
                   </div>
@@ -693,85 +717,6 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
         </CardContent>
       </Card>
 
-      <Dialog open={showStockAlgorithmModal} onOpenChange={setShowStockAlgorithmModal}>
-        <DialogContent className="max-w-5xl max-h-[85vh] overflow-hidden flex flex-col">
-          <DialogHeader>
-            <DialogTitle>Stok Doğruluk Hesaplama Algoritması</DialogTitle>
-            <DialogDescription>
-              Sütun 20 Stok Doğruluk, her satırda kaybın aynı satırın kümülatif test hacmine oranlanmasıyla hesaplanır.
-            </DialogDescription>
-          </DialogHeader>
-
-          {record?.efficiencyMetrics && (
-            <div className="flex min-h-0 flex-1 flex-col gap-4">
-              <div className="grid gap-3 md:grid-cols-3">
-                <div className="rounded-lg border bg-muted/30 p-3">
-                  <div className="text-xs text-muted-foreground">Stok Doğruluk Skoru</div>
-                  <div className="text-2xl font-bold">%{record.efficiencyMetrics.stokDogrulukSkoru.toFixed(1)}</div>
-                  <div className="text-xs text-muted-foreground">Sapma: %{record.efficiencyMetrics.stokSapmaYuzde.toFixed(2)}</div>
-                </div>
-                <div className="rounded-lg border bg-muted/30 p-3">
-                  <div className="text-xs text-muted-foreground">Genel Verimlilikte Kullanım</div>
-                  <div className="text-sm font-semibold">
-                    {stockAlgorithmTotals.hakEdisVerisiGirildi ? 'Stok + Kit ortalaması' : 'Sadece stok doğruluk'}
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    {stockAlgorithmTotals.hakEdisVerisiGirildi
-                      ? 'Hak ediş verisi olduğu için kit verimlilik de genel skora dahil edilir.'
-                      : '19. Hak Ediş sütununda veri olmadığı için genel skor stok doğruluk skoruna eşittir.'}
-                  </div>
-                </div>
-                <div className="rounded-lg border bg-muted/30 p-3">
-                  <div className="text-xs text-muted-foreground">Etki Değeri</div>
-                  <div className="text-lg font-bold">{record.efficiencyMetrics.toplamEtkiDegeri?.toLocaleString('tr-TR') ?? '-'}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {record.efficiencyMetrics.maliyetAgirlikli ? 'Birim maliyet × kümülatif hacim' : 'Kümülatif test hacmi'}
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-lg border p-3 text-sm">
-                <div className="font-semibold mb-2">Formül</div>
-                <ol className="list-decimal space-y-1 pl-5 text-muted-foreground">
-                  <li>Beklenen tüketim = 14. Sevkiyatlar Sonrası Total - 18. Dönem Sonu Toplam.</li>
-                  <li>Stok doğruluk farkı = (14 - 18) - 15. Kümülatif Total.</li>
-                  <li>Satır stok skoru = 100 - (|stok doğruluk farkı| / 15. Kümülatif Total × 100), 0-100 aralığına sıkıştırılır.</li>
-                  <li>Genel stok doğruluk = Σ(satır stok skoru × etki değeri) / Σ(etki değeri).</li>
-                </ol>
-              </div>
-
-              <ScrollArea className="min-h-[220px] flex-1 rounded-lg border">
-                <Table aria-label="Stok doğruluk algoritması satır hesapları">
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Laboratuvar</TableHead>
-                      <TableHead>Ürün</TableHead>
-                      <TableHead className="text-right">14-18</TableHead>
-                      <TableHead className="text-right">15. Kümülatif</TableHead>
-                      <TableHead className="text-right">Fark</TableHead>
-                      <TableHead className="text-right">Satır Skoru</TableHead>
-                      <TableHead className="text-right">Etki</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {stockAlgorithmRows.map(row => (
-                      <TableRow key={row.id}>
-                        <TableCell>{row.labName}</TableCell>
-                        <TableCell className="max-w-[220px] truncate">{row.stokAdi}</TableCell>
-                        <TableCell className="text-right">{row.expectedConsumption.toLocaleString('tr-TR')}</TableCell>
-                        <TableCell className="text-right">{row.volume.toLocaleString('tr-TR')}</TableCell>
-                        <TableCell className="text-right">{row.stockDiff.toLocaleString('tr-TR')}</TableCell>
-                        <TableCell className="text-right">%{row.stockScore.toFixed(1)}</TableCell>
-                        <TableCell className="text-right">{row.impact.toLocaleString('tr-TR')}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </ScrollArea>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
