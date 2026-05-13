@@ -483,7 +483,7 @@ export default function KullaniciPanel() {
                   maxLength={8}
                 />
 
-                {(currentUser.role === 'teknik_servis' || currentUser.role === 'aplikasyon' || currentUser.role === 'teknisyen') && (
+                {(currentUser.role === 'teknik_servis' || currentUser.role === 'aplikasyon' || currentUser.role === 'teknisyen' || currentUser.role === 'lojistik_sorumlusu') && (
                   <Input
                     placeholder="Telefon Numarası (örn: +905xxxxxxxxx)"
                     value={currentUser.phoneNumber || ''}
