@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
+import { cn } from '@/lib/utils';
 
 type RequestHistoryItem = {
   id: string;
