@@ -48,8 +48,9 @@ export async function GET(request: NextRequest) {
       .where('requestSource', 'in', ['lab_to_depot', 'lab_to_office']);
 
     if (labIds && labIds.length > 0) {
-      // If we have multiple labs, we use 'in' operator (limited to 30 labs)
-      baseQuery = baseQuery.where('labId', 'in', labIds.slice(0, 30));
+      // If we have multiple labs, we use 'in' operator (limited to 15 labs to stay within 30 disjunctions limit)
+      // because requestSource 'in' query has 2 items (2 * 15 = 30).
+      baseQuery = baseQuery.where('labId', 'in', labIds.slice(0, 15));
     } else if (labId) {
       baseQuery = baseQuery.where('labId', '==', labId);
     } else if (createdById) {
