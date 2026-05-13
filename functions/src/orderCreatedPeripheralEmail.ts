@@ -3,6 +3,13 @@ import * as functions from 'firebase-functions';
 import { logger } from 'firebase-functions';
 import * as nodemailer from 'nodemailer';
 import * as exceljs from 'exceljs';
+import {
+  buildItemGroupMap,
+  loadLabGroupNamesByDocId,
+  loadLojistikUsers,
+  filterItemsForUserGroups,
+  resolveUserGroupNames,
+} from './lib/peripheralRecipients';
 
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
@@ -427,26 +434,47 @@ export const onPeripheralOrderCreatedSendMail = functions
       }
       steps.push('SMTP yapılandırma kontrolü: OK');
 
-      const { emails, debug } = await resolveLogisticsRecipients();
-      logEntry.recipientLookup = debug;
-
-      if (emails.length === 0) {
+      const orderItems = Array.isArray(order.items) ? order.items : [];
+      if (orderItems.length === 0) {
         logEntry.status = 'skipped';
-        logEntry.error =
-          "role='lojistik_sorumlusu' olan kullanıcı bulunamadı veya hiçbirinin e-posta adresi tanımlı değil.";
-        steps.push('Alıcı sorgusu: BAŞARISIZ - lojistik sorumlusu kullanıcı/email yok');
+        logEntry.error = 'Siparişte kalem yok.';
+        steps.push('Kalem kontrolü: ATLANDI - sipariş boş');
         await db.collection('emailNotificationLogs').add(logEntry);
-        logger.warn(`[peripheralOrderEmail] No lojistik_sorumlusu recipients for order ${orderId}.`);
         return;
       }
 
-      logEntry.recipients = emails;
-      steps.push(`Alıcı sorgusu: OK (${emails.length} alıcı)`);
+      const [itemGroupMap, labGroupNamesById, users] = await Promise.all([
+        buildItemGroupMap(orderItems),
+        loadLabGroupNamesByDocId(),
+        loadLojistikUsers(),
+      ]);
+      steps.push(`Grup/kullanıcı yüklemesi: OK (kalem grup eşlemesi=${itemGroupMap.size}, def_labGroups=${labGroupNamesById.size}, lojistik kullanıcı=${users.length})`);
+
+      logEntry.orderGroups = Array.from(new Set(Array.from(itemGroupMap.values())));
+
+      // Build per-user filtered recipient list
+      const recipients = users.map((user) => {
+        const groupNames = resolveUserGroupNames(user, labGroupNamesById);
+        const filtered = filterItemsForUserGroups(orderItems, itemGroupMap, groupNames);
+        return { user, groupNames, filtered };
+      });
+
+      const sendable = recipients.filter((r) => r.user.email && r.filtered.length > 0);
+      logEntry.recipients = sendable.map((r) => r.user.email);
+
+      if (sendable.length === 0) {
+        logEntry.status = 'skipped';
+        logEntry.error = 'Eşleşen grup/kalem yok ya da hiçbir alıcının e-postası tanımlı değil.';
+        steps.push('Alıcı sorgusu: BAŞARISIZ - eşleşen lojistik sorumlusu yok');
+        await db.collection('emailNotificationLogs').add(logEntry);
+        logger.warn(`[peripheralOrderEmail] No matching lojistik_sorumlusu recipients for order ${orderId}.`);
+        return;
+      }
+
+      steps.push(`Alıcı sorgusu: OK (${sendable.length} alıcı eşleşti)`);
 
       const senderEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
       const labName = order.kurumAdi || 'Bilinmeyen Laboratuvar';
-      const itemsCount = (order.items || []).length;
-      const totalQty = (order.items || []).reduce((sum, item) => sum + Number(item.adet || 0), 0);
       const urgencyKey = (order.urgency && URGENCY_META[order.urgency] ? order.urgency : 'normal') as keyof typeof URGENCY_META;
       const urgencyMeta = URGENCY_META[urgencyKey];
       const noteText = (order.note || '').trim();
@@ -454,60 +482,106 @@ export const onPeripheralOrderCreatedSendMail = functions
         urgencyKey === 'cok_acil' ? '[ÇOK ACİL] ' :
         urgencyKey === 'acil'     ? '[ACİL] '     : '';
 
-      steps.push(`Aciliyet: ${urgencyMeta.label}${noteText ? ' · açıklama mevcut' : ''}`);
-      steps.push('Excel oluşturma: başladı');
-      const excelBuffer = await buildExcelBuffer(orderId, order);
-      steps.push(`Excel oluşturma: OK (${excelBuffer.length} byte)`);
-
       const noteHtml = noteText
         ? `<tr><td style="padding:6px 12px; background:#f1f5f9; border:1px solid #94a3b8; vertical-align:top;"><b>Açıklama</b></td><td style="padding:6px 12px; border:1px solid #94a3b8; white-space:pre-wrap;">${noteText.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] || c))}</td></tr>`
         : '';
 
-      await transporter.sendMail({
-        from: senderEmail,
-        to: emails.join(','),
-        subject: `${subjectPrefix}[Perifer Talep] ${labName} — ${totalQty} adet (${urgencyMeta.label})`,
-        text:
-          `Perifer laboratuvardan yeni sipariş talebi açıldı.\n` +
-          `Aciliyet: ${urgencyMeta.label}\n` +
-          `Sipariş ID: ${orderId}\n` +
-          `Laboratuvar: ${labName}\n` +
-          `Talep Eden: ${order.createdBy || '-'}\n` +
-          `Kalem Sayısı: ${itemsCount}\n` +
-          `Toplam Adet: ${totalQty}\n` +
-          (noteText ? `Açıklama: ${noteText}\n` : '') +
-          `\nDetaylar ekteki Excel dosyasındadır.`,
-        html: `
-          <div style="font-family: -apple-system, Segoe UI, Roboto, sans-serif; color:#0f172a;">
-            <h2 style="margin:0 0 8px 0; color:#1e293b;">Perifer Laboratuvar Ürün Talebi</h2>
-            <div style="display:inline-block; margin:0 0 14px 0; padding:6px 14px; border-radius:999px; background:${urgencyMeta.emailBg}; color:${urgencyMeta.emailText}; border:2px solid ${urgencyMeta.emailBadgeBorder}; font-weight:bold; font-size:13px; letter-spacing:0.5px;">
-              ACİLİYET: ${urgencyMeta.label.toLocaleUpperCase('tr-TR')}
-            </div>
-            <p style="margin:0 0 12px 0;">Aşağıdaki perifer laboratuvardan yeni bir ürün talebi açıldı:</p>
-            <table style="border-collapse:collapse; font-size:14px;">
-              <tr><td style="padding:6px 12px; background:#e0f2fe; border:1px solid #94a3b8;"><b>Sipariş ID</b></td><td style="padding:6px 12px; border:1px solid #94a3b8;">${orderId}</td></tr>
-              <tr><td style="padding:6px 12px; background:#e0e7ff; border:1px solid #94a3b8;"><b>Laboratuvar</b></td><td style="padding:6px 12px; border:1px solid #94a3b8;">${labName}</td></tr>
-              <tr><td style="padding:6px 12px; background:#fef3c7; border:1px solid #94a3b8;"><b>Talep Eden</b></td><td style="padding:6px 12px; border:1px solid #94a3b8;">${order.createdBy || '-'}</td></tr>
-              <tr><td style="padding:6px 12px; background:${urgencyMeta.emailBg}; border:1px solid #94a3b8;"><b>Aciliyet</b></td><td style="padding:6px 12px; border:1px solid #94a3b8; color:${urgencyMeta.emailText}; font-weight:bold;">${urgencyMeta.label}</td></tr>
-              <tr><td style="padding:6px 12px; background:#fee2e2; border:1px solid #94a3b8;"><b>Kalem Sayısı</b></td><td style="padding:6px 12px; border:1px solid #94a3b8;">${itemsCount}</td></tr>
-              <tr><td style="padding:6px 12px; background:#dcfce7; border:1px solid #94a3b8;"><b>Toplam Adet</b></td><td style="padding:6px 12px; border:1px solid #94a3b8; font-weight:bold; font-size:16px;">${totalQty}</td></tr>
-              ${noteHtml}
-            </table>
-            <p style="margin:16px 0 0 0;">Sipariş detayları (lab stok, max adet, talep adedi) ekteki Excel dosyasındadır.</p>
-          </div>`,
-        attachments: [
-          {
-            filename: `perifer_siparis_${orderId}.xlsx`,
-            content: excelBuffer,
-            contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          },
-        ],
-      });
+      logEntry.perUserResults = [] as any[];
+      let sentCount = 0;
 
-      logEntry.status = 'sent';
-      steps.push(`Email gönderimi: BAŞARILI (${emails.length} alıcı)`);
+      for (const r of sendable) {
+        const filtered = r.filtered;
+        const filteredOrder: OrderDoc = { ...order, items: filtered };
+        const filteredItemCount = filtered.length;
+        const filteredTotalQty = filtered.reduce((sum, item) => sum + Number(item.adet || 0), 0);
+        const groupsForUser = Array.from(r.groupNames);
+        const groupsLine = groupsForUser.length ? groupsForUser.join(', ') : '-';
+
+        let excelBuffer: Buffer;
+        try {
+          excelBuffer = await buildExcelBuffer(orderId, filteredOrder);
+        } catch (excelErr: any) {
+          logEntry.perUserResults.push({
+            uid: r.user.uid,
+            email: r.user.email,
+            matchedItemCount: filteredItemCount,
+            success: false,
+            error: `Excel hata: ${excelErr?.message || excelErr}`,
+          });
+          steps.push(`${r.user.email}: Excel HATA - ${excelErr?.message || excelErr}`);
+          continue;
+        }
+
+        try {
+          await transporter.sendMail({
+            from: senderEmail,
+            to: r.user.email!,
+            subject: `${subjectPrefix}[Perifer Talep] ${labName} — ${filteredTotalQty} adet (${urgencyMeta.label})`,
+            text:
+              `Perifer laboratuvardan yeni sipariş talebi açıldı.\n` +
+              `Aciliyet: ${urgencyMeta.label}\n` +
+              `Sipariş ID: ${orderId}\n` +
+              `Laboratuvar: ${labName}\n` +
+              `Talep Eden: ${order.createdBy || '-'}\n` +
+              `Atanan Grup(lar): ${groupsLine}\n` +
+              `Kalem Sayısı: ${filteredItemCount}\n` +
+              `Toplam Adet: ${filteredTotalQty}\n` +
+              (noteText ? `Açıklama: ${noteText}\n` : '') +
+              `\nDetaylar ekteki Excel dosyasındadır.`,
+            html: `
+              <div style="font-family: -apple-system, Segoe UI, Roboto, sans-serif; color:#0f172a;">
+                <h2 style="margin:0 0 8px 0; color:#1e293b;">Perifer Laboratuvar Ürün Talebi</h2>
+                <div style="display:inline-block; margin:0 0 14px 0; padding:6px 14px; border-radius:999px; background:${urgencyMeta.emailBg}; color:${urgencyMeta.emailText}; border:2px solid ${urgencyMeta.emailBadgeBorder}; font-weight:bold; font-size:13px; letter-spacing:0.5px;">
+                  ACİLİYET: ${urgencyMeta.label.toLocaleUpperCase('tr-TR')}
+                </div>
+                <p style="margin:0 0 12px 0;">Aşağıdaki perifer laboratuvardan size atanan grup(lar)a ait yeni bir ürün talebi açıldı:</p>
+                <table style="border-collapse:collapse; font-size:14px;">
+                  <tr><td style="padding:6px 12px; background:#e0f2fe; border:1px solid #94a3b8;"><b>Sipariş ID</b></td><td style="padding:6px 12px; border:1px solid #94a3b8;">${orderId}</td></tr>
+                  <tr><td style="padding:6px 12px; background:#e0e7ff; border:1px solid #94a3b8;"><b>Laboratuvar</b></td><td style="padding:6px 12px; border:1px solid #94a3b8;">${labName}</td></tr>
+                  <tr><td style="padding:6px 12px; background:#fef3c7; border:1px solid #94a3b8;"><b>Talep Eden</b></td><td style="padding:6px 12px; border:1px solid #94a3b8;">${order.createdBy || '-'}</td></tr>
+                  <tr><td style="padding:6px 12px; background:#ccfbf1; border:1px solid #94a3b8;"><b>Atanan Grup(lar)</b></td><td style="padding:6px 12px; border:1px solid #94a3b8;">${groupsLine}</td></tr>
+                  <tr><td style="padding:6px 12px; background:${urgencyMeta.emailBg}; border:1px solid #94a3b8;"><b>Aciliyet</b></td><td style="padding:6px 12px; border:1px solid #94a3b8; color:${urgencyMeta.emailText}; font-weight:bold;">${urgencyMeta.label}</td></tr>
+                  <tr><td style="padding:6px 12px; background:#fee2e2; border:1px solid #94a3b8;"><b>Kalem Sayısı</b></td><td style="padding:6px 12px; border:1px solid #94a3b8;">${filteredItemCount}</td></tr>
+                  <tr><td style="padding:6px 12px; background:#dcfce7; border:1px solid #94a3b8;"><b>Toplam Adet</b></td><td style="padding:6px 12px; border:1px solid #94a3b8; font-weight:bold; font-size:16px;">${filteredTotalQty}</td></tr>
+                  ${noteHtml}
+                </table>
+                <p style="margin:16px 0 0 0;">Sipariş detayları (lab stok, max adet, talep adedi) ekteki Excel dosyasındadır.</p>
+              </div>`,
+            attachments: [
+              {
+                filename: `perifer_siparis_${orderId}.xlsx`,
+                content: excelBuffer,
+                contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+              },
+            ],
+          });
+
+          sentCount += 1;
+          logEntry.perUserResults.push({
+            uid: r.user.uid,
+            email: r.user.email,
+            groups: groupsForUser,
+            matchedItemCount: filteredItemCount,
+            success: true,
+          });
+          steps.push(`${r.user.email}: OK (${filteredItemCount} kalem, ${groupsLine})`);
+        } catch (sendErr: any) {
+          logEntry.perUserResults.push({
+            uid: r.user.uid,
+            email: r.user.email,
+            groups: groupsForUser,
+            matchedItemCount: filteredItemCount,
+            success: false,
+            error: sendErr?.message || String(sendErr),
+          });
+          steps.push(`${r.user.email}: BAŞARISIZ - ${sendErr?.message || sendErr}`);
+        }
+      }
+
+      logEntry.status = sentCount > 0 ? 'sent' : 'failed';
+      logEntry.sentCount = sentCount;
       await db.collection('emailNotificationLogs').add(logEntry);
-      logger.info(`[peripheralOrderEmail] Sent order ${orderId} email to ${emails.length} recipients.`);
+      logger.info(`[peripheralOrderEmail] Sent order ${orderId} email to ${sentCount}/${sendable.length} recipients.`);
     } catch (error: any) {
       logEntry.status = 'failed';
       logEntry.error = error?.message || String(error);

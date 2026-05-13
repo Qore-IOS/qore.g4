@@ -2,21 +2,22 @@ import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions';
 import { logger } from 'firebase-functions';
 import { sendWhatsAppText } from './lib/whatsapp';
+import {
+  buildItemGroupMap,
+  loadLabGroupNamesByDocId,
+  loadLojistikUsers,
+  filterItemsForUserGroups,
+  resolveUserGroupNames,
+  RawOrderItem,
+} from './lib/peripheralRecipients';
 
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
 
-type OrderItem = {
-  stokKodu?: string;
-  stokAdi?: string;
-  adet?: number;
-  anaBirim?: string;
-};
-
 type OrderDoc = {
   labId?: string;
   kurumAdi?: string;
-  items?: OrderItem[];
+  items?: RawOrderItem[];
   isPeripheral?: boolean;
   requestSource?: string;
   urgency?: 'normal' | 'acil' | 'cok_acil';
@@ -34,37 +35,48 @@ function normalizePhoneForWa(raw: unknown): string | null {
   if (typeof raw !== 'string') return null;
   const digits = raw.replace(/\D/g, '');
   if (!digits) return null;
-  // Turkish mobile numbers are 10 digits (5xxxxxxxxx); add 90 country prefix.
   if (digits.length === 10 && digits.startsWith('5')) return `90${digits}`;
-  // Already prefixed (905...) or international form
   return digits;
 }
 
-function buildMessage(order: OrderDoc, labName: string): string {
-  const items = Array.isArray(order.items) ? order.items : [];
+function buildMessage(
+  order: OrderDoc,
+  labName: string,
+  filteredItems: RawOrderItem[],
+  itemGroupMap: Map<string, string>,
+): string {
   const urgency = URGENCY_LABELS[order.urgency || 'normal'] || 'Normal';
+  const totalAdet = filteredItems.reduce((s, it) => s + (Number(it.adet) || 0), 0);
 
   const lines: string[] = [];
   lines.push('*Yeni Perifer Ürün Talebi*');
   lines.push('');
   lines.push(`• *Kurum:* ${labName}`);
-  lines.push(`• *Kalem Sayısı:* ${items.length}`);
+  lines.push(`• *Kalem Sayısı:* ${filteredItems.length}`);
+  lines.push(`• *Toplam Adet:* ${totalAdet}`);
   lines.push(`• *Aciliyet:* ${urgency}`);
   if (order.createdBy) lines.push(`• *Talep Eden:* ${order.createdBy}`);
   lines.push('');
-  if (items.length > 0) {
-    lines.push('*Ürünler:*');
-    for (const it of items.slice(0, 25)) {
+
+  // Group items by laboratuvarGrubu for a more readable layout
+  const itemsByGroup = new Map<string, RawOrderItem[]>();
+  for (const it of filteredItems) {
+    const g = itemGroupMap.get((it.stokKodu || '').trim()) || 'Diğer';
+    if (!itemsByGroup.has(g)) itemsByGroup.set(g, []);
+    itemsByGroup.get(g)!.push(it);
+  }
+  for (const [groupName, groupItems] of itemsByGroup) {
+    lines.push(`*${groupName}:*`);
+    for (const it of groupItems.slice(0, 30)) {
       const name = it.stokAdi || it.stokKodu || '-';
       const adet = it.adet ?? 1;
       const birim = it.anaBirim ? ` ${it.anaBirim}` : '';
       lines.push(`- ${name} x ${adet}${birim}`);
     }
-    if (items.length > 25) {
-      lines.push(`...ve ${items.length - 25} kalem daha`);
-    }
+    if (groupItems.length > 30) lines.push(`...ve ${groupItems.length - 30} kalem daha`);
     lines.push('');
   }
+
   if (order.note && order.note.trim()) {
     lines.push(`*Not:* ${order.note.trim()}`);
     lines.push('');
@@ -85,7 +97,6 @@ export const onPeripheralOrderCreatedSendWhatsApp = functions
       orderId,
       labId: order?.labId || null,
       labName: order?.kurumAdi || null,
-      labGroupId: null as string | null,
       itemsCount: Array.isArray(order?.items) ? order.items.length : 0,
       isPeripheral: order?.isPeripheral ?? null,
       requestSource: order?.requestSource ?? null,
@@ -103,7 +114,6 @@ export const onPeripheralOrderCreatedSendWhatsApp = functions
         await db.collection('peripheralOrderWhatsAppLogs').add(logEntry);
         return;
       }
-      logEntry.steps.push('Perifer kontrolü: OK');
 
       const waConfig = functions.config().whatsapp;
       if (!waConfig?.instance_id || !waConfig?.token) {
@@ -113,90 +123,79 @@ export const onPeripheralOrderCreatedSendWhatsApp = functions
         logger.warn('[peripheralOrderWA] WhatsApp config missing');
         return;
       }
-      logEntry.steps.push('WhatsApp config kontrolü: OK');
 
-      const labId = order.labId;
-      if (!labId) {
+      const items: RawOrderItem[] = Array.isArray(order.items) ? order.items : [];
+      if (items.length === 0) {
         logEntry.status = 'skipped';
-        logEntry.steps.push('Lab kontrolü: BAŞARISIZ (labId yok)');
+        logEntry.steps.push('Kalem kontrolü: ATLANDI (sipariş boş)');
         await db.collection('peripheralOrderWhatsAppLogs').add(logEntry);
         return;
       }
 
-      const hospitalSnap = await db.collection('hospitals').doc(labId).get();
-      const hospitalData = hospitalSnap.exists ? hospitalSnap.data() : null;
-      const labGroupId: string | undefined = hospitalData?.labGroupId;
-      const labName = hospitalData?.name || order.kurumAdi || 'Bilinmeyen Laboratuvar';
-      logEntry.labGroupId = labGroupId || null;
-      logEntry.labName = labName;
+      const [itemGroupMap, labGroupNamesById, users] = await Promise.all([
+        buildItemGroupMap(items),
+        loadLabGroupNamesByDocId(),
+        loadLojistikUsers(),
+      ]);
+      logEntry.steps.push(`Veri yükleme OK (kalem grup eşlemesi: ${itemGroupMap.size}, def_labGroups: ${labGroupNamesById.size}, lojistik kullanıcı: ${users.length})`);
 
-      if (!labGroupId) {
-        logEntry.status = 'skipped';
-        logEntry.steps.push(`Lab grubu kontrolü: ATLANDI (hospital ${labId} için labGroupId atanmamış)`);
-        await db.collection('peripheralOrderWhatsAppLogs').add(logEntry);
-        logger.info(`[peripheralOrderWA] hospital ${labId} has no labGroupId; skipping`);
-        return;
-      }
-      logEntry.steps.push(`Lab grubu kontrolü: OK (${labGroupId})`);
+      const orderGroups = new Set(Array.from(itemGroupMap.values()));
+      logEntry.orderGroups = Array.from(orderGroups);
 
-      const usersSnap = await db.collection('users')
-        .where('role', '==', 'lojistik_sorumlusu')
-        .where('assignedLabGroups', 'array-contains', labGroupId)
-        .get();
+      const labName = order.kurumAdi || 'Bilinmeyen Laboratuvar';
 
-      if (usersSnap.empty) {
-        logEntry.status = 'skipped';
-        logEntry.steps.push(`Alıcı sorgusu: BAŞARISIZ - bu lab grubuna atanmış lojistik sorumlusu yok`);
-        await db.collection('peripheralOrderWhatsAppLogs').add(logEntry);
-        logger.info(`[peripheralOrderWA] no lojistik_sorumlusu for labGroup ${labGroupId}`);
-        return;
-      }
-      logEntry.steps.push(`Alıcı sorgusu: OK (${usersSnap.size} kullanıcı bulundu)`);
+      for (const user of users) {
+        const userGroupNames = resolveUserGroupNames(user, labGroupNamesById);
+        const filtered = filterItemsForUserGroups(items, itemGroupMap, userGroupNames);
+        const phone = normalizePhoneForWa(user.phoneNumber);
 
-      const messageBody = buildMessage(order, labName);
-      logEntry.messagePreview = messageBody.substring(0, 240);
-
-      for (const userDoc of usersSnap.docs) {
-        const user = userDoc.data() as any;
-        const phone = normalizePhoneForWa(user?.phoneNumber);
         const baseResult: any = {
-          uid: userDoc.id,
-          name: user?.name || null,
-          email: user?.email || null,
-          rawPhone: user?.phoneNumber || null,
+          uid: user.uid,
+          name: user.name,
+          email: user.email,
+          assignedGroups: Array.from(userGroupNames),
+          matchedItemCount: filtered.length,
         };
 
+        if (filtered.length === 0) {
+          baseResult.status = 'no_matching_items';
+          logEntry.results.push(baseResult);
+          logEntry.steps.push(`${user.name || user.uid}: ATLANDI (eşleşen kalem yok)`);
+          continue;
+        }
         if (!phone) {
           baseResult.status = 'no_phone';
           logEntry.results.push(baseResult);
-          logEntry.steps.push(`${user?.name || userDoc.id}: ATLANDI (telefon yok)`);
+          logEntry.steps.push(`${user.name || user.uid}: ATLANDI (telefon yok)`);
           continue;
         }
 
         const to = `${phone}@c.us`;
+        const messageBody = buildMessage(order, labName, filtered, itemGroupMap);
+        baseResult.to = to;
+        baseResult.messagePreview = messageBody.substring(0, 200);
         try {
           const r = await sendWhatsAppText(to, messageBody, waConfig.instance_id, waConfig.token);
-          baseResult.to = to;
           baseResult.success = r.success;
           baseResult.messageId = r.messageId || null;
           baseResult.error = r.error || null;
           logEntry.results.push(baseResult);
           if (r.success) {
-            logEntry.steps.push(`${user?.name || userDoc.id} (${to}): OK (msgId=${r.messageId})`);
+            logEntry.steps.push(`${user.name || user.uid} (${to}): OK (msgId=${r.messageId})`);
           } else {
-            logEntry.steps.push(`${user?.name || userDoc.id} (${to}): BAŞARISIZ - ${r.error}`);
+            logEntry.steps.push(`${user.name || user.uid} (${to}): BAŞARISIZ - ${r.error}`);
           }
         } catch (e: any) {
           baseResult.success = false;
           baseResult.error = e?.message || String(e);
           logEntry.results.push(baseResult);
-          logEntry.steps.push(`${user?.name || userDoc.id} (${to}): HATA - ${e?.message || e}`);
-          logger.error(`[peripheralOrderWA] send error for ${userDoc.id}`, e);
+          logEntry.steps.push(`${user.name || user.uid} (${to}): HATA - ${e?.message || e}`);
+          logger.error(`[peripheralOrderWA] send error for ${user.uid}`, e);
         }
       }
 
       const anySent = logEntry.results.some((r: any) => r.success === true);
-      logEntry.status = anySent ? 'sent' : 'failed';
+      logEntry.status = anySent ? 'sent' : 'skipped';
     } catch (e: any) {
       logger.error(`[peripheralOrderWA] Unexpected error for order ${orderId}`, e);
       logEntry.status = 'error';
