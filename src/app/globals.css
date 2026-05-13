@@ -5892,3 +5892,66 @@ html.qt-active body[data-scroll-locked] .qore-technic-bottom-nav {
   .fault-action-option strong { font-size: 17px; }
   .fault-action-option small { font-size: 13px; }
 }
+
+/* ─── Minimalist horizontal table slider ─────────────────────────── */
+.table-hscroll-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 14px;
+  background: transparent;
+  cursor: pointer;
+  outline: none;
+  padding: 0;
+  margin: 0;
+}
+.table-hscroll-slider::-webkit-slider-runnable-track {
+  height: 2px;
+  background: rgba(161, 161, 170, 0.25);
+  border-radius: 2px;
+}
+.table-hscroll-slider::-moz-range-track {
+  height: 2px;
+  background: rgba(161, 161, 170, 0.25);
+  border-radius: 2px;
+  border: none;
+}
+.table-hscroll-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  background: rgba(113, 113, 122, 0.85);
+  border: none;
+  margin-top: -4px;
+  transition: background-color 120ms, transform 120ms;
+}
+.table-hscroll-slider::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  background: rgba(113, 113, 122, 0.85);
+  border: none;
+  transition: background-color 120ms, transform 120ms;
+}
+.table-hscroll-slider:hover::-webkit-slider-thumb {
+  background: rgba(82, 82, 91, 1);
+  transform: scale(1.15);
+}
+.table-hscroll-slider:hover::-moz-range-thumb {
+  background: rgba(82, 82, 91, 1);
+  transform: scale(1.15);
+}
+.dark .table-hscroll-slider::-webkit-slider-runnable-track,
+.dark .table-hscroll-slider::-moz-range-track {
+  background: rgba(82, 82, 91, 0.35);
+}
+.dark .table-hscroll-slider::-webkit-slider-thumb,
+.dark .table-hscroll-slider::-moz-range-thumb {
+  background: rgba(161, 161, 170, 0.85);
+}
+.dark .table-hscroll-slider:hover::-webkit-slider-thumb,
+.dark .table-hscroll-slider:hover::-moz-range-thumb {
+  background: rgba(212, 212, 216, 1);
+}
