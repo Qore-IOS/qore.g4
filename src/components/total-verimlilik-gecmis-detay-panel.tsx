@@ -34,6 +34,7 @@ import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { Button } from '@/components/ui/button';
 import { exportDataToExcel } from '@/lib/utils';
+import { calculateEfficiencyMetrics } from '@/lib/verimlilik/validation';
 
 interface TableRowData {
   id: string;
@@ -89,6 +90,7 @@ interface TotalEfficiencyRecord {
   createdAt: { seconds: number; nanoseconds: number } | null;
   createdByName: string;
   efficiencyMetrics?: EfficiencyMetrics;
+  isAraKayit?: boolean;
 }
 
 const MONTHS = [
@@ -124,7 +126,8 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
             rows: data.rows || [],
             createdAt: data.createdAt || null,
             createdByName: data.createdByName || '',
-            efficiencyMetrics: data.efficiencyMetrics || undefined,
+            efficiencyMetrics: data.efficiencyMetrics || (data.rows?.length ? calculateEfficiencyMetrics(data.rows) : undefined),
+            isAraKayit: data.isAraKayit === true,
           });
         } else {
           toast({
