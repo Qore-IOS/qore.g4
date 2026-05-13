@@ -486,7 +486,8 @@ export const onPeripheralOrderCreatedSendMail = functions
         ? `<tr><td style="padding:6px 12px; background:#f1f5f9; border:1px solid #94a3b8; vertical-align:top;"><b>Açıklama</b></td><td style="padding:6px 12px; border:1px solid #94a3b8; white-space:pre-wrap;">${noteText.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] || c))}</td></tr>`
         : '';
 
-      logEntry.perUserResults = [] as any[];
+      const perUserResults: any[] = [];
+      logEntry.perUserResults = perUserResults;
       let sentCount = 0;
 
       for (const r of sendable) {
@@ -501,7 +502,7 @@ export const onPeripheralOrderCreatedSendMail = functions
         try {
           excelBuffer = await buildExcelBuffer(orderId, filteredOrder);
         } catch (excelErr: any) {
-          logEntry.perUserResults.push({
+          perUserResults.push({
             uid: r.user.uid,
             email: r.user.email,
             matchedItemCount: filteredItemCount,
@@ -557,7 +558,7 @@ export const onPeripheralOrderCreatedSendMail = functions
           });
 
           sentCount += 1;
-          logEntry.perUserResults.push({
+          perUserResults.push({
             uid: r.user.uid,
             email: r.user.email,
             groups: groupsForUser,
@@ -566,7 +567,7 @@ export const onPeripheralOrderCreatedSendMail = functions
           });
           steps.push(`${r.user.email}: OK (${filteredItemCount} kalem, ${groupsLine})`);
         } catch (sendErr: any) {
-          logEntry.perUserResults.push({
+          perUserResults.push({
             uid: r.user.uid,
             email: r.user.email,
             groups: groupsForUser,
