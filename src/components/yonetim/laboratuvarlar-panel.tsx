@@ -39,7 +39,6 @@ export default function LaboratuvarPanel() {
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
   const [addressDefinitions, setAddressDefinitions] = useState<AddressDefinition[]>([]);
-  const [depoStok, setDepoStok] = useState<DepoStokItem[]>([]);
   const [depots, setDepots] = useState<Depot[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -113,12 +112,11 @@ export default function LaboratuvarPanel() {
   const fetchHospitalsAndProducts = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [hSnap, pSnap, addrSnap, poolsSnap, stokSnap, effPoolsSnap, dSnap] = await Promise.all([
+      const [hSnap, pSnap, addrSnap, poolsSnap, effPoolsSnap, dSnap] = await Promise.all([
         getDocs(collection(db, 'hospitals')),
         getDocs(collection(db, 'productCodes')),
         getDocs(collection(db, 'addressDefinitions')),
         getDocs(query(collection(db, 'labPools'), orderBy('createdAt', 'desc'))),
-        getDocs(collection(db, 'depoStok')),
         getDocs(query(collection(db, 'efficiencyPools'), orderBy('createdAt', 'desc'))),
         getDocs(collection(db, 'depots')),
       ]);
@@ -126,7 +124,6 @@ export default function LaboratuvarPanel() {
       setProductCodes(pSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
       setAddressDefinitions(filterByCompanyScope(addrSnap.docs.map(d => ({ id: d.id, ...d.data() } as AddressDefinition)), currentCompanyId, isSuperAdmin));
       setLabPools(filterByCompanyScope(poolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as LabPool)), currentCompanyId, isSuperAdmin));
-      setDepoStok(filterByCompanyScope(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)), currentCompanyId, isSuperAdmin));
       setEfficiencyPools(filterByCompanyScope(effPoolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as EfficiencyPool)), currentCompanyId, isSuperAdmin));
       setDepots(filterByCompanyScope(dSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)), currentCompanyId, isSuperAdmin));
 
@@ -382,40 +379,70 @@ export default function LaboratuvarPanel() {
 
   const handlePoolStockExport = async (pool: LabPool | null) => {
     if (!pool) return;
-    const labNamesInPool = new Set(
-      hospitals
-        .filter(h => pool.memberIds.includes(h.id))
-        .map(h => h.name)
-    );
+    setIsLoading(true);
+    try {
+      const labsInPool = hospitals.filter(h => pool.memberIds.includes(h.id));
+      const labNamesInPool = labsInPool.map(h => h.name).filter(Boolean);
+      const labIdsInPool = labsInPool.map(h => h.id).filter(Boolean);
 
-    const stockInPool = depoStok.filter(
-      item => item.isShipped && item.hedefKurum && labNamesInPool.has(item.hedefKurum)
-    );
-
-    const stockSummary: Record<string, { stokAdi: string, quantity: number }> = {};
-
-    stockInPool.forEach(item => {
-      if (!stockSummary[item.stokKodu]) {
-        stockSummary[item.stokKodu] = {
-          stokAdi: productCodes.find(p => p.stokKodu === item.stokKodu)?.stokAdi || item.stokAdi,
-          quantity: 0
-        };
+      if (labNamesInPool.length === 0) {
+        toast({ title: 'Hata', description: 'Havuzda geçerli laboratuvar bulunamadı.', variant: 'destructive' });
+        return;
       }
-      stockSummary[item.stokKodu].quantity += 1;
-    });
 
-    const dataToExport = Object.entries(stockSummary).map(([stokKodu, data]) => ({
-      'Stok Kodu': stokKodu,
-      'Stok Adı': data.stokAdi,
-      'Toplam Adet': data.quantity
-    })).sort((a,b) => a['Stok Adı'].localeCompare(b['Stok Adı']));
+      // Fetch depoStok on demand, filtering by hedefKurum or hedefKurumId
+      const stockInPool: DepoStokItem[] = [];
+      
+      // Chunk by names (Firestore 'in' limit is 30)
+      for (let i = 0; i < labNamesInPool.length; i += 30) {
+        const chunk = labNamesInPool.slice(i, i + 30);
+        const q = query(collection(db, 'depoStok'), where('hedefKurum', 'in', chunk), where('isShipped', '==', true));
+        const snap = await getDocs(q);
+        stockInPool.push(...snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)));
+      }
 
-    if (dataToExport.length === 0) {
-      toast({ title: 'Veri Yok', description: 'Bu havuz için dışa aktarılacak stok verisi bulunamadı.', variant: 'default' });
-      return;
+      // Also try by IDs to be safe (deduping)
+      for (let i = 0; i < labIdsInPool.length; i += 30) {
+        const chunk = labIdsInPool.slice(i, i + 30);
+        const q = query(collection(db, 'depoStok'), where('hedefKurumId', 'in', chunk), where('isShipped', '==', true));
+        const snap = await getDocs(q);
+        snap.docs.forEach(d => {
+          if (!stockInPool.find(x => x.id === d.id)) {
+            stockInPool.push({ id: d.id, ...d.data() } as DepoStokItem);
+          }
+        });
+      }
+
+      const stockSummary: Record<string, { stokAdi: string, quantity: number }> = {};
+
+      stockInPool.forEach(item => {
+        if (!stockSummary[item.stokKodu]) {
+          stockSummary[item.stokKodu] = {
+            stokAdi: productCodes.find(p => p.stokKodu === item.stokKodu)?.stokAdi || item.stokAdi,
+            quantity: 0
+          };
+        }
+        stockSummary[item.stokKodu].quantity += 1;
+      });
+
+      const dataToExport = Object.entries(stockSummary).map(([stokKodu, data]) => ({
+        'Stok Kodu': stokKodu,
+        'Stok Adı': data.stokAdi,
+        'Toplam Adet': data.quantity
+      })).sort((a,b) => a['Stok Adı'].localeCompare(b['Stok Adı']));
+
+      if (dataToExport.length === 0) {
+        toast({ title: 'Veri Yok', description: 'Bu havuz için dışa aktarılacak stok verisi bulunamadı.', variant: 'default' });
+        return;
+      }
+
+      exportDataToExcel(dataToExport, `Havuz_Stok_Raporu_${pool.name}`, "HavuzStok", toast);
+    } catch (e) {
+      console.error(e);
+      toast({ title: 'Hata', description: 'Stok verileri alınamadı.', variant: 'destructive' });
+    } finally {
+      setIsLoading(false);
     }
-
-    exportDataToExcel(dataToExport, `Havuz_Stok_Raporu_${pool.name}`, "HavuzStok", toast);
   };
 
   const handleExcelFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
