@@ -39,11 +39,6 @@ function statusLabel(s: string | undefined): string {
       return 'Beklemede';
     case 'toplaniyor':
       return 'Hazırlanıyor';
-    case 'shipped':
-    case 'transfer_pending':
-    case 'teslim_bekliyor':
-    case 'yolda':
-      return 'Yolda';
     case 'completed':
       return 'Teslim Edildi';
     case 'eksik':
