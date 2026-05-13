@@ -8,8 +8,15 @@ export type RawOrderItem = {
   stokAdi?: string;
   adet?: number;
   anaBirim?: string;
+  ambalajDegeri?: number;
   laboratuvarGrubu?: string;
   [k: string]: any;
+};
+
+export type ProductInfo = {
+  group: string;
+  anaBirim?: string;
+  ambalajDegeri?: number;
 };
 
 export type LojistikUser = {
@@ -27,22 +34,27 @@ const chunk = <T>(arr: T[], size: number): T[][] => {
 };
 
 /**
- * Build a map: stokKodu -> laboratuvarGrubu (group name) by reading productCodes.
- * Items that already carry a laboratuvarGrubu are used as-is.
+ * Build a map: stokKodu -> { group, anaBirim, ambalajDegeri } by reading productCodes.
+ * Item-level fields (laboratuvarGrubu/anaBirim/ambalajDegeri), when present on the
+ * order item, win over the productCodes lookup so callers can override per-order.
  */
-export async function buildItemGroupMap(items: RawOrderItem[]): Promise<Map<string, string>> {
-  const groupMap = new Map<string, string>();
+export async function buildItemInfoMap(items: RawOrderItem[]): Promise<Map<string, ProductInfo>> {
+  const infoMap = new Map<string, ProductInfo>();
   const codesToFetch = new Set<string>();
   for (const it of items) {
     const code = (it.stokKodu || '').trim();
     if (!code) continue;
-    if (it.laboratuvarGrubu) {
-      groupMap.set(code, String(it.laboratuvarGrubu).trim());
-    } else {
+    const seed: ProductInfo = {
+      group: it.laboratuvarGrubu ? String(it.laboratuvarGrubu).trim() : '',
+      anaBirim: it.anaBirim ? String(it.anaBirim).trim() : undefined,
+      ambalajDegeri: typeof it.ambalajDegeri === 'number' ? it.ambalajDegeri : undefined,
+    };
+    infoMap.set(code, seed);
+    if (!seed.group || seed.anaBirim === undefined || seed.ambalajDegeri === undefined) {
       codesToFetch.add(code);
     }
   }
-  if (codesToFetch.size === 0) return groupMap;
+  if (codesToFetch.size === 0) return infoMap;
 
   try {
     const batches = chunk(Array.from(codesToFetch), 10);
@@ -54,14 +66,31 @@ export async function buildItemGroupMap(items: RawOrderItem[]): Promise<Map<stri
       snap.docs.forEach((d) => {
         const data = d.data() as any;
         const code = (data?.stokKodu || '').trim();
-        const group = (data?.laboratuvarGrubu || '').trim();
-        if (code && group) groupMap.set(code, group);
+        if (!code) return;
+        const existing = infoMap.get(code) || { group: '' };
+        if (!existing.group && data?.laboratuvarGrubu) {
+          existing.group = String(data.laboratuvarGrubu).trim();
+        }
+        if (existing.anaBirim === undefined && data?.anaBirim) {
+          existing.anaBirim = String(data.anaBirim).trim();
+        }
+        if (existing.ambalajDegeri === undefined && data?.ambalajDegeri !== undefined && data?.ambalajDegeri !== null) {
+          const n = Number(data.ambalajDegeri);
+          if (Number.isFinite(n) && n > 0) existing.ambalajDegeri = n;
+        }
+        infoMap.set(code, existing);
       });
     }
   } catch (e) {
     logger.warn('[peripheralRecipients] productCodes lookup failed:', e);
   }
-  return groupMap;
+  return infoMap;
+}
+
+export function groupMapFromInfo(info: Map<string, ProductInfo>): Map<string, string> {
+  const out = new Map<string, string>();
+  info.forEach((v, k) => { if (v.group) out.set(k, v.group); });
+  return out;
 }
 
 /** Load def_labGroups → Map<docId, name>. */

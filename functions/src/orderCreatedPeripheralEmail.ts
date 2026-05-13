@@ -4,11 +4,13 @@ import { logger } from 'firebase-functions';
 import * as nodemailer from 'nodemailer';
 import * as exceljs from 'exceljs';
 import {
-  buildItemGroupMap,
+  buildItemInfoMap,
+  groupMapFromInfo,
   loadLabGroupNamesByDocId,
   loadLojistikUsers,
   filterItemsForUserGroups,
   resolveUserGroupNames,
+  ProductInfo,
 } from './lib/peripheralRecipients';
 
 if (!admin.apps.length) admin.initializeApp();
@@ -87,7 +89,7 @@ function getTransporter() {
   });
 }
 
-async function buildExcelBuffer(orderId: string, order: OrderDoc): Promise<Buffer> {
+async function buildExcelBuffer(orderId: string, order: OrderDoc, itemInfoMap?: Map<string, ProductInfo>): Promise<Buffer> {
   const labId = order.labId;
 
   // 1. Fetch minMaxRules (max amount per stokKodu)
@@ -285,6 +287,14 @@ async function buildExcelBuffer(orderId: string, order: OrderDoc): Promise<Buffe
     const yakinMiad = closestMiadLotMap[sKodu] ?? 0;
     const talep = Number(item.adet || 0);
 
+    const info = itemInfoMap?.get(sKodu);
+    const anaBirim = (info?.anaBirim || '').trim();
+    const ambalaj = info?.ambalajDegeri;
+    const talepCellValue: string | number =
+      typeof ambalaj === 'number' && ambalaj > 0
+        ? `${talep}${anaBirim ? ` ${anaBirim}` : ''} (${talep * ambalaj} adet)`
+        : (anaBirim ? `${talep} ${anaBirim}` : talep);
+
     const row = sheet.getRow(HEADER_ROW + 1 + idx);
     row.height = 30;
 
@@ -295,7 +305,7 @@ async function buildExcelBuffer(orderId: string, order: OrderDoc): Promise<Buffe
       labStok,
       maxAdet,
       yakinMiad,
-      talep,
+      talepCellValue,
     ];
 
     values.forEach((value, colIdx) => {
@@ -443,11 +453,12 @@ export const onPeripheralOrderCreatedSendMail = functions
         return;
       }
 
-      const [itemGroupMap, labGroupNamesById, users] = await Promise.all([
-        buildItemGroupMap(orderItems),
+      const [itemInfoMap, labGroupNamesById, users] = await Promise.all([
+        buildItemInfoMap(orderItems),
         loadLabGroupNamesByDocId(),
         loadLojistikUsers(),
       ]);
+      const itemGroupMap = groupMapFromInfo(itemInfoMap);
       steps.push(`Grup/kullanıcı yüklemesi: OK (kalem grup eşlemesi=${itemGroupMap.size}, def_labGroups=${labGroupNamesById.size}, lojistik kullanıcı=${users.length})`);
 
       logEntry.orderGroups = Array.from(new Set(Array.from(itemGroupMap.values())));
@@ -500,7 +511,7 @@ export const onPeripheralOrderCreatedSendMail = functions
 
         let excelBuffer: Buffer;
         try {
-          excelBuffer = await buildExcelBuffer(orderId, filteredOrder);
+          excelBuffer = await buildExcelBuffer(orderId, filteredOrder, itemInfoMap);
         } catch (excelErr: any) {
           perUserResults.push({
             uid: r.user.uid,
