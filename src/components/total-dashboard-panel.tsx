@@ -97,6 +97,10 @@ interface EfficiencyRecord {
     stokDogrulukSkoru: number;
     kitVerimlilikSkoru: number;
     genelVerimlilik: number;
+    toplamEtkiDegeri?: number;
+    maliyetAgirlikli?: boolean;
+    hesaplananSatirSayisi?: number;
+    algoritma?: 'value-impact-efficiency-index';
   };
   rows?: any[];
   createdAt?: any;
