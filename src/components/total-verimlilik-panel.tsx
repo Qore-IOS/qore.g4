@@ -127,6 +127,168 @@ interface TableRow {
 
 type EditableField = 'baslangicStokuKutu' | 'ayBasiCihazUstuTest' | 'ayBasiSevkiyatKutu' | 'goztepeSevkiyat' | 'kurumlarArasiSevk' | 'lojistikAraTransfer' | 'kumulatifTotal' | 'donemSonuStokKutu' | 'donemSonuCihazUstuTest' | 'hakEdis';
 
+
+interface EfficiencyMetrics {
+  toplamKumulatif: number;
+  toplamBeklenenTuketim: number;
+  toplamHakEdis: number;
+  stokSapmaYuzde: number;
+  kitSapmaYuzde: number;
+  stokDogrulukSkoru: number;
+  kitVerimlilikSkoru: number;
+  genelVerimlilik: number;
+  toplamEtkiDegeri: number;
+  maliyetAgirlikli: boolean;
+  hesaplananSatirSayisi: number;
+  hakEdisVerisiGirildi: boolean;
+  algoritma: 'value-impact-efficiency-index';
+}
+
+type ExchangeRateMap = { EUR: number; USD: number; TRY: number };
+
+const emptyEfficiencyMetrics = (): EfficiencyMetrics => ({
+  toplamKumulatif: 0,
+  toplamBeklenenTuketim: 0,
+  toplamHakEdis: 0,
+  stokSapmaYuzde: 0,
+  kitSapmaYuzde: 0,
+  stokDogrulukSkoru: 100,
+  kitVerimlilikSkoru: 100,
+  genelVerimlilik: 100,
+  toplamEtkiDegeri: 0,
+  maliyetAgirlikli: false,
+  hesaplananSatirSayisi: 0,
+  hakEdisVerisiGirildi: false,
+  algoritma: 'value-impact-efficiency-index',
+});
+
+const clampEfficiencyScore = (value: number) => Math.max(0, Math.min(100, value));
+
+const deviationToScore = (deviation: number, denominator: number) => {
+  if (denominator <= 0) return 100;
+  return clampEfficiencyScore(100 - (Math.abs(deviation) / denominator) * 100);
+};
+
+const getUnitCostInEur = (
+  row: TableRow,
+  productCodes: ProductCode[],
+  costCheckpointData: Record<string, { cost: number; currency: 'EUR' | 'USD' | 'TRY' }> | null,
+  exchangeRates: ExchangeRateMap | null,
+): number | null => {
+  if (!exchangeRates) return null;
+
+  const checkpointCost = costCheckpointData?.[row.stokKodu];
+  const product = productCodes.find(p => p.stokKodu === row.stokKodu);
+  const productCost = checkpointCost?.cost ?? product?.cost;
+  const productCurrency = checkpointCost?.currency ?? (product?.currency as 'EUR' | 'USD' | 'TRY' | undefined) ?? 'EUR';
+
+  if (!productCost || productCost <= 0) return null;
+
+  const packageCostInEur = productCurrency === 'EUR'
+    ? productCost
+    : productCurrency === 'USD'
+      ? productCost / exchangeRates.USD
+      : productCost / exchangeRates.TRY;
+
+  return packageCostInEur / (row.ambalajDegeri || 1);
+};
+
+const calculateEfficiencyMetrics = (
+  rows: TableRow[],
+  productCodes: ProductCode[],
+  costCheckpointData: Record<string, { cost: number; currency: 'EUR' | 'USD' | 'TRY' }> | null,
+  exchangeRates: ExchangeRateMap | null,
+): EfficiencyMetrics => {
+  if (rows.length === 0) return emptyEfficiencyMetrics();
+
+  let toplamKumulatif = 0;
+  let toplamBeklenenTuketim = 0;
+  let toplamHakEdis = 0;
+  let toplamEtkiDegeri = 0;
+  let weightedStockScore = 0;
+  let weightedKitScore = 0;
+  let weightedGeneralScore = 0;
+  let hesaplananSatirSayisi = 0;
+  let rowsWithCost = 0;
+  let rowsWithoutCost = 0;
+  const hakEdisVerisiGirildi = rows.some(row => Number(row.hakEdis || 0) > 0);
+
+  const rowInputs = rows.map(row => {
+    const beklenenTuketim = row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest;
+    const volume = Math.max(0, row.kumulatifTotal || 0);
+    const stockScore = deviationToScore(row.stokDogrulukFark, volume);
+    const kitScore = hakEdisVerisiGirildi ? deviationToScore(row.kitVerimlilikFark, volume) : 0;
+    const generalScore = hakEdisVerisiGirildi ? (stockScore + kitScore) / 2 : stockScore;
+    const unitCostInEur = getUnitCostInEur(row, productCodes, costCheckpointData, exchangeRates);
+
+    toplamKumulatif += row.kumulatifTotal;
+    toplamBeklenenTuketim += beklenenTuketim;
+    toplamHakEdis += row.hakEdis;
+
+    if (volume > 0) {
+      if (unitCostInEur && unitCostInEur > 0) rowsWithCost += 1;
+      else rowsWithoutCost += 1;
+    }
+
+    return { volume, stockScore, kitScore, generalScore, unitCostInEur };
+  });
+
+  const useCostWeighting = rowsWithCost > 0 && rowsWithoutCost === 0;
+
+  rowInputs.forEach(({ volume, stockScore, kitScore, generalScore, unitCostInEur }) => {
+    if (volume <= 0) return;
+
+    const impact = useCostWeighting ? (unitCostInEur || 0) * volume : volume;
+    if (impact <= 0) return;
+
+    toplamEtkiDegeri += impact;
+    weightedStockScore += stockScore * impact;
+    weightedKitScore += kitScore * impact;
+    weightedGeneralScore += generalScore * impact;
+    hesaplananSatirSayisi += 1;
+  });
+
+  const stokSapmaYuzde = toplamKumulatif !== 0
+    ? ((toplamBeklenenTuketim - toplamKumulatif) / toplamKumulatif) * 100
+    : 0;
+
+  const kitSapmaYuzde = toplamKumulatif !== 0
+    ? ((toplamKumulatif - toplamHakEdis) / toplamKumulatif) * 100
+    : 0;
+
+  if (toplamEtkiDegeri === 0) {
+    return {
+      ...emptyEfficiencyMetrics(),
+      toplamKumulatif,
+      toplamBeklenenTuketim,
+      toplamHakEdis,
+      stokSapmaYuzde,
+      kitSapmaYuzde,
+      hakEdisVerisiGirildi,
+    };
+  }
+
+  const stokDogrulukSkoru = weightedStockScore / toplamEtkiDegeri;
+  const kitVerimlilikSkoru = weightedKitScore / toplamEtkiDegeri;
+  const genelVerimlilik = weightedGeneralScore / toplamEtkiDegeri;
+
+  return {
+    toplamKumulatif,
+    toplamBeklenenTuketim,
+    toplamHakEdis,
+    stokSapmaYuzde,
+    kitSapmaYuzde,
+    stokDogrulukSkoru,
+    kitVerimlilikSkoru,
+    genelVerimlilik,
+    toplamEtkiDegeri,
+    maliyetAgirlikli: useCostWeighting,
+    hesaplananSatirSayisi,
+    hakEdisVerisiGirildi,
+    algoritma: 'value-impact-efficiency-index',
+  };
+};
+
 interface HakEdisDefinition {
   id: string;
   sutKodu: string;

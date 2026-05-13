@@ -20,7 +20,7 @@
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
@@ -33,6 +33,7 @@ import BackButton from '@/components/BackButton';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { exportDataToExcel } from '@/lib/utils';
 import { calculateEfficiencyMetrics } from '@/lib/verimlilik/validation';
 
@@ -77,6 +78,7 @@ interface EfficiencyMetrics {
   toplamEtkiDegeri?: number;
   maliyetAgirlikli?: boolean;
   hesaplananSatirSayisi?: number;
+  hakEdisVerisiGirildi?: boolean;
   algoritma?: 'value-impact-efficiency-index';
 }
 
@@ -108,6 +110,7 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
   const [isLoading, setIsLoading] = useState(true);
   const [showResultsOnly, setShowResultsOnly] = useState(false);
   const [column22Mode, setColumn22Mode] = useState<'kumulatif' | 'hakedis'>('kumulatif');
+  const [showStockAlgorithmModal, setShowStockAlgorithmModal] = useState(false);
 
   useEffect(() => {
     const fetchRecord = async () => {
@@ -126,7 +129,9 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
             rows: data.rows || [],
             createdAt: data.createdAt || null,
             createdByName: data.createdByName || '',
-            efficiencyMetrics: data.efficiencyMetrics || (data.rows?.length ? calculateEfficiencyMetrics(data.rows) : undefined),
+            efficiencyMetrics: data.rows?.length && data.efficiencyMetrics?.hakEdisVerisiGirildi === undefined
+              ? calculateEfficiencyMetrics(data.rows)
+              : data.efficiencyMetrics || (data.rows?.length ? calculateEfficiencyMetrics(data.rows) : undefined),
             isAraKayit: data.isAraKayit === true,
           });
         } else {
@@ -186,6 +191,37 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
     const fileName = `Total_Verimlilik_Gecmis_${record.poolName}_${record.year}-${String(record.month + 1).padStart(2, '0')}`;
     exportDataToExcel(dataToExport, fileName, 'Veriler', toast);
   };
+
+  const stockAlgorithmRows = useMemo(() => {
+    if (!record?.rows.length) return [];
+
+    return record.rows.map(row => {
+      const expectedConsumption = row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest;
+      const volume = Math.max(0, row.kumulatifTotal || 0);
+      const stockScore = volume > 0
+        ? Math.max(0, Math.min(100, 100 - (Math.abs(row.stokDogrulukFark) / volume) * 100))
+        : 100;
+
+      return {
+        id: row.id,
+        labName: row.labName,
+        stokAdi: row.stokAdi,
+        expectedConsumption,
+        volume,
+        stockDiff: row.stokDogrulukFark,
+        stockScore,
+        impact: volume,
+      };
+    });
+  }, [record]);
+
+  const stockAlgorithmTotals = useMemo(() => {
+    const hakEdisVerisiGirildi = record?.efficiencyMetrics?.hakEdisVerisiGirildi
+      ?? record?.rows.some(row => Number(row.hakEdis || 0) > 0)
+      ?? false;
+
+    return { hakEdisVerisiGirildi };
+  }, [record]);
 
   if (isLoading) {
     return (
@@ -300,9 +336,14 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
                     </div>
                     <div className="flex flex-col">
                       <span className="text-sm font-medium">Stok Doğruluk</span>
-                      <span className={`text-lg font-bold ${record.efficiencyMetrics.stokDogrulukSkoru >= 90 ? 'text-green-600' : record.efficiencyMetrics.stokDogrulukSkoru >= 70 ? 'text-yellow-600' : 'text-red-600'}`}>
+                      <button
+                        type="button"
+                        onClick={() => setShowStockAlgorithmModal(true)}
+                        className={`w-fit text-left text-lg font-bold underline-offset-4 hover:underline focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 ${record.efficiencyMetrics.stokDogrulukSkoru >= 90 ? 'text-green-600' : record.efficiencyMetrics.stokDogrulukSkoru >= 70 ? 'text-yellow-600' : 'text-red-600'}`}
+                        aria-label="Stok doğruluk hesaplama algoritmasını göster"
+                      >
                         %{record.efficiencyMetrics.stokDogrulukSkoru.toFixed(1)}
-                      </span>
+                      </button>
                       <span className="text-xs text-muted-foreground">Sapma: %{record.efficiencyMetrics.stokSapmaYuzde.toFixed(2)}</span>
                     </div>
                   </div>
@@ -315,18 +356,27 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
                         <circle
                           cx="24" cy="24" r="20"
                           stroke="currentColor" strokeWidth="4" fill="none"
-                          strokeDasharray={`${(record.efficiencyMetrics.kitVerimlilikSkoru / 100) * 125.7} 125.7`}
+                          strokeDasharray={`${record.efficiencyMetrics.hakEdisVerisiGirildi === false ? 0 : (record.efficiencyMetrics.kitVerimlilikSkoru / 100) * 125.7} 125.7`}
                           strokeLinecap="round"
-                          className={record.efficiencyMetrics.kitVerimlilikSkoru >= 90 ? 'text-green-500' : record.efficiencyMetrics.kitVerimlilikSkoru >= 70 ? 'text-yellow-500' : 'text-red-500'}
+                          className={record.efficiencyMetrics.hakEdisVerisiGirildi === false ? 'text-muted-foreground' : record.efficiencyMetrics.kitVerimlilikSkoru >= 90 ? 'text-green-500' : record.efficiencyMetrics.kitVerimlilikSkoru >= 70 ? 'text-yellow-500' : 'text-red-500'}
                         />
                       </svg>
                     </div>
                     <div className="flex flex-col">
                       <span className="text-sm font-medium">Kit Verimlilik</span>
-                      <span className={`text-lg font-bold ${record.efficiencyMetrics.kitVerimlilikSkoru >= 90 ? 'text-green-600' : record.efficiencyMetrics.kitVerimlilikSkoru >= 70 ? 'text-yellow-600' : 'text-red-600'}`}>
-                        %{record.efficiencyMetrics.kitVerimlilikSkoru.toFixed(1)}
-                      </span>
-                      <span className="text-xs text-muted-foreground">Sapma: %{record.efficiencyMetrics.kitSapmaYuzde.toFixed(2)}</span>
+                      {record.efficiencyMetrics.hakEdisVerisiGirildi === false ? (
+                        <>
+                          <span className="text-lg font-bold text-muted-foreground">Dahil değil</span>
+                          <span className="text-xs text-muted-foreground">Hak ediş girilmedi</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className={`text-lg font-bold ${record.efficiencyMetrics.kitVerimlilikSkoru >= 90 ? 'text-green-600' : record.efficiencyMetrics.kitVerimlilikSkoru >= 70 ? 'text-yellow-600' : 'text-red-600'}`}>
+                            %{record.efficiencyMetrics.kitVerimlilikSkoru.toFixed(1)}
+                          </span>
+                          <span className="text-xs text-muted-foreground">Sapma: %{record.efficiencyMetrics.kitSapmaYuzde.toFixed(2)}</span>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -633,6 +683,86 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={showStockAlgorithmModal} onOpenChange={setShowStockAlgorithmModal}>
+        <DialogContent className="max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>Stok Doğruluk Hesaplama Algoritması</DialogTitle>
+            <DialogDescription>
+              Sütun 20 Stok Doğruluk, her satırda kaybın aynı satırın kümülatif test hacmine oranlanmasıyla hesaplanır.
+            </DialogDescription>
+          </DialogHeader>
+
+          {record?.efficiencyMetrics && (
+            <div className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-lg border bg-muted/30 p-3">
+                  <div className="text-xs text-muted-foreground">Stok Doğruluk Skoru</div>
+                  <div className="text-2xl font-bold">%{record.efficiencyMetrics.stokDogrulukSkoru.toFixed(1)}</div>
+                  <div className="text-xs text-muted-foreground">Sapma: %{record.efficiencyMetrics.stokSapmaYuzde.toFixed(2)}</div>
+                </div>
+                <div className="rounded-lg border bg-muted/30 p-3">
+                  <div className="text-xs text-muted-foreground">Genel Verimlilikte Kullanım</div>
+                  <div className="text-sm font-semibold">
+                    {stockAlgorithmTotals.hakEdisVerisiGirildi ? 'Stok + Kit ortalaması' : 'Sadece stok doğruluk'}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {stockAlgorithmTotals.hakEdisVerisiGirildi
+                      ? 'Hak ediş verisi olduğu için kit verimlilik de genel skora dahil edilir.'
+                      : '19. Hak Ediş sütununda veri olmadığı için genel skor stok doğruluk skoruna eşittir.'}
+                  </div>
+                </div>
+                <div className="rounded-lg border bg-muted/30 p-3">
+                  <div className="text-xs text-muted-foreground">Etki Değeri</div>
+                  <div className="text-lg font-bold">{record.efficiencyMetrics.toplamEtkiDegeri?.toLocaleString('tr-TR') ?? '-'}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {record.efficiencyMetrics.maliyetAgirlikli ? 'Birim maliyet × kümülatif hacim' : 'Kümülatif test hacmi'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-lg border p-3 text-sm">
+                <div className="font-semibold mb-2">Formül</div>
+                <ol className="list-decimal space-y-1 pl-5 text-muted-foreground">
+                  <li>Beklenen tüketim = 14. Sevkiyatlar Sonrası Total - 18. Dönem Sonu Toplam.</li>
+                  <li>Stok doğruluk farkı = (14 - 18) - 15. Kümülatif Total.</li>
+                  <li>Satır stok skoru = 100 - (|stok doğruluk farkı| / 15. Kümülatif Total × 100), 0-100 aralığına sıkıştırılır.</li>
+                  <li>Genel stok doğruluk = Σ(satır stok skoru × etki değeri) / Σ(etki değeri).</li>
+                </ol>
+              </div>
+
+              <ScrollArea className="max-h-[360px] rounded-lg border">
+                <Table aria-label="Stok doğruluk algoritması satır hesapları">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Laboratuvar</TableHead>
+                      <TableHead>Ürün</TableHead>
+                      <TableHead className="text-right">14-18</TableHead>
+                      <TableHead className="text-right">15. Kümülatif</TableHead>
+                      <TableHead className="text-right">Fark</TableHead>
+                      <TableHead className="text-right">Satır Skoru</TableHead>
+                      <TableHead className="text-right">Etki</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {stockAlgorithmRows.map(row => (
+                      <TableRow key={row.id}>
+                        <TableCell>{row.labName}</TableCell>
+                        <TableCell className="max-w-[220px] truncate">{row.stokAdi}</TableCell>
+                        <TableCell className="text-right">{row.expectedConsumption.toLocaleString('tr-TR')}</TableCell>
+                        <TableCell className="text-right">{row.volume.toLocaleString('tr-TR')}</TableCell>
+                        <TableCell className="text-right">{row.stockDiff.toLocaleString('tr-TR')}</TableCell>
+                        <TableCell className="text-right">%{row.stockScore.toFixed(1)}</TableCell>
+                        <TableCell className="text-right">{row.impact.toLocaleString('tr-TR')}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </ScrollArea>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

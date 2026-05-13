@@ -49,6 +49,7 @@ interface EfficiencyMetrics {
   toplamEtkiDegeri?: number;
   maliyetAgirlikli?: boolean;
   hesaplananSatirSayisi?: number;
+  hakEdisVerisiGirildi?: boolean;
   algoritma?: 'value-impact-efficiency-index';
 }
 
@@ -96,7 +97,9 @@ export default function TotalVerimlilikGecmisPanel() {
             createdAt: data.createdAt || null,
             createdByName: data.createdByName || '',
             rowCount: data.rows?.length || 0,
-            efficiencyMetrics: data.efficiencyMetrics || (data.rows?.length ? calculateEfficiencyMetrics(data.rows) : undefined),
+            efficiencyMetrics: data.rows?.length && data.efficiencyMetrics?.hakEdisVerisiGirildi === undefined
+              ? calculateEfficiencyMetrics(data.rows)
+              : data.efficiencyMetrics || (data.rows?.length ? calculateEfficiencyMetrics(data.rows) : undefined),
             isAraKayit: data.isAraKayit === true,
           };
         });

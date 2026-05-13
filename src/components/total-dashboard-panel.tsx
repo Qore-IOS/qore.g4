@@ -101,6 +101,7 @@ interface EfficiencyRecord {
     toplamEtkiDegeri?: number;
     maliyetAgirlikli?: boolean;
     hesaplananSatirSayisi?: number;
+    hakEdisVerisiGirildi?: boolean;
     algoritma?: 'value-impact-efficiency-index';
   };
   rows?: any[];
@@ -622,7 +623,9 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
             return {
               id: d.id,
               ...data,
-              efficiencyMetrics: data.efficiencyMetrics || (data.rows?.length ? calculateEfficiencyMetrics(data.rows) : undefined),
+              efficiencyMetrics: data.rows?.length && data.efficiencyMetrics?.hakEdisVerisiGirildi === undefined
+                ? calculateEfficiencyMetrics(data.rows)
+                : data.efficiencyMetrics || (data.rows?.length ? calculateEfficiencyMetrics(data.rows) : undefined),
               isAraKayit: data.isAraKayit === true,
             } as EfficiencyRecord;
           })

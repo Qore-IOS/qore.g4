@@ -455,7 +455,9 @@ export default function DashboardPanel({
         const efficiencies: number[] = [];
         effSnap.docs.forEach(d => {
           const data = d.data();
-          const metrics = data.efficiencyMetrics || (data.rows?.length ? calculateEfficiencyMetrics(data.rows) : undefined);
+          const metrics = data.rows?.length && data.efficiencyMetrics?.hakEdisVerisiGirildi === undefined
+            ? calculateEfficiencyMetrics(data.rows)
+            : data.efficiencyMetrics || (data.rows?.length ? calculateEfficiencyMetrics(data.rows) : undefined);
           const genelVerimlilik = metrics?.genelVerimlilik;
           if (typeof genelVerimlilik === 'number' && genelVerimlilik >= 0) {
             efficiencies.push(genelVerimlilik);

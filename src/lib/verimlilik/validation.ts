@@ -328,6 +328,7 @@ export const EfficiencyMetricsSchema = z.object({
   toplamEtkiDegeri: z.number().min(0).default(0),
   maliyetAgirlikli: z.boolean().default(false),
   hesaplananSatirSayisi: z.number().int().min(0).default(0),
+  hakEdisVerisiGirildi: z.boolean().default(true),
   algoritma: z.literal('value-impact-efficiency-index').default('value-impact-efficiency-index'),
 });
 
@@ -628,6 +629,7 @@ export function calculateEfficiencyMetrics(
       toplamEtkiDegeri: 0,
       maliyetAgirlikli: false,
       hesaplananSatirSayisi: 0,
+      hakEdisVerisiGirildi: false,
       algoritma: 'value-impact-efficiency-index',
     };
   }
@@ -646,13 +648,14 @@ export function calculateEfficiencyMetrics(
   let weightedKitScore = 0;
   let weightedGeneralScore = 0;
   let hesaplananSatirSayisi = 0;
+  const hakEdisVerisiGirildi = rows.some(row => Number(row.hakEdis || 0) > 0);
 
   rows.forEach(row => {
     const beklenenTuketim = row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest;
     const volume = Math.max(0, row.kumulatifTotal || 0);
     const stockScore = deviationToScore(row.stokDogrulukFark, volume);
-    const kitScore = deviationToScore(row.kitVerimlilikFark, volume);
-    const generalScore = (stockScore + kitScore) / 2;
+    const kitScore = hakEdisVerisiGirildi ? deviationToScore(row.kitVerimlilikFark, volume) : 0;
+    const generalScore = hakEdisVerisiGirildi ? (stockScore + kitScore) / 2 : stockScore;
 
     toplamKumulatif += row.kumulatifTotal;
     toplamBeklenenTuketim += beklenenTuketim;
@@ -688,6 +691,7 @@ export function calculateEfficiencyMetrics(
       toplamEtkiDegeri: 0,
       maliyetAgirlikli: false,
       hesaplananSatirSayisi: 0,
+      hakEdisVerisiGirildi,
       algoritma: 'value-impact-efficiency-index',
     };
   }
@@ -704,6 +708,7 @@ export function calculateEfficiencyMetrics(
     toplamEtkiDegeri,
     maliyetAgirlikli: false,
     hesaplananSatirSayisi,
+    hakEdisVerisiGirildi,
     algoritma: 'value-impact-efficiency-index',
   };
 }

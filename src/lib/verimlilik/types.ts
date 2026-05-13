@@ -206,6 +206,8 @@ export interface EfficiencyMetrics {
   maliyetAgirlikli: boolean;
   /** Number of rows included in the weighted efficiency calculation */
   hesaplananSatirSayisi: number;
+  /** Whether at least one earned amount (Column 19 - Hak Ediş) was entered */
+  hakEdisVerisiGirildi: boolean;
   /** Efficiency algorithm identifier */
   algoritma: 'value-impact-efficiency-index';
 }
