@@ -29,6 +29,7 @@ import { collection, onSnapshot, query, where, getDocs, Timestamp } from 'fireba
 import { db } from '@/lib/firebase';
 import { VIEWS } from '@/lib/constants';
 import { getExchangeRates } from '@/lib/exchange-rates';
+import { calculateEfficiencyMetrics } from '@/lib/verimlilik/validation';
 import { matchesCompanyScope } from '@/lib/company-scope';
 import { 
   useDeviceFaultReports, 
@@ -454,8 +455,11 @@ export default function DashboardPanel({
         const efficiencies: number[] = [];
         effSnap.docs.forEach(d => {
           const data = d.data();
-          const genelVerimlilik = data.efficiencyMetrics?.genelVerimlilik;
-          if (typeof genelVerimlilik === 'number' && genelVerimlilik > 0) {
+          const metrics = data.rows?.length && data.efficiencyMetrics?.hakEdisVerisiGirildi === undefined
+            ? calculateEfficiencyMetrics(data.rows)
+            : data.efficiencyMetrics || (data.rows?.length ? calculateEfficiencyMetrics(data.rows) : undefined);
+          const genelVerimlilik = metrics?.genelVerimlilik;
+          if (typeof genelVerimlilik === 'number' && genelVerimlilik >= 0) {
             efficiencies.push(genelVerimlilik);
           }
         });

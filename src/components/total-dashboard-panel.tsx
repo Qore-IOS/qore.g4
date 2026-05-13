@@ -33,6 +33,7 @@ import { totalVerimlilikLogger } from '@/lib/logger';
 import type { Hospital, EfficiencyPool, DeviceFaultReport } from '@/lib/types';
 import BackButton from '@/components/BackButton';
 import { getExchangeRates } from '@/lib/exchange-rates';
+import { calculateEfficiencyMetrics } from '@/lib/verimlilik/validation';
 import {
   Loader2,
   TrendingUp,
@@ -97,8 +98,14 @@ interface EfficiencyRecord {
     stokDogrulukSkoru: number;
     kitVerimlilikSkoru: number;
     genelVerimlilik: number;
+    toplamEtkiDegeri?: number;
+    maliyetAgirlikli?: boolean;
+    hesaplananSatirSayisi?: number;
+    hakEdisVerisiGirildi?: boolean;
+    algoritma?: 'value-impact-efficiency-index';
   };
   rows?: any[];
+  isAraKayit?: boolean;
   createdAt?: any;
 }
 
@@ -611,7 +618,17 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
         // Fetch all efficiency records (without compound index - sort in JS)
         const recordsSnap = await getDocs(collection(db, 'totalEfficiencyRecords'));
         const records = recordsSnap.docs
-          .map(d => ({ id: d.id, ...d.data() } as EfficiencyRecord))
+          .map(d => {
+            const data = d.data();
+            return {
+              id: d.id,
+              ...data,
+              efficiencyMetrics: data.rows?.length && data.efficiencyMetrics?.hakEdisVerisiGirildi === undefined
+                ? calculateEfficiencyMetrics(data.rows)
+                : data.efficiencyMetrics || (data.rows?.length ? calculateEfficiencyMetrics(data.rows) : undefined),
+              isAraKayit: data.isAraKayit === true,
+            } as EfficiencyRecord;
+          })
           .sort((a, b) => {
             // Sort by year desc, then month desc
             if (b.year !== a.year) return b.year - a.year;
