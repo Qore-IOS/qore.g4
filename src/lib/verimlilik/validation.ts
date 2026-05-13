@@ -325,6 +325,10 @@ export const EfficiencyMetricsSchema = z.object({
   stokDogrulukSkoru: z.number().min(0).max(100),
   kitVerimlilikSkoru: z.number().min(0).max(100),
   genelVerimlilik: z.number().min(0).max(100),
+  toplamEtkiDegeri: z.number().min(0).default(0),
+  maliyetAgirlikli: z.boolean().default(false),
+  hesaplananSatirSayisi: z.number().int().min(0).default(0),
+  algoritma: z.literal('value-impact-efficiency-index').default('value-impact-efficiency-index'),
 });
 
 // =============================================================================
@@ -621,24 +625,72 @@ export function calculateEfficiencyMetrics(
       stokDogrulukSkoru: 100,
       kitVerimlilikSkoru: 100,
       genelVerimlilik: 100,
+      toplamEtkiDegeri: 0,
+      maliyetAgirlikli: false,
+      hesaplananSatirSayisi: 0,
+      algoritma: 'value-impact-efficiency-index',
     };
   }
 
-  const toplamKumulatif = rows.reduce((sum, r) => sum + r.kumulatifTotal, 0);
-  const toplamBeklenenTuketim = rows.reduce(
-    (sum, r) => sum + (r.sevkiyatlarSonrasiTotalTest - r.donemSonuToplamTest),
-    0
-  );
-  const toplamHakEdis = rows.reduce((sum, r) => sum + r.hakEdis, 0);
-  const toplamStokFark = rows.reduce((sum, r) => sum + Math.abs(r.stokDogrulukFark), 0);
-  const toplamKitFark = rows.reduce((sum, r) => sum + Math.abs(r.kitVerimlilikFark), 0);
+  const clampScore = (value: number) => Math.max(0, Math.min(100, value));
+  const deviationToScore = (deviation: number, denominator: number) => {
+    if (denominator <= 0) return 100;
+    return clampScore(100 - (Math.abs(deviation) / denominator) * 100);
+  };
 
-  const stokSapmaYuzde = toplamKumulatif > 0 ? (toplamStokFark / toplamKumulatif) * 100 : 0;
-  const kitSapmaYuzde = toplamKumulatif > 0 ? (toplamKitFark / toplamKumulatif) * 100 : 0;
+  let toplamKumulatif = 0;
+  let toplamBeklenenTuketim = 0;
+  let toplamHakEdis = 0;
+  let toplamEtkiDegeri = 0;
+  let weightedStockScore = 0;
+  let weightedKitScore = 0;
+  let weightedGeneralScore = 0;
+  let hesaplananSatirSayisi = 0;
 
-  const stokDogrulukSkoru = Math.max(0, 100 - stokSapmaYuzde);
-  const kitVerimlilikSkoru = Math.max(0, 100 - kitSapmaYuzde);
-  const genelVerimlilik = (stokDogrulukSkoru + kitVerimlilikSkoru) / 2;
+  rows.forEach(row => {
+    const beklenenTuketim = row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest;
+    const volume = Math.max(0, row.kumulatifTotal || 0);
+    const stockScore = deviationToScore(row.stokDogrulukFark, volume);
+    const kitScore = deviationToScore(row.kitVerimlilikFark, volume);
+    const generalScore = (stockScore + kitScore) / 2;
+
+    toplamKumulatif += row.kumulatifTotal;
+    toplamBeklenenTuketim += beklenenTuketim;
+    toplamHakEdis += row.hakEdis;
+
+    if (volume <= 0) return;
+
+    toplamEtkiDegeri += volume;
+    weightedStockScore += stockScore * volume;
+    weightedKitScore += kitScore * volume;
+    weightedGeneralScore += generalScore * volume;
+    hesaplananSatirSayisi += 1;
+  });
+
+  const stokSapmaYuzde = toplamKumulatif !== 0
+    ? ((toplamBeklenenTuketim - toplamKumulatif) / toplamKumulatif) * 100
+    : 0;
+
+  const kitSapmaYuzde = toplamKumulatif !== 0
+    ? ((toplamKumulatif - toplamHakEdis) / toplamKumulatif) * 100
+    : 0;
+
+  if (toplamEtkiDegeri === 0) {
+    return {
+      toplamKumulatif,
+      toplamBeklenenTuketim,
+      toplamHakEdis,
+      stokSapmaYuzde,
+      kitSapmaYuzde,
+      stokDogrulukSkoru: 100,
+      kitVerimlilikSkoru: 100,
+      genelVerimlilik: 100,
+      toplamEtkiDegeri: 0,
+      maliyetAgirlikli: false,
+      hesaplananSatirSayisi: 0,
+      algoritma: 'value-impact-efficiency-index',
+    };
+  }
 
   return {
     toplamKumulatif,
@@ -646,9 +698,13 @@ export function calculateEfficiencyMetrics(
     toplamHakEdis,
     stokSapmaYuzde,
     kitSapmaYuzde,
-    stokDogrulukSkoru,
-    kitVerimlilikSkoru,
-    genelVerimlilik,
+    stokDogrulukSkoru: weightedStockScore / toplamEtkiDegeri,
+    kitVerimlilikSkoru: weightedKitScore / toplamEtkiDegeri,
+    genelVerimlilik: weightedGeneralScore / toplamEtkiDegeri,
+    toplamEtkiDegeri,
+    maliyetAgirlikli: false,
+    hesaplananSatirSayisi,
+    algoritma: 'value-impact-efficiency-index',
   };
 }
 

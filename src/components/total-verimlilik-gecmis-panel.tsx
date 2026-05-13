@@ -35,6 +35,7 @@ import { tr } from 'date-fns/locale';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
+import { calculateEfficiencyMetrics } from '@/lib/verimlilik/validation';
 
 interface EfficiencyMetrics {
   toplamKumulatif: number;
@@ -45,6 +46,10 @@ interface EfficiencyMetrics {
   stokDogrulukSkoru: number;
   kitVerimlilikSkoru: number;
   genelVerimlilik: number;
+  toplamEtkiDegeri?: number;
+  maliyetAgirlikli?: boolean;
+  hesaplananSatirSayisi?: number;
+  algoritma?: 'value-impact-efficiency-index';
 }
 
 interface TotalEfficiencyRecord {
@@ -57,6 +62,7 @@ interface TotalEfficiencyRecord {
   createdByName: string;
   rowCount: number;
   efficiencyMetrics?: EfficiencyMetrics;
+  isAraKayit?: boolean;
 }
 
 const MONTHS = [
@@ -90,7 +96,8 @@ export default function TotalVerimlilikGecmisPanel() {
             createdAt: data.createdAt || null,
             createdByName: data.createdByName || '',
             rowCount: data.rows?.length || 0,
-            efficiencyMetrics: data.efficiencyMetrics || undefined,
+            efficiencyMetrics: data.efficiencyMetrics || (data.rows?.length ? calculateEfficiencyMetrics(data.rows) : undefined),
+            isAraKayit: data.isAraKayit === true,
           };
         });
 
@@ -178,6 +185,11 @@ export default function TotalVerimlilikGecmisPanel() {
                         <div className="flex items-center gap-2">
                           <Building2 className="h-4 w-4 text-muted-foreground" />
                           <span className="font-medium">{record.poolName}</span>
+                          {record.isAraKayit && (
+                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                              Ara Kayıt
+                            </span>
+                          )}
                         </div>
                       </TableCell>
                       <TableCell>
