@@ -21,6 +21,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
+import Link from 'next/link';
 import { db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
@@ -538,13 +539,21 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
                     {record.rows.map((row) => (
                       <TableRow key={row.id} className="text-sm">
                         <TableCell className="font-medium bg-muted/30 sticky left-0 z-10">
-                          <div>
-                            <span>{row.labName}</span>
-                            {row.labKod && (
-                              <span className="ml-1 text-xs font-mono text-muted-foreground">
-                                ({row.labKod})
-                              </span>
-                            )}
+                          <div className="space-y-1">
+                            <div>
+                              <span>{row.labName}</span>
+                              {row.labKod && (
+                                <span className="ml-1 text-xs font-mono text-muted-foreground">
+                                  ({row.labKod})
+                                </span>
+                              )}
+                            </div>
+                            <Link
+                              href={`/total-verimlilik/gecmis/${record.id}/hesap-detay/${encodeURIComponent(row.labId)}`}
+                              className="text-xs font-medium text-primary underline-offset-4 hover:underline"
+                            >
+                              Hesap Detayı
+                            </Link>
                           </div>
                         </TableCell>
                         <TableCell className="font-mono text-xs">{row.stokKodu}</TableCell>
