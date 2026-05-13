@@ -140,6 +140,7 @@ interface EfficiencyMetrics {
   toplamEtkiDegeri: number;
   maliyetAgirlikli: boolean;
   hesaplananSatirSayisi: number;
+  hakEdisVerisiGirildi: boolean;
   algoritma: 'value-impact-efficiency-index';
 }
 
@@ -157,6 +158,7 @@ const emptyEfficiencyMetrics = (): EfficiencyMetrics => ({
   toplamEtkiDegeri: 0,
   maliyetAgirlikli: false,
   hesaplananSatirSayisi: 0,
+  hakEdisVerisiGirildi: false,
   algoritma: 'value-impact-efficiency-index',
 });
 
@@ -209,13 +211,14 @@ const calculateEfficiencyMetrics = (
   let hesaplananSatirSayisi = 0;
   let rowsWithCost = 0;
   let rowsWithoutCost = 0;
+  const hakEdisVerisiGirildi = rows.some(row => Number(row.hakEdis || 0) > 0);
 
   const rowInputs = rows.map(row => {
     const beklenenTuketim = row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest;
     const volume = Math.max(0, row.kumulatifTotal || 0);
     const stockScore = deviationToScore(row.stokDogrulukFark, volume);
-    const kitScore = deviationToScore(row.kitVerimlilikFark, volume);
-    const generalScore = (stockScore + kitScore) / 2;
+    const kitScore = hakEdisVerisiGirildi ? deviationToScore(row.kitVerimlilikFark, volume) : 0;
+    const generalScore = hakEdisVerisiGirildi ? (stockScore + kitScore) / 2 : stockScore;
     const unitCostInEur = getUnitCostInEur(row, productCodes, costCheckpointData, exchangeRates);
 
     toplamKumulatif += row.kumulatifTotal;
@@ -261,6 +264,7 @@ const calculateEfficiencyMetrics = (
       toplamHakEdis,
       stokSapmaYuzde,
       kitSapmaYuzde,
+      hakEdisVerisiGirildi,
     };
   }
 
@@ -280,6 +284,7 @@ const calculateEfficiencyMetrics = (
     toplamEtkiDegeri,
     maliyetAgirlikli: useCostWeighting,
     hesaplananSatirSayisi,
+    hakEdisVerisiGirildi,
     algoritma: 'value-impact-efficiency-index',
   };
 };
