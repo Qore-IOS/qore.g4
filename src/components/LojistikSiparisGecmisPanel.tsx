@@ -50,8 +50,6 @@ function getStatusInfo(order: Order) {
     return { label: 'Teslim', cls: 'loj-status-badge loj-status-badge--success', Icon: CheckCircle2 };
   if (s === 'toplaniyor')
     return { label: 'Hazırlanıyor', cls: 'loj-status-badge loj-status-badge--info', Icon: Truck };
-  if (['shipped', 'transfer_pending', 'teslim_bekliyor', 'yolda'].includes(s))
-    return { label: 'Yolda', cls: 'loj-status-badge loj-status-badge--accent', Icon: Truck };
   if (s === 'eksik')
     return { label: 'Eksik', cls: 'loj-status-badge loj-status-badge--danger', Icon: AlertCircle };
   if (s === 'pending')

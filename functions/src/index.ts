@@ -16,6 +16,7 @@ export { onTeknikServisFormCreated, onAplikasyonFormCreated } from './actionForm
 export { onDeviceFaultReportResolved } from './faultReportNotification';
 export { onPeripheralOrderCreatedSendMail } from './orderCreatedPeripheralEmail';
 export { onPeripheralOrderCreatedSendWhatsApp } from './peripheralOrderWhatsApp';
+export { onDepoStokAccepted } from './peripheralOrderReconcile';
 
 function chunk<T>(arr: T[], size = 500): T[][] {
   const out: T[][] = [];

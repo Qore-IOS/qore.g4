@@ -55,7 +55,7 @@ import OrderConfirmAnimation from '@/components/lojistik-terminal/order-confirm-
 import DeliveryHistory, { type PartialDelivery } from '@/components/lojistik-terminal/delivery-history';
 import { exportOrdersToExcel } from '@/lib/lojistik/export-orders';
 
-type LojFilter = 'all' | 'pending' | 'toplaniyor' | 'teslim_bekliyor' | 'eksik';
+type LojFilter = 'all' | 'pending' | 'toplaniyor' | 'eksik';
 
 type RowState = {
   itemId: string;
@@ -126,17 +126,74 @@ export default function LojistikSiparisView() {
     return s;
   }, [currentUserProfile?.assignedLaboratories]);
 
-  // Fetch hospitals & products
+  const [labGroupNamesById, setLabGroupNamesById] = useState<Map<string, string>>(new Map());
+
+  // Build the set of group names the current user (lojistik sorumlusu) is responsible for.
+  // Empty set when the user has no assignedLabGroups (no group-based filtering applies).
+  const userGroupNames = useMemo(() => {
+    const out = new Set<string>();
+    const ids = currentUserProfile?.assignedLabGroups ?? [];
+    if (!ids.length) return out;
+    const allKnownNames = new Set(Array.from(labGroupNamesById.values()));
+    for (const entry of ids) {
+      if (!entry) continue;
+      const byId = labGroupNamesById.get(entry);
+      if (byId) {
+        out.add(byId);
+        continue;
+      }
+      // Legacy data tolerance: entry might be a name instead of doc ID.
+      const trimmed = String(entry).trim();
+      if (allKnownNames.has(trimmed)) out.add(trimmed);
+    }
+    return out;
+  }, [currentUserProfile?.assignedLabGroups, labGroupNamesById]);
+
+  // stokKodu -> laboratuvarGrubu (name) lookup from productCodes
+  const stokKoduToGrup = useMemo(() => {
+    const m = new Map<string, string>();
+    productCodes.forEach((p) => {
+      const code = (p.stokKodu || '').trim();
+      const grup = (p as any).laboratuvarGrubu;
+      if (code && grup) m.set(code, String(grup).trim());
+    });
+    return m;
+  }, [productCodes]);
+
+  // True when the current user has at least one assigned lab group; if so, list/detail
+  // views are scoped to items whose product group is in `userGroupNames`.
+  const groupFilteringActive = userGroupNames.size > 0;
+
+  const itemBelongsToUserGroup = useCallback(
+    (stokKodu: string | undefined | null): boolean => {
+      if (!groupFilteringActive) return true;
+      const code = (stokKodu || '').trim();
+      if (!code) return false;
+      const grup = stokKoduToGrup.get(code);
+      if (!grup) return false;
+      return userGroupNames.has(grup);
+    },
+    [groupFilteringActive, stokKoduToGrup, userGroupNames]
+  );
+
+  // Fetch hospitals, products, depots and lab groups
   useEffect(() => {
     (async () => {
-      const [hSnap, pSnap, dSnap] = await Promise.all([
+      const [hSnap, pSnap, dSnap, lgSnap] = await Promise.all([
         getDocs(collection(db, 'hospitals')),
         getDocs(collection(db, 'productCodes')),
         getDocs(collection(db, 'depots')),
+        getDocs(collection(db, 'def_labGroups')),
       ]);
       setHospitals(hSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Hospital)));
       setProductCodes(pSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ProductCode)));
       setDepots(dSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Depot)));
+      const lgMap = new Map<string, string>();
+      lgSnap.docs.forEach((d) => {
+        const name = (d.data() as any)?.name;
+        if (name) lgMap.set(d.id, String(name).trim());
+      });
+      setLabGroupNamesById(lgMap);
     })();
   }, []);
 
@@ -155,7 +212,17 @@ export default function LojistikSiparisView() {
       const active: Order[] = [];
       const completed: Order[] = [];
       rowsData.forEach((o) => {
-        if (!o.labId || !assignedLabIds.has(o.labId)) return;
+        // Visibility rules:
+        // - Lojistik users with assignedLabGroups: show orders that contain at least
+        //   one item whose product is in one of their groups.
+        // - Otherwise fall back to legacy lab-ID-based filtering.
+        if (groupFilteringActive) {
+          const items = Array.isArray(o.items) ? o.items : [];
+          const hasMatchingItem = items.some((it: any) => itemBelongsToUserGroup(it?.stokKodu));
+          if (!hasMatchingItem) return;
+        } else {
+          if (!o.labId || !assignedLabIds.has(o.labId)) return;
+        }
         if (o.status === 'completed') completed.push(o);
         else active.push(o);
       });
@@ -172,7 +239,7 @@ export default function LojistikSiparisView() {
       setIsLoading(false);
     });
     return () => unsub();
-  }, [assignedLabIds]);
+  }, [assignedLabIds, groupFilteringActive, itemBelongsToUserGroup]);
 
   const selectedOrder = useMemo(() => {
     if (!selectedOrderId) return null;
@@ -194,17 +261,21 @@ export default function LojistikSiparisView() {
       existingByItemId.set(it.itemId, it);
     });
 
-    const newRows: RowState[] = (selectedOrder.items || []).map((it) => {
-      const existing = existingByItemId.get(it.id);
-      return {
-        itemId: it.id,
-        stokKodu: it.stokKodu,
-        stokAdi: it.stokAdi,
-        requestedAdet: Number(it.adet) || 0,
-        sentAdet: existing ? Number(existing.sentAdet) : Number(it.adet) || 0,
-        fulfilled: existing ? !!existing.fulfilled : false,
-      };
-    });
+    // Only display rows whose product is in the current lojistik user's groups.
+    // When the user has no group assignment, fall back to the legacy "all items" view.
+    const newRows: RowState[] = (selectedOrder.items || [])
+      .filter((it) => itemBelongsToUserGroup(it.stokKodu))
+      .map((it) => {
+        const existing = existingByItemId.get(it.id);
+        return {
+          itemId: it.id,
+          stokKodu: it.stokKodu,
+          stokAdi: it.stokAdi,
+          requestedAdet: Number(it.adet) || 0,
+          sentAdet: existing ? Number(existing.sentAdet) : Number(it.adet) || 0,
+          fulfilled: existing ? !!existing.fulfilled : false,
+        };
+      });
     setRows(newRows);
 
     // Fetch lab stock (shipped items to this hospital)
@@ -243,7 +314,8 @@ export default function LojistikSiparisView() {
     return () => {
       cancelled = true;
     };
-  }, [selectedOrderId, hospitals]); // Only depend on selectedOrderId and hospitals list
+    // itemBelongsToUserGroup also influences which rows we render.
+  }, [selectedOrderId, hospitals, itemBelongsToUserGroup]);
 
   useEffect(() => {
     if (!selectedOrder?.labId) {
@@ -361,11 +433,6 @@ export default function LojistikSiparisView() {
     let list = peripheralOrders;
     if (filter === 'pending') list = list.filter((o) => o.status === 'pending');
     else if (filter === 'toplaniyor') list = list.filter((o) => o.status === 'toplaniyor');
-    else if (filter === 'teslim_bekliyor') {
-      list = list.filter((o) =>
-        ['shipped', 'transfer_pending', 'teslim_bekliyor', 'yolda'].includes(String(o.status || ''))
-      );
-    }
     else if (filter === 'eksik') list = list.filter((o) => o.status === 'eksik');
     if (search.trim()) {
       const q = search.trim().toLowerCase();
@@ -400,29 +467,65 @@ export default function LojistikSiparisView() {
     if (rows.length === 0) {
       toast({
         title: 'Eksik Kalem',
-        description: 'Siparişte en az bir kalem olmalıdır.',
+        description: 'Siparişte size atanmış bir kalem yok.',
         variant: 'destructive',
       });
       return;
     }
     setIsSaving(true);
     try {
-      const updatedOrderItems = rows.map((r) => ({
-        id: r.itemId,
-        stokKodu: r.stokKodu,
-        stokAdi: r.stokAdi,
-        adet: r.sentAdet,
-      }));
+      // Per-group approval: the lojistik user can only modify rows belonging to
+      // their assigned lab groups. Items outside those groups must be preserved
+      // verbatim so that the other group's lojistik responsible can later approve
+      // them. The displayed `rows` is already filtered to user's groups.
+      const rowsByItemId = new Map(rows.map((r) => [r.itemId, r] as const));
+      const existingFulfillmentByItemId = new Map<string, any>();
+      (selectedOrder.peripheralFulfillment?.items || []).forEach((it: any) => {
+        existingFulfillmentByItemId.set(it.itemId, it);
+      });
 
-      const fulfillmentItems: PeripheralFulfillmentItem[] = rows.map((r) => ({
-        itemId: r.itemId,
-        stokKodu: r.stokKodu,
-        requestedAdet: r.sentAdet,
-        sentAdet: r.sentAdet,
-        fulfilled: r.fulfilled,
-      }));
+      const updatedOrderItems = (selectedOrder.items || []).map((it: any) => {
+        const row = rowsByItemId.get(it.id);
+        if (row) {
+          return {
+            id: row.itemId,
+            stokKodu: row.stokKodu,
+            stokAdi: row.stokAdi,
+            adet: row.sentAdet,
+          };
+        }
+        return it;
+      });
 
-      const isFullyApproved = fulfillmentItems.length > 0 && fulfillmentItems.every((it) => it.fulfilled);
+      const allItemIds = new Set<string>();
+      (selectedOrder.items || []).forEach((it: any) => { if (it?.id) allItemIds.add(it.id); });
+      existingFulfillmentByItemId.forEach((_, k) => allItemIds.add(k));
+
+      const fulfillmentItems: PeripheralFulfillmentItem[] = Array.from(allItemIds).map((itemId) => {
+        const row = rowsByItemId.get(itemId);
+        if (row) {
+          return {
+            itemId: row.itemId,
+            stokKodu: row.stokKodu,
+            requestedAdet: row.sentAdet,
+            sentAdet: row.sentAdet,
+            fulfilled: row.fulfilled,
+          } as PeripheralFulfillmentItem;
+        }
+        const existing = existingFulfillmentByItemId.get(itemId);
+        if (existing) return existing as PeripheralFulfillmentItem;
+        // Items the user can't see (other groups) but no prior fulfillment record:
+        // seed a defaults row from the order item so the order keeps full coverage.
+        const item = (selectedOrder.items || []).find((it: any) => it.id === itemId);
+        return {
+          itemId,
+          stokKodu: item?.stokKodu || '',
+          requestedAdet: Number(item?.adet) || 0,
+          sentAdet: Number(item?.adet) || 0,
+          fulfilled: false,
+        } as PeripheralFulfillmentItem;
+      });
+
       const payload: Record<string, any> = {
         peripheralFulfillment: {
           items: fulfillmentItems,
@@ -431,11 +534,11 @@ export default function LojistikSiparisView() {
           updatedBy: currentUserProfile?.name || currentUser?.email || null,
         },
         items: updatedOrderItems,
-        // Approval is *preparation*, not delivery. Fully approved orders
-        // move into "Hazırlanan" (toplaniyor); they only graduate to
-        // "completed" when an irsaliye-based lab acceptance reconciles
-        // the items. Partially approved orders are flagged "eksik".
-        status: isFullyApproved ? 'toplaniyor' : 'eksik',
+        // Saving an order always moves it to "Hazırlanıyor" (toplaniyor).
+        // "completed" is only set when a stock-arrival (irsaliye / depoStok)
+        // reconciliation confirms the items were delivered.
+        // "eksik" is set only by that reconciliation when items are missing.
+        status: 'toplaniyor',
         approvedAt: serverTimestamp(),
         approvedById: currentUser?.uid || null,
         approvedBy: currentUserProfile?.name || currentUser?.email || null,
@@ -445,12 +548,9 @@ export default function LojistikSiparisView() {
       setShowSaveFx(true);
 
       toast({
-        title: isFullyApproved ? 'Sipariş Hazırlanıyor' : 'Sipariş Eksik Onaylandı',
-        description: isFullyApproved
-          ? 'Sipariş hazırlanan listesine taşındı; irsaliye kabulü ile tamamlanacak.'
-          : 'Sipariş eksik kalemler ile bekleyen listede güncellendi.',
+        title: 'Sipariş Hazırlanıyor',
+        description: 'Sipariş hazırlanan listesine taşındı; teslimat irsaliye/stok girişi ile tamamlanacak.',
       });
-      if (isFullyApproved) setSelectedOrderId(null);
     } catch (e) {
       console.error(e);
       toast({ title: 'Hata', description: 'Sipariş kaydedilemedi.', variant: 'destructive' });
@@ -465,20 +565,51 @@ export default function LojistikSiparisView() {
     if (!depot) return;
     setIsRouting(true);
     try {
-      const updatedOrderItems = rows.map((r) => ({
-        id: r.itemId,
-        stokKodu: r.stokKodu,
-        stokAdi: r.stokAdi,
-        adet: r.sentAdet,
-      }));
+      // Preserve items belonging to other lab groups; only update the user's rows.
+      const rowsByItemId = new Map(rows.map((r) => [r.itemId, r] as const));
+      const existingFulfillmentByItemId = new Map<string, any>();
+      (selectedOrder.peripheralFulfillment?.items || []).forEach((it: any) => {
+        existingFulfillmentByItemId.set(it.itemId, it);
+      });
 
-      const fulfillmentItems: PeripheralFulfillmentItem[] = rows.map((r) => ({
-        itemId: r.itemId,
-        stokKodu: r.stokKodu,
-        requestedAdet: r.sentAdet,
-        sentAdet: r.sentAdet,
-        fulfilled: r.fulfilled,
-      }));
+      const updatedOrderItems = (selectedOrder.items || []).map((it: any) => {
+        const row = rowsByItemId.get(it.id);
+        if (row) {
+          return {
+            id: row.itemId,
+            stokKodu: row.stokKodu,
+            stokAdi: row.stokAdi,
+            adet: row.sentAdet,
+          };
+        }
+        return it;
+      });
+
+      const allItemIds = new Set<string>();
+      (selectedOrder.items || []).forEach((it: any) => { if (it?.id) allItemIds.add(it.id); });
+      existingFulfillmentByItemId.forEach((_, k) => allItemIds.add(k));
+      const fulfillmentItems: PeripheralFulfillmentItem[] = Array.from(allItemIds).map((itemId) => {
+        const row = rowsByItemId.get(itemId);
+        if (row) {
+          return {
+            itemId: row.itemId,
+            stokKodu: row.stokKodu,
+            requestedAdet: row.sentAdet,
+            sentAdet: row.sentAdet,
+            fulfilled: row.fulfilled,
+          } as PeripheralFulfillmentItem;
+        }
+        const existing = existingFulfillmentByItemId.get(itemId);
+        if (existing) return existing as PeripheralFulfillmentItem;
+        const item = (selectedOrder.items || []).find((it: any) => it.id === itemId);
+        return {
+          itemId,
+          stokKodu: item?.stokKodu || '',
+          requestedAdet: Number(item?.adet) || 0,
+          sentAdet: Number(item?.adet) || 0,
+          fulfilled: false,
+        } as PeripheralFulfillmentItem;
+      });
 
       await updateDoc(doc(db, 'orders', selectedOrder.id), {
         depotId: depot.id,
@@ -569,12 +700,6 @@ export default function LojistikSiparisView() {
         cls: 'loj-status-badge loj-status-badge--info',
         Icon: Truck,
       };
-    if (['shipped', 'transfer_pending', 'teslim_bekliyor', 'yolda'].includes(String(s)))
-      return {
-        label: 'Yolda',
-        cls: 'loj-status-badge loj-status-badge--accent',
-        Icon: Truck,
-      };
     if (s === 'completed')
       return {
         label: 'Teslim',
@@ -597,8 +722,7 @@ export default function LojistikSiparisView() {
   const getOrderStage = (order: Order | null): number => {
     if (!order) return 0;
     const s = String(order.status || '');
-    if (s === 'completed') return 4;
-    if (['shipped', 'transfer_pending', 'teslim_bekliyor', 'yolda'].includes(s)) return 3;
+    if (s === 'completed') return 3;
     if (s === 'toplaniyor') return 2;
     if (s === 'eksik') return 2;
     if (s === 'pending') return 1;
@@ -801,7 +925,6 @@ export default function LojistikSiparisView() {
               ['all', 'Tümü'],
               ['pending', 'Bekleyen'],
               ['toplaniyor', 'Hazırlanan'],
-              ['teslim_bekliyor', 'Yolda'],
               ['eksik', 'Eksik'],
             ] as [LojFilter, string][]).map(([key, label]) => (
               <button
@@ -922,7 +1045,7 @@ export default function LojistikSiparisView() {
             const stage = getOrderStage(order);
             const headerStatus = getStatusInfo(order);
             const HeaderStatusIcon = headerStatus.Icon;
-            const stageNames = ['Beklemede', 'Hazırlanıyor', 'Yolda', 'Teslim Edildi'];
+            const stageNames = ['Beklemede', 'Hazırlanıyor', 'Teslim Edildi'];
 
             return (
               <div className="flex flex-col h-full">
@@ -1004,8 +1127,8 @@ export default function LojistikSiparisView() {
                   <div className="loj-stepper-track">
                     {stageNames.map((name, idx) => {
                       const stepIdx = idx + 1;
-                      const isDone = stepIdx < stage || (stepIdx === stage && stage === 4);
-                      const isActive = stepIdx === stage && stage !== 4;
+                      const isDone = stepIdx < stage || (stepIdx === stage && stage === 3);
+                      const isActive = stepIdx === stage && stage !== 3;
                       const stepCls = isDone ? 'done' : isActive ? 'active' : 'pending';
                       return (
                         <React.Fragment key={name}>
