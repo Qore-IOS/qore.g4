@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { Loader2, History } from 'lucide-react';
@@ -49,8 +49,11 @@ function getStatusBadge(status: string) {
 
 export default function UrunTalepGecmisPanel() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { toast } = useToast();
   const { currentUser, currentUserProfile } = useAuth();
+
+  const urlLabId = searchParams.get('labId');
 
   const [loading, setLoading] = useState(true);
   const [orders, setOrders] = useState<RequestHistoryItem[]>([]);
@@ -65,16 +68,17 @@ export default function UrunTalepGecmisPanel() {
 
   const totalPages = Math.max(1, Math.ceil(totalCount / rowsPerPage));
 
-  // Determine labIds from profile
-  const labIds = (currentUserProfile?.assignedLaboratories || []).join(',');
+  // Determine labIds from profile or URL
+  const labFilter = urlLabId || (currentUserProfile?.assignedLaboratories || []).join(',');
 
   /**
    * Fetch total count from the server
    */
-  const fetchTotalCount = useCallback(async (uid: string, labs: string, signal: AbortSignal) => {
+  const fetchTotalCount = useCallback(async (uid: string, filter: string, signal: AbortSignal) => {
     try {
       let url = `/api/urun-talep-gecmis?countOnly=true`;
-      if (labs) url += `&labIds=${labs}`;
+      if (filter.includes(',')) url += `&labIds=${filter}`;
+      else if (filter) url += `&labId=${filter}`;
       else url += `&createdById=${uid}`;
 
       const response = await fetch(url, { signal, cache: 'no-store' });
@@ -92,7 +96,7 @@ export default function UrunTalepGecmisPanel() {
    */
   const fetchPage = useCallback(async (
     uid: string,
-    labs: string,
+    filter: string,
     pageNum: number,
     pageSize: number,
     cursors: (string | null)[],
@@ -103,7 +107,8 @@ export default function UrunTalepGecmisPanel() {
       const startAfterId = pageNum > 1 ? cursors[pageNum - 2] : null;
 
       let url = `/api/urun-talep-gecmis?pageSize=${pageSize}`;
-      if (labs) url += `&labIds=${labs}`;
+      if (filter.includes(',')) url += `&labIds=${filter}`;
+      else if (filter) url += `&labId=${filter}`;
       else url += `&createdById=${uid}`;
 
       if (startAfterId) {
@@ -147,9 +152,9 @@ export default function UrunTalepGecmisPanel() {
   useEffect(() => {
     if (!currentUser?.uid) return;
     const controller = new AbortController();
-    fetchTotalCount(currentUser.uid, labIds, controller.signal);
+    fetchTotalCount(currentUser.uid, labFilter, controller.signal);
     return () => controller.abort();
-  }, [currentUser?.uid, labIds, fetchTotalCount]);
+  }, [currentUser?.uid, labFilter, fetchTotalCount]);
 
   // Fetch current page data
   useEffect(() => {
@@ -158,9 +163,9 @@ export default function UrunTalepGecmisPanel() {
       return;
     }
     const controller = new AbortController();
-    fetchPage(currentUser.uid, labIds, page, rowsPerPage, cursorStackRef.current, controller.signal);
+    fetchPage(currentUser.uid, labFilter, page, rowsPerPage, cursorStackRef.current, controller.signal);
     return () => controller.abort();
-  }, [currentUser?.uid, labIds, page, rowsPerPage, fetchPage]);
+  }, [currentUser?.uid, labFilter, page, rowsPerPage, fetchPage]);
 
   return (
     <div className="p-4 space-y-4">
@@ -172,7 +177,7 @@ export default function UrunTalepGecmisPanel() {
             Ürün Talep Geçmişi
           </CardTitle>
           <CardDescription>
-            {labIds ? 'Laboratuvarınıza ait talepleri görüntüleyin.' : 'Önceki taleplerinizi görüntüleyin.'} Satıra tıklayarak sipariş detayını açabilirsiniz.
+            {labFilter ? 'Laboratuvarınıza ait talepleri görüntüleyin.' : 'Önceki taleplerinizi görüntüleyin.'} Satıra tıklayarak sipariş detayını açabilirsiniz.
             {totalCount > 0 && (
               <span className="ml-2 font-medium">({totalCount} kayıt)</span>
             )}
