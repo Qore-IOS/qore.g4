@@ -4,7 +4,7 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
-import { Loader2, History } from 'lucide-react';
+import { Loader2, History, Trash2 } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -19,6 +19,16 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { cn } from '@/lib/utils';
+import { 
+  AlertDialog, 
+  AlertDialogAction, 
+  AlertDialogCancel, 
+  AlertDialogContent, 
+  AlertDialogDescription, 
+  AlertDialogFooter, 
+  AlertDialogHeader, 
+  AlertDialogTitle 
+} from '@/components/ui/alert-dialog';
 
 type RequestHistoryItem = {
   id: string;
@@ -63,6 +73,10 @@ export default function UrunTalepGecmisPanel() {
   // Pagination state
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_PAGE_SIZE);
+
+  // Deletion state
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Cursor stack: cursorStack[i] = lastDocId for page (i+1)
   const cursorStackRef = useRef<(string | null)[]>([]);
@@ -168,6 +182,37 @@ export default function UrunTalepGecmisPanel() {
     return () => controller.abort();
   }, [currentUser?.uid, labFilter, page, rowsPerPage, fetchPage]);
 
+  const handleDelete = async (orderId: string) => {
+    setIsDeleting(true);
+    try {
+      const response = await fetch(`/api/urun-talep-gecmis/${orderId}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        const payload = await response.json();
+        throw new Error(payload?.error || 'Sipariş silinemedi.');
+      }
+
+      toast({ title: 'Başarılı', description: 'Sipariş silindi.' });
+      
+      // Refresh current page
+      if (currentUser?.uid) {
+        fetchTotalCount(currentUser.uid, labFilter, new AbortController().signal);
+        fetchPage(currentUser.uid, labFilter, page, rowsPerPage, cursorStackRef.current, new AbortController().signal);
+      }
+    } catch (error) {
+      toast({
+        title: 'Hata',
+        description: (error as Error).message,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDeleting(false);
+      setDeleteConfirmId(null);
+    }
+  };
+
   return (
     <div className="p-4 space-y-4">
       <BackButton fallback="/urun-talep" />
@@ -199,12 +244,13 @@ export default function UrunTalepGecmisPanel() {
                   <TableHead>Kalem Sayısı</TableHead>
                   <TableHead>Açan Kişi</TableHead>
                   <TableHead>Tarih & Saat</TableHead>
+                  <TableHead className="w-[50px]"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {orders.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center text-muted-foreground">
+                    <TableCell colSpan={6} className="text-center text-muted-foreground">
                       Geçmiş sipariş bulunamadı.
                     </TableCell>
                   </TableRow>
@@ -236,6 +282,19 @@ export default function UrunTalepGecmisPanel() {
                           ? format(new Date(order.createdAt), 'dd MMM yyyy, HH:mm', { locale: tr })
                           : '-'}
                       </TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        {order.status === 'pending' && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => setDeleteConfirmId(order.id)}
+                            disabled={isDeleting}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </TableCell>
                     </TableRow>
                   ))
                 )}
@@ -243,6 +302,28 @@ export default function UrunTalepGecmisPanel() {
             </Table>
           )}
         </CardContent>
+
+        <AlertDialog open={!!deleteConfirmId} onOpenChange={(open) => !open && setDeleteConfirmId(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Siparişi Sil</AlertDialogTitle>
+              <AlertDialogDescription>
+                Bu talebi silmek istediğinize emin misiniz? Bu işlem geri alınamaz ve siparişler panelinden de kaldırılacaktır.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isDeleting}>Vazgeç</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onClick={() => deleteConfirmId && handleDelete(deleteConfirmId)}
+                disabled={isDeleting}
+              >
+                {isDeleting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Sil
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
         {totalPages > 1 && (
           <CardFooter className="flex items-center justify-between mt-4 pt-4 border-t">
             <div className="flex items-center space-x-2 text-sm">
