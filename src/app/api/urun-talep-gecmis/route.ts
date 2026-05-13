@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
 
     // Build base query
     let baseQuery: FirebaseFirestore.Query = adminDb.collection('orders')
-      .where('requestSource', '==', 'lab_to_depot');
+      .where('requestSource', 'in', ['lab_to_depot', 'lab_to_office']);
 
     if (labIds && labIds.length > 0) {
       // If we have multiple labs, we use 'in' operator (limited to 30 labs)
