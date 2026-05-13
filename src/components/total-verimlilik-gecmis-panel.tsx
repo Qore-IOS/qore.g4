@@ -45,6 +45,10 @@ interface EfficiencyMetrics {
   stokDogrulukSkoru: number;
   kitVerimlilikSkoru: number;
   genelVerimlilik: number;
+  toplamEtkiDegeri?: number;
+  maliyetAgirlikli?: boolean;
+  hesaplananSatirSayisi?: number;
+  algoritma?: 'value-impact-efficiency-index';
 }
 
 interface TotalEfficiencyRecord {
