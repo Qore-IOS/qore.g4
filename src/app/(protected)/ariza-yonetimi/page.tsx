@@ -278,8 +278,8 @@ export default function ArizaYonetimiPage() {
     }
   };
 
-  const getExportData = () => {
-    return reports.map(r => {
+  const formatReportsForExport = (list: DeviceFaultReport[]) => {
+    return list.map(r => {
       const normalized = normalizeStatus(r.status);
       const statusConfig = STATUS_CONFIG[normalized];
 
@@ -323,27 +323,71 @@ export default function ArizaYonetimiPage() {
     });
   };
 
-  const handleExportToExcel = () => {
-    if (reports.length === 0) {
-      toast({ title: 'Veri Yok', description: 'Dışa aktarılacak arıza kaydı bulunmuyor.', variant: 'default' });
-      return;
+  // Mevcut filtrelere uyan TÜM arıza kayıtlarını getirir; sayfalama uygulanmaz.
+  // Döküm "ekrandaki satırlar" değil, filtrelenmiş tüm kümeyi içermelidir.
+  const fetchAllFilteredReports = async (): Promise<DeviceFaultReport[]> => {
+    const params = new URLSearchParams({
+      status: statusTab,
+      lab: labFilter,
+      device: deviceFilter,
+      opener: openerFilter,
+      all: '1',
+      companyId: currentCompanyId,
+      isSuperAdmin: isSuperAdmin ? '1' : '0',
+      isAdmin: isAdmin ? '1' : '0',
+    });
+    if (assignedLabs && assignedLabs.length > 0) {
+      params.set('assignedLabs', assignedLabs.join(','));
     }
-    const dataToExport = getExportData();
-    exportDataToExcel(dataToExport, 'Tum_Ariza_Kayitlari', 'Arızalar', toast);
-    setExportModalOpen(false);
+
+    const response = await fetch(`/api/ariza-yonetimi?${params}`);
+    const result = await response.json();
+    if (!result.success) {
+      throw new Error(result.error || 'Veri alınamadı');
+    }
+    return result.data.map((r: any) => ({
+      ...r,
+      openedAt: r.openedAt ? new Date(r.openedAt) : null,
+      closedAt: r.closedAt ? new Date(r.closedAt) : null,
+      assignedAt: r.assignedAt ? new Date(r.assignedAt) : null,
+      interventionStartedAt: r.interventionStartedAt ? new Date(r.interventionStartedAt) : null,
+    }));
+  };
+
+  const handleExportToExcel = async () => {
+    setExportLoading(true);
+    try {
+      const allReports = await fetchAllFilteredReports();
+      if (allReports.length === 0) {
+        toast({ title: 'Veri Yok', description: 'Dışa aktarılacak arıza kaydı bulunmuyor.', variant: 'default' });
+        return;
+      }
+      const dataToExport = formatReportsForExport(allReports);
+      exportDataToExcel(dataToExport, 'Tum_Ariza_Kayitlari', 'Arızalar', toast);
+      setExportModalOpen(false);
+    } catch (error: any) {
+      console.error('Excel export error:', error);
+      toast({ title: 'Hata', description: error.message || 'Excel dökümü oluşturulamadı.', variant: 'destructive' });
+    } finally {
+      setExportLoading(false);
+    }
   };
 
 
   const handleExportToPdf = async () => {
-    if (reports.length === 0) {
-      toast({ title: 'Veri Yok', description: 'Dışa aktarılacak arıza kaydı bulunmuyor.', variant: 'default' });
-      return;
-    }
     setExportLoading(true);
     try {
-      const dataToExport = getExportData();
+      const allReports = await fetchAllFilteredReports();
+      if (allReports.length === 0) {
+        toast({ title: 'Veri Yok', description: 'Dışa aktarılacak arıza kaydı bulunmuyor.', variant: 'default' });
+        return;
+      }
+      const dataToExport = formatReportsForExport(allReports);
       await exportDataToPdf(dataToExport, 'Tum_Ariza_Kayitlari', 'Tüm Arıza Kayıtları', toast);
       setExportModalOpen(false);
+    } catch (error: any) {
+      console.error('PDF export error:', error);
+      toast({ title: 'Hata', description: error.message || 'PDF dökümü oluşturulamadı.', variant: 'destructive' });
     } finally {
       setExportLoading(false);
     }
@@ -635,8 +679,13 @@ export default function ArizaYonetimiPage() {
                 variant="outline"
                 className="w-full justify-start h-14"
                 onClick={handleExportToExcel}
+                disabled={exportLoading}
               >
-                <FileSpreadsheet className="h-5 w-5 mr-3 text-green-600" />
+                {exportLoading ? (
+                  <Loader2 className="h-5 w-5 mr-3 animate-spin" />
+                ) : (
+                  <FileSpreadsheet className="h-5 w-5 mr-3 text-green-600" />
+                )}
                 <div className="flex flex-col items-start">
                   <span className="font-medium">Excel (.xlsx)</span>
                   <span className="text-xs text-muted-foreground">Tablo formatında veri</span>
