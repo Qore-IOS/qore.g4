@@ -597,13 +597,19 @@ async function handleActionFormCreated(
       const cihazAdi = data.cihazAdi || 'Bilinmeyen Cihaz';
       const personnelName = data.createdByName || 'Bilinmeyen Kullanıcı';
       const formTypeLabel = formType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon';
-      
-      const caption = 
+
+      let cihazDurumuCaption = CIHAZ_DURUMU_LABELS[data.cihazDurumu || ''] || '-';
+      if (data.cihazDurumu === 'diger' && data.cihazDurumuAciklama) {
+        cihazDurumuCaption += ` (${data.cihazDurumuAciklama})`;
+      }
+
+      const caption =
         `*${formTypeLabel} İşlemi Tamamlandı*\n\n` +
         `- *Kurum:* ${labName}\n` +
         `- *Cihaz:* ${cihazAdi}\n` +
         `- *Form No:* ${data.formNo || formId}\n` +
-        `- *Personel:* ${personnelName}\n\n` +
+        `- *Personel:* ${personnelName}\n` +
+        `- *Cihaz Durumu:* ${cihazDurumuCaption}\n\n` +
         `QORE Sistemi üzerinden detaylara ulaşabilirsiniz.`;
 
       const waFileName = `IslemFormu_${formType === 'teknik_servis' ? 'Teknik' : 'Aplikasyon'}_${formId.substring(0, 8)}.pdf`;
