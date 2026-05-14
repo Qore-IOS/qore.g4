@@ -523,13 +523,16 @@ async function handleFaultResolved(reportId: string, after: any): Promise<void> 
         const cihazAdi = after.model || 'Bilinmeyen Cihaz';
         const faultTypeLabel = after.faultType === 'teknik_servis' ? 'Teknik Servis' : after.faultType === 'aplikasyon' ? 'Aplikasyon' : '-';
         const personnelName = after.closedByName || 'Bilinmeyen Kullanıcı';
+        const faultDescription = (after.description || after.faultDescription || '').toString().trim() || '-';
         const caption =
           `*Arıza Çözüldü*\n\n` +
           `- *Kurum:* ${labDisplayName}\n` +
           `- *Cihaz:* ${cihazAdi}\n` +
           `- *Arıza No:* ${formNo}\n` +
           `- *Tip:* ${faultTypeLabel}\n` +
-          `- *Çözen:* ${personnelName}\n\n` +
+          `- *Arıza İçeriği:* ${faultDescription}\n` +
+          `- *Çözen:* ${personnelName}\n` +
+          `- *Cihaz Durumu:* Çalışıyor\n\n` +
           `QORE Sistemi üzerinden detaylara ulaşabilirsiniz.`;
 
         const waFileName = `Ariza_Raporu_${reportId.substring(0, 8)}.pdf`;
