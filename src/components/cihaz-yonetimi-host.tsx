@@ -27,6 +27,10 @@ import {
   Wrench,
   ArrowUpRight,
   Users,
+  BarChart3,
+  Building2,
+  Gauge,
+  Package,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
@@ -179,6 +183,7 @@ function PersonnelSkeleton() {
 
 export default function CihazYonetimiHost() {
   const [isQoreAIPanelOpen, setIsQoreAIPanelOpen] = useState(false);
+  const [isStatsDialogOpen, setIsStatsDialogOpen] = useState(false);
   const [isAvailabilityDialogOpen, setIsAvailabilityDialogOpen] = useState(false);
   const [availabilityType, setAvailabilityType] = useState<PersonnelAvailabilityType>('office');
   const [availabilityDescription, setAvailabilityDescription] = useState('');
@@ -192,6 +197,10 @@ export default function CihazYonetimiHost() {
   const router = useRouter();
   const { currentUserProfile } = useAuth();
   const queryClient = useQueryClient();
+  const currentRole = currentUserProfile?.role || '';
+  const isFieldUser = currentRole === 'teknik_servis' || currentRole === 'aplikasyon';
+  const isPrivilegedAdmin = ['admin', 'super_admin', 'admin_developer'].includes(currentRole);
+  const showAdminStatsButton = isPrivilegedAdmin && !isFieldUser;
 
   // TanStack Query — all data is cached and shared with other panels.
   // Each query handles its own company scope filtering inside the hook.
@@ -524,19 +533,20 @@ export default function CihazYonetimiHost() {
             Eğitimdeyim
           </button>
           <QoreTechnicNotificationsButton />
-          {(() => {
-            const role = currentUserProfile?.role;
-            const isFieldUser = role === 'teknik_servis' || role === 'aplikasyon';
-            if (isFieldUser) {
-              return <QoreTechnicProfileButton className="md:hidden" />;
-            }
-            return (
-              <button type="button" className="qt-status-btn qt-status-btn--ai" onClick={() => setIsQoreAIPanelOpen(true)}>
-                <Sparkles className="h-4 w-4" />
-                Qore AI
-              </button>
-            );
-          })()}
+          {showAdminStatsButton && (
+            <button type="button" className="qt-status-btn qt-status-btn--stats" onClick={() => setIsStatsDialogOpen(true)}>
+              <BarChart3 className="h-4 w-4" />
+              İstatistikler
+            </button>
+          )}
+          {isFieldUser ? (
+            <QoreTechnicProfileButton className="md:hidden" />
+          ) : (
+            <button type="button" className="qt-status-btn qt-status-btn--ai" onClick={() => setIsQoreAIPanelOpen(true)}>
+              <Sparkles className="h-4 w-4" />
+              Qore AI
+            </button>
+          )}
         </div>
       </div>
 
@@ -626,6 +636,65 @@ export default function CihazYonetimiHost() {
           </div>
         )))}
       </div>
+
+
+      <Dialog open={isStatsDialogOpen} onOpenChange={setIsStatsDialogOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>İstatistik Panelleri</DialogTitle>
+            <DialogDescription>
+              Admin yetkisiyle tüm teknik servis, aplikasyon, ziyaret, performans ve yedek parça istatistiklerine erişebilirsiniz.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {[
+              {
+                title: 'Kurum Ziyaret Analizi',
+                description: 'Kurum bazlı ziyaret, form ve arıza temaslarını inceleyin.',
+                href: '/kurum-ziyaret-analizi',
+                icon: Building2,
+              },
+              {
+                title: 'Performans Analizi',
+                description: 'Teknik servis ve aplikasyon personeli performans metrikleri.',
+                href: '/personel-izlem',
+                icon: Gauge,
+              },
+              {
+                title: 'Yedek Parça Analizi',
+                description: 'Parça kullanımı, değişim geçmişi ve kurum dağılımları.',
+                href: '/yedek-parca-analizi',
+                icon: Package,
+              },
+              {
+                title: 'Arıza İstatistikleri',
+                description: 'Açık/kapalı arızalar, ürün ve kategori istatistikleri.',
+                href: '/ariza-yonetimi/istatistikler',
+                icon: BarChart3,
+              },
+            ].map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.href}
+                  type="button"
+                  className="group rounded-2xl border border-white/30 bg-white/50 p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:bg-white/70 hover:shadow-md dark:border-white/10 dark:bg-white/10 dark:hover:bg-white/15"
+                  onClick={() => {
+                    setIsStatsDialogOpen(false);
+                    router.push(item.href);
+                  }}
+                >
+                  <span className="mb-3 inline-flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary transition group-hover:bg-primary group-hover:text-primary-foreground">
+                    <Icon className="h-5 w-5" />
+                  </span>
+                  <span className="block font-semibold text-foreground">{item.title}</span>
+                  <span className="mt-1 block text-sm text-muted-foreground">{item.description}</span>
+                </button>
+              );
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={isAvailabilityDialogOpen} onOpenChange={setIsAvailabilityDialogOpen}>
         <DialogContent>
