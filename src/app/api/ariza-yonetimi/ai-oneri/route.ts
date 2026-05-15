@@ -16,7 +16,7 @@ type SimilarFaultSummary = {
   closedAt?: string | null;
 };
 
-const AI_SUGGESTION_CACHE_VERSION = 3;
+const AI_SUGGESTION_CACHE_VERSION = 4;
 
 const FAULT_ANALYSIS_GUIDE = `
 Aşağıdaki kurumsal servis rehberi, model ve arıza başlığına göre öncelikli kontrol adımlarını içerir. Bunu mevcut prompta EK bilgi olarak kullan.
@@ -164,9 +164,11 @@ function buildDeterministicFallbackSuggestion(params: {
   sameFaultGroup: SimilarFaultSummary[];
   closeNotes: Array<{ openedAt?: string | null; description?: string; closeDescription?: string; resolutionClass: 'kalici' | 'gecici' | 'belirsiz' }>;
   resolutionStats: { kalici: number; gecici: number; belirsiz: number };
+  sameCategoryActionForms: ActionFormSummary[];
+  actionFormStats: ReturnType<typeof summarizeActionForms>;
   debug?: string;
 }) {
-  const { report, sameFaultGroup, closeNotes, resolutionStats, debug } = params;
+  const { report, sameFaultGroup, closeNotes, resolutionStats, sameCategoryActionForms, actionFormStats, debug } = params;
 
   const recent = sameFaultGroup.slice(0, 3).map((f) => f.openedAt).filter(Boolean) as string[];
   const recentText = recent.length > 0
@@ -190,18 +192,47 @@ function buildDeterministicFallbackSuggestion(params: {
     'Geçmişte geçici kapanmış vakalarda ilgili parça değişimi veya mekanik sensör kontrolünü değerlendirin.',
   ];
 
-  const freqText = sameFaultGroup.length > 0
-    ? `Bu seri numaradaki cihazda aynı/benzer kategorideki arıza geçmişte ${sameFaultGroup.length} kez kayıt altına alındı (toplam ${resolutionStats.kalici + resolutionStats.gecici + resolutionStats.belirsiz} kapanmış kayıt).`
-    : 'Bu seri numaradaki cihazda aynı kategoride birebir geçmiş kayıt bulunamadı.';
+  // Tekrarlama olasılığı kestirimi
+  const sameCategoryEventCount = sameFaultGroup.length + sameCategoryActionForms.length;
+  const permanentRatio = resolutionStats.kalici / Math.max(1, resolutionStats.kalici + resolutionStats.gecici + resolutionStats.belirsiz);
+  let recurrenceLikelihood: 'dusuk' | 'orta' | 'yuksek';
+  if (sameCategoryEventCount >= 3 && permanentRatio < 0.34) recurrenceLikelihood = 'yuksek';
+  else if (sameCategoryEventCount >= 2 || (sameCategoryEventCount >= 1 && permanentRatio < 0.5)) recurrenceLikelihood = 'orta';
+  else recurrenceLikelihood = 'dusuk';
+  const recurrenceRationale = `Aynı kategoride ${sameCategoryEventCount} kayıt (${sameFaultGroup.length} arıza + ${sameCategoryActionForms.length} işlem formu); kapanışlarda kalıcı çözüm oranı ${(permanentRatio * 100).toFixed(0)}%.`;
+
+  // İşlem formu kanıtı
+  const formActionHints: string[] = [];
+  for (const f of sameCategoryActionForms.slice(0, 3)) {
+    const partsUsed = (f.actions || [])
+      .filter((a) => a.type === 'part_change' || a.type === 'hucre_degisimi')
+      .map((a) => a.stokAdi || a.removedPartStokAdi)
+      .filter(Boolean) as string[];
+    if (partsUsed.length) formActionHints.push(`${partsUsed.join(', ')} değişimi`);
+    else if (f.aciklama) formActionHints.push(f.aciklama.slice(0, 80));
+  }
+  const formEvidence = formActionHints.length
+    ? `Geçmiş işlem formlarında uygulanmış işlemler: ${formActionHints.join(' | ')}.`
+    : actionFormStats.partChanges > 0
+      ? `Bu cihaz için toplam ${actionFormStats.partChanges} parça/hücre değişimi kaydı mevcut.`
+      : '';
+
+  const freqText = sameCategoryEventCount > 0
+    ? `Bu seri numaralı cihazda aynı kategoride ${sameFaultGroup.length} arıza kaydı ve ${sameCategoryActionForms.length} ilgili işlem formu bulunuyor.`
+    : 'Bu seri numarada aynı kategoride geçmiş kayıt bulunmuyor.';
   const resolutionText = resolutionStats.gecici > resolutionStats.kalici
-    ? 'Geçmiş kapanışlar daha çok geçici müdahalelerle (reset/temizlik) sonuçlanmış görünüyor.'
+    ? 'Geçmiş kapanışlarda kalıcı parça değişimi yerine ağırlıkla reset/temizlik tercih edilmiş.'
     : resolutionStats.kalici > 0
-      ? 'Geçmiş kapanışlarda parça değişimi/revizyon gibi kalıcı çözümler uygulanmış.'
-      : 'Geçmiş kapanış notları, çözüm tipini netleştirmek için yeterli detayda değil.';
-  const docHint = 'Master teknik dokümandaki ilgili başlığa göre önerilen kontrol/check menüsünü ve sensör/parça kontrollerini eksiksiz uygulayın; sadece yüzeysel reset ile kapatmayın.';
+      ? 'Geçmiş kapanışlarda kalıcı parça değişimi/revizyon uygulanmış.'
+      : '';
+  const docHint = 'Master teknik dokümandaki ilgili başlığa göre kontrol/check menüsünü, sensör hizalamasını ve parça aşınmasını sırayla doğrulayın.';
+
+  const briefExplanation = [freqText, resolutionText, formEvidence, docHint].filter(Boolean).join(' ');
 
   return {
-    briefExplanation: `${freqText} ${resolutionText} ${docHint}`,
+    briefExplanation,
+    recurrenceLikelihood,
+    recurrenceRationale,
     summary: `${report.model || 'Cihaz'} (${report.serial || '-'}) için ${report.faultName || report.description || 'arıza'} analiz edildi. ${recentText}`,
     probableCauses: [
       'Geçmişte benzer semptomlarda kök neden adımı atlanmış olabilir.',
@@ -222,10 +253,12 @@ async function requestGeminiSuggestion(context: any) {
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
   if (!apiKey) return null;
 
-  const prompt = `Sen teknik servis ve aplikasyon ekiplerine destek veren bir arıza asistanısın.
+  const prompt = `Sen IVD/laboratuvar analizörleri (Roche cobas serisi) için saha mühendisi seviyesinde, ölçülü ve profesyonel bir arıza asistanısın.
 Yalnızca JSON döndür:
 {
-  "briefExplanation": "Tek paragraf, en fazla 5 cümle. Aşağıdaki kuralları uygula.",
+  "briefExplanation": "5-6 cümle, teknik, profesyonel, doldurma yok",
+  "recurrenceLikelihood": "dusuk" | "orta" | "yuksek",
+  "recurrenceRationale": "tek cümle gerekçe",
   "summary": "kısa özet",
   "probableCauses": ["..."],
   "suggestedActions": ["..."],
@@ -235,22 +268,31 @@ Yalnızca JSON döndür:
   "confidence": 0-100
 }
 
-briefExplanation kuralları (en kritik alan, müdahale eden personel arıza detayına girer girmez bunu okuyacak):
-- Türkçe, tek paragraf, en fazla 5 cümle, akıcı ve teknik bir dil.
-- 1. cümle: ilgili seri numaralı cihazın geçmişinde bu arıza başlığı ile aynı veya benzer kategorideki arızaların ne kadar sık görüldüğünü sameFaultCount ve totalPastFaultsForThisDevice değerlerine dayanarak söyle (örn: "bu seri numaradaki cihazda son N kayıtta X kez gözlemlendi" gibi).
-- 2-3. cümle: geçmiş kapanış notlarındaki kalıcı/geçici örüntüyü kısa şekilde özetle (kalıcı çözüm yapılmış mı, sadece reset/temizlik mi vb.).
-- 4-5. cümle: knowledgeDocs içindeki master teknik dokümandan ilgili başlık için somut çözüm/kontrol adımlarını teknik şekilde anlat (parça, sensör, menü, prosedür ismini ver). Aynı laboratuvarda birlikte çalışan komşu cihazlar arasında risk olabilecek bir durum varsa kısaca belirt.
-- Selamlama, doldurma cümleleri ya da "bu arıza için" gibi gevşek başlangıçlar kullanma; ilk cümleden itibaren bilgiye gir.
-- Bağlamda olmayan tarih, sayı, parça adı veya prosedür uydurma.
+briefExplanation kuralları (müdahaleyi yapacak teknisyen arızayı incelemeden önce bunu okuyacak; bu alan en kritik çıktıdır):
+- Türkçe, tek paragraf, 5-6 cümle. Saha mühendisi tonunda; teknik, ölçülü ve profesyonel ol.
+- Doldurma cümlesi ("dikkatli olun", "kontrol edin", "yüzeysel müdahale yapmayın" gibi genel-geçer ifadeler) YASAK. Her cümle somut bilgi taşımalı.
+- Yapı:
+  1) Geçmişe çok kısa değin (1 cümle): sameFaultCount, sameCategoryActionFormCount, totalPastFaultsForThisDevice ve actionFormStats verilerine dayanarak bu cihazın geçmişinde aynı/benzer kategorideki kayıt sayısını ve örüntüsünü tek cümlede ver. Hiç kayıt yoksa "bu seri için geçmiş aynı kategoride kayıt bulunmuyor" deyip GEÇ; uzatma.
+  2) İşlem formu kanıtı (1-2 cümle): recentActionForms ve sameCategoryActionForms içindeki "aciklama" ve "actions" alanlarından somut bulgular çıkar. Geçmişte hangi parça/hücre değişimi yapılmış, hangi check/menü işletilmiş, hangi açıklamalar geçmiş — gerçek terimleri kullan (örn: "ECL Cell yenileme", "Sample Probe unclog", "Cell Blank Measurement", "Photometer Lamp değişimi"). Form yoksa veya bilgi kıt ise sus, uydurma.
+  3) Master teknik doküman çözümü (2 cümle): knowledgeDocs içindeki master dokümandan mevcut faultName'e en yakın başlığa göre teknik aksiyonu somut adım ismi vererek anlat (menü/check/sensör/parça/prosedür ismi geçsin; cobas® terminolojisini koru). Tek bir adım yerine sıralı 2-3 adımı tek cümleye sığdır.
+  4) Komşu cihaz / laboratuvar etkisi (varsa 1 cümle): siblingDevicesInSameLab listesinde arızada olan veya bağlı sistemde risk yaratabilecek bir cihaz varsa kısaca belirt; yoksa bu cümleyi atla.
+- Selamlama, "bu arıza için", "öneri olarak", "dikkat edilmesi gereken" gibi gevşek başlangıç YASAK. İlk kelimeden itibaren bilgiye gir.
+- Bağlamda olmayan tarih, parça kodu, menü adı, sayı veya tanı uydurma. Emin değilsen o cümleyi yazma.
+
+recurrenceLikelihood / recurrenceRationale kuralları (tekrarlama olasılığı tahmini):
+- recurrenceLikelihood değerini şu sinyallere göre belirle: sameFaultCount, sameCategoryActionFormCount, resolutionStats (gecici vs kalici oranı), son kapanışlarda parça değişimi yapılıp yapılmadığı, kronik örüntü (yakın tarihlerde tekrar eden kayıt), komşu cihaz etkisi.
+  - "yuksek": geçmişte aynı kategori birden fazla görülmüş, son kapanışlar ağırlıkla geçici (reset/temizlik), kalıcı parça değişimi yok.
+  - "orta": birkaç kayıt var ama son müdahalede kalıcı bir aksiyon var; ya da kayıt az ama örüntü belirsiz.
+  - "dusuk": geçmiş kayıt yok veya çok az, son müdahale kalıcı parça/revizyon ile kapatılmış.
+- recurrenceRationale tek cümlede, sayısal kanıta dayanarak gerekçeyi açıkla (örn: "Son 6 ayda 3 kez aynı kategoride kayıt ve hepsi reset ile kapatılmış, kalıcı parça değişimi yok.").
 
 Genel kurallar:
-- Türkçe yaz.
+- Türkçe yaz. Resmi-teknik üslup; cümleler kısa, net ve enformatif.
 - Sadece verilen bağlamı kullan. Bağlamda olmayan sayı/tarih/olgu uydurma.
-- "benzer arıza sayısı" söylerken sadece bağlamdaki sameFaultCount değerini esas al.
-- Öneriler cihazın TEKİL SERİ NUMARALI geçmişine dayanmalı.
-- Teknik servis/aplikasyon için uygulanabilir ve kısa maddeler üret.
-- Genel-geçer cümlelerden kaçın; mümkünse tarih ve geçmiş çözüm notundan kanıt ver.
-- Emin olmadığında bunu açıkça belirt.
+- "benzer arıza sayısı" söylerken sadece bağlamdaki sameFaultCount ve sameCategoryActionFormCount değerlerini esas al.
+- Öneriler cihazın TEKİL SERİ NUMARALI geçmişine ve form kayıtlarına dayanmalı.
+- Cobas® terminolojisini ve doğru menü/parça isimlerini kullan; Türkçeleştirme.
+- Emin olmadığında bunu açıkça belirt, varsayım üretme.
 
 Ek kurumsal rapor/yönergeler:
 ${FAULT_ANALYSIS_GUIDE}
@@ -356,6 +398,96 @@ async function loadSiblingDevicesInLab(hospitalId: string, currentDeviceId: stri
   }
 }
 
+type ActionFormSummary = {
+  id: string;
+  formType?: string;
+  islemTuru?: string;
+  faultName?: string;
+  cihazDurumu?: string;
+  cihazDurumuAciklama?: string;
+  aciklama?: string;
+  actions?: Array<{ type?: string; action?: string; stokAdi?: string; stokKodu?: string; description?: string; serialNumber?: string; removedPartStokAdi?: string; removedPartSerialNumber?: string }>;
+  createdAt?: string | null;
+};
+
+async function loadActionFormsForDevice(deviceId: string): Promise<ActionFormSummary[]> {
+  if (!deviceId) return [];
+  try {
+    const snap = await adminDb.collection('deviceActionForms').where('deviceId', '==', deviceId).get();
+    const list: ActionFormSummary[] = snap.docs.map((d) => {
+      const x = d.data() as any;
+      return {
+        id: d.id,
+        formType: x.formType,
+        islemTuru: x.islemTuru,
+        faultName: x.faultName,
+        cihazDurumu: x.cihazDurumu,
+        cihazDurumuAciklama: x.cihazDurumuAciklama,
+        aciklama: x.aciklama,
+        actions: Array.isArray(x.actions) ? x.actions.slice(0, 8).map((a: any) => ({
+          type: a.type,
+          action: a.action,
+          stokAdi: a.stokAdi,
+          stokKodu: a.stokKodu,
+          description: a.description,
+          serialNumber: a.serialNumber,
+          removedPartStokAdi: a.removedPartStokAdi,
+          removedPartSerialNumber: a.removedPartSerialNumber,
+        })) : undefined,
+        createdAt: toIso(x.createdAt),
+      };
+    });
+    list.sort((a, b) => {
+      const ta = a.createdAt ? Date.parse(a.createdAt) : 0;
+      const tb = b.createdAt ? Date.parse(b.createdAt) : 0;
+      return tb - ta;
+    });
+    return list;
+  } catch (err) {
+    console.error('Action forms alınamadı:', err);
+    return [];
+  }
+}
+
+function summarizeActionForms(forms: ActionFormSummary[]): {
+  teknikServisCount: number;
+  aplikasyonCount: number;
+  ariza: number;
+  periyodik: number;
+  kontrol: number;
+  partChanges: number;
+  recentTopics: string[];
+} {
+  let teknikServisCount = 0;
+  let aplikasyonCount = 0;
+  let ariza = 0;
+  let periyodik = 0;
+  let kontrol = 0;
+  let partChanges = 0;
+  const topicSet = new Set<string>();
+
+  for (const f of forms) {
+    if (f.formType === 'teknik_servis') teknikServisCount += 1;
+    else if (f.formType === 'aplikasyon') aplikasyonCount += 1;
+    if (f.islemTuru === 'ariza') ariza += 1;
+    else if (f.islemTuru === 'periyodik_bakim') periyodik += 1;
+    else if (f.islemTuru && f.islemTuru.includes('kontrol')) kontrol += 1;
+    if (Array.isArray(f.actions)) {
+      partChanges += f.actions.filter((a) => a.type === 'part_change' || a.type === 'hucre_degisimi').length;
+    }
+    if (f.faultName) topicSet.add(f.faultName);
+  }
+  return {
+    teknikServisCount,
+    aplikasyonCount,
+    ariza,
+    periyodik,
+    kontrol,
+    partChanges,
+    recentTopics: Array.from(topicSet).slice(0, 8),
+  };
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -388,12 +520,15 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: true, cached: true, data: cachedSuggestion });
     }
 
-    const [{ otherFaultsOfSameDevice }, siblingDevices] = await Promise.all([
+    const [{ otherFaultsOfSameDevice }, siblingDevices, deviceActionForms] = await Promise.all([
       loadDeviceHistoryBySerial(serial, reportId),
       loadSiblingDevicesInLab(report?.hospitalId || '', report?.deviceId || ''),
+      loadActionFormsForDevice(report?.deviceId || ''),
     ]);
 
     const sameFaultGroup = otherFaultsOfSameDevice.filter((f) => (f.faultName || null) === (report.faultName || null) && (f.faultType || null) === (report.faultType || null));
+    const sameCategoryForms = deviceActionForms.filter((f) => (f.faultName || null) === (report.faultName || null));
+    const actionFormStats = summarizeActionForms(deviceActionForms);
 
     const closeNotes = await Promise.all(otherFaultsOfSameDevice.slice(0, 40).map(async (f) => {
       const historySnap = await adminDb.collection('deviceFaultReports').doc(f.id).collection('history').get();
@@ -428,6 +563,8 @@ export async function GET(request: NextRequest) {
         sameFaultCount: sameFaultGroup.length,
         totalPastFaultsForThisDevice: otherFaultsOfSameDevice.length,
         siblingDeviceCount: siblingDevices.length,
+        actionFormCount: deviceActionForms.length,
+        sameCategoryActionFormCount: sameCategoryForms.length,
       },
       currentFault: {
         id: reportId,
@@ -464,6 +601,28 @@ export async function GET(request: NextRequest) {
         description: f.description,
         closeDescription: f.closeDescription,
       })),
+      actionFormStats,
+      sameCategoryActionForms: sameCategoryForms.slice(0, 15).map((f) => ({
+        id: f.id,
+        formType: f.formType,
+        islemTuru: f.islemTuru,
+        faultName: f.faultName,
+        cihazDurumu: f.cihazDurumu,
+        cihazDurumuAciklama: f.cihazDurumuAciklama,
+        aciklama: f.aciklama,
+        actions: f.actions,
+        createdAt: f.createdAt,
+      })),
+      recentActionForms: deviceActionForms.slice(0, 15).map((f) => ({
+        id: f.id,
+        formType: f.formType,
+        islemTuru: f.islemTuru,
+        faultName: f.faultName,
+        cihazDurumu: f.cihazDurumu,
+        aciklama: f.aciklama,
+        actions: f.actions,
+        createdAt: f.createdAt,
+      })),
       closeNotes,
       resolutionStats,
       knowledgeDocs: [{
@@ -482,6 +641,8 @@ export async function GET(request: NextRequest) {
           sameFaultGroup,
           closeNotes,
           resolutionStats,
+          sameCategoryActionForms: sameCategoryForms,
+          actionFormStats,
           debug: ai?.debug,
         });
 
@@ -492,7 +653,10 @@ export async function GET(request: NextRequest) {
         sameModelCount: otherFaultsOfSameDevice.filter((f) => (f.model || null) === (report.model || null)).length,
         sameTitleCategoryCount: sameFaultGroup.length,
         resolvedCount: otherFaultsOfSameDevice.filter((f) => ['cozuldu', 'closed'].includes(f.status || '')).length,
+        actionFormCount: deviceActionForms.length,
+        sameCategoryActionFormCount: sameCategoryForms.length,
       },
+      actionFormStats,
       resolutionStats,
       generatedAt: new Date().toISOString(),
       cacheVersion: AI_SUGGESTION_CACHE_VERSION,

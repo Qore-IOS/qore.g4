@@ -229,8 +229,11 @@ export default function FaultDetailPage() {
   type AiSuggestion = {
     briefExplanation?: string;
     summary?: string;
-    similarFaultStats?: { total?: number; sameTitleCategoryCount?: number; sameModelCount?: number; resolvedCount?: number };
+    recurrenceLikelihood?: 'dusuk' | 'orta' | 'yuksek';
+    recurrenceRationale?: string;
+    similarFaultStats?: { total?: number; sameTitleCategoryCount?: number; sameModelCount?: number; resolvedCount?: number; actionFormCount?: number; sameCategoryActionFormCount?: number };
     resolutionStats?: { kalici?: number; gecici?: number; belirsiz?: number };
+    actionFormStats?: { teknikServisCount?: number; aplikasyonCount?: number; partChanges?: number };
     generatedAt?: string;
     scopeSerial?: string;
   };
@@ -1880,10 +1883,31 @@ export default function FaultDetailPage() {
               ) : aiSuggestion?.briefExplanation ? (
                 <>
                   <p className="whitespace-pre-wrap leading-relaxed">{aiSuggestion.briefExplanation}</p>
+                  {(aiSuggestion.recurrenceLikelihood || aiSuggestion.recurrenceRationale) && (() => {
+                    const lvl = aiSuggestion.recurrenceLikelihood;
+                    const label = lvl === 'yuksek' ? 'Yüksek' : lvl === 'orta' ? 'Orta' : lvl === 'dusuk' ? 'Düşük' : '—';
+                    const tone = lvl === 'yuksek'
+                      ? 'bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/30'
+                      : lvl === 'orta'
+                        ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30'
+                        : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30';
+                    return (
+                      <div className="mt-3 pt-3 border-t border-white/20 dark:border-white/10 flex flex-wrap items-center gap-2 text-xs">
+                        <span className="font-medium text-muted-foreground">Tekrarlama olasılığı:</span>
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[11px] font-semibold ${tone}`}>{label}</span>
+                        {aiSuggestion.recurrenceRationale && (
+                          <span className="text-muted-foreground">— {aiSuggestion.recurrenceRationale}</span>
+                        )}
+                      </div>
+                    );
+                  })()}
                   {(aiSuggestion.similarFaultStats || aiSuggestion.generatedAt) && (
                     <div className="mt-3 pt-3 border-t border-white/20 dark:border-white/10 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                       {typeof aiSuggestion.similarFaultStats?.sameTitleCategoryCount === 'number' && (
-                        <span>Aynı kategoride geçmiş kayıt: <strong className="font-mono">{aiSuggestion.similarFaultStats.sameTitleCategoryCount}</strong></span>
+                        <span>Aynı kategoride geçmiş arıza: <strong className="font-mono">{aiSuggestion.similarFaultStats.sameTitleCategoryCount}</strong></span>
+                      )}
+                      {typeof aiSuggestion.similarFaultStats?.sameCategoryActionFormCount === 'number' && (
+                        <span>İlgili işlem formu: <strong className="font-mono">{aiSuggestion.similarFaultStats.sameCategoryActionFormCount}</strong></span>
                       )}
                       {typeof aiSuggestion.similarFaultStats?.total === 'number' && (
                         <span>Bu serideki toplam geçmiş arıza: <strong className="font-mono">{aiSuggestion.similarFaultStats.total}</strong></span>
