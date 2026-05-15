@@ -234,6 +234,9 @@ export default function FaultDetailPage() {
     similarFaultStats?: { total?: number; sameTitleCategoryCount?: number; sameModelCount?: number; resolvedCount?: number; actionFormCount?: number; sameCategoryActionFormCount?: number };
     resolutionStats?: { kalici?: number; gecici?: number; belirsiz?: number };
     actionFormStats?: { teknikServisCount?: number; aplikasyonCount?: number; partChanges?: number };
+    docMeta?: { sourcePath?: string; matchedSections?: number; topHeadings?: string[]; keywordsUsed?: string[]; totalChars?: number; excerptChars?: number };
+    aiSource?: 'gemini' | 'fallback';
+    aiDebug?: string;
     generatedAt?: string;
     scopeSerial?: string;
   };
@@ -1912,11 +1915,29 @@ export default function FaultDetailPage() {
                       {typeof aiSuggestion.similarFaultStats?.total === 'number' && (
                         <span>Bu serideki toplam geçmiş arıza: <strong className="font-mono">{aiSuggestion.similarFaultStats.total}</strong></span>
                       )}
+                      {typeof aiSuggestion.docMeta?.matchedSections === 'number' && aiSuggestion.docMeta.matchedSections > 0 && (
+                        <span>Doküman bölümü eşleşmesi: <strong className="font-mono">{aiSuggestion.docMeta.matchedSections}</strong></span>
+                      )}
+                      {aiSuggestion.aiSource === 'fallback' && (
+                        <span className="text-amber-700 dark:text-amber-300">
+                          AI motoru yanıtsız ({aiSuggestion.aiDebug || 'bilinmiyor'})
+                        </span>
+                      )}
                       {aiSuggestion.generatedAt && (
                         <span>
                           {aiFromCache ? 'Önbellek' : 'Üretildi'}: {format(new Date(aiSuggestion.generatedAt), 'dd.MM.yyyy HH:mm', { locale: tr })}
                         </span>
                       )}
+                    </div>
+                  )}
+                  {aiSuggestion.docMeta?.topHeadings && aiSuggestion.docMeta.topHeadings.length > 0 && (
+                    <div className="mt-2 flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
+                      <span className="opacity-75">Dokümandan okunan bölümler:</span>
+                      {aiSuggestion.docMeta.topHeadings.slice(0, 4).map((h, i) => (
+                        <span key={i} className="px-1.5 py-0.5 rounded bg-white/30 dark:bg-white/5 border border-white/30 dark:border-white/10 font-mono">
+                          {h.length > 60 ? h.slice(0, 60) + '…' : h}
+                        </span>
+                      ))}
                     </div>
                   )}
                 </>
