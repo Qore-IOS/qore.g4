@@ -16,7 +16,7 @@ type SimilarFaultSummary = {
   closedAt?: string | null;
 };
 
-const AI_SUGGESTION_CACHE_VERSION = 2;
+const AI_SUGGESTION_CACHE_VERSION = 3;
 
 const FAULT_ANALYSIS_GUIDE = `
 Aşağıdaki kurumsal servis rehberi, model ve arıza başlığına göre öncelikli kontrol adımlarını içerir. Bunu mevcut prompta EK bilgi olarak kullan.
@@ -96,18 +96,27 @@ function candidateGeminiModels(): string[] {
 }
 
 
-const MASTER_DOC_FILE = 'teknik_doc.txt';
+const MASTER_DOC_FILES = ['teknik-doc-2.txt', 'teknik_doc.txt'];
 
 function candidateMasterDocPaths(): string[] {
   const fromEnv = process.env.AI_MASTER_DOC_PATH?.trim();
   const cwd = process.cwd();
 
-  return [
-    fromEnv,
-    path.join(cwd, 'public', MASTER_DOC_FILE),
-    '/home/user/studio/public/teknik_doc.txt',
-    '/workspace/qore.g4/public/teknik_doc.txt',
-  ].filter(Boolean) as string[];
+  const baseDirs = [
+    path.join(cwd, 'public'),
+    '/home/user/studio/public',
+    '/home/user/qore.g4/public',
+    '/workspace/qore.g4/public',
+  ];
+
+  const candidates: string[] = [];
+  if (fromEnv) candidates.push(fromEnv);
+  for (const file of MASTER_DOC_FILES) {
+    for (const dir of baseDirs) {
+      candidates.push(path.join(dir, file));
+    }
+  }
+  return candidates;
 }
 
 async function resolveMasterDocPath(): Promise<string> {
@@ -135,18 +144,19 @@ async function loadMasterKnowledgeDoc() {
   return { text: normalized.slice(0, 60_000), sourcePath };
 }
 
-function buildKnowledgeSignature(masterDocText: string): string {
-  return `master_doc_v1:${masterDocText.length}`;
+function buildKnowledgeSignature(masterDocText: string, sourcePath: string): string {
+  return `master_doc_v2:${path.basename(sourcePath)}:${masterDocText.length}`;
 }
 
 
 function hasUsableAiSuggestion(ai: any): boolean {
   if (!ai || typeof ai !== 'object') return false;
+  const hasBrief = typeof ai.briefExplanation === 'string' && ai.briefExplanation.trim().length > 0;
   const hasSummary = typeof ai.summary === 'string' && ai.summary.trim().length > 0;
   const hasCauses = Array.isArray(ai.probableCauses) && ai.probableCauses.length > 0;
   const hasActions = Array.isArray(ai.suggestedActions) && ai.suggestedActions.length > 0;
   const hasEvidence = typeof ai.evidenceBasedRecommendation === 'string' && ai.evidenceBasedRecommendation.trim().length > 0;
-  return hasSummary || hasCauses || hasActions || hasEvidence;
+  return hasBrief || hasSummary || hasCauses || hasActions || hasEvidence;
 }
 
 function buildDeterministicFallbackSuggestion(params: {
@@ -180,7 +190,18 @@ function buildDeterministicFallbackSuggestion(params: {
     'Geçmişte geçici kapanmış vakalarda ilgili parça değişimi veya mekanik sensör kontrolünü değerlendirin.',
   ];
 
+  const freqText = sameFaultGroup.length > 0
+    ? `Bu seri numaradaki cihazda aynı/benzer kategorideki arıza geçmişte ${sameFaultGroup.length} kez kayıt altına alındı (toplam ${resolutionStats.kalici + resolutionStats.gecici + resolutionStats.belirsiz} kapanmış kayıt).`
+    : 'Bu seri numaradaki cihazda aynı kategoride birebir geçmiş kayıt bulunamadı.';
+  const resolutionText = resolutionStats.gecici > resolutionStats.kalici
+    ? 'Geçmiş kapanışlar daha çok geçici müdahalelerle (reset/temizlik) sonuçlanmış görünüyor.'
+    : resolutionStats.kalici > 0
+      ? 'Geçmiş kapanışlarda parça değişimi/revizyon gibi kalıcı çözümler uygulanmış.'
+      : 'Geçmiş kapanış notları, çözüm tipini netleştirmek için yeterli detayda değil.';
+  const docHint = 'Master teknik dokümandaki ilgili başlığa göre önerilen kontrol/check menüsünü ve sensör/parça kontrollerini eksiksiz uygulayın; sadece yüzeysel reset ile kapatmayın.';
+
   return {
+    briefExplanation: `${freqText} ${resolutionText} ${docHint}`,
     summary: `${report.model || 'Cihaz'} (${report.serial || '-'}) için ${report.faultName || report.description || 'arıza'} analiz edildi. ${recentText}`,
     probableCauses: [
       'Geçmişte benzer semptomlarda kök neden adımı atlanmış olabilir.',
@@ -204,6 +225,7 @@ async function requestGeminiSuggestion(context: any) {
   const prompt = `Sen teknik servis ve aplikasyon ekiplerine destek veren bir arıza asistanısın.
 Yalnızca JSON döndür:
 {
+  "briefExplanation": "Tek paragraf, en fazla 5 cümle. Aşağıdaki kuralları uygula.",
   "summary": "kısa özet",
   "probableCauses": ["..."],
   "suggestedActions": ["..."],
@@ -213,7 +235,15 @@ Yalnızca JSON döndür:
   "confidence": 0-100
 }
 
-Kurallar:
+briefExplanation kuralları (en kritik alan, müdahale eden personel arıza detayına girer girmez bunu okuyacak):
+- Türkçe, tek paragraf, en fazla 5 cümle, akıcı ve teknik bir dil.
+- 1. cümle: ilgili seri numaralı cihazın geçmişinde bu arıza başlığı ile aynı veya benzer kategorideki arızaların ne kadar sık görüldüğünü sameFaultCount ve totalPastFaultsForThisDevice değerlerine dayanarak söyle (örn: "bu seri numaradaki cihazda son N kayıtta X kez gözlemlendi" gibi).
+- 2-3. cümle: geçmiş kapanış notlarındaki kalıcı/geçici örüntüyü kısa şekilde özetle (kalıcı çözüm yapılmış mı, sadece reset/temizlik mi vb.).
+- 4-5. cümle: knowledgeDocs içindeki master teknik dokümandan ilgili başlık için somut çözüm/kontrol adımlarını teknik şekilde anlat (parça, sensör, menü, prosedür ismini ver). Aynı laboratuvarda birlikte çalışan komşu cihazlar arasında risk olabilecek bir durum varsa kısaca belirt.
+- Selamlama, doldurma cümleleri ya da "bu arıza için" gibi gevşek başlangıçlar kullanma; ilk cümleden itibaren bilgiye gir.
+- Bağlamda olmayan tarih, sayı, parça adı veya prosedür uydurma.
+
+Genel kurallar:
 - Türkçe yaz.
 - Sadece verilen bağlamı kullan. Bağlamda olmayan sayı/tarih/olgu uydurma.
 - "benzer arıza sayısı" söylerken sadece bağlamdaki sameFaultCount değerini esas al.
@@ -290,6 +320,42 @@ async function loadDeviceHistoryBySerial(serial: string, reportId: string) {
   };
 }
 
+type SiblingDevice = {
+  id: string;
+  brand?: string;
+  model?: string;
+  cihazAdi?: string;
+  seriNumarasi?: string;
+  order?: number;
+  arizaDurumu?: string;
+};
+
+async function loadSiblingDevicesInLab(hospitalId: string, currentDeviceId: string): Promise<SiblingDevice[]> {
+  if (!hospitalId) return [];
+  try {
+    const snap = await adminDb.collection('devices').where('hospitalId', '==', hospitalId).get();
+    const list: SiblingDevice[] = snap.docs
+      .filter((d) => d.id !== currentDeviceId)
+      .map((d) => {
+        const x = d.data() as any;
+        return {
+          id: d.id,
+          brand: x.brand,
+          model: x.model,
+          cihazAdi: x.cihazAdi,
+          seriNumarasi: x.seriNumarasi,
+          order: typeof x.order === 'number' ? x.order : Number(x.order) || undefined,
+          arizaDurumu: x.arizaDurumu,
+        };
+      });
+    list.sort((a, b) => (a.order ?? 9999) - (b.order ?? 9999));
+    return list;
+  } catch (err) {
+    console.error('Sibling devices alınamadı:', err);
+    return [];
+  }
+}
+
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -313,7 +379,7 @@ export async function GET(request: NextRequest) {
     }
 
     const { text: masterDocText, sourcePath: masterDocPath } = await loadMasterKnowledgeDoc();
-    const knowledgeSignature = buildKnowledgeSignature(masterDocText);
+    const knowledgeSignature = buildKnowledgeSignature(masterDocText, masterDocPath);
 
     const cachedSuggestion = report?.aiSuggestion;
     const cacheVersionMatches = Number(cachedSuggestion?.cacheVersion || 0) === AI_SUGGESTION_CACHE_VERSION;
@@ -322,7 +388,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ success: true, cached: true, data: cachedSuggestion });
     }
 
-    const { otherFaultsOfSameDevice } = await loadDeviceHistoryBySerial(serial, reportId);
+    const [{ otherFaultsOfSameDevice }, siblingDevices] = await Promise.all([
+      loadDeviceHistoryBySerial(serial, reportId),
+      loadSiblingDevicesInLab(report?.hospitalId || '', report?.deviceId || ''),
+    ]);
 
     const sameFaultGroup = otherFaultsOfSameDevice.filter((f) => (f.faultName || null) === (report.faultName || null) && (f.faultType || null) === (report.faultType || null));
 
@@ -358,6 +427,7 @@ export async function GET(request: NextRequest) {
         serial,
         sameFaultCount: sameFaultGroup.length,
         totalPastFaultsForThisDevice: otherFaultsOfSameDevice.length,
+        siblingDeviceCount: siblingDevices.length,
       },
       currentFault: {
         id: reportId,
@@ -368,7 +438,17 @@ export async function GET(request: NextRequest) {
         title: report.title || null,
         description: report.description || null,
         openedAt: toIso(report.openedAt),
+        labName: report.labName || null,
+        hospitalId: report.hospitalId || null,
       },
+      siblingDevicesInSameLab: siblingDevices.slice(0, 30).map((s) => ({
+        brand: s.brand || null,
+        model: s.model || null,
+        cihazAdi: s.cihazAdi || null,
+        seriNumarasi: s.seriNumarasi || null,
+        order: s.order ?? null,
+        arizaDurumu: s.arizaDurumu || 'yok',
+      })),
       sameFaultHistory: sameFaultGroup.slice(0, 20).map((f) => ({
         id: f.id,
         openedAt: f.openedAt,

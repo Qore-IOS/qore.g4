@@ -225,6 +225,21 @@ export default function FaultDetailPage() {
   const [isSavingHucre, setIsSavingHucre] = useState(false);
   const [isSavingPart, setIsSavingPart] = useState(false);
 
+  // AI açıklama
+  type AiSuggestion = {
+    briefExplanation?: string;
+    summary?: string;
+    similarFaultStats?: { total?: number; sameTitleCategoryCount?: number; sameModelCount?: number; resolvedCount?: number };
+    resolutionStats?: { kalici?: number; gecici?: number; belirsiz?: number };
+    generatedAt?: string;
+    scopeSerial?: string;
+  };
+  const [aiSuggestion, setAiSuggestion] = useState<AiSuggestion | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiFromCache, setAiFromCache] = useState(false);
+  const aiFetchedForRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!params?.id) return;
     const ref = doc(db, 'deviceFaultReports', params.id);
@@ -270,6 +285,34 @@ export default function FaultDetailPage() {
       unsubHistory();
     };
   }, [params?.id, router, toast]);
+
+  // AI açıklama: arıza detayı yüklendiğinde otomatik getir (cache varsa anında, yoksa Gemini'den üret)
+  const fetchAiSuggestion = useCallback(async (forceRefresh = false) => {
+    if (!params?.id) return;
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const url = `/api/ariza-yonetimi/ai-oneri?reportId=${encodeURIComponent(params.id)}${forceRefresh ? '&force=1' : ''}`;
+      const res = await fetch(url, { method: 'GET' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.success) {
+        throw new Error(json?.error || `HTTP ${res.status}`);
+      }
+      setAiSuggestion(json.data || null);
+      setAiFromCache(Boolean(json.cached));
+    } catch (e: any) {
+      setAiError(e?.message || 'AI açıklaması alınamadı.');
+    } finally {
+      setAiLoading(false);
+    }
+  }, [params?.id]);
+
+  useEffect(() => {
+    if (!fault?.id || !fault?.serial) return;
+    if (aiFetchedForRef.current === fault.id) return;
+    aiFetchedForRef.current = fault.id;
+    fetchAiSuggestion(false);
+  }, [fault?.id, fault?.serial, fetchAiSuggestion]);
 
   // Laboratuvara ait test listesini çek
   useEffect(() => {
@@ -1802,6 +1845,61 @@ export default function FaultDetailPage() {
           <div className="fault-clay-section space-y-3">
             <p className="font-medium">Açıklama</p>
             <p className="text-sm text-muted-foreground whitespace-pre-wrap">{fault.description || '-'}</p>
+          </div>
+
+          {/* AI Açıklama (geçmiş arıza analizi + master teknik doküman) */}
+          <div className="fault-clay-section space-y-3">
+            <div className="fault-section-head">
+              <p className="fault-section-title">
+                <Sparkles className="h-4 w-4" />
+                AI Açıklama
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => fetchAiSuggestion(true)}
+                disabled={aiLoading}
+              >
+                {aiLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Sparkles className="h-4 w-4 mr-1" />
+                )}
+                {aiLoading ? 'Üretiliyor…' : 'Yenile'}
+              </Button>
+            </div>
+            <div className="fault-action-card text-sm">
+              {aiLoading && !aiSuggestion?.briefExplanation ? (
+                <p className="text-muted-foreground italic">
+                  Geçmiş arızalar ve teknik doküman okunarak açıklama hazırlanıyor…
+                </p>
+              ) : aiError ? (
+                <p className="text-sm text-red-600 dark:text-red-400">
+                  {aiError}
+                </p>
+              ) : aiSuggestion?.briefExplanation ? (
+                <>
+                  <p className="whitespace-pre-wrap leading-relaxed">{aiSuggestion.briefExplanation}</p>
+                  {(aiSuggestion.similarFaultStats || aiSuggestion.generatedAt) && (
+                    <div className="mt-3 pt-3 border-t border-white/20 dark:border-white/10 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      {typeof aiSuggestion.similarFaultStats?.sameTitleCategoryCount === 'number' && (
+                        <span>Aynı kategoride geçmiş kayıt: <strong className="font-mono">{aiSuggestion.similarFaultStats.sameTitleCategoryCount}</strong></span>
+                      )}
+                      {typeof aiSuggestion.similarFaultStats?.total === 'number' && (
+                        <span>Bu serideki toplam geçmiş arıza: <strong className="font-mono">{aiSuggestion.similarFaultStats.total}</strong></span>
+                      )}
+                      {aiSuggestion.generatedAt && (
+                        <span>
+                          {aiFromCache ? 'Önbellek' : 'Üretildi'}: {format(new Date(aiSuggestion.generatedAt), 'dd.MM.yyyy HH:mm', { locale: tr })}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="text-muted-foreground italic">Henüz AI açıklaması üretilmedi. Yenile butonuna basabilirsiniz.</p>
+              )}
+            </div>
           </div>
 
           {/* Yeni Arıza Akış Sistemi */}
