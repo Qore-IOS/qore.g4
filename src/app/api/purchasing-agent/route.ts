@@ -243,10 +243,11 @@ function candidateGeminiModels(): string[] {
   ].filter(Boolean) as string[];
 
   const defaults = [
+    'gemini-2.5-flash',
     'gemini-2.0-flash',
     'gemini-2.0-flash-001',
-    'gemini-1.5-flash-latest',
-    'gemini-1.5-flash',
+    'gemini-2.5-flash-lite',
+    'gemini-2.0-flash-lite',
   ];
 
   return Array.from(new Set([...fromEnv, ...defaults]));

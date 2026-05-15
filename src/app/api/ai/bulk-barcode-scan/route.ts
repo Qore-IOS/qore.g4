@@ -155,27 +155,21 @@ HER SERİ NUMARASINI TEK TEK OKU - aynı üründen 50 tane varsa 50 farklı seri
       },
     ];
 
-    // Use gemini-2.0-flash for vision - fast and excellent multimodal
-    // Also include gemini-2.5-flash and gemini-1.5-flash as fallbacks
     const models = [
+      'gemini-2.5-flash',
       'gemini-2.5-flash-preview-05-20',
       'gemini-2.0-flash',
       'gemini-2.0-flash-001',
-      'gemini-1.5-flash',
     ];
     let lastError = '';
 
     for (const model of models) {
       try {
-        // gemini-1.5 doesn't support responseMimeType for JSON mode
-        const supportsJsonMode = model.startsWith('gemini-2');
         const generationConfig: Record<string, unknown> = {
           temperature: 0.05,
-          maxOutputTokens: supportsJsonMode ? 65536 : 8192,
+          maxOutputTokens: 65536,
+          responseMimeType: 'application/json',
         };
-        if (supportsJsonMode) {
-          generationConfig.responseMimeType = 'application/json';
-        }
 
         const res = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
