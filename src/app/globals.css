@@ -5789,7 +5789,7 @@ body:has(.fault-clay-page) .page-shell {
 .dark .fault-history-copy strong { color: #fbf8ff; }
 .fault-history-copy span { display: block; color: #625d88; overflow-wrap: anywhere; }
 .dark .fault-history-copy span { color: rgba(238,232,255,0.68); }
-.fault-history-time { color: #8d85aa; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; min-width: 0; max-width: 100%; text-align: right; overflow-wrap: anywhere; white-space: normal; }
+.fault-history-time { color: #8d85aa; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; min-width: max-content; max-width: 100%; text-align: right; white-space: nowrap; }
 .fault-history-edit { width: 30px !important; height: 30px !important; }
 
 .fault-clay-page .dialog-content,
@@ -5858,14 +5858,32 @@ body:has(.fault-clay-page) .page-shell {
   }
 
   .fault-history-item {
+    position: relative;
     grid-template-columns: auto minmax(0, 1fr);
+    padding: 72px 18px 18px 24px;
   }
 
-  .fault-history-time,
-  .fault-history-edit {
+  .fault-history-icon {
+    position: absolute;
+    top: 18px;
+    right: 18px;
+  }
+
+  .fault-history-copy {
+    grid-column: 2;
+  }
+
+  .fault-history-time {
     grid-column: 2;
     justify-self: start;
     text-align: left;
+    white-space: nowrap;
+  }
+
+  .fault-history-edit {
+    position: absolute;
+    right: 18px;
+    bottom: 18px;
   }
 }
 
