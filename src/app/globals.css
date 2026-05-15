@@ -4389,6 +4389,11 @@ html.qt-active { color: var(--qt-text); }
   box-shadow: 0 12px 24px -12px rgba(139, 92, 246, 0.55);
 }
 
+.qt-status-btn--stats {
+  background: linear-gradient(135deg, #06B6D4, #2563EB);
+  box-shadow: 0 12px 24px -12px rgba(37, 99, 235, 0.55), 0 4px 10px -4px rgba(6, 182, 212, 0.35);
+}
+
 .qt-status-btn:hover {
   transform: translateY(-1px);
   filter: brightness(1.04);
