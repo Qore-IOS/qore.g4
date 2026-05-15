@@ -18,6 +18,21 @@ type SimilarFaultSummary = {
 
 const AI_SUGGESTION_CACHE_VERSION = 5;
 
+function stripUndefined<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((v) => stripUndefined(v)) as unknown as T;
+  }
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (v === undefined) continue;
+      out[k] = stripUndefined(v);
+    }
+    return out as unknown as T;
+  }
+  return value;
+}
+
 const FAULT_ANALYSIS_GUIDE = `
 Aşağıdaki kurumsal servis rehberi, model ve arıza başlığına göre öncelikli kontrol adımlarını içerir. Bunu mevcut prompta EK bilgi olarak kullan.
 
@@ -762,7 +777,7 @@ export async function GET(request: NextRequest) {
           debug: ai?.debug,
         });
 
-    const suggestionPayload = {
+    const suggestionPayload: Record<string, unknown> = {
       ...normalizedAi,
       similarFaultStats: {
         total: otherFaultsOfSameDevice.length,
@@ -783,15 +798,17 @@ export async function GET(request: NextRequest) {
         excerptChars: docSelection.excerpt.length,
       },
       aiSource: aiIsUsable ? 'gemini' : 'fallback',
-      aiDebug: aiIsUsable ? undefined : (ai?.debug || 'unknown'),
       generatedAt: new Date().toISOString(),
       cacheVersion: AI_SUGGESTION_CACHE_VERSION,
       scopeSerial: serial,
       knowledgeSignature,
     };
+    if (!aiIsUsable) {
+      suggestionPayload.aiDebug = ai?.debug || 'unknown';
+    }
 
     await reportRef.update({
-      aiSuggestion: suggestionPayload,
+      aiSuggestion: stripUndefined(suggestionPayload),
       aiSuggestionUpdatedAt: new Date(),
     });
 
