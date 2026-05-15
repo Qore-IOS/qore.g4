@@ -32,6 +32,11 @@ if (!admin.apps.length) {
 }
 
 const adminDb = admin.firestore();
+try {
+  adminDb.settings({ ignoreUndefinedProperties: true });
+} catch {
+  // settings() may only run before the first Firestore call; safe to ignore on hot reload
+}
 const adminAuth = admin.auth();
 
 export { adminDb, adminAuth };
