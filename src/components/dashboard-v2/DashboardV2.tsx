@@ -769,72 +769,39 @@ export default function DashboardV2({
   // Fault total (atama+müdahale)
   const faultTotal = faultKpis.atamaBekleyen + faultKpis.mudahaleBekleyen + faultKpis.mudahaleEdilen;
 
-  const kpiCards = [
-    {
-      key: 'atama',
-      label: 'Atama Bekleyen',
-      value: faultKpis.atamaBekleyen,
-      sub: 'arıza talebi',
-      color: '#fb923c',
-      icon: UserPlus2,
-      href: '/ariza-yonetimi?status=atama_bekliyor',
-    },
-    {
-      key: 'mudahale-bekleyen',
-      label: 'Müdahale Bekleyen',
-      value: faultKpis.mudahaleBekleyen,
-      sub: `${faultTotal} toplam`,
-      color: '#fc7272',
-      icon: TimerReset,
-      href: '/ariza-yonetimi?status=mudahale_bekliyor',
-    },
-    {
-      key: 'mudahale-edilen',
-      label: 'Müdahale Edilen',
-      value: faultKpis.mudahaleEdilen,
-      sub: 'açık çalışma',
-      color: '#42e46d',
-      icon: ActivitySquare,
-      href: '/ariza-yonetimi?status=mudahale_ediliyor',
-    },
-    {
-      key: 'miad',
-      label: 'MIAD ≤ 45 Gün',
-      value: typeof expiringProductsCount === 'number' ? expiringProductsCount : 0,
-      sub: 'yaklaşan ürün',
-      color: '#a78bfa',
-      icon: AlertTriangle,
-      href: '/stok-yonetimi',
-    },
+  const hasStockCost = totalStockCost !== null && totalStockCost > 0;
+
+  const faultStats = [
+    { key: 'atama', label: 'Atama Bekleyen', value: faultKpis.atamaBekleyen, color: '#fb923c', icon: UserPlus2, href: '/ariza-yonetimi?status=atama_bekliyor' },
+    { key: 'mb', label: 'Müdahale Bekleyen', value: faultKpis.mudahaleBekleyen, color: '#fc7272', icon: TimerReset, href: '/ariza-yonetimi?status=mudahale_bekliyor' },
+    { key: 'me', label: 'Müdahale Edilen', value: faultKpis.mudahaleEdilen, color: '#42e46d', icon: ActivitySquare, href: '/ariza-yonetimi?status=mudahale_ediliyor' },
   ];
+
+  const combinedTimeline: Array<{ id: string; label: string; type: 'past' | 'today' | 'future' | 'today-task' }> = [
+    ...personalCalendarKpi.timelineItems,
+    ...personalCalendarKpi.todayTasks.map((t) => ({ id: t.id, label: t.label, type: 'today-task' as const })),
+  ];
+  const todayCount = personalCalendarKpi.todayTasks.length;
 
   return (
     <>
       <div
         className="mg-root"
         style={{
-          minHeight: 'calc(100vh - var(--dock-h, 0px))',
-          padding: '20px 22px',
+          minHeight: '100vh',
+          padding: '16px 20px 24px',
           background: `radial-gradient(ellipse at 0% 0%, rgba(251,146,60,0.06) 0%, transparent 50%),
                        radial-gradient(ellipse at 100% 100%, rgba(167,139,250,0.04) 0%, transparent 50%),
                        var(--mg-bg)`,
           color: 'var(--mg-text)',
           display: 'flex',
           flexDirection: 'column',
-          gap: 16,
+          gap: 14,
         }}
       >
         {/* Karşılama */}
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-          <h1
-            style={{
-              fontSize: 24,
-              fontWeight: 800,
-              letterSpacing: '-0.02em',
-              color: 'var(--mg-text)',
-              margin: 0,
-            }}
-          >
+          <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--mg-text)', margin: 0 }}>
             {currentUserProfile?.name || 'Lojistik & Stok Paneli'}
           </h1>
           <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--mg-muted)', letterSpacing: '0.04em' }}>
@@ -842,116 +809,113 @@ export default function DashboardV2({
           </span>
         </div>
 
-        {/* KPI Sıra (4 kart) */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
-          {kpiCards.map((card) => {
-            const Icon = card.icon;
-            return (
-              <Link
-                key={card.key}
-                href={card.href}
-                style={{
-                  textDecoration: 'none',
-                  background: 'linear-gradient(135deg, rgba(255,255,255,0.025), rgba(255,255,255,0.005))',
-                  border: '1px solid var(--mg-border)',
-                  borderRadius: 20,
-                  padding: '16px 18px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 8,
-                  position: 'relative',
-                  overflow: 'hidden',
-                  transition: 'all 0.25s',
-                }}
-              >
-                <div
-                  style={{
-                    position: 'absolute',
-                    top: -30,
-                    right: -30,
-                    width: 100,
-                    height: 100,
-                    borderRadius: '50%',
-                    background: card.color,
-                    filter: 'blur(50px)',
-                    opacity: 0.08,
-                    pointerEvents: 'none',
-                  }}
-                />
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--mg-muted)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-                    {card.label}
-                  </span>
-                  <span
-                    style={{
-                      width: 28,
-                      height: 28,
-                      borderRadius: 8,
-                      background: card.color + '18',
-                      color: card.color,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <Icon size={14} />
-                  </span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-                  <span
-                    style={{
-                      fontSize: 36,
-                      fontWeight: 400,
-                      letterSpacing: '-0.04em',
-                      color: 'var(--mg-text)',
-                      lineHeight: 1,
-                      fontVariantNumeric: 'tabular-nums',
-                    }}
-                  >
-                    {card.value.toLocaleString('tr-TR')}
-                  </span>
-                  <ArrowUpRight size={14} style={{ color: 'var(--mg-muted)' }} />
-                </div>
-                <span style={{ fontSize: 11, color: 'var(--mg-muted)', fontWeight: 500 }}>{card.sub}</span>
-              </Link>
-            );
-          })}
-        </div>
+        {/* Üst sıra: 3 KPI kart */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 1.4fr', gap: 12 }}>
+          {/* Cihaz Atama Durumu */}
+          <div style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.025), rgba(255,255,255,0.005))', border: '1px solid var(--mg-border)', borderRadius: 18, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <ActivitySquare size={14} style={{ color: 'var(--mg-accent)' }} />
+              <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--mg-text)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                Cihaz Atama Durumu
+              </span>
+              <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 800, padding: '2px 7px', borderRadius: 6, background: 'var(--mg-surface-2)', color: 'var(--mg-muted)' }}>
+                {faultTotal} toplam
+              </span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+              {faultStats.map((s) => {
+                const Icon = s.icon;
+                return (
+                  <Link key={s.key} href={s.href} style={{ textDecoration: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '6px 4px', borderRadius: 10, background: 'var(--mg-surface-2)', border: '1px solid var(--mg-border)', transition: 'all 0.2s' }}>
+                    <span style={{ width: 28, height: 28, borderRadius: 8, background: s.color + '18', color: s.color, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Icon size={14} />
+                    </span>
+                    <span style={{ fontSize: 22, fontWeight: 400, color: 'var(--mg-text)', letterSpacing: '-0.04em', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
+                      {s.value.toLocaleString('tr-TR')}
+                    </span>
+                    <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--mg-muted)', textAlign: 'center', lineHeight: 1.15 }}>
+                      {s.label}
+                    </span>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
 
-        {/* Orta grid: Tüketim Trendi (geniş) + Anlık Maliyet + Görevler */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr)', gap: 12 }}>
-          {/* Tüketim Trendi */}
-          <div
-            onClick={() => setIsConsumptionModalOpen(true)}
-            style={{
-              background: 'var(--mg-surface)',
-              border: '1px solid var(--mg-border)',
-              borderRadius: 20,
-              padding: '16px 18px',
-              cursor: 'pointer',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 10,
-              minHeight: 220,
-            }}
-          >
+          {/* MIAD ≤ 45 Gün */}
+          <Link href="/stok-yonetimi" style={{ textDecoration: 'none', background: 'linear-gradient(135deg, rgba(167,139,250,0.05), rgba(167,139,250,0.01))', border: '1px solid var(--mg-border)', borderRadius: 18, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, position: 'relative', overflow: 'hidden' }}>
+            <div style={{ position: 'absolute', top: -30, right: -30, width: 100, height: 100, borderRadius: '50%', background: '#a78bfa', filter: 'blur(50px)', opacity: 0.1, pointerEvents: 'none' }} />
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <TrendingUp size={16} style={{ color: 'var(--mg-accent)' }} />
-                <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--mg-text)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                <AlertTriangle size={14} style={{ color: '#a78bfa' }} />
+                <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--mg-text)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                  MIAD ≤ 45 Gün
+                </span>
+              </div>
+              <ArrowUpRight size={14} style={{ color: 'var(--mg-muted)' }} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <span style={{ fontSize: 38, fontWeight: 400, color: 'var(--mg-text)', letterSpacing: '-0.04em', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
+                {typeof expiringProductsCount === 'number' ? expiringProductsCount.toLocaleString('tr-TR') : '…'}
+              </span>
+              <span style={{ fontSize: 11, color: 'var(--mg-muted)', fontWeight: 500 }}>ürün</span>
+            </div>
+            <span style={{ fontSize: 11, color: 'var(--mg-muted)', fontWeight: 500 }}>Tüm depolarda yaklaşan</span>
+          </Link>
+
+          {/* Anlık Maliyet */}
+          <div onClick={() => setIsStockCostDetailOpen(true)} style={{ background: 'linear-gradient(135deg, rgba(66,228,109,0.05), rgba(66,228,109,0.01))', border: '1px solid var(--mg-border)', borderRadius: 18, padding: '14px 16px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 10, position: 'relative', overflow: 'hidden' }}>
+            <div style={{ position: 'absolute', top: -30, right: -30, width: 100, height: 100, borderRadius: '50%', background: '#42e46d', filter: 'blur(50px)', opacity: 0.1, pointerEvents: 'none' }} />
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Banknote size={14} style={{ color: 'var(--mg-success)' }} />
+                <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--mg-text)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                  Anlık Maliyet
+                </span>
+              </div>
+              <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); loadStockCostSnapshot(true); }} title="Yenile" style={{ width: 24, height: 24, borderRadius: '50%', border: '1px solid var(--mg-border)', background: 'var(--mg-surface-2)', color: 'var(--mg-text-2)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                <RefreshCw size={11} className={isRefreshingStockCost ? 'animate-spin' : ''} />
+              </button>
+            </div>
+            <div>
+              <div style={{ fontSize: 28, fontWeight: 400, color: hasStockCost ? 'var(--mg-text)' : 'var(--mg-muted)', letterSpacing: '-0.04em', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
+                {totalStockCost === null
+                  ? '…'
+                  : new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(totalStockCost)}
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: 'var(--mg-danger-soft)', borderRadius: 10, border: '1px solid var(--mg-danger-soft)', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <AlertTriangle size={11} style={{ color: 'var(--mg-danger)' }} />
+                <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--mg-danger)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>Riskli</span>
+              </div>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--mg-danger)', fontVariantNumeric: 'tabular-nums' }}>
+                {riskyCost !== null
+                  ? new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(riskyCost)
+                  : '…'}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Orta sıra: Tüketim Trendi + Bugün (sabit yükseklik) */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(0, 1fr)', gap: 12 }}>
+          {/* Tüketim Trendi */}
+          <div onClick={() => setIsConsumptionModalOpen(true)} style={{ background: 'var(--mg-surface)', border: '1px solid var(--mg-border)', borderRadius: 18, padding: '14px 16px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 10, height: 240 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <TrendingUp size={14} style={{ color: 'var(--mg-accent)' }} />
+                <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--mg-text)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
                   Tüketim Trendi
                 </span>
               </div>
-              <div style={{ display: 'inline-flex', gap: 4, background: 'var(--mg-surface-2)', padding: 3, borderRadius: 8, border: '1px solid var(--mg-border)' }}>
+              <div style={{ display: 'inline-flex', gap: 3, background: 'var(--mg-surface-2)', padding: 3, borderRadius: 8, border: '1px solid var(--mg-border)' }}>
                 {(['daily', 'weekly', 'monthly', 'yearly'] as TrendPeriod[]).map((p) => (
                   <button
                     key={p}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setTrendPeriod(p);
-                    }}
+                    onClick={(e) => { e.stopPropagation(); setTrendPeriod(p); }}
                     style={{
-                      padding: '4px 10px',
+                      padding: '3px 9px',
                       borderRadius: 6,
                       border: 'none',
                       cursor: 'pointer',
@@ -971,193 +935,40 @@ export default function DashboardV2({
             </div>
             <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
               <div>
-                <div style={{ fontSize: 32, fontWeight: 400, color: 'var(--mg-text)', letterSpacing: '-0.04em', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
+                <div style={{ fontSize: 28, fontWeight: 400, color: 'var(--mg-text)', letterSpacing: '-0.04em', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
                   {trendTotal.toLocaleString('tr-TR')}
                 </div>
-                <div style={{ fontSize: 11, color: 'var(--mg-muted)', marginTop: 4, fontWeight: 500 }}>{trendTitle}</div>
+                <div style={{ fontSize: 10, color: 'var(--mg-muted)', marginTop: 4, fontWeight: 500 }}>{trendTitle}</div>
               </div>
               <div style={{ display: 'flex', gap: 4 }}>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleTrendNav('prev');
-                  }}
-                  style={{
-                    width: 28,
-                    height: 28,
-                    borderRadius: '50%',
-                    border: '1px solid var(--mg-border)',
-                    background: 'var(--mg-surface-2)',
-                    color: 'var(--mg-text-2)',
-                    cursor: 'pointer',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <ChevronLeft size={14} />
+                <button onClick={(e) => { e.stopPropagation(); handleTrendNav('prev'); }} style={{ width: 26, height: 26, borderRadius: '50%', border: '1px solid var(--mg-border)', background: 'var(--mg-surface-2)', color: 'var(--mg-text-2)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <ChevronLeft size={13} />
                 </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleTrendNav('next');
-                  }}
-                  style={{
-                    width: 28,
-                    height: 28,
-                    borderRadius: '50%',
-                    border: '1px solid var(--mg-border)',
-                    background: 'var(--mg-surface-2)',
-                    color: 'var(--mg-text-2)',
-                    cursor: 'pointer',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <ChevronRight size={14} />
+                <button onClick={(e) => { e.stopPropagation(); handleTrendNav('next'); }} style={{ width: 26, height: 26, borderRadius: '50%', border: '1px solid var(--mg-border)', background: 'var(--mg-surface-2)', color: 'var(--mg-text-2)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <ChevronRight size={13} />
                 </button>
               </div>
             </div>
-            <div style={{ flex: 1, minHeight: 80 }}>
-              <Sparkline data={trendSpark.length > 0 ? trendSpark : [0]} color="#fb923c" width={500} height={90} fill />
+            <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
+              <div style={{ flex: 1 }}>
+                <Sparkline data={trendSpark.length > 0 ? trendSpark : [0]} color="#fb923c" width={700} height={110} fill />
+              </div>
             </div>
           </div>
 
-          {/* Anlık Maliyet */}
-          <div
-            onClick={() => setIsStockCostDetailOpen(true)}
-            style={{
-              background: 'var(--mg-surface)',
-              border: '1px solid var(--mg-border)',
-              borderRadius: 20,
-              padding: '16px 18px',
-              cursor: 'pointer',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 10,
-              position: 'relative',
-              minHeight: 220,
-            }}
-          >
-            <button
-              type="button"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                loadStockCostSnapshot(true);
-              }}
-              title="Yenile"
-              style={{
-                position: 'absolute',
-                top: 12,
-                right: 12,
-                width: 26,
-                height: 26,
-                borderRadius: '50%',
-                border: '1px solid var(--mg-border)',
-                background: 'var(--mg-surface-2)',
-                color: 'var(--mg-text-2)',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <RefreshCw size={12} className={isRefreshingStockCost ? 'animate-spin' : ''} />
-            </button>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Banknote size={16} style={{ color: 'var(--mg-success)' }} />
-              <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--mg-text)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                Anlık Maliyet
-              </span>
-            </div>
-            <div>
-              <div
-                style={{
-                  fontSize: 32,
-                  fontWeight: 400,
-                  color: 'var(--mg-text)',
-                  letterSpacing: '-0.04em',
-                  fontVariantNumeric: 'tabular-nums',
-                  lineHeight: 1,
-                }}
-              >
-                {totalStockCost !== null
-                  ? new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(totalStockCost)
-                  : '…'}
-              </div>
-              <div style={{ fontSize: 11, color: 'var(--mg-muted)', marginTop: 4, fontWeight: 500 }}>Tüm depo + lab stoğu (TRY)</div>
-            </div>
-            <div
-              style={{
-                marginTop: 'auto',
-                padding: '10px 12px',
-                background: 'var(--mg-danger-soft)',
-                borderRadius: 12,
-                border: '1px solid var(--mg-danger-soft)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 8,
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <AlertTriangle size={12} style={{ color: 'var(--mg-danger)' }} />
-                <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--mg-danger)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-                  Riskli
-                </span>
-              </div>
-              <span
-                style={{
-                  fontSize: 16,
-                  fontWeight: 700,
-                  color: 'var(--mg-danger)',
-                  fontVariantNumeric: 'tabular-nums',
-                }}
-              >
-                {riskyCost !== null
-                  ? new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(riskyCost)
-                  : '…'}
-              </span>
-            </div>
-          </div>
-
-          {/* Görevler + Etkinlikler */}
-          <div
-            style={{
-              background: 'var(--mg-surface)',
-              border: '1px solid var(--mg-border)',
-              borderRadius: 20,
-              padding: '16px 18px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 10,
-              minHeight: 220,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <CalendarCheck size={16} style={{ color: 'var(--mg-accent)' }} />
-              <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--mg-text)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+          {/* Bugün/Etkinlikler */}
+          <div style={{ background: 'var(--mg-surface)', border: '1px solid var(--mg-border)', borderRadius: 18, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, height: 240, overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+              <CalendarCheck size={14} style={{ color: 'var(--mg-accent)' }} />
+              <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--mg-text)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
                 Bugün
               </span>
-              <span
-                style={{
-                  fontSize: 10,
-                  fontWeight: 800,
-                  padding: '2px 7px',
-                  borderRadius: 6,
-                  background: 'var(--mg-surface-2)',
-                  color: 'var(--mg-muted)',
-                  marginLeft: 'auto',
-                }}
-              >
-                {personalCalendarKpi.todayTasks.length} görev
+              <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 800, padding: '2px 7px', borderRadius: 6, background: todayCount > 0 ? 'var(--mg-accent)' : 'var(--mg-surface-2)', color: todayCount > 0 ? '#0a0a0c' : 'var(--mg-muted)' }}>
+                {todayCount} görev
               </span>
             </div>
-
-            {personalCalendarKpi.todayTasks.length === 0 && personalCalendarKpi.timelineItems.length <= 1 ? (
-              <div style={{ fontSize: 12, color: 'var(--mg-muted)', textAlign: 'center', padding: '24px 0' }}>
+            {combinedTimeline.length === 0 ? (
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: 'var(--mg-muted)', textAlign: 'center' }}>
                 Bugün için planlanmış görev yok.
               </div>
             ) : (
@@ -1165,94 +976,65 @@ export default function DashboardV2({
                 ref={calendarScrollRef}
                 style={{
                   flex: 1,
+                  minHeight: 0,
                   overflowY: 'auto',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: 6,
+                  gap: 4,
                   paddingRight: 4,
+                  scrollbarWidth: 'thin',
                 }}
               >
-                {personalCalendarKpi.timelineItems.map((item) => (
-                  <div
-                    key={item.id}
-                    data-today={item.type === 'today'}
-                    style={{
-                      padding: '6px 10px',
-                      borderRadius: 8,
-                      background:
-                        item.type === 'today' ? 'var(--mg-accent-soft)' : 'var(--mg-surface-2)',
-                      border: '1px solid ' + (item.type === 'today' ? 'rgba(251,146,60,0.3)' : 'var(--mg-border)'),
-                      fontSize: item.type === 'today' ? 12 : 11,
-                      fontWeight: item.type === 'today' ? 700 : 500,
-                      color:
-                        item.type === 'today'
+                {combinedTimeline.map((item) => {
+                  const isToday = item.type === 'today';
+                  const isPast = item.type === 'past';
+                  const isTodayTask = item.type === 'today-task';
+                  return (
+                    <div
+                      key={item.id}
+                      data-today={isToday}
+                      style={{
+                        padding: '5px 10px',
+                        borderRadius: 8,
+                        background: isToday
+                          ? 'var(--mg-accent-soft)'
+                          : isTodayTask
+                            ? 'var(--mg-success-soft)'
+                            : 'var(--mg-surface-2)',
+                        border: '1px solid ' + (isToday ? 'rgba(251,146,60,0.3)' : isTodayTask ? 'var(--mg-success-soft)' : 'var(--mg-border)'),
+                        fontSize: isToday ? 12 : 11,
+                        fontWeight: isToday ? 700 : 500,
+                        color: isToday
                           ? 'var(--mg-accent)'
-                          : item.type === 'past'
-                            ? 'var(--mg-muted)'
-                            : 'var(--mg-text-2)',
-                      textDecoration: item.type === 'past' ? 'line-through' : 'none',
-                    }}
-                  >
-                    {item.label}
-                  </div>
-                ))}
-                {personalCalendarKpi.todayTasks.map((task) => (
-                  <div
-                    key={task.id}
-                    style={{
-                      padding: '6px 10px',
-                      borderRadius: 8,
-                      background: 'var(--mg-success-soft)',
-                      border: '1px solid var(--mg-success-soft)',
-                      fontSize: 11,
-                      fontWeight: 500,
-                      color: 'var(--mg-success)',
-                    }}
-                  >
-                    {task.label}
-                  </div>
-                ))}
+                          : isTodayTask
+                            ? 'var(--mg-success)'
+                            : isPast
+                              ? 'var(--mg-muted)'
+                              : 'var(--mg-text-2)',
+                        textDecoration: isPast ? 'line-through' : 'none',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {item.label}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
         </div>
 
         {/* Sık Kullanılanlar */}
-        <div
-          style={{
-            background: 'var(--mg-surface)',
-            border: '1px solid var(--mg-border)',
-            borderRadius: 20,
-            padding: '14px 18px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 12,
-          }}
-        >
+        <div style={{ background: 'var(--mg-surface)', border: '1px solid var(--mg-border)', borderRadius: 18, padding: '12px 16px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 12, fontWeight: 800, color: 'var(--mg-text)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+            <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--mg-text)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
               Sık Kullanılanlar
             </span>
-            <span
-              style={{
-                fontSize: 10,
-                fontWeight: 800,
-                padding: '2px 7px',
-                borderRadius: 6,
-                background: 'var(--mg-surface-2)',
-                color: 'var(--mg-muted)',
-              }}
-            >
+            <span style={{ fontSize: 10, fontWeight: 800, padding: '2px 7px', borderRadius: 6, background: 'var(--mg-surface-2)', color: 'var(--mg-muted)' }}>
               {visiblePanels.length}
             </span>
           </div>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))',
-              gap: 8,
-            }}
-          >
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: 8 }}>
             {visiblePanels.map((panel) => {
               const Icon = panel.icon;
               const isFrequent = ['arama', 'stok-yonetimi', 'laboratuvar-yonetimi', 'satin-alma'].includes(panel.key);
@@ -1265,36 +1047,26 @@ export default function DashboardV2({
                     textDecoration: 'none',
                     background: isFrequent ? 'var(--mg-accent-soft)' : 'var(--mg-surface-2)',
                     border: '1px solid ' + (isFrequent ? 'rgba(251,146,60,0.3)' : 'var(--mg-border)'),
-                    borderRadius: 14,
-                    padding: '10px 8px',
+                    borderRadius: 12,
+                    padding: '8px 6px',
                     display: 'flex',
                     flexDirection: 'column',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    gap: 6,
+                    gap: 5,
                     position: 'relative',
                     transition: 'all 0.2s',
-                    minHeight: 78,
+                    minHeight: 66,
                   }}
                 >
                   {hasAttention && (
-                    <span
-                      style={{
-                        position: 'absolute',
-                        top: 6,
-                        right: 6,
-                        width: 6,
-                        height: 6,
-                        borderRadius: '50%',
-                        background: 'var(--mg-accent)',
-                      }}
-                    />
+                    <span style={{ position: 'absolute', top: 5, right: 5, width: 6, height: 6, borderRadius: '50%', background: 'var(--mg-accent)' }} />
                   )}
                   <span
                     style={{
-                      width: 30,
-                      height: 30,
-                      borderRadius: 9,
+                      width: 26,
+                      height: 26,
+                      borderRadius: 8,
                       background: 'var(--mg-surface)',
                       color: isFrequent ? 'var(--mg-accent)' : 'var(--mg-text-2)',
                       display: 'inline-flex',
@@ -1303,17 +1075,9 @@ export default function DashboardV2({
                       border: '1px solid var(--mg-border)',
                     }}
                   >
-                    <Icon size={14} />
+                    <Icon size={13} />
                   </span>
-                  <span
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 600,
-                      color: 'var(--mg-text-2)',
-                      textAlign: 'center',
-                      lineHeight: 1.2,
-                    }}
-                  >
+                  <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--mg-text-2)', textAlign: 'center', lineHeight: 1.2 }}>
                     {panel.label}
                   </span>
                 </Link>
@@ -1322,7 +1086,7 @@ export default function DashboardV2({
           </div>
         </div>
       </div>
-      
+
       {isConsumptionModalOpen && (
         <ConsumptionTrendModal
           isOpen={isConsumptionModalOpen}
