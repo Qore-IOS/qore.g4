@@ -6127,3 +6127,11 @@ html:not(.dark) .mg-root {
   0%, 100% { box-shadow: 0 0 0 0 rgba(251,146,60,0.5); }
   50%      { box-shadow: 0 0 0 6px rgba(251,146,60,0); }
 }
+
+/* Edge-to-edge sayfalar için body bg — Maliyet Gözlem & Dashboard v2 */
+body.mg-edge-body {
+  background: #f5f4f0 !important;
+}
+html.dark body.mg-edge-body {
+  background: #000000 !important;
+}
