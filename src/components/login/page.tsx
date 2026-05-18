@@ -8,6 +8,8 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from 'lucide-react';
+import Image from 'next/image';
+import { useTheme } from 'next-themes';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -16,6 +18,8 @@ export default function LoginPage() {
   const router = useRouter();
   const { login } = useAuth();
   const { toast } = useToast();
+  const { resolvedTheme } = useTheme();
+  const logoSrc = resolvedTheme === 'light' ? '/blk.png' : '/wt.png';
 
   const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
@@ -40,20 +44,23 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-transparent p-4 animation-fade-in">
-      <Card className="w-full max-w-md glass-card">
+    <div className="flex items-center justify-center min-h-screen bg-background p-4 animation-fade-in">
+      <Card className="w-full max-w-sm border border-border bg-card shadow-sm">
         <CardHeader className="text-center">
-          <CardTitle className="text-3xl font-headline text-gradient-primary">INVITROLAB Login</CardTitle>
-          <CardDescription>Please sign in to continue.</CardDescription>
+          <div className="mx-auto mb-2 flex items-center justify-center">
+            <Image src={logoSrc} alt="Qore Logo" width={44} height={44} className="object-contain" priority />
+          </div>
+          <CardTitle className="text-2xl font-semibold tracking-tight">Giriş Yap</CardTitle>
+          <CardDescription>Devam etmek için hesabınızla oturum açın.</CardDescription>
         </CardHeader>
         <form onSubmit={handleLogin}>
-          <CardContent className="space-y-6">
+          <CardContent className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="email">Email</Label>
               <Input
                 id="email"
                 type="email"
-                placeholder="admin@example.com"
+                placeholder="ornek@firma.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
@@ -64,7 +71,7 @@ export default function LoginPage() {
               <Input
                 id="password"
                 type="password"
-                placeholder="********"
+                placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
@@ -72,7 +79,7 @@ export default function LoginPage() {
             </div>
           </CardContent>
           <CardFooter>
-            <Button type="submit" className="w-full" size="lg" disabled={isLoading}>
+            <Button type="submit" className="w-full" size="default" disabled={isLoading}>
               {isLoading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : "Sign In"}
             </Button>
           </CardFooter>
