@@ -53,14 +53,18 @@ declare module "@/lib/types" {
     accessibleViews?: AppView[];
     name?: string;
     nfcId?: string;
+    companyId?: string;
     assignedLaboratories?: string[];
+    primaryLaboratories?: string[];
     assignedDepots?: string[];
     assignedBrands?: string[];
+    assignedLabGroups?: string[];
     phoneNumber?: string;
     createdAt?: TimestampLike;
     notificationsEnabled?: boolean;
     notificationPreferences?: string[];
     themePreference?: 'light' | 'dark' | 'system';
+    lastSelectedLabId?: string;
   }
 
   // ---------- Master Data ----------
@@ -707,6 +711,40 @@ declare module "@/lib/types" {
     id: string;
     name: string;
     linkedProductCode: string; // stokKodu
+  }
+
+  export type DeviceMulkiyetTipi = 'kira' | 'satin_alma' | 'demobaz';
+
+  export interface TestDefinitionGlobal {
+    id: string;
+    sutKodu: string;
+    sutTestAdi: string;
+    linkedStokKodlari: string[];
+    hakEdisMiktari: number;
+    currency?: 'EUR' | 'USD' | 'TRY';
+    aktif: boolean;
+    createdAt: TimestampLike;
+    createdByUid?: string;
+    createdByName?: string;
+    updatedAt?: TimestampLike;
+    companyId?: string;
+  }
+
+  export interface Personnel {
+    id: string;
+    adSoyad: string;
+    pozisyon?: string;
+    assignedLabIds: string[];
+    primaryLabId?: string;
+    aylikBrutMaas: number;
+    aylikYanHaklar?: number;
+    currency: 'EUR' | 'USD' | 'TRY';
+    aktif: boolean;
+    baslamaTarihi?: string;
+    userId?: string;
+    companyId?: string;
+    createdAt?: TimestampLike;
+    updatedAt?: TimestampLike;
   }
 
   export interface LabPool {

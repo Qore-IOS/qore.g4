@@ -17,7 +17,11 @@
     "src/lib/utils.ts",
     "src/lib/mal-kabul/**/*.ts",
     "src/lib/lojistik/**/*.ts",
-    "src/lib/logger.ts"
+    "src/lib/logger.ts",
+    "src/lib/test-cost-calculator.ts",
+    "src/lib/types.ts",
+    "src/lib/tracking.ts",
+    "src/@types/**/*.d.ts"
   ],
   "exclude": [
     "node_modules",

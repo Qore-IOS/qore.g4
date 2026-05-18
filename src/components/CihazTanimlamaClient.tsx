@@ -229,7 +229,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     const id = current.id
       ?? `${current.brand}-${current.model}-${current.seriNumarasi}`.toLowerCase().replace(/\s+/g, '-');
       
-    await setDoc(doc(db, 'devices', id), withCompanyScope({ 
+    await setDoc(doc(db, 'devices', id), withCompanyScope({
       brand: current.brand,
       model: current.model,
       imageUrl,
@@ -240,7 +240,13 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       mulkiyet: current.mulkiyet || '',
       kurulumTarihi: current.kurulumTarihi || '',
       kurulumPersonelleri: current.kurulumPersonelleri || '',
-      aciklama: current.aciklama || ''
+      aciklama: current.aciklama || '',
+      // Test bazlı maliyet hesabı alanları
+      maliyetCurrency: current.maliyetCurrency || 'TRY',
+      aylikKira: current.aylikKira ?? null,
+      satinAlmaTutari: current.satinAlmaTutari ?? null,
+      satinAlmaTarihi: current.satinAlmaTarihi ?? null,
+      amortismanAyi: current.amortismanAyi ?? null,
     }, currentUserProfile?.companyId), { merge: true });
 
     toast({ title: 'Kaydedildi', description: 'Cihaz tanımı kaydedildi.' });
@@ -1348,7 +1354,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                   <Select value={String(current.mulkiyet || '')} onValueChange={val => setCurrent({ ...current, mulkiyet: val })}>
                     <SelectTrigger><SelectValue placeholder="Mülkiyet seçin" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="kurum">Kurum</SelectItem>
+                      <SelectItem value="kurum">Kurum (Satın Alma)</SelectItem>
                       <SelectItem value="kiralik">Kiralık</SelectItem>
                       <SelectItem value="demirbas">Demirbaş</SelectItem>
                       <SelectItem value="diger">Diğer</SelectItem>
@@ -1359,6 +1365,81 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                   <Label>Kurulum Tarihi</Label>
                   <Input type="date" value={String(current.kurulumTarihi || '')} onChange={e => setCurrent({ ...current, kurulumTarihi: e.target.value })} />
                 </div>
+              </div>
+
+              {/* Maliyet alanları - test bazlı maliyet hesabı için */}
+              <div className="cihaz-card p-4 space-y-3">
+                <p className="cihaz-section-label">Maliyet Bilgileri (Test Maliyet Hesabı İçin)</p>
+                <div className="grid md:grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <Label>Para Birimi</Label>
+                    <Select
+                      value={String(current.maliyetCurrency || 'TRY')}
+                      onValueChange={val => setCurrent({ ...current, maliyetCurrency: val as any })}
+                    >
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="TRY">TRY (₺)</SelectItem>
+                        <SelectItem value="EUR">EUR (€)</SelectItem>
+                        <SelectItem value="USD">USD ($)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {(String(current.mulkiyet || '').toLowerCase() === 'kiralik' ||
+                    String(current.mulkiyet || '').toLowerCase() === 'kira') && (
+                    <div className="space-y-1 md:col-span-2">
+                      <Label>Aylık Kira Tutarı</Label>
+                      <Input
+                        type="number"
+                        inputMode="decimal"
+                        placeholder="Örn: 45000"
+                        value={current.aylikKira ?? ''}
+                        onChange={e => setCurrent({ ...current, aylikKira: e.target.value === '' ? undefined : Number(e.target.value) })}
+                      />
+                    </div>
+                  )}
+                  {(String(current.mulkiyet || '').toLowerCase() === 'kurum' ||
+                    String(current.mulkiyet || '').toLowerCase() === 'satin_alma') && (
+                    <>
+                      <div className="space-y-1">
+                        <Label>Satın Alma Tutarı</Label>
+                        <Input
+                          type="number"
+                          inputMode="decimal"
+                          placeholder="Örn: 600000"
+                          value={current.satinAlmaTutari ?? ''}
+                          onChange={e => setCurrent({ ...current, satinAlmaTutari: e.target.value === '' ? undefined : Number(e.target.value) })}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Amortisman (Ay)</Label>
+                        <Input
+                          type="number"
+                          inputMode="numeric"
+                          placeholder="Örn: 60 (5 yıl)"
+                          value={current.amortismanAyi ?? ''}
+                          onChange={e => setCurrent({ ...current, amortismanAyi: e.target.value === '' ? undefined : Number(e.target.value) })}
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+                {(String(current.mulkiyet || '').toLowerCase() === 'kiralik' || String(current.mulkiyet || '').toLowerCase() === 'kira') &&
+                  Number(current.aylikKira) > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      Aylık maliyet: ₺{Number(current.aylikKira).toLocaleString('tr-TR')}
+                    </p>
+                  )}
+                {(String(current.mulkiyet || '').toLowerCase() === 'kurum' || String(current.mulkiyet || '').toLowerCase() === 'satin_alma') &&
+                  Number(current.satinAlmaTutari) > 0 &&
+                  Number(current.amortismanAyi) > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      Aylık amortisman: ₺
+                      {(Number(current.satinAlmaTutari) / Number(current.amortismanAyi)).toLocaleString('tr-TR', {
+                        maximumFractionDigits: 2,
+                      })}
+                    </p>
+                  )}
               </div>
               <div className="space-y-1">
                 <Label>Kuran Personel(ler)</Label>

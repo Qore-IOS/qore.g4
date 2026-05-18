@@ -3,7 +3,7 @@ import React from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Users, Clock, Wallet, CalendarCheck, LogOut } from 'lucide-react';
+import { Users, Clock, Wallet, CalendarCheck, LogOut, Coins } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { useAuth } from '@/contexts/auth-context';
 
@@ -12,6 +12,12 @@ export default function PersonelYonetimiPage() {
   const { isAdmin } = useAuth();
 
   const modules = [
+    {
+      name: 'Maaş Yönetimi',
+      icon: Coins,
+      description: 'Personel maaşlarını ve laboratuvar atamalarını yönetin. Test bazlı maliyet hesabında kullanılır.',
+      path: '/yonetim/personel-yonetimi/maaslar',
+    },
     {
       name: 'Oturum Yönetimi',
       icon: LogOut,
