@@ -90,6 +90,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
   const isWideContentRoute = pathname?.startsWith("/total-verimlilik");
+  const isEdgeToEdgeRoute = pathname?.startsWith("/maliyet-gozlem");
 
   const {
     dockItems,
@@ -256,7 +257,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <OnlyUsageAutoRedirect />
       <main className="flex w-full flex-1 flex-col items-center">
         <PersistentNotificationToast />
-        <PageShell className={`w-full flex-1 ${isWideContentRoute ? "max-w-none md:px-3" : ""}`}>{children}</PageShell>
+        <PageShell
+          edgeToEdge={isEdgeToEdgeRoute}
+          className={`w-full flex-1 ${isWideContentRoute ? "max-w-none md:px-3" : ""}`}
+        >
+          {children}
+        </PageShell>
 
         {!isMobile && !isTeknisyen && (
           <div
