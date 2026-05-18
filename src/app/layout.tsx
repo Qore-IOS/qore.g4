@@ -1,5 +1,5 @@
 
-import { Inter } from "next/font/google";
+import { Urbanist } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AuthProvider } from "@/contexts/auth-context";
@@ -9,7 +9,12 @@ import MobileResponsiveFix from "@/components/responsive/MobileResponsiveFix";
 import React from "react";
 
 
-const inter = Inter({ subsets: ["latin"] });
+const urbanist = Urbanist({
+  subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700", "800", "900"],
+  variable: "--font-urbanist",
+  display: "swap",
+});
 
 export default function RootLayout({
   children,
@@ -17,7 +22,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="tr" suppressHydrationWarning>
+    <html lang="tr" suppressHydrationWarning className={urbanist.variable}>
       <head>
         <title>Qore</title>
         <meta name="description" content="Advanced Inventory Management" />
@@ -38,7 +43,7 @@ export default function RootLayout({
           href="/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG"
         />
       </head>
-      <body className={inter.className}>
+      <body className={urbanist.className}>
         <ThemeProvider
           attribute="class"
           defaultTheme="dark"
