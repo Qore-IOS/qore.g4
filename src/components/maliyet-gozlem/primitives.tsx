@@ -669,10 +669,20 @@ export interface CostAssistantContext {
 interface CostInsightAssistantProps {
   context: CostAssistantContext;
   activeInsight: Insight;
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  showTrigger?: boolean;
+  showPanel?: boolean;
 }
 
-function CostInsightAssistant({ context, activeInsight }: CostInsightAssistantProps) {
-  const [open, setOpen] = useState(false);
+function CostInsightAssistant({
+  context,
+  activeInsight,
+  open,
+  setOpen,
+  showTrigger = true,
+  showPanel = true,
+}: CostInsightAssistantProps) {
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [messages, setMessages] = useState<CostAssistantMessage[]>([
@@ -726,7 +736,7 @@ function CostInsightAssistant({ context, activeInsight }: CostInsightAssistantPr
 
   return (
     <>
-      {!open && (
+      {showTrigger && !open && (
         <button
           type="button"
           onClick={() => setOpen(true)}
@@ -748,6 +758,8 @@ function CostInsightAssistant({ context, activeInsight }: CostInsightAssistantPr
             fontWeight: 700,
             backdropFilter: 'blur(14px)',
             boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.16)',
+            transformOrigin: '50% 50%',
+            transition: 'transform 0.55s cubic-bezier(0.22,1,0.36,1), opacity 0.35s ease, background 0.35s ease',
           }}
           title="Qore Asistan'a sor"
         >
@@ -772,187 +784,217 @@ function CostInsightAssistant({ context, activeInsight }: CostInsightAssistantPr
         </button>
       )}
 
-      {open && (
+      {showPanel && (
+      <div
+        aria-hidden={!open}
+        style={{
+          position: 'absolute',
+          inset: 0,
+          zIndex: 5,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          borderRadius: 'inherit',
+          color: '#fff',
+          pointerEvents: open ? 'auto' : 'none',
+          opacity: open ? 1 : 0,
+          transform: open ? 'scale(1) translateY(0)' : 'scale(0.86) translateY(18px)',
+          clipPath: open ? 'inset(0% 0% 0% 0% round 24px)' : 'inset(67% 9% 8% 9% round 999px)',
+          transformOrigin: '50% 88%',
+          transition:
+            'opacity 0.42s ease, transform 0.72s cubic-bezier(0.22,1,0.36,1), clip-path 0.72s cubic-bezier(0.22,1,0.36,1)',
+          backdropFilter: open ? 'blur(18px)' : 'blur(0px)',
+        }}
+      >
         <div
           style={{
             position: 'absolute',
             inset: 0,
-            zIndex: 5,
+            pointerEvents: 'none',
+            background:
+              'radial-gradient(90% 70% at 16% 8%, rgba(255,255,255,0.20), transparent 54%), radial-gradient(80% 70% at 88% 88%, rgba(126,78,166,0.42), transparent 58%), linear-gradient(145deg, rgba(80,54,83,0.24), rgba(95,84,145,0.16))',
+            opacity: open ? 1 : 0,
+            transition: 'opacity 0.5s ease',
+          }}
+        />
+
+        <div
+          style={{
+            position: 'relative',
+            zIndex: 1,
             display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-            borderRadius: 24,
-            background: 'linear-gradient(145deg, rgba(161,105,84,0.96), rgba(135,127,181,0.94) 48%, rgba(122,87,154,0.96))',
-            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18)',
-            backdropFilter: 'blur(22px)',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '20px 22px 16px',
+            borderBottom: '1px solid rgba(255,255,255,0.14)',
           }}
         >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '16px 18px 14px',
-              borderBottom: '1px solid rgba(255,255,255,0.14)',
-              color: '#fff',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span
-                style={{
-                  width: 34,
-                  height: 34,
-                  borderRadius: '50%',
-                  background: 'rgba(255,255,255,0.88)',
-                  color: '#2f2635',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontWeight: 900,
-                }}
-              >
-                ✦
-              </span>
-              <div>
-                <div style={{ fontSize: 15, fontWeight: 800, lineHeight: 1.1 }}>Qore Asistan</div>
-                <div style={{ fontSize: 11, opacity: 0.78, marginTop: 2 }}>{busy ? 'Düşünüyor…' : 'Aktif'}</div>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={() => setOpen(false)}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span
               style={{
-                width: 34,
-                height: 34,
+                width: 42,
+                height: 42,
                 borderRadius: '50%',
-                border: '1px solid rgba(255,255,255,0.28)',
-                background: 'rgba(255,255,255,0.12)',
-                color: '#fff',
-                cursor: 'pointer',
-                fontSize: 20,
-                lineHeight: 1,
+                background: 'rgba(255,255,255,0.9)',
+                color: '#2f2635',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: 900,
+                fontSize: 18,
+                boxShadow: '0 10px 26px rgba(30,15,40,0.22)',
               }}
-              title="Asistanı kapat"
             >
-              ×
-            </button>
-          </div>
-
-          <div
-            ref={scrollRef}
-            style={{
-              flex: 1,
-              overflowY: 'auto',
-              padding: '18px 18px 10px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 10,
-              scrollbarWidth: 'thin',
-            }}
-          >
-            {messages.map((m, i) => (
-              <div
-                key={`${m.role}-${i}`}
-                style={{
-                  alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
-                  maxWidth: m.role === 'user' ? '78%' : '88%',
-                  borderRadius: m.role === 'user' ? '18px 18px 6px 18px' : '6px 18px 18px 18px',
-                  border: m.role === 'assistant' ? '1px solid rgba(255,255,255,0.2)' : 'none',
-                  background: m.role === 'user' ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.12)',
-                  color: m.role === 'user' ? '#2f2635' : '#fff',
-                  padding: '11px 14px',
-                  fontSize: 13,
-                  lineHeight: 1.45,
-                  whiteSpace: 'pre-wrap',
-                  boxShadow: '0 8px 22px rgba(31,18,40,0.18)',
-                }}
-              >
-                {m.content}
-              </div>
-            ))}
-            {busy && (
-              <div
-                style={{
-                  alignSelf: 'flex-start',
-                  borderRadius: '6px 18px 18px 18px',
-                  background: 'rgba(255,255,255,0.12)',
-                  border: '1px solid rgba(255,255,255,0.2)',
-                  color: '#fff',
-                  padding: '10px 13px',
-                  fontSize: 13,
-                }}
-              >
-                Analiz ediliyor…
-              </div>
-            )}
-          </div>
-
-          <div style={{ padding: '0 16px 12px' }}>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 9 }}>
-              {['Tavsiyen?', 'Risk var mı?'].map((q) => (
-                <button
-                  key={q}
-                  type="button"
-                  onClick={() => void ask(q)}
-                  disabled={busy}
-                  style={{
-                    border: '1px solid rgba(255,255,255,0.22)',
-                    background: 'rgba(255,255,255,0.12)',
-                    color: '#fff',
-                    borderRadius: 999,
-                    padding: '6px 10px',
-                    fontSize: 12,
-                    fontFamily: 'inherit',
-                    cursor: busy ? 'not-allowed' : 'pointer',
-                    opacity: busy ? 0.6 : 1,
-                  }}
-                >
-                  {q}
-                </button>
-              ))}
+              ✦
+            </span>
+            <div>
+              <div style={{ fontSize: 17, fontWeight: 850, lineHeight: 1.1 }}>Qore Asistan</div>
+              <div style={{ fontSize: 12, opacity: 0.78, marginTop: 3 }}>{busy ? 'Düşünüyor…' : 'Aktif'}</div>
             </div>
-            <form onSubmit={onSubmit} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-              <input
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder="Sorunuzu yazın..."
+          </div>
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: '50%',
+              border: '1px solid rgba(255,255,255,0.3)',
+              background: 'rgba(255,255,255,0.13)',
+              color: '#fff',
+              cursor: 'pointer',
+              fontSize: 22,
+              lineHeight: 1,
+              backdropFilter: 'blur(12px)',
+            }}
+            title="Asistanı kapat"
+          >
+            ×
+          </button>
+        </div>
+
+        <div
+          ref={scrollRef}
+          style={{
+            position: 'relative',
+            zIndex: 1,
+            flex: 1,
+            overflowY: 'auto',
+            padding: '18px 22px 12px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+            scrollbarWidth: 'thin',
+          }}
+        >
+          {messages.map((m, i) => (
+            <div
+              key={`${m.role}-${i}`}
+              style={{
+                alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
+                maxWidth: m.role === 'user' ? '78%' : '88%',
+                borderRadius: m.role === 'user' ? '18px 18px 6px 18px' : '6px 18px 18px 18px',
+                border: m.role === 'assistant' ? '1px solid rgba(255,255,255,0.2)' : 'none',
+                background: m.role === 'user' ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.13)',
+                color: m.role === 'user' ? '#2f2635' : '#fff',
+                padding: '11px 14px',
+                fontSize: 13,
+                lineHeight: 1.45,
+                whiteSpace: 'pre-wrap',
+                boxShadow: '0 8px 22px rgba(31,18,40,0.18)',
+                backdropFilter: m.role === 'assistant' ? 'blur(10px)' : undefined,
+              }}
+            >
+              {m.content}
+            </div>
+          ))}
+          {busy && (
+            <div
+              style={{
+                alignSelf: 'flex-start',
+                borderRadius: '6px 18px 18px 18px',
+                background: 'rgba(255,255,255,0.13)',
+                border: '1px solid rgba(255,255,255,0.2)',
+                color: '#fff',
+                padding: '10px 13px',
+                fontSize: 13,
+                backdropFilter: 'blur(10px)',
+              }}
+            >
+              Analiz ediliyor…
+            </div>
+          )}
+        </div>
+
+        <div style={{ position: 'relative', zIndex: 1, padding: '0 22px 18px' }}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+            {['Tavsiyen?', 'Risk var mı?'].map((q) => (
+              <button
+                key={q}
+                type="button"
+                onClick={() => void ask(q)}
                 disabled={busy}
                 style={{
-                  minWidth: 0,
-                  flex: 1,
-                  height: 44,
-                  borderRadius: 999,
-                  border: '1px solid rgba(255,255,255,0.26)',
-                  background: 'rgba(255,255,255,0.14)',
+                  border: '1px solid rgba(255,255,255,0.24)',
+                  background: 'rgba(255,255,255,0.13)',
                   color: '#fff',
-                  outline: 'none',
-                  padding: '0 16px',
+                  borderRadius: 999,
+                  padding: '7px 12px',
+                  fontSize: 12,
                   fontFamily: 'inherit',
-                  fontSize: 13,
+                  cursor: busy ? 'not-allowed' : 'pointer',
+                  opacity: busy ? 0.6 : 1,
+                  backdropFilter: 'blur(10px)',
                 }}
-              />
-              <button
-                type="submit"
-                disabled={busy || !input.trim()}
-                style={{
-                  width: 46,
-                  height: 46,
-                  borderRadius: '50%',
-                  border: 0,
-                  background: 'rgba(255,255,255,0.34)',
-                  color: '#231827',
-                  cursor: busy || !input.trim() ? 'not-allowed' : 'pointer',
-                  fontSize: 24,
-                  lineHeight: 1,
-                  opacity: busy || !input.trim() ? 0.55 : 1,
-                }}
-                title="Gönder"
               >
-                →
+                {q}
               </button>
-            </form>
+            ))}
           </div>
+          <form onSubmit={onSubmit} style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="Sorunuzu yazın..."
+              disabled={busy}
+              style={{
+                minWidth: 0,
+                flex: 1,
+                height: 48,
+                borderRadius: 999,
+                border: '1px solid rgba(255,255,255,0.27)',
+                background: 'rgba(255,255,255,0.15)',
+                color: '#fff',
+                outline: 'none',
+                padding: '0 18px',
+                fontFamily: 'inherit',
+                fontSize: 13,
+                backdropFilter: 'blur(12px)',
+              }}
+            />
+            <button
+              type="submit"
+              disabled={busy || !input.trim()}
+              style={{
+                width: 50,
+                height: 50,
+                borderRadius: '50%',
+                border: 0,
+                background: 'rgba(255,255,255,0.34)',
+                color: '#231827',
+                cursor: busy || !input.trim() ? 'not-allowed' : 'pointer',
+                fontSize: 25,
+                lineHeight: 1,
+                opacity: busy || !input.trim() ? 0.55 : 1,
+                boxShadow: '0 10px 26px rgba(30,15,40,0.2)',
+              }}
+              title="Gönder"
+            >
+              →
+            </button>
+          </form>
         </div>
+      </div>
       )}
     </>
   );
@@ -961,6 +1003,7 @@ function CostInsightAssistant({ context, activeInsight }: CostInsightAssistantPr
 
 export function InsightsCard({ insights, autoMs = 60000, assistantContext }: InsightsCardProps) {
   const [idx, setIdx] = useState(0);
+  const [assistantOpen, setAssistantOpen] = useState(false);
   const [transitionKey, setTransitionKey] = useState(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const filterIdRef = useRef('mg-goo-' + Math.random().toString(36).slice(2, 8));
@@ -972,13 +1015,13 @@ export function InsightsCard({ insights, autoMs = 60000, assistantContext }: Ins
   };
 
   useEffect(() => {
-    if (!autoMs || list.length <= 1) return;
+    if (assistantOpen || !autoMs || list.length <= 1) return;
     timerRef.current = setTimeout(() => advance(1), autoMs);
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idx, autoMs]);
+  }, [idx, autoMs, assistantOpen]);
 
   if (list.length === 0) return null;
 
@@ -1000,10 +1043,13 @@ export function InsightsCard({ insights, autoMs = 60000, assistantContext }: Ins
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
-        minHeight: 260,
-        boxShadow: '0 16px 48px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.15)',
+        minHeight: assistantOpen ? 390 : 260,
+        boxShadow: assistantOpen
+          ? '0 22px 68px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.18)'
+          : '0 16px 48px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.15)',
         background: cur.palette[4],
         isolation: 'isolate',
+        transition: 'min-height 0.72s cubic-bezier(0.22,1,0.36,1), box-shadow 0.72s cubic-bezier(0.22,1,0.36,1)',
       }}
     >
       <svg width="0" height="0" style={{ position: 'absolute' }}>
@@ -1059,7 +1105,20 @@ export function InsightsCard({ insights, autoMs = 60000, assistantContext }: Ins
         }}
       />
 
-      <div style={{ position: 'relative', zIndex: 2, display: 'flex', flexDirection: 'column', flex: 1 }}>
+      <div
+        style={{
+          position: 'relative',
+          zIndex: 2,
+          display: 'flex',
+          flexDirection: 'column',
+          flex: 1,
+          opacity: assistantOpen ? 0 : 1,
+          transform: assistantOpen ? 'scale(0.94) translateY(-10px)' : 'scale(1) translateY(0)',
+          filter: assistantOpen ? 'blur(8px)' : 'blur(0px)',
+          pointerEvents: assistantOpen ? 'none' : 'auto',
+          transition: 'opacity 0.32s ease, transform 0.62s cubic-bezier(0.22,1,0.36,1), filter 0.5s ease',
+        }}
+      >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
           <span
             style={{
@@ -1165,7 +1224,15 @@ export function InsightsCard({ insights, autoMs = 60000, assistantContext }: Ins
           </div>
         </div>
 
-        {assistantContext && <CostInsightAssistant context={assistantContext} activeInsight={cur} />}
+        {!assistantOpen && assistantContext && (
+          <CostInsightAssistant
+            context={assistantContext}
+            activeInsight={cur}
+            open={assistantOpen}
+            setOpen={setAssistantOpen}
+            showPanel={false}
+          />
+        )}
 
         {list.length > 1 && (
           <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
@@ -1204,6 +1271,16 @@ export function InsightsCard({ insights, autoMs = 60000, assistantContext }: Ins
           </div>
         )}
       </div>
+
+      {assistantContext && (
+        <CostInsightAssistant
+          context={assistantContext}
+          activeInsight={cur}
+          open={assistantOpen}
+          setOpen={setAssistantOpen}
+          showTrigger={false}
+        />
+      )}
     </div>
   );
 }
