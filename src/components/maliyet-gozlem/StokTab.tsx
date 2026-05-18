@@ -103,6 +103,63 @@ export function StokTab({ currency }: StokTabProps) {
     g === 'kit' ? 'Kit' : g === 'sarf' ? 'Sarf' : g === 'yedek_parca' ? 'Yedek Parça' : 'Diğer';
   const symbol = currency === 'TRY' ? '₺' : currency === 'EUR' ? '€' : '$';
 
+  const assistantContext = useMemo(() => ({
+    panel: 'stok' as const,
+    currency,
+    generatedAt: new Date().toISOString(),
+    totals: {
+      totalInventoryCost: Math.round(total),
+      sessionCount: sessions.length,
+      locationCount: locations.length,
+      brandCount: brands.length,
+      productGroupCount: groups.filter((g) => g.value > 0).length,
+    },
+    rankings: {
+      topLocations: locations.slice(0, 10).map((l) => ({
+        locationId: l.locationId,
+        locationName: l.locationName,
+        locationType: l.locationType,
+        totalCost: Math.round(l.totalCost),
+        productCount: l.productCount,
+        lastSessionDate: l.lastSessionDate?.toISOString() || null,
+        topBrands: l.brands.slice(0, 5),
+      })),
+      topBrands: brands.slice(0, 10).map((b) => ({ ...b, value: Math.round(b.value), sharePct: total > 0 ? Number(((b.value / total) * 100).toFixed(1)) : 0 })),
+      productGroups: groups.map((g) => ({ group: groupLabel(g.group), value: Math.round(g.value), sharePct: total > 0 ? Number(((g.value / total) * 100).toFixed(1)) : 0 })),
+    },
+    history: {
+      monthlyTrend: trend.map((t) => ({ monthKey: t.monthKey, monthLabel: t.monthLabel, cost: Math.round(t.cost) })),
+      latestSessions: sessions.slice(0, 12).map((session) => ({
+        id: session.id,
+        locationName: session.locationName,
+        locationType: session.locationType,
+        itemCount: session.items.length,
+        totalQuantity: session.items.reduce((sum, item) => sum + item.stokAdedi + item.cihazUstuAdedi, 0),
+        topItems: session.items.slice(0, 8),
+      })),
+    },
+    rawSamples: {
+      rates,
+      productCount: productMap.size,
+      allLocations: locations.map((l) => ({
+        locationId: l.locationId,
+        locationName: l.locationName,
+        locationType: l.locationType,
+        totalCost: Math.round(l.totalCost),
+        productCount: l.productCount,
+      })),
+      allBrands: brands.map((b) => ({ ...b, value: Math.round(b.value) })),
+      allGroups: groups.map((g) => ({ group: groupLabel(g.group), value: Math.round(g.value) })),
+      allMonthlyTrend: trend.map((t) => ({ monthKey: t.monthKey, monthLabel: t.monthLabel, cost: Math.round(t.cost) })),
+      allSessions: sessions.map((session) => ({
+        id: session.id,
+        locationName: session.locationName,
+        locationType: session.locationType,
+        itemCount: session.items.length,
+      })),
+    },
+  }), [currency, total, sessions, locations, brands, groups, trend, rates, productMap.size]);
+
   if (loading) {
     return (
       <div style={{ padding: 60, textAlign: 'center', color: 'var(--mg-muted)' }}>
@@ -217,6 +274,7 @@ export function StokTab({ currency }: StokTabProps) {
         />
 
         <InsightsCard
+          assistantContext={assistantContext}
           insights={[
             {
               palette: ['#ffb088', '#b8c6ff', '#d8a8ff', '#88b3ff', '#1a0c1e'],
