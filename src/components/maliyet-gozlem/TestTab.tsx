@@ -891,6 +891,100 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
     filtered[0] || ({ totalTestUnits: 0, sutTestAdi: '—' } as any),
   );
 
+  const assistantContext = useMemo(() => ({
+    panel: 'test' as const,
+    currency: 'TRY',
+    generatedAt: new Date().toISOString(),
+    filters: {
+      periot,
+      search,
+      sortBy,
+      selectedLabIds,
+      selectedTestIds,
+      selectedLabNames: selectedLabIds.length > 0 ? labs.filter((l) => selectedLabIds.includes(l.id)).map((l) => l.name) : ['Tüm laboratuvarlar'],
+      selectedTestNames: selectedTestIds.length > 0 ? testDefs.filter((t) => selectedTestIds.includes(t.id)).map((t) => t.sutTestAdi) : ['Tüm testler'],
+    },
+    totals: {
+      filteredTestCount: filtered.length,
+      filteredTotalCostTL: Math.round(filteredTotal),
+      filteredTotalUnits: filteredVolume,
+      filteredAvgUnitCostTL: Number(filteredAvgUnit.toFixed(2)),
+      systemTotal,
+      totalHakEdisTL: Math.round(filtered.reduce((sum, t) => sum + t.hakEdisTL * t.totalTestUnits, 0)),
+      totalMarginTL: Math.round(filtered.reduce((sum, t) => sum + t.marjTL * t.totalTestUnits, 0)),
+    },
+    rankings: {
+      mostExpensiveUnit: mostExpensive,
+      mostFrequent,
+      topByUnitCost: filtered.slice(0, 10).map((t) => ({
+        testId: t.testId,
+        sutKodu: t.sutKodu,
+        sutTestAdi: t.sutTestAdi,
+        costPerTestTL: Number(t.costPerTestTL.toFixed(2)),
+        totalTestUnits: t.totalTestUnits,
+        testTotalCostTL: Math.round(t.testTotalCostTL),
+        stockCostTL: Math.round(t.stockCostTL),
+        deviceCostMonthlyTL: Math.round(t.deviceCostMonthlyTL),
+        personnelCostMonthlyTL: Math.round(t.personnelCostMonthlyTL),
+        inventoryCostTL: Math.round(t.inventoryCostTL),
+        hakEdisTL: Number(t.hakEdisTL.toFixed(2)),
+        marjTL: Number(t.marjTL.toFixed(2)),
+        warnings: t.warnings,
+        topLabs: t.perLab
+          .slice()
+          .sort((a, b) => b.stockCostTL - a.stockCostTL)
+          .slice(0, 5),
+      })),
+      negativeMarginTests: filtered
+        .filter((t) => t.marjTL < 0)
+        .slice(0, 10)
+        .map((t) => ({ sutKodu: t.sutKodu, sutTestAdi: t.sutTestAdi, marjTL: Number(t.marjTL.toFixed(2)), costPerTestTL: Number(t.costPerTestTL.toFixed(2)), hakEdisTL: Number(t.hakEdisTL.toFixed(2)) })),
+    },
+    rawSamples: {
+      labsCount: labs.length,
+      productCount: productMap.size,
+      deviceAssignmentCount: assignedDevices.length,
+      assetCount: assets.length,
+      personnelCount: personnel.length,
+      shippedStockRows: depoStok.length,
+      rates,
+      allFilteredTests: filtered.map((t) => ({
+        testId: t.testId,
+        sutKodu: t.sutKodu,
+        sutTestAdi: t.sutTestAdi,
+        costPerTestTL: Number(t.costPerTestTL.toFixed(2)),
+        totalTestUnits: t.totalTestUnits,
+        testTotalCostTL: Math.round(t.testTotalCostTL),
+        stockCostTL: Math.round(t.stockCostTL),
+        ortakGiderlerTL: Math.round(t.ortakGiderlerTL),
+        hakEdisTL: Number(t.hakEdisTL.toFixed(2)),
+        marjTL: Number(t.marjTL.toFixed(2)),
+        warnings: t.warnings,
+      })),
+    },
+  }), [
+    periot,
+    search,
+    sortBy,
+    selectedLabIds,
+    selectedTestIds,
+    labs,
+    testDefs,
+    filtered,
+    filteredTotal,
+    filteredVolume,
+    filteredAvgUnit,
+    systemTotal,
+    mostExpensive,
+    mostFrequent,
+    productMap.size,
+    assignedDevices.length,
+    assets.length,
+    personnel.length,
+    depoStok.length,
+    rates,
+  ]);
+
   if (loading) {
     return (
       <div style={{ padding: 60, textAlign: 'center', color: 'var(--mg-muted)' }}>
@@ -1031,6 +1125,7 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
         />
 
         <InsightsCard
+          assistantContext={assistantContext}
           insights={[
             {
               palette: ['#a3e8c1', '#7bd5f2', '#9ab6ff', '#7a8af0', '#0a1422'],

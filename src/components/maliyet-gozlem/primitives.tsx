@@ -646,9 +646,320 @@ export interface Insight {
 interface InsightsCardProps {
   insights: Insight[];
   autoMs?: number;
+  assistantContext?: Omit<CostAssistantContext, 'activeInsight'>;
 }
 
-export function InsightsCard({ insights, autoMs = 60000 }: InsightsCardProps) {
+export interface CostAssistantMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface CostAssistantContext {
+  panel: 'test' | 'stok';
+  currency: string;
+  generatedAt: string;
+  activeInsight?: Pick<Insight, 'title' | 'headline' | 'subhead' | 'delta' | 'deltaPositive' | 'isPct'>;
+  filters?: Record<string, unknown>;
+  totals?: Record<string, unknown>;
+  rankings?: Record<string, unknown>;
+  history?: Record<string, unknown>;
+  rawSamples?: Record<string, unknown>;
+}
+
+interface CostInsightAssistantProps {
+  context: CostAssistantContext;
+  activeInsight: Insight;
+}
+
+function CostInsightAssistant({ context, activeInsight }: CostInsightAssistantProps) {
+  const [open, setOpen] = useState(false);
+  const [input, setInput] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [messages, setMessages] = useState<CostAssistantMessage[]>([
+    { role: 'assistant', content: 'Merhaba! Bu öngörüyle ilgili sorularınızı yanıtlayabilirim.' },
+  ]);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const id = window.setTimeout(() => {
+      scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+    }, 40);
+    return () => window.clearTimeout(id);
+  }, [open, messages, busy]);
+
+  const ask = async (override?: string) => {
+    const question = (override ?? input).trim();
+    if (!question || busy) return;
+
+    const nextMessages: CostAssistantMessage[] = [...messages, { role: 'user', content: question }];
+    setMessages(nextMessages);
+    setInput('');
+    setOpen(true);
+    setBusy(true);
+
+    try {
+      const res = await fetch('/api/ai/maliyet-gozlem-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: question,
+          history: messages.slice(-6),
+          context: { ...context, activeInsight },
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.message || data?.error || 'AI yanıtı alınamadı');
+      setMessages([...nextMessages, { role: 'assistant', content: data.message || 'Yanıt üretilemedi.' }]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Bilinmeyen hata';
+      setMessages([...nextMessages, { role: 'assistant', content: `Üzgünüm, analiz oluşturulamadı: ${message}` }]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    void ask();
+  };
+
+  return (
+    <>
+      {!open && (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          style={{
+            width: '100%',
+            minHeight: 46,
+            marginTop: 12,
+            borderRadius: 999,
+            border: '1px solid rgba(255,255,255,0.28)',
+            background: 'rgba(255,255,255,0.13)',
+            color: '#fff',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '8px 14px',
+            fontFamily: 'inherit',
+            fontSize: 14,
+            fontWeight: 700,
+            backdropFilter: 'blur(14px)',
+            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.16)',
+          }}
+          title="Qore Asistan'a sor"
+        >
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+            <span
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: '50%',
+                background: 'rgba(255,255,255,0.82)',
+                color: '#35223e',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              ✦
+            </span>
+            Asistana sor
+          </span>
+          <span style={{ fontSize: 22, lineHeight: 1 }}>›</span>
+        </button>
+      )}
+
+      {open && (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            zIndex: 5,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            borderRadius: 24,
+            background: 'linear-gradient(145deg, rgba(161,105,84,0.96), rgba(135,127,181,0.94) 48%, rgba(122,87,154,0.96))',
+            boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18)',
+            backdropFilter: 'blur(22px)',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '16px 18px 14px',
+              borderBottom: '1px solid rgba(255,255,255,0.14)',
+              color: '#fff',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span
+                style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: '50%',
+                  background: 'rgba(255,255,255,0.88)',
+                  color: '#2f2635',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: 900,
+                }}
+              >
+                ✦
+              </span>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 800, lineHeight: 1.1 }}>Qore Asistan</div>
+                <div style={{ fontSize: 11, opacity: 0.78, marginTop: 2 }}>{busy ? 'Düşünüyor…' : 'Aktif'}</div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setOpen(false)}
+              style={{
+                width: 34,
+                height: 34,
+                borderRadius: '50%',
+                border: '1px solid rgba(255,255,255,0.28)',
+                background: 'rgba(255,255,255,0.12)',
+                color: '#fff',
+                cursor: 'pointer',
+                fontSize: 20,
+                lineHeight: 1,
+              }}
+              title="Asistanı kapat"
+            >
+              ×
+            </button>
+          </div>
+
+          <div
+            ref={scrollRef}
+            style={{
+              flex: 1,
+              overflowY: 'auto',
+              padding: '18px 18px 10px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+              scrollbarWidth: 'thin',
+            }}
+          >
+            {messages.map((m, i) => (
+              <div
+                key={`${m.role}-${i}`}
+                style={{
+                  alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
+                  maxWidth: m.role === 'user' ? '78%' : '88%',
+                  borderRadius: m.role === 'user' ? '18px 18px 6px 18px' : '6px 18px 18px 18px',
+                  border: m.role === 'assistant' ? '1px solid rgba(255,255,255,0.2)' : 'none',
+                  background: m.role === 'user' ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.12)',
+                  color: m.role === 'user' ? '#2f2635' : '#fff',
+                  padding: '11px 14px',
+                  fontSize: 13,
+                  lineHeight: 1.45,
+                  whiteSpace: 'pre-wrap',
+                  boxShadow: '0 8px 22px rgba(31,18,40,0.18)',
+                }}
+              >
+                {m.content}
+              </div>
+            ))}
+            {busy && (
+              <div
+                style={{
+                  alignSelf: 'flex-start',
+                  borderRadius: '6px 18px 18px 18px',
+                  background: 'rgba(255,255,255,0.12)',
+                  border: '1px solid rgba(255,255,255,0.2)',
+                  color: '#fff',
+                  padding: '10px 13px',
+                  fontSize: 13,
+                }}
+              >
+                Analiz ediliyor…
+              </div>
+            )}
+          </div>
+
+          <div style={{ padding: '0 16px 12px' }}>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 9 }}>
+              {['Tavsiyen?', 'Risk var mı?'].map((q) => (
+                <button
+                  key={q}
+                  type="button"
+                  onClick={() => void ask(q)}
+                  disabled={busy}
+                  style={{
+                    border: '1px solid rgba(255,255,255,0.22)',
+                    background: 'rgba(255,255,255,0.12)',
+                    color: '#fff',
+                    borderRadius: 999,
+                    padding: '6px 10px',
+                    fontSize: 12,
+                    fontFamily: 'inherit',
+                    cursor: busy ? 'not-allowed' : 'pointer',
+                    opacity: busy ? 0.6 : 1,
+                  }}
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+            <form onSubmit={onSubmit} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="Sorunuzu yazın..."
+                disabled={busy}
+                style={{
+                  minWidth: 0,
+                  flex: 1,
+                  height: 44,
+                  borderRadius: 999,
+                  border: '1px solid rgba(255,255,255,0.26)',
+                  background: 'rgba(255,255,255,0.14)',
+                  color: '#fff',
+                  outline: 'none',
+                  padding: '0 16px',
+                  fontFamily: 'inherit',
+                  fontSize: 13,
+                }}
+              />
+              <button
+                type="submit"
+                disabled={busy || !input.trim()}
+                style={{
+                  width: 46,
+                  height: 46,
+                  borderRadius: '50%',
+                  border: 0,
+                  background: 'rgba(255,255,255,0.34)',
+                  color: '#231827',
+                  cursor: busy || !input.trim() ? 'not-allowed' : 'pointer',
+                  fontSize: 24,
+                  lineHeight: 1,
+                  opacity: busy || !input.trim() ? 0.55 : 1,
+                }}
+                title="Gönder"
+              >
+                →
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+
+export function InsightsCard({ insights, autoMs = 60000, assistantContext }: InsightsCardProps) {
   const [idx, setIdx] = useState(0);
   const [transitionKey, setTransitionKey] = useState(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -853,6 +1164,8 @@ export function InsightsCard({ insights, autoMs = 60000 }: InsightsCardProps) {
             {cur.subhead}
           </div>
         </div>
+
+        {assistantContext && <CostInsightAssistant context={assistantContext} activeInsight={cur} />}
 
         {list.length > 1 && (
           <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
