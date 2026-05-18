@@ -364,3 +364,115 @@ test('Sistem geneli: ortak giderler TEK SEFER + tüm stoklar', () => {
   // Real total = 12.000 + 900.000 + 1.200.000 + 10.100 = 2.122.100
   assert.equal(sys.realTotalSpendTL, 2122100);
 });
+
+test('Periyot: yıllık → ortak giderler × 12, stok değişmez', () => {
+  const r = calculateTestCost({ ...baseInputs, periot: { type: 'yillik' } });
+  // Yıllık ortak giderler:
+  //   envanter: 12.000 × 12 = 144.000
+  //   cihaz: 900.000 × 12 = 10.800.000
+  //   personel: 1.200.000 × 12 = 14.400.000
+  //   stok (anlık): 10.000 (değişmez)
+  // Grand: 10.000 + 144.000 + 10.800.000 + 14.400.000 = 25.354.000
+  assert.equal(r.stockCostTL, 10000);
+  assert.equal(r.inventoryCostTL, 144000);
+  assert.equal(r.deviceCostMonthlyTL, 10800000);
+  assert.equal(r.personnelCostMonthlyTL, 14400000);
+  assert.equal(r.testTotalCostTL, 25354000);
+  assert.equal(r.periotAy, 12);
+});
+
+test('Periyot: günlük → ortak giderler ÷ 30', () => {
+  const r = calculateTestCost({ ...baseInputs, periot: { type: 'gunluk' } });
+  // Günlük: envanter 12.000/30 = 400, cihaz 30.000, personel 40.000, stok 10.000
+  // Grand: 10.000 + 400 + 30.000 + 40.000 = 80.400
+  assert.equal(r.inventoryCostTL, 400);
+  assert.equal(r.deviceCostMonthlyTL, 30000);
+  assert.equal(r.personnelCostMonthlyTL, 40000);
+  assert.equal(r.testTotalCostTL, 80400);
+});
+
+test('Lab filtresi: sadece lab1 → ortak giderler 1/10', () => {
+  const r = calculateTestCost({ ...baseInputs, filterLabIds: ['lab1'] });
+  // 1 lab: stok 5 kutu × 200 ambalaj = 1.000 test, 5 × 200 TL = 1.000 TL stok
+  //         envanter 1.200, cihaz 90.000, personel 120.000
+  //         Grand: 1.000 + 1.200 + 90.000 + 120.000 = 212.200
+  assert.equal(r.totalTestUnits, 1000);
+  assert.equal(r.stockCostTL, 1000);
+  assert.equal(r.inventoryCostTL, 1200);
+  assert.equal(r.deviceCostMonthlyTL, 90000);
+  assert.equal(r.personnelCostMonthlyTL, 120000);
+  assert.equal(r.testTotalCostTL, 212200);
+  assert.equal(r.costPerTestTL, 212.2);
+  assert.equal(r.perLab.length, 1);
+});
+
+test('Asset: satın alma + omur yıl → aylık amortisman', () => {
+  // Bir asset: 1.200 TL alım, 5 yıl ömür → aylık 1.200/(5×12) = 20 TL
+  const localAssets: Any[] = [{
+    id: 'a1', category: 'bilgisayar', demirbasNo: 'A1', urunAdi: 'Bilgisayar',
+    konum: 'lab1',
+    alimFiyatiTl: 1200,
+    planliKullanimOmruYil: 5,
+    mulkiyet: 'satin_alma',
+    teslimEdilenPersonel: '', aciklama: '',
+  }];
+  const r = calculateTestCost({
+    ...baseInputs,
+    assets: localAssets,
+    filterLabIds: ['lab1'],
+    assignedDevices: [],
+    deviceDefs: new Map(),
+    personnel: [],
+  });
+  // Stok lab1 için 1.000 TL (5 kutu × 200 TL), 1.000 test adedi
+  // Envanter: 20 TL/ay
+  // Grand: 1.000 + 20 = 1.020
+  // Birim: 1.020 / 1.000 = 1,02 TL
+  assert.equal(r.inventoryCostTL, 20);
+  assert.equal(r.stockCostTL, 1000);
+  assert.equal(r.totalTestUnits, 1000);
+  assert.equal(r.testTotalCostTL, 1020);
+  assert.equal(r.costPerTestTL, 1.02);
+});
+
+test('Asset: kira yıllık → aylık olarak ÷12', () => {
+  const localAssets: Any[] = [{
+    id: 'a1', category: 'bilgisayar', demirbasNo: 'A1', urunAdi: 'Bilgisayar',
+    konum: 'lab1',
+    mulkiyet: 'kira',
+    kiraTutari: 12000,
+    kiraDonemi: 'yillik',
+    maliyetCurrency: 'TRY',
+    teslimEdilenPersonel: '', aciklama: '',
+  }];
+  const r = calculateTestCost({
+    ...baseInputs,
+    assets: localAssets,
+    filterLabIds: ['lab1'],
+    assignedDevices: [],
+    deviceDefs: new Map(),
+    personnel: [],
+  });
+  // Asset aylık: 12.000/12 = 1.000 TL
+  // Stok lab1: 1.000 TL, 1.000 test adedi
+  // Grand: 1.000 + 1.000 = 2.000
+  assert.equal(r.inventoryCostTL, 1000);
+  assert.equal(r.testTotalCostTL, 2000);
+});
+
+test('Cihaz: kira yıllık → aylık olarak ÷12', () => {
+  const localDevDefs: Any = new Map([['d1', {
+    id: 'd1', brand: 'c', model: 'q', imageUrl: '',
+    mulkiyet: 'kira', aylikKira: 540000, kiraDonemi: 'yillik', maliyetCurrency: 'TRY',
+  }]]);
+  const r = calculateTestCost({
+    ...baseInputs,
+    deviceDefs: localDevDefs,
+    assignedDevices: [{ cihazId: 'd1', id: 'lab1-d1', deviceId: 'd1', name: 'c q', serial: 'x', hastaneId: 'lab1' }],
+    assets: [],
+    personnel: [],
+    filterLabIds: ['lab1'],
+  });
+  // Cihaz aylık: 540.000/12 = 45.000 TL
+  assert.equal(r.deviceCostMonthlyTL, 45000);
+});
