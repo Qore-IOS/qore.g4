@@ -48,7 +48,7 @@ export default function LoginPage() {
       <Card className="w-full max-w-sm border border-border bg-card shadow-sm">
         <CardHeader className="text-center">
           <div className="mx-auto mb-2 flex items-center justify-center">
-            <Image src={logoSrc} alt="Qore Logo" width={44} height={44} className="object-contain" priority />
+            <Image src={logoSrc} alt="Qore Logo" width={77} height={77} className="object-contain" priority />
           </div>
           <CardTitle className="text-2xl font-semibold tracking-tight">Giriş Yap</CardTitle>
           <CardDescription>Devam etmek için hesabınızla oturum açın.</CardDescription>

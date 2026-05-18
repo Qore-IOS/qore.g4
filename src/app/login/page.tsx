@@ -69,8 +69,8 @@ export default function LoginPage() {
             <Image 
               src={logoSrc}
               alt="Qore Logo"
-              width={44}
-              height={44}
+              width={77}
+              height={77}
               className="object-contain"
               priority
             />
