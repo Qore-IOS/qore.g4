@@ -9,7 +9,7 @@
  * kartı ve detaylı test tablosu sunar.
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   calculateTestCost,
   calculateSystemTotal,
@@ -33,7 +33,7 @@ import { db } from '@/lib/firebase';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { useAuth } from '@/contexts/auth-context';
 import { getExchangeRates } from '@/lib/exchange-rates';
-import { Loader2, ChevronDown, Search } from 'lucide-react';
+import { Loader2, ChevronDown, ChevronsUpDown, Search, Check, X } from 'lucide-react';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Filtre satırı (lab + tek/çoklu seçim)
@@ -52,47 +52,268 @@ interface FilterBarProps {
   setSearch: (s: string) => void;
 }
 
-function Pill({
-  label,
-  active,
-  onClick,
-  color,
-}: {
+/**
+ * Aramalı, tekli/çoklu/tümünü seç destekli açılır seçici.
+ * Lab veya test listelerinde kullanılır.
+ */
+interface MultiSelectProps {
   label: string;
-  active: boolean;
-  onClick: () => void;
-  color?: string;
-}) {
+  options: { id: string; label: string; sub?: string }[];
+  selected: string[];
+  onChange: (ids: string[]) => void;
+  placeholder?: string;
+  width?: number;
+}
+
+function MultiSelect({ label, options, selected, onChange, placeholder, width = 280 }: MultiSelectProps) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const filtered = useMemo(() => {
+    if (!q.trim()) return options;
+    const s = q.toLowerCase().trim();
+    return options.filter((o) => o.label.toLowerCase().includes(s) || (o.sub?.toLowerCase().includes(s) ?? false));
+  }, [options, q]);
+
+  const toggle = (id: string) => {
+    if (selected.includes(id)) onChange(selected.filter((x) => x !== id));
+    else onChange([...selected, id]);
+  };
+  const allSelected = selected.length === options.length && options.length > 0;
+  const noneSelected = selected.length === 0;
+  const selectAll = () => onChange(allSelected ? [] : options.map((o) => o.id));
+
+  const summary =
+    noneSelected || allSelected
+      ? `Tüm ${label.toLowerCase()} (${options.length})`
+      : selected.length === 1
+        ? options.find((o) => o.id === selected[0])?.label || '1 seçili'
+        : `${selected.length} seçili`;
+
   return (
-    <button
-      onClick={onClick}
-      style={{
-        padding: '6px 12px',
-        borderRadius: 100,
-        cursor: 'pointer',
-        background: active ? 'var(--mg-surface-2)' : 'var(--mg-surface)',
-        border: '1px solid ' + (active ? color || 'var(--mg-border-strong)' : 'var(--mg-border)'),
-        color: active ? color || 'var(--mg-text)' : 'var(--mg-text-2)',
-        fontFamily: 'inherit',
-        fontSize: 12,
-        fontWeight: 500,
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 8,
-        whiteSpace: 'nowrap',
-        transition: 'all 0.2s',
-      }}
-    >
-      <span
+    <div ref={ref} style={{ position: 'relative', minWidth: width }}>
+      <button
+        onClick={() => setOpen((v) => !v)}
         style={{
-          width: 6,
-          height: 6,
-          borderRadius: '50%',
-          background: active ? color || 'var(--mg-accent)' : 'var(--mg-muted)',
+          width: '100%',
+          minHeight: 38,
+          padding: '7px 12px',
+          borderRadius: 10,
+          cursor: 'pointer',
+          background: 'var(--mg-surface)',
+          border: '1px solid ' + (selected.length > 0 && !allSelected ? 'var(--mg-accent)' : 'var(--mg-border)'),
+          color: 'var(--mg-text)',
+          fontFamily: 'inherit',
+          fontSize: 13,
+          fontWeight: 600,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+          transition: 'all 0.2s',
         }}
-      />
-      {label}
-    </button>
+      >
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--mg-muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+            {label}
+          </span>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{summary}</span>
+        </span>
+        <ChevronsUpDown size={14} style={{ color: 'var(--mg-muted)', flexShrink: 0 }} />
+      </button>
+
+      {open && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 6px)',
+            left: 0,
+            right: 0,
+            minWidth: width,
+            background: 'var(--mg-surface)',
+            border: '1px solid var(--mg-border-strong)',
+            borderRadius: 12,
+            boxShadow: '0 16px 48px rgba(0,0,0,0.5)',
+            zIndex: 100,
+            backdropFilter: 'blur(20px)',
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+            maxHeight: 360,
+          }}
+        >
+          {/* Arama */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '10px 12px',
+              borderBottom: '1px solid var(--mg-border)',
+            }}
+          >
+            <Search size={14} style={{ color: 'var(--mg-muted)' }} />
+            <input
+              autoFocus
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder={placeholder || 'Ara…'}
+              style={{
+                background: 'none',
+                border: 'none',
+                outline: 'none',
+                flex: 1,
+                color: 'var(--mg-text)',
+                fontSize: 13,
+                fontFamily: 'inherit',
+                fontWeight: 500,
+                minWidth: 0,
+              }}
+            />
+            {q && (
+              <button onClick={() => setQ('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--mg-muted)' }}>
+                <X size={12} />
+              </button>
+            )}
+          </div>
+
+          {/* Tümünü seç + temizle */}
+          <div
+            style={{
+              display: 'flex',
+              gap: 6,
+              padding: '8px 12px',
+              borderBottom: '1px solid var(--mg-border)',
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
+            <button
+              onClick={selectAll}
+              style={{
+                flex: 1,
+                padding: '6px 10px',
+                borderRadius: 7,
+                background: allSelected ? 'var(--mg-accent)' : 'var(--mg-surface-2)',
+                color: allSelected ? '#0a0a0c' : 'var(--mg-text-2)',
+                border: 'none',
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              {allSelected ? 'Tümü seçili' : 'Tümünü seç'}
+            </button>
+            {selected.length > 0 && (
+              <button
+                onClick={() => onChange([])}
+                style={{
+                  padding: '6px 10px',
+                  borderRadius: 7,
+                  background: 'var(--mg-surface-2)',
+                  color: 'var(--mg-muted)',
+                  border: '1px dashed var(--mg-border-strong)',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  fontSize: 11,
+                  fontWeight: 700,
+                }}
+              >
+                Temizle ({selected.length})
+              </button>
+            )}
+          </div>
+
+          {/* Liste */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: 6 }}>
+            {filtered.length === 0 ? (
+              <div style={{ padding: 20, textAlign: 'center', color: 'var(--mg-muted)', fontSize: 12 }}>
+                Eşleşen sonuç yok
+              </div>
+            ) : (
+              filtered.map((o) => {
+                const checked = selected.includes(o.id);
+                return (
+                  <button
+                    key={o.id}
+                    onClick={() => toggle(o.id)}
+                    style={{
+                      width: '100%',
+                      textAlign: 'left',
+                      padding: '8px 10px',
+                      borderRadius: 8,
+                      background: checked ? 'var(--mg-accent-soft)' : 'transparent',
+                      border: 'none',
+                      cursor: 'pointer',
+                      color: 'var(--mg-text)',
+                      fontFamily: 'inherit',
+                      fontSize: 13,
+                      fontWeight: 500,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 10,
+                      transition: 'background 0.15s',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!checked) (e.currentTarget as HTMLButtonElement).style.background = 'var(--mg-surface-2)';
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!checked) (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 16,
+                        height: 16,
+                        borderRadius: 4,
+                        border: '1px solid ' + (checked ? 'var(--mg-accent)' : 'var(--mg-border-strong)'),
+                        background: checked ? 'var(--mg-accent)' : 'transparent',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {checked && <Check size={11} color="#0a0a0c" />}
+                    </span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {o.label}
+                      </span>
+                      {o.sub && (
+                        <span
+                          style={{
+                            display: 'block',
+                            fontSize: 11,
+                            color: 'var(--mg-muted)',
+                            marginTop: 1,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {o.sub}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -100,128 +321,77 @@ function FilterBar({
   labs,
   selectedLabIds,
   setSelectedLabIds,
+  testDefs,
+  selectedTestIds,
+  setSelectedTestIds,
   periot,
   setPeriot,
-  search,
-  setSearch,
-}: FilterBarProps) {
+}: Omit<FilterBarProps, 'search' | 'setSearch'>) {
   const periodOpts: { k: PeriotConfig['type']; label: string }[] = [
     { k: 'gunluk', label: 'Günlük' },
     { k: 'aylik', label: 'Aylık' },
     { k: 'yillik', label: 'Yıllık' },
   ];
 
-  const toggleLab = (id: string) => {
-    if (selectedLabIds.includes(id)) setSelectedLabIds(selectedLabIds.filter((x) => x !== id));
-    else setSelectedLabIds([...selectedLabIds, id]);
-  };
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {/* Periyot + arama */}
-      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-        <div
-          style={{
-            display: 'inline-flex',
-            gap: 4,
-            background: 'var(--mg-surface-2)',
-            padding: 4,
-            borderRadius: 10,
-            border: '1px solid var(--mg-border)',
-          }}
-        >
-          {periodOpts.map((o) => (
-            <button
-              key={o.k}
-              onClick={() => setPeriot({ type: o.k })}
-              style={{
-                padding: '5px 12px',
-                borderRadius: 7,
-                border: 'none',
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-                fontSize: 11,
-                fontWeight: 700,
-                letterSpacing: '0.02em',
-                background: periot.type === o.k ? 'var(--mg-accent)' : 'transparent',
-                color: periot.type === o.k ? '#0a0a0c' : 'var(--mg-text-2)',
-                transition: 'all 0.2s',
-                boxShadow: periot.type === o.k ? '0 2px 8px rgba(251,146,60,0.3)' : 'none',
-              }}
-            >
-              {o.label}
-            </button>
-          ))}
-        </div>
-
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            background: 'var(--mg-surface)',
-            borderRadius: 10,
-            padding: '8px 14px',
-            border: '1px solid var(--mg-border)',
-            minWidth: 240,
-            flex: 1,
-            maxWidth: 360,
-          }}
-        >
-          <Search size={14} style={{ color: 'var(--mg-muted)' }} />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Test ara…"
-            style={{
-              background: 'none',
-              border: 'none',
-              outline: 'none',
-              flex: 1,
-              color: 'var(--mg-text)',
-              fontSize: 13,
-              fontFamily: 'inherit',
-              fontWeight: 500,
-              minWidth: 0,
-            }}
-          />
-        </div>
-      </div>
-
-      {/* Lab seçim pills */}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <Pill
-          label={`Tüm Laboratuvarlar (${labs.length})`}
-          active={selectedLabIds.length === 0}
-          onClick={() => setSelectedLabIds([])}
-        />
-        {labs.map((l) => (
-          <Pill
-            key={l.id}
-            label={l.name}
-            active={selectedLabIds.includes(l.id)}
-            onClick={() => toggleLab(l.id)}
-          />
-        ))}
-        {selectedLabIds.length > 0 && (
+    <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+      {/* Periyot toggle */}
+      <div
+        style={{
+          display: 'inline-flex',
+          gap: 4,
+          background: 'var(--mg-surface-2)',
+          padding: 4,
+          borderRadius: 10,
+          border: '1px solid var(--mg-border)',
+        }}
+      >
+        {periodOpts.map((o) => (
           <button
-            onClick={() => setSelectedLabIds([])}
+            key={o.k}
+            onClick={() => setPeriot({ type: o.k })}
             style={{
-              padding: '6px 12px',
-              borderRadius: 100,
+              padding: '5px 12px',
+              borderRadius: 7,
+              border: 'none',
               cursor: 'pointer',
-              background: 'transparent',
-              border: '1px dashed var(--mg-border-strong)',
-              color: 'var(--mg-muted)',
               fontFamily: 'inherit',
               fontSize: 11,
-              fontWeight: 600,
+              fontWeight: 700,
+              letterSpacing: '0.02em',
+              background: periot.type === o.k ? 'var(--mg-accent)' : 'transparent',
+              color: periot.type === o.k ? '#0a0a0c' : 'var(--mg-text-2)',
+              transition: 'all 0.2s',
+              boxShadow: periot.type === o.k ? '0 2px 8px rgba(251,146,60,0.3)' : 'none',
             }}
           >
-            Temizle ({selectedLabIds.length})
+            {o.label}
           </button>
-        )}
+        ))}
       </div>
+
+      {/* Lab seçici (aramalı multiselect) */}
+      <MultiSelect
+        label="Lab"
+        placeholder="Laboratuvar ara…"
+        options={labs.map((l) => ({ id: l.id, label: l.name }))}
+        selected={selectedLabIds}
+        onChange={setSelectedLabIds}
+      />
+
+      {/* Test seçici (aramalı multiselect) */}
+      <MultiSelect
+        label="Test"
+        placeholder="SUT kodu veya test adı ara…"
+        options={testDefs.map((t) => ({
+          id: t.id,
+          label: t.sutTestAdi,
+          sub: `SUT ${t.sutKodu} · ${(t.linkedStokKodlari || []).length} ürün`,
+        }))}
+        selected={selectedTestIds}
+        onChange={setSelectedTestIds}
+        width={320}
+      />
     </div>
   );
 }
@@ -752,8 +922,6 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
         setSelectedTestIds={setSelectedTestIds}
         periot={periot}
         setPeriot={setPeriot}
-        search={search}
-        setSearch={setSearch}
       />
 
       {/* KPI Row */}

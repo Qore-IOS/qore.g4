@@ -223,6 +223,8 @@ function Header({ search, setSearch, currency, setCurrency }: HeaderProps) {
         background: 'var(--mg-header-bg)',
         backdropFilter: 'blur(20px)',
         zIndex: 50,
+        position: 'sticky',
+        top: 0,
       }}
     >
       <div
@@ -406,7 +408,7 @@ export default function MaliyetGozlemMerkezi({ initialTab = 'test' }: MaliyetGoz
     <div
       className={`mg-root ${urbanist.className} ${urbanist.variable}`}
       style={{
-        height: '100%',
+        minHeight: '100vh',
         display: 'flex',
         flexDirection: 'column',
         background: `radial-gradient(ellipse at 0% 0%, rgba(251,146,60,0.06) 0%, transparent 50%),
@@ -423,8 +425,6 @@ export default function MaliyetGozlemMerkezi({ initialTab = 'test' }: MaliyetGoz
       <main
         style={{
           flex: 1,
-          overflowY: 'auto',
-          overflowX: 'hidden',
           padding: '24px',
         }}
       >
