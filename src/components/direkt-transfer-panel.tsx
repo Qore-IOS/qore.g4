@@ -72,6 +72,7 @@ import { emitFefoOverride } from '@/lib/notifications';
 import { VirtualizedList } from '@/components/ui/virtualized-list';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { formatUnitMultiplier, normalizeUnitLabel, formatQuantityWithUnit } from '@/lib/product-unit';
+import { getStockItemQuantity, sumStockItemQuantities } from '@/lib/stock-quantity';
 
 
 const CameraScanner = dynamic(() => import('@/components/camera-barcode-scanner'), {
@@ -315,14 +316,14 @@ export default function DirektTransferPanel() {
     if (!lastScannedProduct) return 0;
     return directTransferItems
       .filter(item => item.stokKodu === lastScannedProduct.stokKodu && item.lotNumarasi === lastScannedProduct.lotNumarasi)
-      .reduce((n, it) => n + (it.adet ?? 1), 0);
+      .reduce((n, it) => n + getStockItemQuantity(it), 0);
   }, [directTransferItems, lastScannedProduct]);
 
   const totalCountForProduct = useMemo(() => {
     if (!lastScannedProduct) return 0;
     return directTransferItems
       .filter(item => item.stokKodu === lastScannedProduct.stokKodu)
-      .reduce((n, it) => n + (it.adet ?? 1), 0);
+      .reduce((n, it) => n + getStockItemQuantity(it), 0);
   }, [directTransferItems, lastScannedProduct]);
   
   // Auto-select first depot
@@ -419,13 +420,13 @@ export default function DirektTransferPanel() {
   // Lot-tracked items are stored as a single document with `adet: N`; serial-tracked
   // items are one-document-per-unit (adet: 1). Available units = sum of adet, not doc count.
   const sumStockAdet = useCallback((items: DepoStokItem[]): number => {
-      return items.reduce((sum, item) => sum + ((item as any).adet ?? 1), 0);
+      return sumStockItemQuantities(items);
   }, []);
 
   const alreadyQueued = useCallback((stokKodu: string, lot?: string, seri?: string) => {
     return directTransferItems
       .filter(r => r.stokKodu === stokKodu && (lot ? r.lotNumarasi === lot : !r.lotNumarasi) && (seri ? r.seriNumarasi === seri : true))
-      .reduce((n, r) => n + (r.adet ?? 1), 0);
+      .reduce((n, r) => n + getStockItemQuantity(r), 0);
   }, [directTransferItems]);
   
   const handleScan = useCallback(
@@ -686,7 +687,7 @@ export default function DirektTransferPanel() {
       for (const docItem of pool) {
         if (accumulated >= need) break;
 
-        const docQty = docItem.adet ?? 1;
+        const docQty = getStockItemQuantity(docItem);
         const remainingToNeed = need - accumulated;
         const take = Math.min(docQty, remainingToNeed);
 
@@ -759,9 +760,14 @@ export default function DirektTransferPanel() {
     setDirectTransferItems([]);
     setShipmentLoading(false);
 
+    const totalShippedAdet = itemsToShip.reduce(
+      (sum, item: DepoStokItem & { transferAdet?: number }) => sum + (item.transferAdet ?? getStockItemQuantity(item)),
+      0
+    );
+
     toast({
       title: 'İşlem Kaydediliyor...',
-      description: `${itemsToShip.length} ürün arka planda transfer ediliyor. Çıkış yapmayınız.`,
+      description: `${totalShippedAdet} adet ürün arka planda transfer ediliyor. Çıkış yapmayınız.`,
       duration: 3000
     });
 
@@ -775,8 +781,8 @@ export default function DirektTransferPanel() {
         const targetHospitalId = isBorcMode ? null : selectedLabId;
 
         itemsToShip.forEach((item: DepoStokItem & { transferAdet?: number }) => {
-          const transferQty = item.transferAdet ?? (item.adet || 1);
-          const originalQty = item.adet || 1;
+          const transferQty = item.transferAdet ?? getStockItemQuantity(item);
+          const originalQty = getStockItemQuantity(item);
           const isPartial = transferQty < originalQty;
 
           // Target Reference (If partial, we need a new ID for the target document)
@@ -888,7 +894,7 @@ export default function DirektTransferPanel() {
           id: transferRef.id, timestamp: serverTimestamp(), sourceDepotId: selectedDepotId,
           sourceDepotName: depotName, targetName, targetHospitalId: targetId || null,
           mode: isBorcMode ? 'borc' : 'lab', company: isBorcMode ? selectedCompany : null,
-          itemCount: itemsToShip.length, createdByUid: currentUser.uid ?? '',
+          itemCount: totalShippedAdet, createdByUid: currentUser.uid ?? '',
           createdByName: currentUserProfile.name ?? currentUser.email ?? '',
         });
 
@@ -896,8 +902,8 @@ export default function DirektTransferPanel() {
 
         await touchStockMetadata();
 
-        toast({ title: 'Transfer Tamamlandı', description: `${itemsToShip.length} ürün başarıyla transfer edildi.` });
-        setLastTransferCount(itemsToShip.length);
+        toast({ title: 'Transfer Tamamlandı', description: `${totalShippedAdet} adet ürün başarıyla transfer edildi.` });
+        setLastTransferCount(totalShippedAdet);
         
         confirmedViolations.forEach(v => {
           emitFefoOverride({
@@ -948,9 +954,9 @@ export default function DirektTransferPanel() {
           }
         }
 
-        direktTransferLogger.info('Transfer başarıyla tamamlandı', { transferId: transferRef.id, itemCount: itemsToShip.length, targetName, mode: isBorcMode ? 'borc' : 'lab' });
+        direktTransferLogger.info('Transfer başarıyla tamamlandı', { transferId: transferRef.id, itemCount: totalShippedAdet, targetName, mode: isBorcMode ? 'borc' : 'lab' });
       } catch (err) {
-        direktTransferLogger.error('Transfer commit hatası', err, { depotId: selectedDepotId, targetId, itemCount: itemsToShip.length });
+        direktTransferLogger.error('Transfer commit hatası', err, { depotId: selectedDepotId, targetId, itemCount: totalShippedAdet });
         
         // --- ROLLBACK ---
         setDirectTransferItems(previousDirectTransferItems);
@@ -1038,8 +1044,7 @@ export default function DirektTransferPanel() {
     const items = filterByCompanyScope(
         snap.docs.map(d => {
             const data = d.data() as any;
-            const docAdet = Number(data.adet);
-            const safeAdet = Number.isFinite(docAdet) && docAdet > 0 ? Math.max(1, Math.floor(docAdet)) : 1;
+            const safeAdet = getStockItemQuantity(data);
             return {
                 ...data,
                 id: d.id,
@@ -1053,7 +1058,7 @@ export default function DirektTransferPanel() {
     );
 
     setDirectTransferItems(items);
-    const totalAdet = items.reduce((sum, it) => sum + (it.adet ?? 1), 0);
+    const totalAdet = sumStockItemQuantities(items);
     flashScanFeedback('success', `${items.length} kalem (${totalAdet} adet) transfer listesine eklendi.`);
   };
   
@@ -1083,7 +1088,7 @@ export default function DirektTransferPanel() {
           serials: [],
         };
       }
-      groups[groupKey].adet += item.adet;
+      groups[groupKey].adet += getStockItemQuantity(item);
       if (!item.isGroup && item.seriNumarasi) {
         groups[groupKey].serials.push({ id: item.id, seriNumarasi: item.seriNumarasi });
       }
@@ -1130,7 +1135,7 @@ export default function DirektTransferPanel() {
     const hasSource = !!selectedDepotId;
     const hasTarget = isBorcMode ? (!!selectedBorcDepotId && !!selectedCompany) : !!selectedLabId;
     const hasItems = directTransferItems.length > 0;
-    const totalAdet = directTransferItems.reduce((sum, item) => sum + (item.adet ?? 1), 0);
+    const totalAdet = directTransferItems.reduce((sum, item) => sum + getStockItemQuantity(item), 0);
     const totalKalem = groupedTransferItems.length;
     return { hasSource, hasTarget, hasItems, totalAdet, totalKalem };
   }, [selectedDepotId, selectedLabId, isBorcMode, selectedBorcDepotId, selectedCompany, directTransferItems, groupedTransferItems]);
@@ -1145,7 +1150,7 @@ export default function DirektTransferPanel() {
         : (depotStockLookups.byCode.get(group.stokKodu) || []);
       // Sum the `adet` field — lot-tracked items are stored as a single doc with adet:N,
       // so counting docs would under-report stock (root cause of the "1 adet okutabilirsiniz" bug).
-      const available = stockItems.reduce((sum, item) => sum + ((item as any).adet ?? 1), 0);
+      const available = sumStockItemQuantities(stockItems);
       map.set(key, available);
     }
     return map;

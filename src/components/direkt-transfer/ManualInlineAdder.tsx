@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils';
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { DepoStokItem } from '@/lib/types';
 import { direktTransferLogger } from '@/lib/logger';
+import { getStockItemQuantity, sumStockItemQuantities } from '@/lib/stock-quantity';
 
 type LotPayload = { code: string; name: string; lot: string; miad: string; qty: number };
 type QtyPayload = { code: string; name: string; qty: number };
@@ -95,10 +96,10 @@ export default function ManualInlineAdder({
   const totalStockForQtyProduct = useMemo(() => {
     if (!chosenProduct || !isQtyTracked) return 0;
     const itemsInStock = stockPool.filter(item => item.stokKodu === chosenProduct.code && !item.isShipped);
-    const totalCount = itemsInStock.length;
+    const totalCount = sumStockItemQuantities(itemsInStock);
     const allocated = transferRows
       .filter(r => r.stokKodu === chosenProduct.code)
-      .reduce((sum, r) => sum + (r.adet ?? 1), 0);
+      .reduce((sum, r) => sum + getStockItemQuantity(r), 0);
     return totalCount - allocated;
   }, [chosenProduct, isQtyTracked, stockPool, transferRows]);
 
@@ -108,8 +109,11 @@ export default function ManualInlineAdder({
     const uniqueLots = Array.from(new Set(lotsInStock.map(item => `${item.lotNumarasi || 'N/A'}|${item.miad || 'N/A'}`)));
     return uniqueLots.map(key => {
         const [lotNum, miadVal] = key.split('|');
-        const count = lotsInStock.filter(item => (item.lotNumarasi || 'N/A') === lotNum && (item.miad || 'N/A') === miadVal).length;
-        const allocated = transferRows.filter(r => r.stokKodu === chosenProduct.code && r.lotNumarasi === lotNum && r.miad === miadVal).reduce((sum, r) => sum + (r.adet ?? 1), 0);
+        const lotItems = lotsInStock.filter(item => (item.lotNumarasi || 'N/A') === lotNum && (item.miad || 'N/A') === miadVal);
+        const count = sumStockItemQuantities(lotItems);
+        const allocated = transferRows
+          .filter(r => r.stokKodu === chosenProduct.code && r.lotNumarasi === lotNum && r.miad === miadVal)
+          .reduce((sum, r) => sum + getStockItemQuantity(r), 0);
         return { key, label: `${lotNum} - ${miadVal}`, remaining: count - allocated };
     });
   }, [chosenProduct, isLotTracked, stockPool, transferRows]);
@@ -136,7 +140,7 @@ export default function ManualInlineAdder({
    */
   const handleAdd = () => {
     if (!chosenProduct) return;
-    const qtyNum = Number(quantity) || 1;
+    const qtyNum = Math.max(1, Math.floor(Number(quantity) || 1));
     const name = chosenProduct.name || chosenProduct.code;
 
     if (activeTab === 'manual') {
@@ -210,13 +214,14 @@ export default function ManualInlineAdder({
       if (isLotTracked && (!lot || !miad)) return true;
       return false;
     } else {
-      // Stoktan seçme modunda: lot takipli ürünler için lot seçimi zorunlu
-      if (isLotTracked && !selectedLotKey) return true;
+      const qtyNum = Math.max(1, Math.floor(Number(quantity) || 1));
+      // Stoktan seçme modunda: lot takipli ürünler için lot seçimi ve kalan adet kontrolü zorunlu
+      if (isLotTracked) return !selectedLotInfo || selectedLotInfo.remaining <= 0 || qtyNum > selectedLotInfo.remaining;
       // Adet takipli ürünler için stok kontrolü
-      if (isQtyTracked && totalStockForQtyProduct <= 0) return true;
+      if (isQtyTracked) return totalStockForQtyProduct <= 0 || qtyNum > totalStockForQtyProduct;
       return false;
     }
-  }, [chosenProduct, activeTab, isLotTracked, isQtyTracked, lot, miad, selectedLotKey, totalStockForQtyProduct]);
+  }, [chosenProduct, activeTab, isLotTracked, isQtyTracked, lot, miad, selectedLotKey, selectedLotInfo, quantity, totalStockForQtyProduct]);
 
   return (
     <div>
