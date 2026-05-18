@@ -13,17 +13,10 @@
  */
 
 import React, { useEffect, useRef, useState } from 'react';
-import { Urbanist } from 'next/font/google';
 import { Search, Settings, Download, X } from 'lucide-react';
 import type { Currency } from '@/lib/types';
 import { TestTab } from './TestTab';
 import { StokTab } from './StokTab';
-
-const urbanist = Urbanist({
-  subsets: ['latin'],
-  variable: '--font-urbanist',
-  weight: ['300', '400', '500', '600', '700', '800', '900'],
-});
 
 type TabKey = 'stok' | 'test';
 
@@ -406,7 +399,7 @@ export default function MaliyetGozlemMerkezi({ initialTab = 'test' }: MaliyetGoz
 
   return (
     <div
-      className={`mg-root ${urbanist.className} ${urbanist.variable}`}
+      className="mg-root"
       style={{
         minHeight: '100vh',
         display: 'flex',
@@ -416,7 +409,6 @@ export default function MaliyetGozlemMerkezi({ initialTab = 'test' }: MaliyetGoz
                      var(--mg-bg)`,
         color: 'var(--mg-text)',
         letterSpacing: '-0.005em',
-        fontFamily: urbanist.style.fontFamily,
       }}
     >
       <Header search={search} setSearch={setSearch} currency={currency} setCurrency={setCurrency} />
