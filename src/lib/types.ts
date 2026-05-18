@@ -333,6 +333,7 @@ export interface LaboratoryStockCountSession { // New session type for labs
 
 
 export type DeviceMulkiyetTipi = 'kira' | 'satin_alma' | 'demobaz';
+export type KiraDonemi = 'aylik' | 'yillik';
 
 export interface Device {
   id: string;
@@ -340,8 +341,10 @@ export interface Device {
   model: string;
   imageUrl: string;
   mulkiyet?: DeviceMulkiyetTipi | string;
-  /** Sahiplik 'kira' ise aylık kira tutarı */
+  /** Sahiplik 'kira' ise tutar (kiraDonemi'ne göre aylık/yıllık) */
   aylikKira?: number;
+  /** Kira dönemi (varsayılan 'aylik'). 'yillik' ise hesapta ÷12 yapılır. */
+  kiraDonemi?: KiraDonemi;
   /** Sahiplik 'satin_alma' ise toplam satın alma tutarı */
   satinAlmaTutari?: number;
   /** Sahiplik 'satin_alma' ise satın alma tarihi (dd.MM.yyyy) */
@@ -1044,6 +1047,14 @@ export interface Asset {
   planliKullanimOmruYil?: number;
   amortismanYontemi?: 'dogrusal' | 'azalan_bakiye';
   amortismanBaslangicTarihi?: string;
+  /** Mülkiyet tipi: satın alma (varsayılan, alimFiyatiTl + planliKullanimOmruYil) veya kira */
+  mulkiyet?: 'satin_alma' | 'kira';
+  /** Kira tutarı (mulkiyet='kira' ise) */
+  kiraTutari?: number;
+  /** Kira dönemi (mulkiyet='kira' ise; varsayılan 'aylik') */
+  kiraDonemi?: 'aylik' | 'yillik';
+  /** Maliyet para birimi (varsayılan TRY) */
+  maliyetCurrency?: 'EUR' | 'USD' | 'TRY';
   hurdaTarihi?: string;
   imhaTarihi?: string;
   satisTarihi?: string;

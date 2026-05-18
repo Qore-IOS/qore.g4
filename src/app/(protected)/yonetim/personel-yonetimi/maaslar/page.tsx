@@ -22,7 +22,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
-import type { Personnel, Hospital } from '@/lib/types';
+import type { Personnel, Hospital, User } from '@/lib/types';
 import BackButton from '@/components/BackButton';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
@@ -45,8 +45,14 @@ function parseLabIds(raw: unknown): string[] {
     .filter(Boolean);
 }
 
+const ADMIN_ROLES = new Set(['admin', 'super_admin', 'admin_developer']);
+
 interface FormState {
   id?: string;
+  /** Eğer kullanıcıdan seçildiyse User.uid; aksi halde boş (manuel) */
+  userId?: string;
+  userEmail?: string;
+  userRole?: string;
   adSoyad: string;
   pozisyon: string;
   assignedLabIds: string[];
@@ -76,7 +82,8 @@ export default function PersonelMaaslarPage() {
 
   const [labs, setLabs] = useState<Hospital[]>([]);
   const [personnel, setPersonnel] = useState<Personnel[]>([]);
-  const [loading, setLoading] = useState({ labs: true, personnel: true });
+  const [users, setUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState({ labs: true, personnel: true, users: true });
 
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -87,7 +94,7 @@ export default function PersonelMaaslarPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isImporting, setIsImporting] = useState(false);
 
-  // Master data
+  // Master data — laboratuvarlar
   useEffect(() => {
     (async () => {
       setLoading((p) => ({ ...p, labs: true }));
@@ -105,6 +112,30 @@ export default function PersonelMaaslarPage() {
         toast({ title: 'Hata', description: 'Laboratuvarlar yüklenemedi.', variant: 'destructive' });
       } finally {
         setLoading((p) => ({ ...p, labs: false }));
+      }
+    })();
+  }, [toast, currentCompanyId, isSuperAdmin]);
+
+  // Master data — kullanıcılar (admin rolleri hariç)
+  useEffect(() => {
+    (async () => {
+      setLoading((p) => ({ ...p, users: true }));
+      try {
+        const snap = await getDocs(collection(db, 'users'));
+        const all = filterByCompanyScope(
+          snap.docs.map((d) => ({ id: d.id, uid: d.id, ...d.data() } as User)),
+          currentCompanyId,
+          isSuperAdmin,
+        );
+        const filtered = all
+          .filter((u) => !ADMIN_ROLES.has(u.role || ''))
+          .sort((a, b) => (a.name || a.email || '').localeCompare(b.name || b.email || '', 'tr'));
+        setUsers(filtered);
+      } catch (e) {
+        console.error('users fetch error', e);
+        toast({ title: 'Hata', description: 'Kullanıcılar yüklenemedi.', variant: 'destructive' });
+      } finally {
+        setLoading((p) => ({ ...p, users: false }));
       }
     })();
   }, [toast, currentCompanyId, isSuperAdmin]);
@@ -160,6 +191,9 @@ export default function PersonelMaaslarPage() {
         currency: form.currency,
         aktif: form.aktif,
         baslamaTarihi: form.baslamaTarihi || null,
+        userId: form.userId || null,
+        userEmail: form.userEmail || null,
+        userRole: form.userRole || null,
         updatedAt: serverTimestamp(),
         companyId: normalizeCompanyId(currentUserProfile?.companyId || currentCompanyId),
       };
@@ -185,8 +219,12 @@ export default function PersonelMaaslarPage() {
 
   const handleEdit = (p: Personnel) => {
     setEditingId(p.id);
+    const u = p.userId ? users.find((x) => x.uid === p.userId) : undefined;
     setForm({
       id: p.id,
+      userId: p.userId || '',
+      userEmail: u?.email || (p as any).userEmail || '',
+      userRole: u?.role || (p as any).userRole || '',
       adSoyad: p.adSoyad || '',
       pozisyon: p.pozisyon || '',
       assignedLabIds: p.assignedLabIds || [],
@@ -197,6 +235,38 @@ export default function PersonelMaaslarPage() {
       aktif: p.aktif !== false,
       baslamaTarihi: p.baslamaTarihi || '',
     });
+    // Scroll to form
+    if (typeof window !== 'undefined') {
+      setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 50);
+    }
+  };
+
+  /** Bir kullanıcı seçildiğinde formu doldur (yeni personel için) */
+  const handleSelectUser = (u: User) => {
+    // Aynı kullanıcının zaten maaş kaydı var mı?
+    const existing = personnel.find((p) => p.userId === u.uid);
+    if (existing) {
+      handleEdit(existing);
+      return;
+    }
+    setEditingId(null);
+    setForm({
+      userId: u.uid,
+      userEmail: u.email || '',
+      userRole: u.role || '',
+      adSoyad: u.name || u.email || '',
+      pozisyon: '',
+      assignedLabIds: u.assignedLaboratories || [],
+      primaryLabId: u.primaryLaboratories?.[0] || u.assignedLaboratories?.[0] || '',
+      aylikBrutMaas: '',
+      aylikYanHaklar: '',
+      currency: 'TRY',
+      aktif: true,
+      baslamaTarihi: '',
+    });
+    if (typeof window !== 'undefined') {
+      setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 50);
+    }
   };
 
   const resetForm = () => {
@@ -390,15 +460,128 @@ export default function PersonelMaaslarPage() {
             </Button>
           </div>
 
+          {/* Kullanıcılar — mevcut kullanıcılardan seçim */}
+          <Card className="border">
+            <CardHeader>
+              <CardTitle className="text-lg">Kullanıcılar</CardTitle>
+              <CardDescription>
+                Sistemdeki kullanıcılardan birini seçerek maaş tanımı oluşturun. Admin rolündeki kullanıcılar
+                gösterilmez. Yanlarındaki "Maaş Tanımla" butonuna bastığınızda alttaki formun ilgili alanları otomatik
+                doldurulur.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-0">
+              <ScrollArea className="h-[300px]">
+                {loading.users ? (
+                  <div className="flex items-center justify-center h-32 text-muted-foreground">
+                    <Loader2 className="h-5 w-5 animate-spin mr-2" /> Kullanıcılar yükleniyor...
+                  </div>
+                ) : users.length === 0 ? (
+                  <div className="text-center text-muted-foreground p-8">
+                    Bu firmaya bağlı (admin olmayan) kullanıcı bulunamadı.
+                  </div>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Ad / E-posta</TableHead>
+                        <TableHead>Rol</TableHead>
+                        <TableHead>Atanan Laboratuvarlar</TableHead>
+                        <TableHead>Maaş Durumu</TableHead>
+                        <TableHead className="text-right w-[160px]">İşlem</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {users.map((u) => {
+                        const hasSalary = personnel.some((p) => p.userId === u.uid);
+                        const labIds = u.assignedLaboratories || [];
+                        return (
+                          <TableRow key={u.uid}>
+                            <TableCell>
+                              <div className="font-medium">{u.name || '-'}</div>
+                              {u.email && <div className="text-xs text-muted-foreground">{u.email}</div>}
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant="outline" className="text-xs">
+                                {u.role || 'user'}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              {labIds.length === 0 ? (
+                                <span className="text-xs text-muted-foreground">—</span>
+                              ) : (
+                                <div className="flex flex-wrap gap-1">
+                                  {labIds.slice(0, 3).map((id) => (
+                                    <Badge key={id} variant="secondary" className="text-xs">
+                                      {labMap.get(id) || id}
+                                    </Badge>
+                                  ))}
+                                  {labIds.length > 3 && (
+                                    <Badge variant="outline" className="text-xs">
+                                      +{labIds.length - 3}
+                                    </Badge>
+                                  )}
+                                </div>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              {hasSalary ? (
+                                <Badge variant="outline" className="text-green-700 border-green-300">
+                                  Tanımlı
+                                </Badge>
+                              ) : (
+                                <Badge variant="outline" className="text-amber-700 border-amber-300">
+                                  Eksik
+                                </Badge>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Button size="sm" variant={hasSalary ? 'outline' : 'default'} onClick={() => handleSelectUser(u)}>
+                                {hasSalary ? (
+                                  <>
+                                    <Pencil className="h-3 w-3 mr-1" /> Düzenle
+                                  </>
+                                ) : (
+                                  <>
+                                    <Plus className="h-3 w-3 mr-1" /> Maaş Tanımla
+                                  </>
+                                )}
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                )}
+              </ScrollArea>
+            </CardContent>
+          </Card>
+
           {/* Form */}
           <Card className="border">
             <CardHeader>
-              <CardTitle className="text-lg">{editingId ? 'Personeli Güncelle' : 'Yeni Personel Ekle'}</CardTitle>
+              <CardTitle className="text-lg">
+                {editingId ? 'Personeli Güncelle' : form.userId ? `${form.adSoyad} için Maaş Tanımla` : 'Manuel Personel Ekle'}
+              </CardTitle>
+              {form.userId && (
+                <CardDescription>
+                  <span className="text-xs">
+                    Kullanıcı: <b>{form.adSoyad}</b>
+                    {form.userEmail && ` · ${form.userEmail}`}
+                    {form.userRole && ` · ${form.userRole}`}
+                  </span>
+                </CardDescription>
+              )}
             </CardHeader>
             <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               <div className="space-y-1">
                 <label className="text-sm font-medium">Ad Soyad *</label>
-                <Input value={form.adSoyad} onChange={(e) => setForm({ ...form, adSoyad: e.target.value })} />
+                <Input
+                  value={form.adSoyad}
+                  onChange={(e) => setForm({ ...form, adSoyad: e.target.value })}
+                  disabled={!!form.userId}
+                />
               </div>
               <div className="space-y-1">
                 <label className="text-sm font-medium">Pozisyon</label>

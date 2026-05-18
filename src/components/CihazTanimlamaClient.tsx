@@ -244,6 +244,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       // Test bazlı maliyet hesabı alanları
       maliyetCurrency: current.maliyetCurrency || 'TRY',
       aylikKira: current.aylikKira ?? null,
+      kiraDonemi: current.kiraDonemi ?? 'aylik',
       satinAlmaTutari: current.satinAlmaTutari ?? null,
       satinAlmaTarihi: current.satinAlmaTarihi ?? null,
       amortismanAyi: current.amortismanAyi ?? null,
@@ -1387,16 +1388,33 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                   </div>
                   {(String(current.mulkiyet || '').toLowerCase() === 'kiralik' ||
                     String(current.mulkiyet || '').toLowerCase() === 'kira') && (
-                    <div className="space-y-1 md:col-span-2">
-                      <Label>Aylık Kira Tutarı</Label>
-                      <Input
-                        type="number"
-                        inputMode="decimal"
-                        placeholder="Örn: 45000"
-                        value={current.aylikKira ?? ''}
-                        onChange={e => setCurrent({ ...current, aylikKira: e.target.value === '' ? undefined : Number(e.target.value) })}
-                      />
-                    </div>
+                    <>
+                      <div className="space-y-1">
+                        <Label>Kira Dönemi</Label>
+                        <Select
+                          value={String(current.kiraDonemi || 'aylik')}
+                          onValueChange={val => setCurrent({ ...current, kiraDonemi: val as any })}
+                        >
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="aylik">Aylık</SelectItem>
+                            <SelectItem value="yillik">Yıllık</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label>
+                          {String(current.kiraDonemi || 'aylik') === 'yillik' ? 'Yıllık Kira Tutarı' : 'Aylık Kira Tutarı'}
+                        </Label>
+                        <Input
+                          type="number"
+                          inputMode="decimal"
+                          placeholder="Örn: 45000"
+                          value={current.aylikKira ?? ''}
+                          onChange={e => setCurrent({ ...current, aylikKira: e.target.value === '' ? undefined : Number(e.target.value) })}
+                        />
+                      </div>
+                    </>
                   )}
                   {(String(current.mulkiyet || '').toLowerCase() === 'kurum' ||
                     String(current.mulkiyet || '').toLowerCase() === 'satin_alma') && (
@@ -1427,7 +1445,9 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                 {(String(current.mulkiyet || '').toLowerCase() === 'kiralik' || String(current.mulkiyet || '').toLowerCase() === 'kira') &&
                   Number(current.aylikKira) > 0 && (
                     <p className="text-xs text-muted-foreground">
-                      Aylık maliyet: ₺{Number(current.aylikKira).toLocaleString('tr-TR')}
+                      {String(current.kiraDonemi || 'aylik') === 'yillik'
+                        ? `Aylık karşılık: ₺${(Number(current.aylikKira) / 12).toLocaleString('tr-TR', { maximumFractionDigits: 2 })} (yıllık ${Number(current.aylikKira).toLocaleString('tr-TR')})`
+                        : `Aylık maliyet: ₺${Number(current.aylikKira).toLocaleString('tr-TR')}`}
                     </p>
                   )}
                 {(String(current.mulkiyet || '').toLowerCase() === 'kurum' || String(current.mulkiyet || '').toLowerCase() === 'satin_alma') &&
