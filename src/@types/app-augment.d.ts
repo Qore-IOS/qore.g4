@@ -53,14 +53,18 @@ declare module "@/lib/types" {
     accessibleViews?: AppView[];
     name?: string;
     nfcId?: string;
+    companyId?: string;
     assignedLaboratories?: string[];
+    primaryLaboratories?: string[];
     assignedDepots?: string[];
     assignedBrands?: string[];
+    assignedLabGroups?: string[];
     phoneNumber?: string;
     createdAt?: TimestampLike;
     notificationsEnabled?: boolean;
     notificationPreferences?: string[];
     themePreference?: 'light' | 'dark' | 'system';
+    lastSelectedLabId?: string;
   }
 
   // ---------- Master Data ----------

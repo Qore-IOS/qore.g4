@@ -198,18 +198,21 @@ function assetMonthlyCostTL(asset: Asset): number {
 
 /**
  * Bir cihazın aylık maliyetini TL cinsinden döndürür.
- * - mulkiyet='kira' → aylikKira
- * - mulkiyet='satin_alma' → satinAlmaTutari / amortismanAyi
- * - mulkiyet='demobaz' veya tanımsız → 0
+ * Mülkiyet değerleri için hem yeni ('kira', 'satin_alma', 'demobaz') hem de
+ * sistemde halen kullanılan eski isimler ('kiralik', 'kurum', 'demirbas')
+ * desteklenir:
+ *   - kira / kiralik          → aylikKira
+ *   - satin_alma / kurum      → satinAlmaTutari / amortismanAyi
+ *   - demobaz / demirbas / diğer → 0
  */
 export function deviceMonthlyCostTL(device: Device | undefined, rates: Record<Currency, number>): number {
   if (!device) return 0;
   const cur = (device.maliyetCurrency || 'TRY') as Currency;
-  const m = device.mulkiyet as DeviceMulkiyetTipi | string | undefined;
-  if (m === 'kira') {
+  const m = String(device.mulkiyet || '').toLowerCase();
+  if (m === 'kira' || m === 'kiralik' || m === 'kiralık') {
     return toTRY(Number(device.aylikKira) || 0, cur, rates);
   }
-  if (m === 'satin_alma') {
+  if (m === 'satin_alma' || m === 'satinalma' || m === 'kurum') {
     const tutar = Number(device.satinAlmaTutari) || 0;
     const ay = Number(device.amortismanAyi) || 0;
     if (tutar > 0 && ay > 0) {
