@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Plus, Trash2, Loader2, Coins, Upload, Download, Search, X } from 'lucide-react';
+import { Plus, Trash2, Loader2, Coins, Upload, Download, Search, X, Calculator } from 'lucide-react';
+import TestCostDetailModal from '@/components/TestCostDetailModal';
 import {
   collection,
   addDoc,
@@ -69,6 +70,9 @@ export default function HakEdisPage() {
   // Excel import
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isImporting, setIsImporting] = useState(false);
+
+  // Cost detail modal
+  const [costDetailFor, setCostDetailFor] = useState<TestDefinitionGlobal | null>(null);
 
   // Döviz kurları
   const [exchangeRates, setExchangeRates] = useState<{ EUR: number; USD: number; TRY: number } | null>(null);
@@ -516,7 +520,7 @@ export default function HakEdisPage() {
                         <TableHead>SUT Test Adı</TableHead>
                         <TableHead>Bağlı Ürünler</TableHead>
                         <TableHead className="text-right w-[150px]">Hak Ediş (TL)</TableHead>
-                        <TableHead className="text-right w-[80px]">İşlem</TableHead>
+                        <TableHead className="text-right w-[140px]">İşlem</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -541,6 +545,14 @@ export default function HakEdisPage() {
                             ₺{Number(d.hakEdisMiktari || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
                           </TableCell>
                           <TableCell className="text-right">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="Maliyet Detayı"
+                              onClick={() => setCostDetailFor(d)}
+                            >
+                              <Calculator className="h-4 w-4 text-blue-600" />
+                            </Button>
                             <Button variant="ghost" size="icon" onClick={() => handleDelete(d.id)}>
                               <Trash2 className="h-4 w-4 text-destructive" />
                             </Button>
@@ -555,6 +567,13 @@ export default function HakEdisPage() {
           </Card>
         </CardContent>
       </Card>
+
+      <TestCostDetailModal
+        open={!!costDetailFor}
+        onOpenChange={(o) => !o && setCostDetailFor(null)}
+        testDef={costDetailFor}
+        allTestDefs={testDefs}
+      />
     </div>
   );
 }
