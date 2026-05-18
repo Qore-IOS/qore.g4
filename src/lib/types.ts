@@ -332,12 +332,24 @@ export interface LaboratoryStockCountSession { // New session type for labs
 }
 
 
+export type DeviceMulkiyetTipi = 'kira' | 'satin_alma' | 'demobaz';
+
 export interface Device {
   id: string;
   brand: string;
   model: string;
   imageUrl: string;
-  mulkiyet?: string;
+  mulkiyet?: DeviceMulkiyetTipi | string;
+  /** Sahiplik 'kira' ise aylık kira tutarı */
+  aylikKira?: number;
+  /** Sahiplik 'satin_alma' ise toplam satın alma tutarı */
+  satinAlmaTutari?: number;
+  /** Sahiplik 'satin_alma' ise satın alma tarihi (dd.MM.yyyy) */
+  satinAlmaTarihi?: string;
+  /** Sahiplik 'satin_alma' ise amortisman süresi (ay cinsinden) — aylık karşılık = satinAlmaTutari / amortismanAyi */
+  amortismanAyi?: number;
+  /** Maliyet alanlarının para birimi (varsayılan TRY) */
+  maliyetCurrency?: 'EUR' | 'USD' | 'TRY';
   kurulumTarihi?: string;
   kurulumPersonelleri?: string;
   aciklama?: string;
@@ -824,7 +836,6 @@ export interface PendingReturn {
   confirmedByUid?: string;
   confirmedByName?: string;
   imageUrl?: string;           // Cihazdan çıkan parça fotoğrafı URL
-  returnCondition?: 'iyi' | 'arizali' | 'miadi_gecmis' | 'diger';
   returnConditionNote?: string;
 }
 
@@ -1009,6 +1020,102 @@ export interface TestDefinition {
   id: string;
   name: string;
   linkedProductCode: string; // stokKodu
+}
+
+/**
+ * Envanter (zimmet edilebilen demirbaş) — bilgisayar, barkod okuyucu,
+ * dolap, klima vb. Maliyet hesabında lab'ın "envanter maliyeti" kalemine girer.
+ */
+export interface Asset {
+  id: string;
+  category: string;
+  demirbasNo: string;
+  urunKodu?: string;
+  urunAdi: string;
+  marka?: string;
+  model?: string;
+  seriNumarasi?: string;
+  durum?: 'iyi' | 'orta' | 'kötü' | 'çok kötü';
+  konum: string;
+  manuelKonum?: string;
+  alimFiyatiTl?: number;
+  satinAlmaTarihi?: string;
+  garantiBitisTarihi?: string;
+  planliKullanimOmruYil?: number;
+  amortismanYontemi?: 'dogrusal' | 'azalan_bakiye';
+  amortismanBaslangicTarihi?: string;
+  hurdaTarihi?: string;
+  imhaTarihi?: string;
+  satisTarihi?: string;
+  sonBakimTarihi?: string;
+  sonrakiBakimTarihi?: string;
+  sonKalibrasyonTarihi?: string;
+  sonrakiKalibrasyonTarihi?: string;
+  bakimMaliyetiTl?: number;
+  zimmetliKisi?: string;
+  checkOutTarihi?: string;
+  checkInTarihi?: string;
+  dijitalImza?: string;
+  zimmetFisNo?: string;
+  teslimEdilenPersonel?: string;
+  aciklama?: string;
+  companyId?: string;
+}
+
+/**
+ * Global test/hak ediş tanımı.
+ *
+ * Eski model: her laboratuvarın subcollection'ı `hospitals/{labId}/hakEdisDefinitions`
+ * altında ayrı SUT tanımları vardı. Yeni model bu tanımları sistem geneline taşır
+ * (tek bir koleksiyon: `testDefinitions`) ve aynı testi birden fazla ürüne
+ * (kit + sarf gibi) bağlayabilmek için `linkedStokKodlari` array'ini kullanır.
+ */
+export interface TestDefinitionGlobal {
+  id: string;
+  /** SUT kodu (örn: "900.010") */
+  sutKodu: string;
+  /** SUT test adı (örn: "Glikoz Tayini") */
+  sutTestAdi: string;
+  /** Bu teste bağlı bir veya birden çok ürün stok kodu */
+  linkedStokKodlari: string[];
+  /** SUT karşılığı hak ediş tutarı (TL) */
+  hakEdisMiktari: number;
+  /** Hak ediş tutarının para birimi (varsayılan TRY) */
+  currency?: 'EUR' | 'USD' | 'TRY';
+  aktif: boolean;
+  createdAt: TimestampLike;
+  createdByUid?: string;
+  createdByName?: string;
+  updatedAt?: TimestampLike;
+  companyId?: string;
+}
+
+/**
+ * Personel (laboratuvarda çalışan) modeli.
+ *
+ * Sisteme login olan kullanıcı `User` ile karıştırılmamalıdır; bir personel
+ * istenirse bir `User` ile eşleştirilebilir (`userId`).
+ */
+export interface Personnel {
+  id: string;
+  adSoyad: string;
+  pozisyon?: string;
+  /** Personelin görev yaptığı laboratuvarların id listesi */
+  assignedLabIds: string[];
+  /** Ana sorumluluk laboratuvarı (raporlamada ağırlıklandırma için) */
+  primaryLabId?: string;
+  /** Aylık brüt maaş */
+  aylikBrutMaas: number;
+  /** Aylık yan haklar (yemek, yol, sigorta vb.) */
+  aylikYanHaklar?: number;
+  currency: 'EUR' | 'USD' | 'TRY';
+  aktif: boolean;
+  baslamaTarihi?: string;
+  /** Varsa bağlı kullanıcı UID'si */
+  userId?: string;
+  companyId?: string;
+  createdAt?: TimestampLike;
+  updatedAt?: TimestampLike;
 }
 
 export interface LabPool {

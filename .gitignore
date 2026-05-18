@@ -54,3 +54,4 @@ qore-studio-work
 # Environment files
 .env.local
 .env*.local
+.test-dist-cost/

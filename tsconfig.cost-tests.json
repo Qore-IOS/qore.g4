@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.tests.json",
+  "include": [
+    "tests/test-cost-calculator.test.ts",
+    "src/lib/test-cost-calculator.ts",
+    "src/lib/types.ts",
+    "src/lib/tracking.ts",
+    "src/@types/**/*.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    ".next",
+    ".test-dist",
+    "tests/direkt-transfer/**",
+    "tests/urun-kullanim/**",
+    "tests/mal-kabul/**",
+    "tests/siparisler/**",
+    "tests/verimlilik/**"
+  ]
+}

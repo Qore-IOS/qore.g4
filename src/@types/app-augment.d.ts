@@ -709,6 +709,40 @@ declare module "@/lib/types" {
     linkedProductCode: string; // stokKodu
   }
 
+  export type DeviceMulkiyetTipi = 'kira' | 'satin_alma' | 'demobaz';
+
+  export interface TestDefinitionGlobal {
+    id: string;
+    sutKodu: string;
+    sutTestAdi: string;
+    linkedStokKodlari: string[];
+    hakEdisMiktari: number;
+    currency?: 'EUR' | 'USD' | 'TRY';
+    aktif: boolean;
+    createdAt: TimestampLike;
+    createdByUid?: string;
+    createdByName?: string;
+    updatedAt?: TimestampLike;
+    companyId?: string;
+  }
+
+  export interface Personnel {
+    id: string;
+    adSoyad: string;
+    pozisyon?: string;
+    assignedLabIds: string[];
+    primaryLabId?: string;
+    aylikBrutMaas: number;
+    aylikYanHaklar?: number;
+    currency: 'EUR' | 'USD' | 'TRY';
+    aktif: boolean;
+    baslamaTarihi?: string;
+    userId?: string;
+    companyId?: string;
+    createdAt?: TimestampLike;
+    updatedAt?: TimestampLike;
+  }
+
   export interface LabPool {
     id: string;
     name: string;
