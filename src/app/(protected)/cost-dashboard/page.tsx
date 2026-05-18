@@ -51,7 +51,7 @@ export default function CostDashboardPage() {
       icon: BarChart3,
       label: 'Maliyet Gözlem',
       description: 'Envanter maliyeti, trendler ve marka bazlı analizler',
-      href: '/cost-dashboard/gozlem',
+      href: '/maliyet-gozlem',
     },
   ];
 
