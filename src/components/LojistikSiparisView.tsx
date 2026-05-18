@@ -54,6 +54,7 @@ import { toDateFromAny } from '@/lib/date';
 import OrderConfirmAnimation from '@/components/lojistik-terminal/order-confirm-animation';
 import DeliveryHistory, { type PartialDelivery } from '@/components/lojistik-terminal/delivery-history';
 import { exportOrdersToExcel } from '@/lib/lojistik/export-orders';
+import { sumStockItemQuantities } from '@/lib/stock-quantity';
 
 type LojFilter = 'all' | 'pending' | 'toplaniyor' | 'eksik';
 
@@ -411,7 +412,7 @@ export default function LojistikSiparisView() {
   const computeLabInfo = useCallback(
     (stokKodu: string): LabStockInfo => {
       const items = labStockByStokKodu.get(stokKodu) || [];
-      const totalAdet = items.length;
+      const totalAdet = sumStockItemQuantities(items);
 
       let closestLot: LabStockInfo['closestLot'] = null;
       if (items.length > 0) {
@@ -429,14 +430,14 @@ export default function LojistikSiparisView() {
           first.miad instanceof Timestamp
             ? formatDate(first.miad.toDate(), 'dd.MM.yyyy')
             : String(first.miad || '-');
-        const lotCount = items.filter(
+        const lotItems = items.filter(
           (x) =>
             (x.lotNumarasi ?? '') === firstLot &&
             (x.miad instanceof Timestamp
               ? formatDate(x.miad.toDate(), 'dd.MM.yyyy')
               : String(x.miad || '-')) === firstMiad
-        ).length;
-        closestLot = { lotNumarasi: firstLot || '-', miad: firstMiad, adet: lotCount };
+        );
+        closestLot = { lotNumarasi: firstLot || '-', miad: firstMiad, adet: sumStockItemQuantities(lotItems) };
       }
 
       let lastTransfer: LabStockInfo['lastTransfer'] = null;

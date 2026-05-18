@@ -91,6 +91,7 @@ type PeripheralFulfillmentItem = {
 };
 import { emitOrderCreatedFromRequest } from '@/lib/notifications';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
+import { sumStockItemQuantities } from '@/lib/stock-quantity';
 import { siparislerLogger } from '@/lib/logger';
 import LojistikSiparisView from '@/components/LojistikSiparisView';
 import { formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
@@ -415,9 +416,9 @@ export default function SiparislerPanel(): JSX.Element {
       const depot = depots.find(d => d.id === depotId)!;
       const rules = await fetchRules('depots', depotId);
       const rows = Object.values(rules).map(rule => {
-        const have = depoStok.filter(
+        const have = sumStockItemQuantities(depoStok.filter(
           st => st.depotId === depotId && !st.isShipped && st.stokKodu === rule.stokKodu
-        ).length;
+        ));
         const maxValue = rule.max ?? 0;
         const need = maxValue - have;
         return {
@@ -436,9 +437,9 @@ export default function SiparislerPanel(): JSX.Element {
       const lab = hospitals.find(h => h.id === labId)!;
       const rules = await fetchRules('hospitals', labId);
       const rows = Object.values(rules).map(rule => {
-        const have = depoStok.filter(
+        const have = sumStockItemQuantities(depoStok.filter(
           st => st.isShipped && (st.hedefKurumId === lab.id || (!st.hedefKurumId && st.hedefKurum === lab.name)) && st.stokKodu === rule.stokKodu
-        ).length;
+        ));
         const maxValue = rule.max ?? 0;
         const need = maxValue - have;
         return {
@@ -482,18 +483,18 @@ export default function SiparislerPanel(): JSX.Element {
     const neededItems: OrderItem[] = [];
   
     for (const rule of Object.values(rules)) {
-      const labStockCount = depoStok.filter(
+      const labStockCount = sumStockItemQuantities(depoStok.filter(
         st => st.isShipped && (st.hedefKurumId === hospital.id || (!st.hedefKurumId && st.hedefKurum === hospital.name)) && st.stokKodu === rule.stokKodu
-      ).length;
+      ));
       const maxValue = rule.max ?? 0;
       const need = maxValue - labStockCount;
   
       if (need > 0) {
         const product = productCodes.find(p => p.stokKodu === rule.stokKodu);
         if (product) {
-          const depotStockCount = depoStok.filter(
+          const depotStockCount = sumStockItemQuantities(depoStok.filter(
             st => st.depotId === selectedDepotId && !st.isShipped && st.stokKodu === rule.stokKodu
-          ).length;
+          ));
           
           neededItems.push({
             id: generateId(),
