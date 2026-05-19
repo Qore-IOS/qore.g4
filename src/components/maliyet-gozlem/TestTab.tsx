@@ -318,6 +318,161 @@ function MultiSelect({ label, options, selected, onChange, placeholder, width = 
   );
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// HeroKpiCard — mock'taki "Sales This Month $23,876" stili (mobile)
+// ────────────────────────────────────────────────────────────────────────────
+
+interface HeroKpiCardProps {
+  label: string;
+  value: number;
+  sub?: string;
+  color?: string;
+  trend?: string;
+  trendPositive?: boolean;
+  decimals?: number;
+  isCount?: boolean;
+}
+
+function HeroKpiCard({ label, value, sub, color = '#fb923c', trend, trendPositive, decimals = 0, isCount = false }: HeroKpiCardProps) {
+  const rounded = decimals > 0 ? value.toFixed(decimals) : Math.round(value).toString();
+  const [intPart, fracPart] = rounded.split('.');
+  const intFormatted = (+intPart).toLocaleString('tr-TR');
+  // Currency symbol veya count
+  const symbol = isCount ? '' : '₺';
+
+  return (
+    <div
+      style={{
+        flex: '0 0 88%',
+        scrollSnapAlign: 'start',
+        background: 'var(--mg-surface)',
+        border: '1px solid var(--mg-border)',
+        borderRadius: 22,
+        padding: '18px 18px 16px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 16,
+        minHeight: 200,
+        position: 'relative',
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          position: 'absolute',
+          top: -40,
+          right: -40,
+          width: 140,
+          height: 140,
+          borderRadius: '50%',
+          background: color,
+          filter: 'blur(60px)',
+          opacity: 0.06,
+          pointerEvents: 'none',
+        }}
+      />
+
+      {/* Üst satır: etiket + arrow button */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--mg-muted)' }}>{label}</span>
+        <button
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: '50%',
+            border: '1px solid var(--mg-border-strong)',
+            background: 'transparent',
+            color: 'var(--mg-text-2)',
+            cursor: 'pointer',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0,
+          }}
+          aria-label="Detay"
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M7 17 17 7M7 7h10v10" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Büyük rakam */}
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+        {symbol && (
+          <span style={{ fontSize: 22, fontWeight: 300, color: 'var(--mg-text)', letterSpacing: '-0.02em' }}>{symbol}</span>
+        )}
+        <span
+          style={{
+            fontSize: 48,
+            fontWeight: 500,
+            color: 'var(--mg-text)',
+            letterSpacing: '-0.04em',
+            fontVariantNumeric: 'tabular-nums',
+            lineHeight: 1,
+          }}
+        >
+          {intFormatted}
+        </span>
+        {fracPart && (
+          <span style={{ fontSize: 22, fontWeight: 400, color: 'var(--mg-muted)', letterSpacing: '-0.02em' }}>,{fracPart}</span>
+        )}
+        {trend && (
+          <span
+            style={{
+              marginLeft: 4,
+              color: trendPositive ? 'var(--mg-success)' : 'var(--mg-danger)',
+              fontSize: 16,
+              fontWeight: 600,
+            }}
+          >
+            {trendPositive ? '↑' : '↓'}
+          </span>
+        )}
+      </div>
+
+      {/* Alt satır: Geçen Dönem (çapraz çizgili) + Bu Dönem (renkli pill) */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 'auto' }}>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <div
+            style={{
+              flex: 1,
+              height: 36,
+              borderRadius: 10,
+              background: `repeating-linear-gradient(45deg, transparent, transparent 4px, var(--mg-border) 4px, var(--mg-border) 5px)`,
+              border: '1px solid var(--mg-border)',
+            }}
+          />
+          <div
+            style={{
+              flex: 1,
+              height: 36,
+              borderRadius: 10,
+              background: trendPositive ? 'var(--mg-success-soft)' : 'var(--mg-danger-soft)',
+              border: '1px solid ' + (trendPositive ? 'var(--mg-success-soft)' : 'var(--mg-danger-soft)'),
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: trendPositive ? 'var(--mg-success)' : 'var(--mg-danger)',
+              fontSize: 13,
+              fontWeight: 700,
+              letterSpacing: '0.01em',
+            }}
+          >
+            {trend || '—'}
+          </div>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+          <span style={{ fontSize: 10, fontWeight: 500, color: 'var(--mg-muted)' }}>Geçen Dönem</span>
+          <span style={{ fontSize: 10, fontWeight: 600, color: trendPositive ? 'var(--mg-success)' : 'var(--mg-danger)' }}>
+            {sub || 'Bu Dönem'}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function FilterBar({
   labs,
   selectedLabIds,
@@ -1127,8 +1282,51 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
     );
   }
 
+  // Mobil: mock-uyumlu hero kartlar (yatay scroll carousel)
+  const heroKpis = [
+    {
+      key: 'total',
+      label: 'Toplam Test Maliyeti',
+      value: filteredTotal,
+      sub: `${filteredVolume.toLocaleString('tr-TR')} test`,
+      color: '#fb923c',
+      trend: '+12%',
+      trendPositive: false,
+    },
+    {
+      key: 'avg',
+      label: 'Test Başına Ort.',
+      value: filteredAvgUnit,
+      sub: 'ağırlıklı',
+      color: '#6ea8ff',
+      trend: '+6%',
+      trendPositive: false,
+      decimals: 2,
+    },
+    {
+      key: 'most-expensive',
+      label: 'En Pahalı Test',
+      value: mostExpensive?.costPerTestTL || 0,
+      sub: mostExpensive?.sutTestAdi || '—',
+      color: '#a78bfa',
+      trend: '+18%',
+      trendPositive: false,
+      decimals: 2,
+    },
+    {
+      key: 'most-frequent',
+      label: 'En Çok Test',
+      value: mostFrequent?.totalTestUnits || 0,
+      sub: mostFrequent?.sutTestAdi || '—',
+      color: '#42e46d',
+      trend: '+4%',
+      trendPositive: true,
+      isCount: true,
+    },
+  ];
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? 12 : 20 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? 18 : 20 }}>
       {/* Filtre bar */}
       <FilterBar
         labs={labs}
@@ -1142,25 +1340,43 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
       />
 
       {/* KPI Row */}
-      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(220px, 1fr))', gap: isMobile ? 8 : 16 }}>
-        <MiniStat label={`Toplam Test Maliyeti (${periot.type})`} value={filteredTotal} sub={`${filteredVolume.toLocaleString('tr-TR')} test`} color="#fb923c" />
-        <MiniStat label="Test Başına Ort." value={filteredAvgUnit} sub="Ağırlıklı" color="#6ea8ff" decimals={2} />
-        <MiniStat
-          label="En Pahalı Test"
-          value={mostExpensive?.costPerTestTL || 0}
-          sub={mostExpensive?.sutTestAdi || ''}
-          color="#a78bfa"
-          decimals={2}
-        />
-        <MiniStat
-          label="En Çok Test"
-          value={mostFrequent?.totalTestUnits || 0}
-          sub={mostFrequent?.sutTestAdi || ''}
-          color="#42e46d"
-          isCount
-          unit="adet"
-        />
-      </div>
+      {isMobile ? (
+        <div
+          style={{
+            display: 'flex',
+            gap: 12,
+            overflowX: 'auto',
+            overflowY: 'hidden',
+            scrollSnapType: 'x mandatory',
+            margin: '0 -16px',
+            padding: '0 16px',
+          }}
+        >
+          {heroKpis.map((k) => (
+            <HeroKpiCard key={k.key} {...k} />
+          ))}
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
+          <MiniStat label={`Toplam Test Maliyeti (${periot.type})`} value={filteredTotal} sub={`${filteredVolume.toLocaleString('tr-TR')} test`} color="#fb923c" />
+          <MiniStat label="Test Başına Ort." value={filteredAvgUnit} sub="Ağırlıklı" color="#6ea8ff" decimals={2} />
+          <MiniStat
+            label="En Pahalı Test"
+            value={mostExpensive?.costPerTestTL || 0}
+            sub={mostExpensive?.sutTestAdi || ''}
+            color="#a78bfa"
+            decimals={2}
+          />
+          <MiniStat
+            label="En Çok Test"
+            value={mostFrequent?.totalTestUnits || 0}
+            sub={mostFrequent?.sutTestAdi || ''}
+            color="#42e46d"
+            isCount
+            unit="adet"
+          />
+        </div>
+      )}
 
       {/* Activities + Insights */}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 3fr) minmax(0, 1fr)', gap: isMobile ? 12 : 16 }}>

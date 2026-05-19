@@ -393,6 +393,178 @@ function TabSwitcher({ value, onChange, counts }: TabSwitcherProps) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// MobileHeader — mock'taki "Dashboard / Customer" stili
+// ────────────────────────────────────────────────────────────────────────────
+
+interface MobileHeaderProps {
+  tab: TabKey;
+  setTab: (t: TabKey) => void;
+  currency: Currency;
+  setCurrency: (c: Currency) => void;
+  search: string;
+  setSearch: (s: string) => void;
+}
+
+function MobileHeader({ tab, setTab, currency, setCurrency, search, setSearch }: MobileHeaderProps) {
+  const [searchOpen, setSearchOpen] = useState(false);
+  const activeLabel = tab === 'stok' ? 'Stok' : 'Test';
+  const otherKey: TabKey = tab === 'stok' ? 'test' : 'stok';
+  const otherLabel = tab === 'stok' ? 'Test' : 'Stok';
+
+  return (
+    <header
+      style={{
+        flexShrink: 0,
+        padding: '14px 16px 4px',
+        background: 'var(--mg-bg)',
+        position: 'sticky',
+        top: 0,
+        zIndex: 50,
+      }}
+    >
+      {/* Üst satır: 4-nokta menü + Ayarlar + Arama */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+        <div
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: '50%',
+            background: 'var(--mg-surface)',
+            border: '1px solid var(--mg-border)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'var(--mg-text-2)',
+          }}
+          aria-hidden
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <circle cx="5" cy="5" r="2" />
+            <circle cx="12" cy="5" r="2" />
+            <circle cx="19" cy="5" r="2" />
+            <circle cx="5" cy="12" r="2" />
+            <circle cx="12" cy="12" r="2" />
+            <circle cx="19" cy="12" r="2" />
+            <circle cx="5" cy="19" r="2" />
+            <circle cx="12" cy="19" r="2" />
+            <circle cx="19" cy="19" r="2" />
+          </svg>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <SettingsMenu currency={currency} setCurrency={setCurrency} />
+          <button
+            onClick={() => setSearchOpen((v) => !v)}
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: '50%',
+              background: 'var(--mg-surface)',
+              border: '1px solid var(--mg-border)',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--mg-text-2)',
+            }}
+            aria-label="Ara"
+          >
+            <Search size={14} />
+          </button>
+        </div>
+      </div>
+
+      {searchOpen && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            background: 'var(--mg-surface)',
+            borderRadius: 10,
+            padding: '8px 14px',
+            border: '1px solid var(--mg-border)',
+            marginBottom: 14,
+          }}
+        >
+          <Search size={14} style={{ color: 'var(--mg-muted)' }} />
+          <input
+            autoFocus
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Ara…"
+            style={{
+              background: 'none',
+              border: 'none',
+              outline: 'none',
+              flex: 1,
+              color: 'var(--mg-text)',
+              fontSize: 13,
+              fontFamily: 'inherit',
+              fontWeight: 500,
+              minWidth: 0,
+            }}
+          />
+          {search && (
+            <button
+              onClick={() => setSearch('')}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--mg-muted)' }}
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Büyük başlık + sağda diğer tab */}
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12 }}>
+        <h1
+          style={{
+            fontSize: 44,
+            fontWeight: 600,
+            letterSpacing: '-0.04em',
+            color: 'var(--mg-text)',
+            margin: 0,
+            lineHeight: 1,
+          }}
+        >
+          {activeLabel}
+        </h1>
+        <button
+          onClick={() => setTab(otherKey)}
+          style={{
+            background: 'none',
+            border: 'none',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            fontSize: 18,
+            fontWeight: 500,
+            color: 'var(--mg-muted)',
+            letterSpacing: '-0.02em',
+            paddingBottom: 4,
+          }}
+        >
+          {otherLabel}
+        </button>
+      </div>
+
+      {/* Alt çizgi (sol = aktif tab altında dolu çizgi) */}
+      <div
+        style={{
+          marginTop: 10,
+          display: 'grid',
+          gridTemplateColumns: '1fr 1fr',
+          gap: 0,
+        }}
+      >
+        <div style={{ height: 1.5, background: 'var(--mg-text)' }} />
+        <div style={{ height: 1.5, background: 'var(--mg-border)' }} />
+      </div>
+    </header>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Container
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -425,13 +597,19 @@ export default function MaliyetGozlemMerkezi({ initialTab = 'test' }: MaliyetGoz
         letterSpacing: '-0.005em',
       }}
     >
-      <Header search={search} setSearch={setSearch} currency={currency} setCurrency={setCurrency} />
-      <TabSwitcher value={tab} onChange={setTab} counts={counts} />
+      {isMobile ? (
+        <MobileHeader tab={tab} setTab={setTab} currency={currency} setCurrency={setCurrency} search={search} setSearch={setSearch} />
+      ) : (
+        <>
+          <Header search={search} setSearch={setSearch} currency={currency} setCurrency={setCurrency} />
+          <TabSwitcher value={tab} onChange={setTab} counts={counts} />
+        </>
+      )}
 
       <main
         style={{
           flex: 1,
-          padding: isMobile ? '12px 12px 24px' : '24px',
+          padding: isMobile ? '0 16px 24px' : '24px',
         }}
       >
         {tab === 'stok' ? (
