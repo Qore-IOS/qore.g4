@@ -25,6 +25,7 @@ import {
 } from '@/lib/cost-analytics';
 import { ActivitiesPanel, InsightsCard, MiniStat, SectionHeader, Card, HBarList } from './primitives';
 import { DonutChart } from './charts';
+import { useIsMobile } from './useIsMobile';
 import { Loader2 } from 'lucide-react';
 
 interface StokTabProps {
@@ -35,6 +36,7 @@ const BRAND_COLORS = ['#fb923c', '#a78bfa', '#3b82f6', '#42e46d', '#6ea8ff', '#f
 
 export function StokTab({ currency }: StokTabProps) {
   const { currentCompanyId, isSuperAdmin } = useAuth();
+  const isMobile = useIsMobile();
   const [loading, setLoading] = useState(true);
   const [sessions, setSessions] = useState<SayimSession[]>([]);
   const [productMap, setProductMap] = useState<Map<string, ProductCode>>(new Map());
@@ -123,9 +125,9 @@ export function StokTab({ currency }: StokTabProps) {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? 12 : 20 }}>
       {/* KPI Row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(220px, 1fr))', gap: isMobile ? 8 : 16 }}>
         <MiniStat label={`Toplam Envanter (${currency})`} value={total} sub="Son sayımlar" color="#fb923c" />
         <MiniStat label="Lokasyon Sayısı" value={locations.length} sub="aktif" color="#6ea8ff" isCount unit="lab/depo" />
         <MiniStat label="Marka Sayısı" value={brands.length} sub="aktif" color="#a78bfa" isCount unit="marka" />
@@ -133,7 +135,7 @@ export function StokTab({ currency }: StokTabProps) {
       </div>
 
       {/* Activities + Insights */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 3fr) minmax(0, 1fr)', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 3fr) minmax(0, 1fr)', gap: isMobile ? 12 : 16 }}>
         <ActivitiesPanel
           count={trend.length + locations.length + brands.length}
           title="Maliyet Aktiviteleri"
@@ -247,7 +249,7 @@ export function StokTab({ currency }: StokTabProps) {
       </div>
 
       {/* Brand + Group */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr', gap: 20 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1.4fr', gap: isMobile ? 12 : 20 }}>
         <Card>
           <SectionHeader
             icon={

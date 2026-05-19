@@ -28,6 +28,7 @@ import type {
   Currency,
 } from '../../lib/types';
 import { ActivitiesPanel, InsightsCard, MiniStat, SectionHeader, Card } from './primitives';
+import { useIsMobile } from './useIsMobile';
 import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { filterByCompanyScope } from '@/lib/company-scope';
@@ -100,7 +101,7 @@ function MultiSelect({ label, options, selected, onChange, placeholder, width = 
         : `${selected.length} seçili`;
 
   return (
-    <div ref={ref} style={{ position: 'relative', minWidth: width }}>
+    <div ref={ref} style={{ position: 'relative', minWidth: width || undefined, width: width === 0 ? '100%' : undefined }}>
       <button
         onClick={() => setOpen((v) => !v)}
         style={{
@@ -327,6 +328,7 @@ function FilterBar({
   periot,
   setPeriot,
 }: Omit<FilterBarProps, 'search' | 'setSearch'>) {
+  const isMobile = useIsMobile();
   const periodOpts: { k: PeriotConfig['type']; label: string }[] = [
     { k: 'gunluk', label: 'Günlük' },
     { k: 'aylik', label: 'Aylık' },
@@ -334,16 +336,17 @@ function FilterBar({
   ];
 
   return (
-    <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+    <div style={{ display: 'flex', gap: isMobile ? 8 : 12, alignItems: isMobile ? 'stretch' : 'center', flexWrap: 'wrap', flexDirection: isMobile ? 'column' : 'row' }}>
       {/* Periyot toggle */}
       <div
         style={{
-          display: 'inline-flex',
+          display: 'flex',
           gap: 4,
           background: 'var(--mg-surface-2)',
           padding: 4,
           borderRadius: 10,
           border: '1px solid var(--mg-border)',
+          width: isMobile ? '100%' : undefined,
         }}
       >
         {periodOpts.map((o) => (
@@ -351,7 +354,7 @@ function FilterBar({
             key={o.k}
             onClick={() => setPeriot({ type: o.k })}
             style={{
-              padding: '5px 12px',
+              padding: isMobile ? '6px 12px' : '5px 12px',
               borderRadius: 7,
               border: 'none',
               cursor: 'pointer',
@@ -363,6 +366,7 @@ function FilterBar({
               color: periot.type === o.k ? '#0a0a0c' : 'var(--mg-text-2)',
               transition: 'all 0.2s',
               boxShadow: periot.type === o.k ? '0 2px 8px rgba(251,146,60,0.3)' : 'none',
+              flex: isMobile ? 1 : undefined,
             }}
           >
             {o.label}
@@ -377,6 +381,7 @@ function FilterBar({
         options={labs.map((l) => ({ id: l.id, label: l.name }))}
         selected={selectedLabIds}
         onChange={setSelectedLabIds}
+        width={isMobile ? 0 : 280}
       />
 
       {/* Test seçici (aramalı multiselect) */}
@@ -390,7 +395,7 @@ function FilterBar({
         }))}
         selected={selectedTestIds}
         onChange={setSelectedTestIds}
-        width={320}
+        width={isMobile ? 0 : 320}
       />
     </div>
   );
@@ -413,8 +418,125 @@ interface TestRowProps {
 }
 
 function TestRow({ result, expanded, onToggle, maxTotal }: TestRowProps) {
+  const isMobile = useIsMobile();
   const totalPct = (result.testTotalCostTL / Math.max(maxTotal, 1)) * 100;
   const c = result.marjTL >= 0 ? 'var(--mg-success)' : 'var(--mg-danger)';
+
+  // Mobil: dikey kart yapısı
+  if (isMobile) {
+    return (
+      <>
+        <div
+          onClick={onToggle}
+          style={{
+            padding: '12px 14px',
+            background: expanded ? 'var(--mg-surface-2)' : 'transparent',
+            borderRadius: 12,
+            cursor: 'pointer',
+            border: '1px solid var(--mg-border)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8,
+            marginBottom: 6,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+            <span style={{ width: 4, height: 24, borderRadius: 2, background: c, flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--mg-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {result.sutTestAdi}
+              </div>
+              <div style={{ fontSize: 10, color: 'var(--mg-muted)', marginTop: 1 }}>
+                SUT {result.sutKodu} · {result.linkedStokKodlari.length} ürün
+              </div>
+            </div>
+            <div
+              style={{
+                color: 'var(--mg-muted)',
+                transform: expanded ? 'rotate(180deg)' : 'none',
+                transition: 'transform 0.3s',
+                flexShrink: 0,
+              }}
+            >
+              <ChevronDown size={16} />
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+            <div>
+              <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--mg-muted)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Birim</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--mg-text)', fontVariantNumeric: 'tabular-nums' }}>{fmtTL(result.costPerTestTL)}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--mg-muted)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Adet</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--mg-text-2)', fontVariantNumeric: 'tabular-nums' }}>{result.totalTestUnits.toLocaleString('tr-TR')}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 9, fontWeight: 700, color: 'var(--mg-muted)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Marj</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: c, fontVariantNumeric: 'tabular-nums' }}>
+                {result.marjTL >= 0 ? '↑' : '↓'} {fmtTL(Math.abs(result.marjTL))}
+              </div>
+            </div>
+          </div>
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--mg-muted)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Toplam</span>
+              <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--mg-accent)', fontVariantNumeric: 'tabular-nums' }}>
+                {fmtTL(result.testTotalCostTL, 0)}
+              </span>
+            </div>
+            <div style={{ height: 3, background: 'var(--mg-surface-2)', borderRadius: 2, overflow: 'hidden', marginTop: 4 }}>
+              <div style={{ height: '100%', width: `${totalPct}%`, background: c, borderRadius: 2 }} />
+            </div>
+          </div>
+        </div>
+        {expanded && (
+          <div style={{ background: 'var(--mg-surface-2)', borderRadius: 12, padding: '12px 14px 14px', marginTop: -4, marginBottom: 8, border: `1px solid ${c}33` }}>
+            <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--mg-muted)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 8 }}>Maliyet Bileşenleri</div>
+            {[
+              { label: 'Stok (anlık)', v: result.stockCostTL, color: '#fb923c' },
+              { label: 'Envanter', v: result.inventoryCostTL, color: '#3b82f6' },
+              { label: 'Cihaz', v: result.deviceCostMonthlyTL, color: '#a78bfa' },
+              { label: 'Personel', v: result.personnelCostMonthlyTL, color: '#10b981' },
+              { label: 'Diğer testler stoğu', v: result.otherTestsStockCostTL, color: '#71717a' },
+            ].map((comp, i) => {
+              const pct = result.testTotalCostTL > 0 ? (comp.v / result.testTotalCostTL) * 100 : 0;
+              return (
+                <div key={i} style={{ marginBottom: 8 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                    <span style={{ fontSize: 11, color: 'var(--mg-text-2)', fontWeight: 600 }}>{comp.label}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: comp.color, fontVariantNumeric: 'tabular-nums' }}>
+                      {fmtTL(comp.v, 0)} · %{pct.toFixed(0)}
+                    </span>
+                  </div>
+                  <div style={{ height: 5, background: 'var(--mg-surface)', borderRadius: 3, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${pct}%`, background: comp.color, borderRadius: 3 }} />
+                  </div>
+                </div>
+              );
+            })}
+            {result.perLab.length > 0 && (
+              <>
+                <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--mg-muted)', letterSpacing: '0.1em', textTransform: 'uppercase', marginTop: 10, marginBottom: 6 }}>
+                  Lab Kırılımı
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {result.perLab.map((l) => (
+                    <div key={l.labId} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 8px', background: 'var(--mg-surface)', borderRadius: 6, fontSize: 11 }}>
+                      <span style={{ fontWeight: 600, color: 'var(--mg-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.labName}</span>
+                      <span style={{ color: 'var(--mg-muted)', fontVariantNumeric: 'tabular-nums', flexShrink: 0, marginLeft: 8 }}>
+                        {l.testUnits.toLocaleString('tr-TR')}t
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </>
+    );
+  }
+
   return (
     <>
       <div
@@ -717,6 +839,7 @@ interface TestTabProps {
 
 export function TestTab({ currency: _currency, search, setSearch }: TestTabProps) {
   const { currentCompanyId, isSuperAdmin } = useAuth();
+  const isMobile = useIsMobile();
 
   const [loading, setLoading] = useState(true);
   const [labs, setLabs] = useState<Hospital[]>([]);
@@ -911,7 +1034,7 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? 12 : 20 }}>
       {/* Filtre bar */}
       <FilterBar
         labs={labs}
@@ -925,7 +1048,7 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
       />
 
       {/* KPI Row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(220px, 1fr))', gap: isMobile ? 8 : 16 }}>
         <MiniStat label={`Toplam Test Maliyeti (${periot.type})`} value={filteredTotal} sub={`${filteredVolume.toLocaleString('tr-TR')} test`} color="#fb923c" />
         <MiniStat label="Test Başına Ort." value={filteredAvgUnit} sub="Ağırlıklı" color="#6ea8ff" decimals={2} />
         <MiniStat
@@ -946,7 +1069,7 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
       </div>
 
       {/* Activities + Insights */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 3fr) minmax(0, 1fr)', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 3fr) minmax(0, 1fr)', gap: isMobile ? 12 : 16 }}>
         <ActivitiesPanel
           count={filtered.length}
           title="Test Maliyetleri"
@@ -1127,28 +1250,30 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
           </div>
         )}
 
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'minmax(0,1.8fr) minmax(0,1fr) 100px 110px 140px 90px 24px',
-            gap: 16,
-            padding: '12px 18px',
-            fontSize: 10,
-            fontWeight: 800,
-            color: 'var(--mg-muted)',
-            letterSpacing: '0.1em',
-            textTransform: 'uppercase',
-            borderBottom: '1px solid var(--mg-border)',
-          }}
-        >
-          <div>Test</div>
-          <div>Ürünler</div>
-          <div style={{ textAlign: 'right' }}>Birim ₺</div>
-          <div style={{ textAlign: 'right' }}>Adet</div>
-          <div style={{ textAlign: 'right' }}>Toplam</div>
-          <div style={{ textAlign: 'right' }}>Marj</div>
-          <div></div>
-        </div>
+        {!isMobile && (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(0,1.8fr) minmax(0,1fr) 100px 110px 140px 90px 24px',
+              gap: 16,
+              padding: '12px 18px',
+              fontSize: 10,
+              fontWeight: 800,
+              color: 'var(--mg-muted)',
+              letterSpacing: '0.1em',
+              textTransform: 'uppercase',
+              borderBottom: '1px solid var(--mg-border)',
+            }}
+          >
+            <div>Test</div>
+            <div>Ürünler</div>
+            <div style={{ textAlign: 'right' }}>Birim ₺</div>
+            <div style={{ textAlign: 'right' }}>Adet</div>
+            <div style={{ textAlign: 'right' }}>Toplam</div>
+            <div style={{ textAlign: 'right' }}>Marj</div>
+            <div></div>
+          </div>
+        )}
 
         <div style={{ padding: '8px 12px 12px', display: 'flex', flexDirection: 'column', gap: 0 }}>
           {filtered.length === 0 ? (
