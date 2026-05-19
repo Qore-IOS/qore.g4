@@ -21,7 +21,8 @@ export default function PageShell({
       <div
         className={cn(
           'page-shell w-full',
-          'pb-[env(safe-area-inset-bottom)]',
+          // Mobile dock için alt boşluk — mobile dock ~64px + safe-area
+          'pb-[calc(env(safe-area-inset-bottom)+90px)]',
           'md:pb-[calc(var(--dock-h)+var(--dock-gap)+24px)]',
           className,
         )}
