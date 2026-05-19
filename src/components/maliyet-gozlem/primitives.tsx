@@ -3,6 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AnimatedNumber, BigCurrency, Sparkline } from './charts';
 import { HBarList } from './charts';
+import { useIsMobile } from './useIsMobile';
 
 // ────────────────────────────────────────────────────────────────────────────
 // SectionHeader
@@ -115,6 +116,7 @@ export function MiniStat({
   decimals = 0,
 }: MiniStatProps) {
   const [hovered, setHovered] = useState(false);
+  const isMobile = useIsMobile();
   const positive = trend != null && trend >= 0;
   return (
     <div
@@ -122,11 +124,11 @@ export function MiniStat({
       onMouseLeave={() => setHovered(false)}
       style={{
         flex: 1,
-        minWidth: 220,
+        minWidth: 0,
         background: 'linear-gradient(135deg, rgba(255,255,255,0.025), rgba(255,255,255,0.005))',
         border: '1px solid var(--mg-border)',
-        borderRadius: 24,
-        padding: '22px 24px 20px',
+        borderRadius: isMobile ? 18 : 24,
+        padding: isMobile ? '14px 14px 12px' : '22px 24px 20px',
         position: 'relative',
         overflow: 'hidden',
         transition: 'all 0.35s cubic-bezier(0.34,1.56,0.64,1)',
@@ -153,14 +155,14 @@ export function MiniStat({
         }}
       />
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
-        <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--mg-muted)', letterSpacing: '0.01em' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: isMobile ? 10 : 18, gap: 8 }}>
+        <span style={{ fontSize: isMobile ? 11 : 12, fontWeight: 500, color: 'var(--mg-muted)', letterSpacing: '0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {label}
         </span>
         <div
           style={{
-            width: 32,
-            height: 32,
+            width: isMobile ? 24 : 32,
+            height: isMobile ? 24 : 32,
             borderRadius: '50%',
             border: '1px solid var(--mg-border-strong)',
             background: hovered ? color + '18' : 'transparent',
@@ -188,11 +190,11 @@ export function MiniStat({
         </div>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 18 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: isMobile ? 10 : 18 }}>
         {isCount ? (
           <span
             style={{
-              fontSize: 42,
+              fontSize: isMobile ? 30 : 42,
               fontWeight: 400,
               color: 'var(--mg-text)',
               letterSpacing: '-0.04em',
@@ -212,7 +214,7 @@ export function MiniStat({
         ) : decimals > 0 ? (
           <span
             style={{
-              fontSize: 42,
+              fontSize: isMobile ? 30 : 42,
               fontWeight: 400,
               color: 'var(--mg-text)',
               letterSpacing: '-0.04em',
@@ -238,7 +240,7 @@ export function MiniStat({
             />
           </span>
         ) : (
-          <BigCurrency value={value} mainSize={42} decSize={22} showSymbol={unit === '₺'} />
+          <BigCurrency value={value} mainSize={isMobile ? 28 : 42} decSize={isMobile ? 16 : 22} showSymbol={unit === '₺'} />
         )}
         {trend != null && (
           <span
@@ -344,6 +346,7 @@ export function ActivityCard({
   compact = false,
 }: ActivityCardData) {
   const [hovered, setHovered] = useState(false);
+  const isMobile = useIsMobile();
   const positive = delta == null ? null : typeof delta === 'string' ? !delta.startsWith('-') : delta >= 0;
   const fmt = format || ((v: number) => Math.round(v).toLocaleString('tr-TR'));
   return (
@@ -356,8 +359,8 @@ export function ActivityCard({
           ? 'linear-gradient(160deg, rgba(255,255,255,0.07), rgba(255,255,255,0.025))'
           : 'linear-gradient(160deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015))',
         border: '1px solid ' + (active ? color + '44' : 'var(--mg-border)'),
-        borderRadius: 22,
-        padding: compact ? '14px 14px 14px' : '16px 16px 16px',
+        borderRadius: isMobile ? 18 : 22,
+        padding: isMobile ? '12px 12px 12px' : compact ? '14px 14px 14px' : '16px 16px 16px',
         position: 'relative',
         overflow: 'hidden',
         cursor: onClick ? 'pointer' : 'default',
@@ -367,7 +370,7 @@ export function ActivityCard({
           hovered && onClick
             ? `0 12px 28px rgba(0,0,0,0.25), 0 0 0 1px ${color}33, inset 0 1px 0 rgba(255,255,255,0.06)`
             : 'inset 0 1px 0 rgba(255,255,255,0.04)',
-        minHeight: 150,
+        minHeight: isMobile ? 122 : 150,
         display: 'flex',
         flexDirection: 'column',
         backdropFilter: 'blur(8px)',
@@ -375,15 +378,16 @@ export function ActivityCard({
       }}
     >
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 4 }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, minWidth: 0 }}>
           <span
             style={{
-              fontSize: 44,
+              fontSize: isMobile ? 32 : 44,
               fontWeight: 400,
               color: 'var(--mg-text)',
               letterSpacing: '-0.04em',
               lineHeight: 0.95,
               fontVariantNumeric: 'tabular-nums',
+              whiteSpace: 'nowrap',
             }}
           >
             <AnimatedNumber value={value} format={fmt} />
@@ -391,11 +395,11 @@ export function ActivityCard({
           {delta != null && (
             <span
               style={{
-                fontSize: 10,
+                fontSize: isMobile ? 9 : 10,
                 fontWeight: 700,
                 color: '#fff',
                 background: positive ? '#42e46d' : '#fc7272',
-                padding: '2px 7px',
+                padding: '2px 6px',
                 borderRadius: 100,
                 marginTop: 4,
                 whiteSpace: 'nowrap',
@@ -408,8 +412,8 @@ export function ActivityCard({
         </div>
         <button
           style={{
-            width: 30,
-            height: 30,
+            width: isMobile ? 24 : 30,
+            height: isMobile ? 24 : 30,
             borderRadius: '50%',
             border: '1px solid var(--mg-border-strong)',
             background: hovered ? color + '18' : 'transparent',
@@ -423,25 +427,16 @@ export function ActivityCard({
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
+          <svg width={isMobile ? 10 : 12} height={isMobile ? 10 : 12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M7 17 17 7M7 7h10v10" />
           </svg>
         </button>
       </div>
 
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', marginBottom: 10 }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', marginBottom: isMobile ? 6 : 10 }}>
         {sparkData && sparkData.length > 1 && (
           <div style={{ marginLeft: -2 }}>
-            <Sparkline data={sparkData} color={color} width={100} height={22} fill={false} />
+            <Sparkline data={sparkData} color={color} width={isMobile ? 80 : 100} height={isMobile ? 18 : 22} fill={false} />
           </div>
         )}
         <div style={{ fontSize: 9, fontWeight: 500, color: 'var(--mg-muted)', letterSpacing: '0.04em', marginTop: 2 }}>
@@ -449,7 +444,7 @@ export function ActivityCard({
         </div>
       </div>
 
-      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--mg-text-2)', letterSpacing: '-0.01em', lineHeight: 1.2 }}>
+      <div style={{ fontSize: isMobile ? 12 : 14, fontWeight: 600, color: 'var(--mg-text-2)', letterSpacing: '-0.01em', lineHeight: 1.2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {label}
       </div>
     </div>
@@ -469,39 +464,51 @@ interface ActivitiesPanelProps {
 }
 
 export function ActivitiesPanel({ count, sections, action, title = 'Activities' }: ActivitiesPanelProps) {
+  const isMobile = useIsMobile();
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const scrollBy = (dir: number) => {
-    if (scrollRef.current) scrollRef.current.scrollBy({ left: dir * 320, behavior: 'smooth' });
+    if (scrollRef.current) scrollRef.current.scrollBy({ left: dir * (isMobile ? 200 : 320), behavior: 'smooth' });
   };
+  const cardWidth = isMobile ? 138 : 168;
   return (
     <div
       style={{
-        borderRadius: 28,
+        borderRadius: isMobile ? 22 : 28,
         background: 'linear-gradient(160deg, rgba(255,255,255,0.04), rgba(255,255,255,0.015))',
         border: '1px solid var(--mg-border)',
-        padding: '20px 0 20px',
+        padding: isMobile ? '14px 0 14px' : '20px 0 20px',
         position: 'relative',
         boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06), 0 12px 40px rgba(0,0,0,0.2)',
         backdropFilter: 'blur(20px)',
         WebkitBackdropFilter: 'blur(20px)',
+        overflow: 'hidden',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '0 22px', marginBottom: 18 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: isMobile ? 8 : 14,
+          padding: isMobile ? '0 14px' : '0 22px',
+          marginBottom: isMobile ? 12 : 18,
+        }}
+      >
         <span
           style={{
             display: 'inline-flex',
             alignItems: 'center',
             gap: 8,
-            padding: '5px 12px 5px 6px',
+            padding: '4px 10px 4px 5px',
             background: 'var(--mg-surface-2)',
             borderRadius: 100,
             border: '1px solid var(--mg-border)',
+            minWidth: 0,
           }}
         >
           <span
             style={{
-              width: 22,
-              height: 22,
+              width: isMobile ? 20 : 22,
+              height: isMobile ? 20 : 22,
               borderRadius: '50%',
               background: 'linear-gradient(135deg, #fc7272, #fb923c)',
               fontSize: 10,
@@ -510,20 +517,31 @@ export function ActivitiesPanel({ count, sections, action, title = 'Activities' 
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
+              flexShrink: 0,
             }}
           >
             {count}
           </span>
-          <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--mg-text)', letterSpacing: '-0.01em' }}>
+          <span
+            style={{
+              fontSize: isMobile ? 12 : 14,
+              fontWeight: 700,
+              color: 'var(--mg-text)',
+              letterSpacing: '-0.01em',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
             {title}
           </span>
         </span>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, flexShrink: 0 }}>
           <button
             onClick={() => scrollBy(-1)}
             style={{
-              width: 30,
-              height: 30,
+              width: isMobile ? 26 : 30,
+              height: isMobile ? 26 : 30,
               borderRadius: '50%',
               border: '1px solid var(--mg-border)',
               background: 'var(--mg-surface)',
@@ -534,24 +552,15 @@ export function ActivitiesPanel({ count, sections, action, title = 'Activities' 
               justifyContent: 'center',
             }}
           >
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="m15 18-6-6 6-6" />
             </svg>
           </button>
           <button
             onClick={() => scrollBy(1)}
             style={{
-              width: 30,
-              height: 30,
+              width: isMobile ? 26 : 30,
+              height: isMobile ? 26 : 30,
               borderRadius: '50%',
               border: '1px solid var(--mg-border)',
               background: 'var(--mg-surface)',
@@ -562,16 +571,7 @@ export function ActivitiesPanel({ count, sections, action, title = 'Activities' 
               justifyContent: 'center',
             }}
           >
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="m9 18 6-6-6-6" />
             </svg>
           </button>
@@ -583,8 +583,8 @@ export function ActivitiesPanel({ count, sections, action, title = 'Activities' 
         ref={scrollRef}
         style={{
           display: 'flex',
-          gap: 28,
-          padding: '0 22px 4px',
+          gap: isMobile ? 16 : 28,
+          padding: isMobile ? '0 14px 4px' : '0 22px 4px',
           overflowX: 'auto',
           overflowY: 'hidden',
           scrollbarWidth: 'thin',
@@ -599,24 +599,26 @@ export function ActivitiesPanel({ count, sections, action, title = 'Activities' 
                   alignSelf: 'stretch',
                   background: 'var(--mg-border)',
                   margin: '16px -8px',
+                  flexShrink: 0,
                 }}
               />
             )}
             <div style={{ display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
               <div
                 style={{
-                  fontSize: 13,
+                  fontSize: isMobile ? 12 : 13,
                   fontWeight: 600,
                   color: 'var(--mg-text-2)',
                   marginBottom: 10,
                   paddingLeft: 4,
+                  whiteSpace: 'nowrap',
                 }}
               >
                 {sec.title}
               </div>
-              <div style={{ display: 'flex', gap: 12 }}>
+              <div style={{ display: 'flex', gap: isMobile ? 8 : 12 }}>
                 {sec.cards.map((card, ci) => (
-                  <div key={ci} style={{ width: 168, flexShrink: 0 }}>
+                  <div key={ci} style={{ width: cardWidth, flexShrink: 0 }}>
                     <ActivityCard {...card} />
                   </div>
                 ))}

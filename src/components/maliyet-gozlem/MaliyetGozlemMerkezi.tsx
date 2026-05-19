@@ -17,6 +17,7 @@ import { Search, Settings, Download, X } from 'lucide-react';
 import type { Currency } from '@/lib/types';
 import { TestTab } from './TestTab';
 import { StokTab } from './StokTab';
+import { useIsMobile } from './useIsMobile';
 
 type TabKey = 'stok' | 'test';
 
@@ -203,15 +204,16 @@ interface HeaderProps {
 }
 
 function Header({ search, setSearch, currency, setCurrency }: HeaderProps) {
+  const isMobile = useIsMobile();
   return (
     <header
       style={{
-        height: 64,
+        height: isMobile ? 56 : 64,
         flexShrink: 0,
         display: 'flex',
         alignItems: 'center',
-        gap: 12,
-        padding: '0 24px',
+        gap: isMobile ? 8 : 12,
+        padding: isMobile ? '0 12px' : '0 24px',
         borderBottom: '1px solid var(--mg-border)',
         background: 'var(--mg-header-bg)',
         backdropFilter: 'blur(20px)',
@@ -259,21 +261,23 @@ function Header({ search, setSearch, currency, setCurrency }: HeaderProps) {
             <X size={14} />
           </button>
         )}
-        <span
-          style={{
-            fontSize: 10,
-            fontWeight: 700,
-            color: 'var(--mg-muted)',
-            background: 'var(--mg-surface-2)',
-            padding: '2px 6px',
-            borderRadius: 4,
-          }}
-        >
-          ⌘K
-        </span>
+        {!isMobile && (
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 700,
+              color: 'var(--mg-muted)',
+              background: 'var(--mg-surface-2)',
+              padding: '2px 6px',
+              borderRadius: 4,
+            }}
+          >
+            ⌘K
+          </span>
+        )}
       </div>
 
-      <div style={{ flex: 1 }} />
+      {!isMobile && <div style={{ flex: 1 }} />}
 
       <SettingsMenu currency={currency} setCurrency={setCurrency} />
     </header>
@@ -291,6 +295,7 @@ interface TabSwitcherProps {
 }
 
 function TabSwitcher({ value, onChange, counts }: TabSwitcherProps) {
+  const isMobile = useIsMobile();
   const tabs: { k: TabKey; label: string; labelShort: string; icon: React.ReactNode; count: number; desc: string }[] = [
     { k: 'stok', label: 'Stok Maliyeti', labelShort: 'Stok', icon: NavStock, count: counts.stok, desc: 'Envanter ve marka kırılımı' },
     { k: 'test', label: 'Test Bazlı Maliyet', labelShort: 'Test', icon: NavLab, count: counts.test, desc: 'Test başına detaylı dağılım' },
@@ -299,8 +304,8 @@ function TabSwitcher({ value, onChange, counts }: TabSwitcherProps) {
     <div
       style={{
         display: 'flex',
-        gap: 8,
-        padding: '20px 24px 0',
+        gap: isMobile ? 4 : 8,
+        padding: isMobile ? '12px 12px 0' : '20px 24px 0',
         borderBottom: '1px solid var(--mg-border)',
       }}
     >
@@ -314,12 +319,14 @@ function TabSwitcher({ value, onChange, counts }: TabSwitcherProps) {
               background: 'transparent',
               border: 'none',
               cursor: 'pointer',
-              padding: '12px 0',
+              padding: isMobile ? '10px 0' : '12px 0',
               display: 'inline-flex',
               alignItems: 'center',
-              gap: 10,
+              gap: isMobile ? 6 : 10,
               position: 'relative',
-              marginRight: 20,
+              marginRight: isMobile ? 0 : 20,
+              flex: isMobile ? 1 : 'initial',
+              justifyContent: isMobile ? 'center' : 'flex-start',
               color: active ? 'var(--mg-text)' : 'var(--mg-muted)',
               transition: 'color 0.2s',
               fontFamily: 'inherit',
@@ -327,8 +334,8 @@ function TabSwitcher({ value, onChange, counts }: TabSwitcherProps) {
           >
             <span
               style={{
-                width: 28,
-                height: 28,
+                width: isMobile ? 24 : 28,
+                height: isMobile ? 24 : 28,
                 borderRadius: 8,
                 background: active ? 'var(--mg-accent-soft)' : 'var(--mg-surface)',
                 color: active ? 'var(--mg-accent)' : 'var(--mg-muted)',
@@ -336,13 +343,18 @@ function TabSwitcher({ value, onChange, counts }: TabSwitcherProps) {
                 alignItems: 'center',
                 justifyContent: 'center',
                 border: '1px solid ' + (active ? 'rgba(251,146,60,0.3)' : 'var(--mg-border)'),
+                flexShrink: 0,
               }}
             >
               {t.icon}
             </span>
             <div style={{ textAlign: 'left' }}>
-              <div style={{ fontSize: 14, fontWeight: 700, letterSpacing: '-0.01em' }}>{t.label}</div>
-              <div style={{ fontSize: 11, color: 'var(--mg-muted)', fontWeight: 500, marginTop: 1 }}>{t.desc}</div>
+              <div style={{ fontSize: isMobile ? 13 : 14, fontWeight: 700, letterSpacing: '-0.01em', whiteSpace: 'nowrap' }}>
+                {isMobile ? t.labelShort : t.label}
+              </div>
+              {!isMobile && (
+                <div style={{ fontSize: 11, color: 'var(--mg-muted)', fontWeight: 500, marginTop: 1 }}>{t.desc}</div>
+              )}
             </div>
             <span
               style={{
@@ -353,6 +365,7 @@ function TabSwitcher({ value, onChange, counts }: TabSwitcherProps) {
                 background: active ? 'var(--mg-accent)' : 'var(--mg-surface-2)',
                 color: active ? '#0a0a0c' : 'var(--mg-muted)',
                 marginLeft: 4,
+                flexShrink: 0,
               }}
             >
               {t.count}
@@ -392,6 +405,7 @@ export default function MaliyetGozlemMerkezi({ initialTab = 'test' }: MaliyetGoz
   const [tab, setTab] = useState<TabKey>(initialTab);
   const [currency, setCurrency] = useState<Currency>('TRY');
   const [search, setSearch] = useState('');
+  const isMobile = useIsMobile();
 
   // Tab counts — TestTab/StokTab kendi içlerinde fetch edip count'u expose etmiyor;
   // basitlik için 0 veriyoruz, UI'da sembolik.
@@ -417,7 +431,7 @@ export default function MaliyetGozlemMerkezi({ initialTab = 'test' }: MaliyetGoz
       <main
         style={{
           flex: 1,
-          padding: '24px',
+          padding: isMobile ? '12px 12px 24px' : '24px',
         }}
       >
         {tab === 'stok' ? (
