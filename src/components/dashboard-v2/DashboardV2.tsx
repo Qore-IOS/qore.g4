@@ -118,6 +118,16 @@ export default function DashboardV2({
   const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>('weekly');
   const [trendDate, setTrendDate] = useState(new Date());
 
+  // Mobil / küçük tablet tespiti — responsive layout için
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const mql = window.matchMedia('(max-width: 768px)');
+    const update = () => setIsMobile(mql.matches);
+    update();
+    mql.addEventListener('change', update);
+    return () => mql.removeEventListener('change', update);
+  }, []);
+
   const calendarScrollRef = useRef<HTMLDivElement | null>(null);
 
   const expiringProductsCount = expiringCountServer;
@@ -789,28 +799,28 @@ export default function DashboardV2({
         className="mg-root"
         style={{
           minHeight: '100vh',
-          padding: '16px 20px 24px',
+          padding: isMobile ? '12px 12px 20px' : '16px 20px 24px',
           background: `radial-gradient(ellipse at 0% 0%, rgba(251,146,60,0.06) 0%, transparent 50%),
                        radial-gradient(ellipse at 100% 100%, rgba(167,139,250,0.04) 0%, transparent 50%),
                        var(--mg-bg)`,
           color: 'var(--mg-text)',
           display: 'flex',
           flexDirection: 'column',
-          gap: 14,
+          gap: isMobile ? 10 : 14,
         }}
       >
         {/* Karşılama */}
-        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-          <h1 style={{ fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--mg-text)', margin: 0 }}>
+        <div style={{ display: 'flex', alignItems: isMobile ? 'flex-start' : 'baseline', justifyContent: 'space-between', gap: isMobile ? 4 : 12, flexWrap: 'wrap', flexDirection: isMobile ? 'column' : 'row' }}>
+          <h1 style={{ fontSize: isMobile ? 18 : 22, fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--mg-text)', margin: 0 }}>
             {currentUserProfile?.name || 'Lojistik & Stok Paneli'}
           </h1>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--mg-muted)', letterSpacing: '0.04em' }}>
-            {format(new Date(), 'dd MMMM yyyy · EEEE', { locale: tr })}
+          <span style={{ fontSize: isMobile ? 11 : 12, fontWeight: 600, color: 'var(--mg-muted)', letterSpacing: '0.04em' }}>
+            {format(new Date(), isMobile ? 'dd MMM yyyy · EEEE' : 'dd MMMM yyyy · EEEE', { locale: tr })}
           </span>
         </div>
 
-        {/* Üst sıra: 3 KPI kart */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 1.4fr', gap: 12 }}>
+        {/* Üst sıra: 3 KPI kart — mobilde MIAD+Maliyet yan yana, Cihaz Atama tek satır */}
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.6fr 1fr 1.4fr', gap: isMobile ? 10 : 12 }}>
           {/* Cihaz Atama Durumu */}
           <div style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.025), rgba(255,255,255,0.005))', border: '1px solid var(--mg-border)', borderRadius: 18, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -898,10 +908,10 @@ export default function DashboardV2({
           </div>
         </div>
 
-        {/* Orta sıra: Tüketim Trendi + Bugün (sabit yükseklik) */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(0, 1fr)', gap: 12 }}>
+        {/* Orta sıra: Tüketim Trendi + Bugün (sabit yükseklik) — mobilde alt alta */}
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.6fr) minmax(0, 1fr)', gap: isMobile ? 10 : 12 }}>
           {/* Tüketim Trendi */}
-          <div onClick={() => setIsConsumptionModalOpen(true)} style={{ background: 'var(--mg-surface)', border: '1px solid var(--mg-border)', borderRadius: 18, padding: '14px 16px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 10, height: 240 }}>
+          <div onClick={() => setIsConsumptionModalOpen(true)} style={{ background: 'var(--mg-surface)', border: '1px solid var(--mg-border)', borderRadius: 18, padding: '14px 16px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 10, height: isMobile ? 200 : 240 }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <TrendingUp size={14} style={{ color: 'var(--mg-accent)' }} />
@@ -957,7 +967,7 @@ export default function DashboardV2({
           </div>
 
           {/* Bugün/Etkinlikler */}
-          <div style={{ background: 'var(--mg-surface)', border: '1px solid var(--mg-border)', borderRadius: 18, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, height: 240, overflow: 'hidden' }}>
+          <div style={{ background: 'var(--mg-surface)', border: '1px solid var(--mg-border)', borderRadius: 18, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, height: isMobile ? 220 : 240, overflow: 'hidden' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
               <CalendarCheck size={14} style={{ color: 'var(--mg-accent)' }} />
               <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--mg-text)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
@@ -1034,7 +1044,7 @@ export default function DashboardV2({
               {visiblePanels.length}
             </span>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: 8 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(3, 1fr)' : 'repeat(auto-fit, minmax(100px, 1fr))', gap: isMobile ? 6 : 8 }}>
             {visiblePanels.map((panel) => {
               const Icon = panel.icon;
               const isFrequent = ['arama', 'stok-yonetimi', 'laboratuvar-yonetimi', 'satin-alma'].includes(panel.key);
