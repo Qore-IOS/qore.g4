@@ -91,7 +91,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   const isWideContentRoute = pathname?.startsWith("/total-verimlilik");
   const isEdgeToEdgeRoute =
-    pathname?.startsWith("/maliyet-gozlem") || pathname === "/dashboard" || pathname?.startsWith("/dashboard/");
+    pathname?.startsWith("/maliyet-gozlem") ||
+    pathname?.startsWith("/cihaz-test-dagilimi") ||
+    pathname === "/dashboard" ||
+    pathname?.startsWith("/dashboard/");
 
   const {
     dockItems,

@@ -1,6 +1,7 @@
 
 'use client';
 import React, { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
 import {
   collection, getDocs, setDoc, doc, deleteDoc, addDoc, serverTimestamp, query, where, Timestamp, updateDoc
 } from 'firebase/firestore';
@@ -1239,6 +1240,12 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
             <Boxes className="h-4 w-4 mr-2" />
             Marka / Model Tanımları
           </Button>
+          <Link href="/cihaz-test-dagilimi">
+            <Button variant="outline" className="bg-[var(--dashboard-surface-2)]">
+              <Boxes className="h-4 w-4 mr-2" />
+              Cihaz Test Dağılımı
+            </Button>
+          </Link>
         </div>
       </div>
 

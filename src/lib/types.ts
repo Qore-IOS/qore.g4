@@ -399,6 +399,9 @@ export interface AssignedDevice {
   openedBy?: string;
   subPointId?: string;
   subPointName?: string;
+  /** Bu cihaza atanmış ürün stok kodları — bir kit birden fazla cihaza atanabilir.
+   *  Test bazlı maliyette CAWC algoritmasının girdisi olur. */
+  assignedStokKodlari?: string[];
 }
 
 export interface DeviceGroup {
