@@ -1,19 +1,17 @@
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
 import { PlusCircle, Trash2, Loader2, MapPin } from 'lucide-react';
 import { collection, getDocs, addDoc, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import type { AddressDefinition } from '@/lib/types';
-import BackButton from '@/components/BackButton';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { YonetimShell, YonetimHeader, YonetimCard } from '@/components/yonetim-ui/YonetimHub';
 
 export default function AdresTanimlariPanel() {
   const { toast } = useToast();
@@ -64,52 +62,98 @@ export default function AdresTanimlariPanel() {
   };
 
   return (
-    <>
-      <div className="p-4 space-y-4">
-        <BackButton fallback="/yonetim" />
-        <Card className="shadow-lg">
-          <CardHeader className="flex flex-row justify-between items-center">
-            <div>
-              <CardTitle className="text-xl font-headline flex items-center">
-                <MapPin className="mr-2 h-6 w-6 text-red-500" />
-                Adres Tanımları Yönetimi
-              </CardTitle>
-              <CardDescription>Depo içindeki raf adreslerini ve barkod karşılıklarını tanımlayın.</CardDescription>
-            </div>
-            <Button onClick={() => setIsModalOpen(true)} size="sm" disabled={isLoading}>
-              <PlusCircle className="mr-2 h-4 w-4" />Yeni Adres
-            </Button>
-          </CardHeader>
-          <CardContent>
-            {isLoading ? (
-              <div className="flex justify-center p-4"><Loader2 className="h-6 w-6 animate-spin" /></div>
-            ) : (
-              <ScrollArea className="h-[300px] border rounded-md">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Adres Barkodu</TableHead>
-                      <TableHead>Adres Adı</TableHead>
-                      <TableHead className="text-right">İşlemler</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {addresses.map(a => (
-                      <TableRow key={a.id}>
-                        <TableCell className="font-mono">{a.addressBarcode}</TableCell>
-                        <TableCell>{a.addressName}</TableCell>
-                        <TableCell className="text-right">
-                          <Button variant="ghost" size="icon" onClick={() => handleDelete(a.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </ScrollArea>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+    <YonetimShell>
+      <YonetimHeader
+        title="Adres Tanımları"
+        description="Depo içindeki raf adreslerini ve barkod karşılıklarını tanımlayın."
+        backHref="/yonetim/tanimlar"
+        rightAction={
+          <Button
+            onClick={() => setIsModalOpen(true)}
+            disabled={isLoading}
+            size="sm"
+            style={{
+              background: 'var(--mg-accent)',
+              color: '#0a0a0c',
+              border: 'none',
+              fontWeight: 700,
+            }}
+          >
+            <PlusCircle className="mr-2 h-4 w-4" />
+            Yeni Adres
+          </Button>
+        }
+      />
+
+      <YonetimCard padding={0}>
+        <div style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid var(--mg-border)' }}>
+          <span
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 8,
+              background: 'var(--mg-danger-soft)',
+              color: 'var(--mg-danger)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <MapPin size={14} />
+          </span>
+          <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+            Tanımlı Adresler
+          </span>
+          <span
+            style={{
+              marginLeft: 'auto',
+              fontSize: 10,
+              fontWeight: 800,
+              padding: '2px 7px',
+              borderRadius: 6,
+              background: 'var(--mg-surface-2)',
+              color: 'var(--mg-muted)',
+            }}
+          >
+            {addresses.length}
+          </span>
+        </div>
+
+        {isLoading ? (
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--mg-muted)' }}>
+            <Loader2 className="h-6 w-6 animate-spin inline-block" />
+          </div>
+        ) : addresses.length === 0 ? (
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--mg-muted)', fontSize: 13 }}>
+            Henüz adres tanımı yok.
+          </div>
+        ) : (
+          <div style={{ maxHeight: 480, overflow: 'auto' }}>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Adres Barkodu</TableHead>
+                  <TableHead>Adres Adı</TableHead>
+                  <TableHead className="text-right w-[100px]">İşlem</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {addresses.map((a) => (
+                  <TableRow key={a.id}>
+                    <TableCell className="font-mono text-sm">{a.addressBarcode}</TableCell>
+                    <TableCell>{a.addressName}</TableCell>
+                    <TableCell className="text-right">
+                      <Button variant="ghost" size="icon" onClick={() => handleDelete(a.id)}>
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+      </YonetimCard>
 
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
         <DialogContent>
@@ -132,6 +176,6 @@ export default function AdresTanimlariPanel() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </>
+    </YonetimShell>
   );
 }

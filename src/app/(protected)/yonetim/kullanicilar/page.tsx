@@ -17,6 +17,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { VIEWS } from '@/lib/constants';
 import { Checkbox } from '@/components/ui/checkbox';
 import BackButton from '@/components/BackButton';
+import { YonetimShell, YonetimHeader, YonetimCard } from '@/components/yonetim-ui/YonetimHub';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
@@ -292,23 +293,31 @@ export default function KullaniciPanel() {
     : null;
 
   return (
-    <>
-      <div className="dashboard-neu-page p-4 md:p-6 space-y-4 md:space-y-6 min-h-screen">
-        <BackButton fallback="/yonetim" />
-
-        <Card className="glass-card border-border/60 shadow-xl">
-          <CardHeader className="space-y-4">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <CardTitle className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-                  <Users className="h-6 w-6 text-teal-500" />
-                  Kullanıcı Yönetimi
-                </CardTitle>
-                <CardDescription className="mt-1">
-                  Kullanıcıları uygulamanın geri kalanındaki tasarıma uygun şekilde yönetin; rol, firma ve panel yetkilerini tek noktadan düzenleyin.
-                </CardDescription>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
+    <YonetimShell>
+      <YonetimHeader
+        title="Kullanıcı Yönetimi"
+        description="Rol, firma ve panel yetkilerini tek noktadan düzenleyin."
+        backHref="/yonetim/tanimlar"
+      />
+      <YonetimCard>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span
+                style={{
+                  width: 28, height: 28, borderRadius: 8,
+                  background: 'rgba(20,184,166,0.18)', color: '#14b8a6',
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                <Users size={14} />
+              </span>
+              <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                Kullanıcılar
+              </span>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
                 {currentUserProfile?.role === 'admin' && !users.some(u => u.role === 'super_admin') && (
                   <Button
                     variant="outline"
@@ -362,9 +371,8 @@ export default function KullaniciPanel() {
                 </CardContent>
               </Card>
             </div>
-          </CardHeader>
 
-          <CardContent>
+          <div className="pt-2">
             {isLoading ? (
               <div className="flex justify-center p-8"><Loader2 className="h-6 w-6 animate-spin" /></div>
             ) : (
@@ -414,9 +422,8 @@ export default function KullaniciPanel() {
                 </ScrollArea>
               </div>
             )}
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+      </YonetimCard>
 
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
         <DialogContent className="max-w-7xl w-[96vw] p-0 overflow-hidden max-h-[92vh] flex flex-col">
@@ -674,6 +681,6 @@ export default function KullaniciPanel() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </>
+    </YonetimShell>
   );
 }
