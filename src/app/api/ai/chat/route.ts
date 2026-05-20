@@ -1,170 +1,112 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { chat, chatStream, ChatMessage } from '@/lib/ai/chat';
-import { runAgent, runAgentStream, AgentMessage } from '@/lib/ai/agent';
-import { isApiKeyValid } from '@/lib/ai/config';
 import { aiLogger } from '@/lib/logger';
+import { isApiKeyValid } from '@/lib/ai/config';
+import {
+  permissionContextFromRequest,
+  runEngine,
+  runEngineStream,
+  type EngineMessage,
+  type EngineTrace,
+} from '@/lib/ai/v2';
 
 export const runtime = 'nodejs';
-export const maxDuration = 60; // 60 seconds timeout
+export const maxDuration = 60;
+
+interface ChatRequestBody {
+  message: string;
+  history?: EngineMessage[];
+  stream?: boolean;
+  /** Reserved — kept for client backward compat (mode is auto in v2). */
+  mode?: string;
+}
+
+function classifyErrorMessage(error: unknown): string {
+  if (!(error instanceof Error)) return 'Beklenmeyen bir hata oluştu.';
+  const msg = error.message.toLowerCase();
+  if (msg.includes('401') || msg.includes('api key') || msg.includes('authentication')) {
+    return 'API anahtarı geçersiz veya süresi dolmuş. Lütfen Gemini API anahtarınızı kontrol edin.';
+  }
+  if (msg.includes('429') || msg.includes('rate')) {
+    return 'API rate limit aşıldı. Lütfen birkaç saniye bekleyip tekrar deneyin.';
+  }
+  if (msg.includes('500') || msg.includes('503')) {
+    return 'Gemini API geçici olarak kullanılamıyor. Lütfen tekrar deneyin.';
+  }
+  if (msg.includes('fetch') || msg.includes('network') || msg.includes('enotfound')) {
+    return 'Ağ bağlantısı hatası. İnternet bağlantınızı kontrol edin.';
+  }
+  return error.message;
+}
 
 export async function POST(request: NextRequest) {
   try {
-    // Check API key first - use validated check from config
     if (!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY)) {
       aiLogger.error('Gemini API key is not set');
       return NextResponse.json(
-        {
-          error: 'API anahtarı ayarlanmamış',
-          message: 'GEMINI_API_KEY (veya GOOGLE_API_KEY) environment variable eksik. Lütfen .env.local dosyasına ekleyin.'
-        },
-        { status: 500 }
+        { error: 'API anahtarı ayarlanmamış', message: 'GEMINI_API_KEY environment variable eksik.' },
+        { status: 500 },
       );
     }
-
-    // Check if API key format is valid
     if (!isApiKeyValid) {
-      aiLogger.error('Gemini API key format is invalid');
       return NextResponse.json(
-        {
-          error: 'Geçersiz API anahtarı formatı',
-          message: "API anahtarı geçersiz formatta. Gemini API anahtarınızı kontrol edin. Lütfen Google AI Studio'dan doğru anahtarı alın."
-        },
-        { status: 500 }
+        { error: 'Geçersiz API anahtarı formatı', message: 'Gemini API anahtarı formatı geçersiz.' },
+        { status: 500 },
       );
     }
 
-    const body = await request.json();
-    const { message, history = [], stream = false, mode = 'chat' } = body as {
-      message: string;
-      history?: ChatMessage[] | AgentMessage[];
-      stream?: boolean;
-      mode?: 'chat' | 'agent';
-    };
+    const body = (await request.json()) as ChatRequestBody;
+    const { message, history = [], stream = false } = body;
 
-    aiLogger.info('Request received', {
-      message: message?.substring(0, 50) + '...',
+    if (!message || typeof message !== 'string' || message.trim().length === 0) {
+      return NextResponse.json({ error: 'Mesaj gerekli' }, { status: 400 });
+    }
+
+    const permission = await permissionContextFromRequest(request);
+    aiLogger.info('chat v2 request', {
+      uid: permission.uid,
+      role: permission.role,
+      scope: permission.unrestrictedScope ? 'unrestricted' : 'restricted',
+      messageLen: message.length,
+      historyLen: history.length,
       stream,
-      mode,
-      historyLength: history.length
     });
 
-    if (!message || typeof message !== 'string') {
-      return NextResponse.json(
-        { error: 'Mesaj gerekli', message: 'message alanı string olmalı' },
-        { status: 400 }
-      );
-    }
-
-    if (message.trim().length === 0) {
-      return NextResponse.json(
-        { error: 'Boş mesaj gönderilemez' },
-        { status: 400 }
-      );
-    }
-
-    // ============ AGENT MODE ============
-    if (mode === 'agent') {
-      aiLogger.info('Using AGENT mode');
-
-      if (!stream) {
-        const response = await runAgent(message, history as AgentMessage[]);
-
-        aiLogger.info('Agent response ready', {
-          hasMessage: !!response.message,
-          toolsUsed: response.toolsUsed,
-          actionTaken: response.actionTaken,
-          requiresConfirmation: response.requiresConfirmation,
-        });
-
-        return NextResponse.json(response);
-      }
-
-      // Streaming agent response
-      const encoder = new TextEncoder();
-      const customStream = new ReadableStream({
-        async start(controller) {
-          try {
-            const response = await runAgentStream(
-              message,
-              history as AgentMessage[],
-              (chunk) => {
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ chunk })}\n\n`));
-              }
-            );
-
-            controller.enqueue(
-              encoder.encode(
-                `data: ${JSON.stringify({
-                  done: true,
-                  toolsUsed: response.toolsUsed,
-                  actionTaken: response.actionTaken,
-                  requiresConfirmation: response.requiresConfirmation,
-                  planId: response.planId,
-                })}\n\n`
-              )
-            );
-            controller.close();
-          } catch (error) {
-            aiLogger.error('Agent stream error', error);
-            const errorMessage = error instanceof Error ? error.message : 'Bilinmeyen hata';
-            controller.enqueue(
-              encoder.encode(`data: ${JSON.stringify({ error: errorMessage })}\n\n`)
-            );
-            controller.close();
-          }
-        },
-      });
-
-      return new Response(customStream, {
-        headers: {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-cache',
-          'Connection': 'keep-alive',
-        },
-      });
-    }
-
-    // ============ CHAT MODE (Default) ============
     if (!stream) {
-      aiLogger.info('Using CHAT mode (non-streaming)');
-      const response = await chat(message, history as ChatMessage[]);
-
-      aiLogger.info('Response ready', {
-        hasMessage: !!response.message,
-        messageLength: response.message?.length,
-        error: response.error
+      const result = await runEngine({ message, history, permission });
+      return NextResponse.json({
+        message: result.message,
+        toolsUsed: result.toolsUsed,
+        rounds: result.rounds,
+        scannedDocs: result.scannedDocs,
       });
-
-      return NextResponse.json(response);
     }
 
-    // Streaming chat response
-    aiLogger.info('Using CHAT mode (streaming)');
+    // Streaming variant: emits chunk + trace events as SSE
     const encoder = new TextEncoder();
-
     const customStream = new ReadableStream({
       async start(controller) {
-        try {
-          const response = await chatStream(message, history as ChatMessage[], (chunk) => {
-            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ chunk })}\n\n`));
-          });
+        const send = (payload: Record<string, unknown>) =>
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
 
-          controller.enqueue(
-            encoder.encode(
-              `data: ${JSON.stringify({
-                done: true,
-                queryPlan: response.queryPlan,
-                summary: response.fetchedData?.summary,
-              })}\n\n`
-            )
+        const onTrace = (trace: EngineTrace) => {
+          try { send({ trace }); } catch { /* ignore */ }
+        };
+
+        try {
+          const result = await runEngineStream(
+            { message, history, permission, onTrace },
+            (chunk) => send({ chunk }),
           );
+          send({
+            done: true,
+            toolsUsed: result.toolsUsed,
+            rounds: result.rounds,
+            scannedDocs: result.scannedDocs,
+          });
           controller.close();
         } catch (error) {
-          aiLogger.error('Stream error', error);
-          const errorMessage = error instanceof Error ? error.message : 'Bilinmeyen hata';
-          controller.enqueue(
-            encoder.encode(`data: ${JSON.stringify({ error: errorMessage })}\n\n`)
-          );
+          aiLogger.error('engine stream error', error);
+          send({ error: classifyErrorMessage(error) });
           controller.close();
         }
       },
@@ -174,19 +116,14 @@ export async function POST(request: NextRequest) {
       headers: {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
+        Connection: 'keep-alive',
       },
     });
   } catch (error) {
-    aiLogger.error('API error', error, {
-      stack: error instanceof Error ? error.stack : undefined
-    });
-
-    const errorMessage = error instanceof Error ? error.message : 'Bilinmeyen hata';
-
+    aiLogger.error('chat route fatal', error);
     return NextResponse.json(
-      { error: 'Sunucu hatası', message: errorMessage },
-      { status: 500 }
+      { error: 'Sunucu hatası', message: classifyErrorMessage(error) },
+      { status: 500 },
     );
   }
 }

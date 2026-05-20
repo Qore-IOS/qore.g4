@@ -4,12 +4,13 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Menu, X, Sparkles, Mic, SendHorizonal, ChevronRight, HeartPulse,
+  Menu, Sparkles, Mic, SendHorizonal, ChevronRight, HeartPulse,
   Stethoscope, BellRing, MapPin, Clock, Bookmark, User as UserIcon, Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAI } from '@/contexts/ai-context';
 import { useAuth } from '@/contexts/auth-context';
+import { getAuth } from 'firebase/auth';
 
 const QoreOrb3D = dynamic(() => import('./QoreOrb3D'), { ssr: false });
 
@@ -19,21 +20,6 @@ interface Message {
   content: string;
   timestamp: Date;
   isStreaming?: boolean;
-}
-
-const AGENT_KEYWORDS = [
-  'oluştur', 'olustur', 'yap', 'hazırla', 'başlat', 'baslat',
-  'sipariş', 'siparis', 'transfer', 'sevk', 'gönder', 'gonder',
-  'planla', 'düzenle', 'ekle', 'sil', 'güncelle', 'guncelle',
-  'analiz', 'kontrol', 'incele', 'bul', 'listele',
-  'düşük stok', 'dusuk stok', 'eksik', 'kritik', 'altında', 'altinda',
-  'hangi lab', 'hangi hastane', 'stok durumu', 'doluluk',
-  'min max', 'minimum', 'maksimum', 'ihtiyaç', 'ihtiyac',
-];
-
-function shouldUseAgentMode(message: string): boolean {
-  const lower = message.toLowerCase();
-  return AGENT_KEYWORDS.some((k) => lower.includes(k));
 }
 
 interface QuickAction {
@@ -151,17 +137,18 @@ export function AIChatbot() {
 
     try {
       const history = messages.map((m) => ({ role: m.role, content: m.content }));
-      const useAgent = shouldUseAgentMode(text);
+
+      // Attach Firebase ID token so the server can scope the engine to this user.
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      try {
+        const idToken = await getAuth().currentUser?.getIdToken();
+        if (idToken) headers.Authorization = `Bearer ${idToken}`;
+      } catch { /* anonymous → server uses fallback context */ }
 
       const response = await fetch('/api/ai/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: text,
-          history,
-          stream: true,
-          mode: useAgent ? 'agent' : 'chat',
-        }),
+        headers,
+        body: JSON.stringify({ message: text, history, stream: true }),
       });
 
       if (!response.ok) throw new Error('API hatası');
