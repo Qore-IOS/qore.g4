@@ -108,6 +108,18 @@ export interface CapacityBreakdown {
   costPerHourTL: number;
   /** Kapasite bazlı birim test maliyeti = ortak gider / monthlyTestCapacity (yalnızca ortak gider — stok eklenmemiş) */
   capacityBasedCostPerTestTL: number;
+
+  // CAWC + Yedeklilik metrikleri
+  /** Testi çalıştırabilen cihaz sayısı (assignedStokKodlari kesişimi) */
+  eligibleDeviceCount: number;
+  /** Lab(lar)daki toplam cihaz sayısı (TPH > 0 olan) */
+  totalDeviceCount: number;
+  /** Yedeklilik skoru: eligible / total (0..1) — yüksek = yedekli, düşük = tek noktaya bağımlı */
+  redundancyScore: number;
+  /** Risk primi katsayısı (1.0 = yedekli, 1.1 = tek cihaza bağımlı) */
+  reliabilityPremium: number;
+  /** CAWC ile bu teste düşen cihaz maliyet payı (TL) */
+  deviceShareToTestTL: number;
 }
 
 export interface LabBreakdown {
@@ -515,27 +527,81 @@ export function calculateTestCost(inputs: TestCostInputs): TestCostBreakdown {
   }
 
   // ────────────────────────────────────────────────────────────────────────
-  // Kapasite hesabı — cihaz TPH ve lab çalışma saati varsa anlamlı
+  // Kapasite hesabı — cihaz TPH ve lab çalışma saati varsa anlamlı.
+  // Cihaz-test atama varsa (assignedStokKodlari), yalnızca testi çalıştıran
+  // cihazların kapasitesi sayılır → CAWC algoritmasının temel girdisi.
   // ────────────────────────────────────────────────────────────────────────
   let monthlyHours = 0;
   let monthlyTestCapacity = 0;
   let labsWithCapacity = 0;
+  let eligibleDeviceCount = 0;
+  let totalDeviceCount = 0;
+  let deviceShareToTestTL = 0;
+  const testStokSet = new Set(testDef.linkedStokKodlari || []);
+
   for (const lab of labs) {
     const labHours = getLabMonthlyHours(lab);
+    const labDevices = assignedDevices.filter((d) => d.hastaneId === lab.id);
     let hasCapacity = false;
-    for (const ad of assignedDevices.filter((d) => d.hastaneId === lab.id)) {
+
+    for (const ad of labDevices) {
       const def = deviceDefs.get(ad.deviceId) || deviceDefs.get(ad.cihazId);
       const tph = Number(def?.testKapasiteSaatBasi) || 0;
-      if (tph > 0) {
+      if (tph <= 0) continue;
+
+      totalDeviceCount++;
+
+      const assignedKodlar = ad.assignedStokKodlari || [];
+      const hasAssignment = assignedKodlar.length > 0;
+      // Cihaz testi çalıştırabilir mi? (atanmış stok kodu testin ürünleriyle kesişiyorsa)
+      const isEligible = !hasAssignment
+        ? false // atama yoksa muhafazakar: yalnızca atanmış cihaz kapasiteye sayılır
+        : assignedKodlar.some((k) => testStokSet.has(k));
+
+      if (isEligible) {
         monthlyTestCapacity += tph * labHours;
+        eligibleDeviceCount++;
         hasCapacity = true;
+
+        // CAWC: cihaz maliyetinden bu teste düşen pay
+        // assignmentWeight = bu testin payı / cihaza atanan tüm testlerin payı
+        // Burada basitleştirme: cihaza atanan stok kodları arasında testin
+        // payı = (testin atanan stok kodu sayısı) / (cihaza atanan toplam stok kodu sayısı)
+        const testCodesOnDevice = assignedKodlar.filter((k) => testStokSet.has(k)).length;
+        const weight = assignedKodlar.length > 0 ? testCodesOnDevice / assignedKodlar.length : 0;
+        const deviceMonthly = deviceMonthlyCostTL(def, rates);
+        deviceShareToTestTL += deviceMonthly * weight * periotAy;
       }
     }
+
+    // Cihaz-test ataması hiç yapılmamışsa eski davranışa düş — tüm cihazlar uygun
+    // kabul edilir ve cihaz maliyeti tamamen bu teste atfedilir (CAWC fallback).
+    const labHasAnyAssignment = labDevices.some((d) => (d.assignedStokKodlari || []).length > 0);
+    if (!labHasAnyAssignment && !hasCapacity) {
+      for (const ad of labDevices) {
+        const def = deviceDefs.get(ad.deviceId) || deviceDefs.get(ad.cihazId);
+        const tph = Number(def?.testKapasiteSaatBasi) || 0;
+        if (tph > 0) {
+          monthlyTestCapacity += tph * labHours;
+          eligibleDeviceCount++;
+          hasCapacity = true;
+          // Atama yoksa cihazın tüm aylık maliyeti bu teste düşer
+          // (geriye uyumlu — fallback davranış)
+          deviceShareToTestTL += deviceMonthlyCostTL(def, rates) * periotAy;
+        }
+      }
+    }
+
     if (hasCapacity) {
       monthlyHours += labHours;
       labsWithCapacity++;
     }
   }
+
+  // Yedeklilik (Redundancy) skoru — 0..1
+  const redundancyScore = totalDeviceCount > 0 ? Math.min(1, eligibleDeviceCount / totalDeviceCount) : 0;
+  // Reliability premium — yalnız 1 cihaz uygunsa %10 daha pahalı
+  const reliabilityPremium = totalDeviceCount > 0 ? 1 + (1 - redundancyScore) * 0.1 : 1;
   // Periyot çarpanı kapasiteye de uygulanır
   const periodCapacity = monthlyTestCapacity * periotAy;
   const utilization = periodCapacity > 0 ? Math.min(1, totalStockUnits / periodCapacity) : 0;
@@ -548,13 +614,30 @@ export function calculateTestCost(inputs: TestCostInputs): TestCostBreakdown {
   const costModeResolved: CostMode = inputs.costMode || 'stock';
   let finalCostPerTest = costPerTest; // stock (default)
   if (costModeResolved === 'capacity' && periodCapacity > 0) {
-    // Tüm maliyet kapasiteye bölünür (stok dahil — kapasite yaklaşımı)
     finalCostPerTest = testTotalCost / periodCapacity;
   } else if (costModeResolved === 'hybrid' && periodCapacity > 0 && totalStockUnits > 0) {
-    // Ürün birim maliyeti stoktan, ortak gider kapasiteden
+    // Ürün birim maliyeti stoktan, ortak gider kapasiteden — optimistik (cihaz tam dolu çalışıyor varsayımı)
     const stockUnitCost = totalStockCostTL / totalStockUnits;
     finalCostPerTest = stockUnitCost + ortakGiderler / periodCapacity;
   }
+
+  // CAWC modu: cihaz maliyeti atanmış testler arasında paylaşılır, kullanım dahil
+  // (atama yoksa cihaz maliyetinin tamamı teste yazılır — gerçek tüketim odaklı)
+  if (inputs.costMode === 'capacity' || inputs.costMode === 'hybrid') {
+    // CAWC = stok birim + (deviceShareToTest + nonDeviceOrtak) / stockUnits
+    if (totalStockUnits > 0) {
+      const stockUnitCost = totalStockCostTL / totalStockUnits;
+      const nonDeviceOrtak = ortakGiderler - devicePeriotTL;
+      const cawcCost = stockUnitCost + (deviceShareToTestTL + nonDeviceOrtak) / totalStockUnits;
+      // capacity modu CAWC kullansın (en gerçekçi), hybrid optimistik kalsın
+      if (costModeResolved === 'capacity') {
+        finalCostPerTest = cawcCost;
+      }
+    }
+  }
+
+  // Yedeklilik primi her modda uygulanır — risk-adjusted final maliyet
+  finalCostPerTest = finalCostPerTest * reliabilityPremium;
 
   const capacity: CapacityBreakdown | undefined =
     labsWithCapacity > 0
@@ -566,6 +649,11 @@ export function calculateTestCost(inputs: TestCostInputs): TestCostBreakdown {
           idleCostTL,
           costPerHourTL,
           capacityBasedCostPerTestTL,
+          eligibleDeviceCount,
+          totalDeviceCount,
+          redundancyScore,
+          reliabilityPremium,
+          deviceShareToTestTL,
         }
       : undefined;
 
