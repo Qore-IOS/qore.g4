@@ -5,7 +5,7 @@ const validatedApiKey = getGeminiApiKey();
 
 export const isApiKeyValid = !!validatedApiKey;
 
-export const GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || 'gemini-2.0-flash';
+export const GEMINI_MODEL = process.env.GEMINI_MODEL?.trim() || 'gemini-2.5-flash';
 export const MAX_TOKENS = 4096;
 
 // Backward-compatible aliases
