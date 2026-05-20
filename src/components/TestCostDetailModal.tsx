@@ -285,6 +285,60 @@ export default function TestCostDetailModal({ open, onOpenChange, testDef, allTe
                 </CardContent>
               </Card>
 
+              {/* Kapasite Metrikleri (cihaz TPH + lab çalışma saati varsa) */}
+              {breakdown.capacity && (
+                <Card>
+                  <CardHeader className="py-3">
+                    <CardTitle className="text-base">Kapasite & Atıl Maliyet</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-sm text-muted-foreground mb-3">
+                      Cihaz saat başına test kapasitesi ve lab çalışma saatleri üzerinden hesaplandı.
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+                      <KpiBox
+                        label="Aylık Kapasite (saat)"
+                        value={`${Math.round(breakdown.capacity.monthlyHours)} sa`}
+                      />
+                      <KpiBox
+                        label="Maks. Test Kapasitesi"
+                        value={Math.round(breakdown.capacity.monthlyTestCapacity).toLocaleString('tr-TR')}
+                      />
+                      <KpiBox
+                        label="Utilization"
+                        value={`%${(breakdown.capacity.utilization * 100).toFixed(1)}`}
+                        highlight={breakdown.capacity.utilization < 0.5}
+                      />
+                      <KpiBox
+                        label="Atıl Maliyet"
+                        value={fmtTL(breakdown.capacity.idleCostTL)}
+                        warn
+                      />
+                    </div>
+                    <Table>
+                      <TableBody>
+                        <TableRow>
+                          <TableCell>Saatlik Birim Maliyet (ortak gider/saat)</TableCell>
+                          <TableCell className="text-right font-mono">{fmtTL(breakdown.capacity.costPerHourTL)}</TableCell>
+                        </TableRow>
+                        <TableRow>
+                          <TableCell>Kapasite-bazlı Birim Maliyet (ortak gider/test)</TableCell>
+                          <TableCell className="text-right font-mono">
+                            {fmtTL(breakdown.capacity.capacityBasedCostPerTestTL)}
+                          </TableCell>
+                        </TableRow>
+                        <TableRow>
+                          <TableCell>Gerçek Test Hacmi</TableCell>
+                          <TableCell className="text-right font-mono">
+                            {breakdown.capacity.actualTestVolume.toLocaleString('tr-TR')} test
+                          </TableCell>
+                        </TableRow>
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
+              )}
+
               {/* Sistem Geneli */}
               <Card>
                 <CardHeader className="py-3">
@@ -375,6 +429,39 @@ function KpiCard({
         {badge && <div className="mt-1">{badge}</div>}
       </CardContent>
     </Card>
+  );
+}
+
+function KpiBox({
+  label,
+  value,
+  highlight,
+  warn,
+}: {
+  label: string;
+  value: string;
+  highlight?: boolean;
+  warn?: boolean;
+}) {
+  return (
+    <div
+      className={
+        warn
+          ? 'border border-red-300 bg-red-50/40 rounded-lg p-3'
+          : highlight
+            ? 'border border-amber-300 bg-amber-50/40 rounded-lg p-3'
+            : 'border border-border rounded-lg p-3'
+      }
+    >
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div
+        className={`text-base font-bold font-mono mt-1 ${
+          warn ? 'text-red-700' : highlight ? 'text-amber-700' : ''
+        }`}
+      >
+        {value}
+      </div>
+    </div>
   );
 }
 

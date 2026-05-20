@@ -476,3 +476,78 @@ test('Cihaz: kira yıllık → aylık olarak ÷12', () => {
   // Cihaz aylık: 540.000/12 = 45.000 TL
   assert.equal(r.deviceCostMonthlyTL, 45000);
 });
+
+test('Kapasite: TPH ve lab çalışma saati varsa utilization & idle hesaplanır', () => {
+  // 1 lab + 1 cihaz × 100 test/saat, 8 saat × 22 gün = ~174 saat → ~17.400 test/ay kapasite
+  const localLabs: Any[] = [{ id: 'lab1', name: 'Lab 1', calismaSaatleri: { haftaIciStart: '08:00', haftaIciEnd: '16:00', haftaIciGunleri: ['pzt', 'sal', 'cars', 'pers', 'cum'] } }];
+  const localDevDefs: Any = new Map([['d1', { id: 'd1', brand: 'c', model: 'q', imageUrl: '', mulkiyet: 'kira', aylikKira: 45000, maliyetCurrency: 'TRY', testKapasiteSaatBasi: 100 }]]);
+  const localAssigned: Any[] = [{ cihazId: 'd1', id: 'lab1-d1', deviceId: 'd1', name: 'c q', serial: 'x', hastaneId: 'lab1' }];
+  // 5 kutu × 200 ambalaj = 1.000 test stoğu
+  const localStok: Any[] = [];
+  for (let k = 0; k < 5; k++) {
+    localStok.push({ id: `lab1-A-${k}`, stokKodu: 'A', stokAdi: 'A Ürünü', miad: '01.01.2030', isShipped: true, hedefKurum: 'Lab 1', hedefKurumId: 'lab1', urunGrubu: 'kit', ambalajDegeri: 200 });
+  }
+  const r = calculateTestCost({
+    ...baseInputs,
+    labs: localLabs,
+    deviceDefs: localDevDefs,
+    assignedDevices: localAssigned,
+    depoStok: localStok,
+    assets: [],
+    personnel: [],
+  });
+  assert.ok(r.capacity, 'capacity tanımlı olmalı');
+  // 8 saat × 5 gün × 4.34 hafta = ~173.6 saat
+  assert.ok(Math.abs((r.capacity?.monthlyHours || 0) - 173.6) < 1, 'monthlyHours ≈ 174');
+  // 100 × 173.6 = 17.360 test kapasitesi
+  assert.ok(Math.abs((r.capacity?.monthlyTestCapacity || 0) - 17360) < 10, 'monthly capacity ≈ 17.360');
+  // utilization = 1000/17360 ≈ 0.0576
+  assert.ok(r.capacity!.utilization > 0.05 && r.capacity!.utilization < 0.07);
+  // idle cost = ortakGiderler × (1 - 0.0576) ≈ %94.2'si
+  assert.ok(r.capacity!.idleCostTL > r.ortakGiderlerTL * 0.9);
+});
+
+test('Acil lab: 7/24 → 720 saat/ay kapasite', () => {
+  const localLabs: Any[] = [{ id: 'lab1', name: 'Lab 1', acilStatusu: true }];
+  const localDevDefs: Any = new Map([['d1', { id: 'd1', brand: 'c', model: 'q', imageUrl: '', testKapasiteSaatBasi: 50 }]]);
+  const localAssigned: Any[] = [{ cihazId: 'd1', id: 'lab1-d1', deviceId: 'd1', name: 'c q', serial: 'x', hastaneId: 'lab1' }];
+  const r = calculateTestCost({
+    ...baseInputs,
+    labs: localLabs,
+    deviceDefs: localDevDefs,
+    assignedDevices: localAssigned,
+    depoStok: [],
+    assets: [],
+    personnel: [],
+  });
+  assert.equal(r.capacity?.monthlyHours, 720);
+  // 50 × 720 = 36.000 test kapasitesi
+  assert.equal(r.capacity?.monthlyTestCapacity, 36000);
+});
+
+test('Hybrid mod: ürün maliyeti stoktan, ortak gider kapasiteden', () => {
+  // 1 lab + cihaz TPH=200 + lab 174 saat → 34.800 kapasite
+  // 5 kutu × 200 = 1.000 test stoğu, 5 × 200 = 1.000 TL stok
+  const localLabs: Any[] = [{ id: 'lab1', name: 'Lab 1' }]; // varsayılan ~174 saat
+  const localDevDefs: Any = new Map([['d1', { id: 'd1', brand: 'c', model: 'q', imageUrl: '', mulkiyet: 'kira', aylikKira: 45000, maliyetCurrency: 'TRY', testKapasiteSaatBasi: 200 }]]);
+  const localAssigned: Any[] = [{ cihazId: 'd1', id: 'lab1-d1', deviceId: 'd1', hastaneId: 'lab1', name: 'c q', serial: 'x' }];
+  const localStok: Any[] = [];
+  for (let k = 0; k < 5; k++) {
+    localStok.push({ id: `lab1-A-${k}`, stokKodu: 'A', stokAdi: 'A Ürünü', miad: '01.01.2030', isShipped: true, hedefKurum: 'Lab 1', hedefKurumId: 'lab1', urunGrubu: 'kit', ambalajDegeri: 200 });
+  }
+  const r = calculateTestCost({
+    ...baseInputs,
+    labs: localLabs,
+    deviceDefs: localDevDefs,
+    assignedDevices: localAssigned,
+    depoStok: localStok,
+    assets: [],
+    personnel: [],
+    costMode: 'hybrid',
+  });
+  // stok birim = 1.000 / 1.000 = 1 TL
+  // ortak gider = 45.000 (cihaz aylık)
+  // kapasite = 200 × 173.6 = 34.720
+  // hybrid birim = 1 + 45.000/34.720 ≈ 2.296
+  assert.ok(r.costPerTestTL > 2 && r.costPerTestTL < 3, `hybrid ≈ 2.3 TL, gerçek: ${r.costPerTestTL}`);
+});

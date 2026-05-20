@@ -76,7 +76,25 @@ export interface Hospital {
   defaultDepotName?: string; // Varsayılan depo adı
   ceomedCariKodu?: string; // Ceomed ERP'deki cari kodu (örn. M51001) - irsaliye eşlemesi için
   ekHizmetLabIds?: string[]; // Bu ana laboratuvara bağlı ek hizmet laboratuvarlarının id'leri
+  /** Acil statüsü — true ise 7/24 (Pazartesi-Pazar 00:00-24:00) çalışır kabul edilir, calismaSaatleri yok sayılır. */
+  acilStatusu?: boolean;
+  /** Lab çalışma saatleri — kapasite ve atıl maliyet hesabında kullanılır. */
+  calismaSaatleri?: LabCalismaSaatleri;
   [k: string]: any;
+}
+
+/**
+ * Laboratuvar çalışma saatleri.
+ * - haftaIciGunleri / haftaSonuGunleri: hangi günler çalışıyor (her ikisi için varsayılan dolu kabul edilir)
+ * - Boş bir aralık (start = end) o periyodun kapalı olduğu anlamına gelir
+ */
+export interface LabCalismaSaatleri {
+  haftaIciStart?: string;  // "08:00"
+  haftaIciEnd?: string;    // "17:00"
+  haftaSonuStart?: string; // "00:00"
+  haftaSonuEnd?: string;   // "00:00" (kapalı)
+  haftaIciGunleri?: ('pzt' | 'sal' | 'cars' | 'pers' | 'cum')[];
+  haftaSonuGunleri?: ('cmt' | 'pzr')[];
 }
 
 export interface RackHeader {
@@ -353,6 +371,8 @@ export interface Device {
   amortismanAyi?: number;
   /** Maliyet alanlarının para birimi (varsayılan TRY) */
   maliyetCurrency?: 'EUR' | 'USD' | 'TRY';
+  /** Saat başına teorik test çalışma kapasitesi (örn 100 test/saat) — kapasite bazlı maliyet hesabında kullanılır */
+  testKapasiteSaatBasi?: number;
   kurulumTarihi?: string;
   kurulumPersonelleri?: string;
   aciklama?: string;

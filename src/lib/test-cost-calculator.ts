@@ -38,6 +38,14 @@ import type {
 export type AllocationMode = 'full_burden' | 'equal_alloc' | 'volume_weighted';
 
 /**
+ * Maliyet hesap modu (yeni — kapasite verisi geldiğinde anlamlı):
+ * - 'stock': ortak gider / stoktaki test adedine bölünür (full burden, mevcut davranış)
+ * - 'capacity': ortak gider / cihazların aylık maks. kapasitesine bölünür (atıl-maliyet hesabı için)
+ * - 'hybrid': ürün maliyeti stoktan, ortak gider kapasiteden — en gerçekçi
+ */
+export type CostMode = 'stock' | 'capacity' | 'hybrid';
+
+/**
  * Hesap periyodu.
  * - 'aylik'  → ortak gider çarpanı = 1 ay
  * - 'yillik' → çarpan = 12 ay
@@ -81,6 +89,25 @@ export interface TestCostInputs {
   periot?: PeriotConfig;
   /** Sadece bu lab'ları içerir; boş/undefined → tümü */
   filterLabIds?: string[];
+  /** Hesap modu (varsayılan 'stock' — geriye uyumlu) */
+  costMode?: CostMode;
+}
+
+export interface CapacityBreakdown {
+  /** Lab'ların toplam aylık çalışma saati (saat/ay) */
+  monthlyHours: number;
+  /** Tüm cihazların aylık test kapasitesi (test/ay) */
+  monthlyTestCapacity: number;
+  /** Bu testin aktüel test adedi (stok bazlı) */
+  actualTestVolume: number;
+  /** Kullanım oranı (0-1) — actualTestVolume / monthlyTestCapacity */
+  utilization: number;
+  /** Atıl maliyet = ortak gider × (1 − utilization) */
+  idleCostTL: number;
+  /** Saatlik birim maliyet = ortak gider / monthlyHours */
+  costPerHourTL: number;
+  /** Kapasite bazlı birim test maliyeti = ortak gider / monthlyTestCapacity (yalnızca ortak gider — stok eklenmemiş) */
+  capacityBasedCostPerTestTL: number;
 }
 
 export interface LabBreakdown {
@@ -129,6 +156,10 @@ export interface TestCostBreakdown {
   warnings: string[];
   /** Hesabın periyodu (ay olarak). 1=aylık, 12=yıllık, 1/30=günlük */
   periotAy?: number;
+  /** Kapasite bazlı metrikler — cihaz TPH ve lab çalışma saati varsa anlamlı */
+  capacity?: CapacityBreakdown;
+  /** Aktif hesap modu */
+  costMode?: CostMode;
 }
 
 export interface SystemCostSummary {
@@ -281,6 +312,48 @@ function personnelMonthlyCostTL(p: Personnel, rates: Record<Currency, number>): 
   if (!p.aktif) return 0;
   const total = (Number(p.aylikBrutMaas) || 0) + (Number(p.aylikYanHaklar) || 0);
   return toTRY(total, p.currency, rates);
+}
+
+// ============================================================================
+// KAPASITE HESABI
+// ============================================================================
+
+/**
+ * "HH:MM" formatlı saat string'inin gün içindeki ondalık saat karşılığı.
+ * Boş veya geçersiz değer → 0.
+ */
+function parseHour(hhmm?: string): number {
+  if (!hhmm || typeof hhmm !== 'string') return 0;
+  const [h, m] = hhmm.split(':').map((s) => Number(s) || 0);
+  return (h || 0) + ((m || 0) / 60);
+}
+
+/**
+ * Bir laboratuvarın aylık çalışma saati (saat/ay).
+ * - acilStatusu=true → 24 × 30 = 720 saat (7/24)
+ * - calismaSaatleri tanımlı değilse → varsayılan: hafta içi 5 gün × 8 saat × 4.34 hafta ≈ 174 saat
+ * - Tanımlı ise: (haftaIciSaat × haftaIciGunSayısı × 4.34) + (haftaSonuSaat × haftaSonuGunSayısı × 4.34)
+ */
+export function getLabMonthlyHours(lab: Hospital): number {
+  if (lab.acilStatusu) return 24 * 30;
+  const cs = lab.calismaSaatleri;
+  if (!cs) return 5 * 8 * 4.34; // varsayılan 174 saat
+  const hiSaat = Math.max(0, parseHour(cs.haftaIciEnd) - parseHour(cs.haftaIciStart));
+  const hsSaat = Math.max(0, parseHour(cs.haftaSonuEnd) - parseHour(cs.haftaSonuStart));
+  const hiGun = cs.haftaIciGunleri?.length ?? 5;
+  const hsGun = cs.haftaSonuGunleri?.length ?? 0;
+  return (hiSaat * hiGun + hsSaat * hsGun) * 4.34; // ortalama 4.34 hafta/ay
+}
+
+/**
+ * Bir cihazın aylık test kapasitesi: TPH × lab çalışma saati.
+ * TPH veya saat 0 ise 0 döner.
+ */
+export function getDeviceMonthlyCapacity(device: Device | undefined, lab: Hospital): number {
+  if (!device) return 0;
+  const tph = Number(device.testKapasiteSaatBasi) || 0;
+  if (tph <= 0) return 0;
+  return tph * getLabMonthlyHours(lab);
 }
 
 // ============================================================================
@@ -441,8 +514,67 @@ export function calculateTestCost(inputs: TestCostInputs): TestCostBreakdown {
     warnings.push('Bu testin stoğunda hiç test adedi yok — birim maliyet hesaplanamadı');
   }
 
+  // ────────────────────────────────────────────────────────────────────────
+  // Kapasite hesabı — cihaz TPH ve lab çalışma saati varsa anlamlı
+  // ────────────────────────────────────────────────────────────────────────
+  let monthlyHours = 0;
+  let monthlyTestCapacity = 0;
+  let labsWithCapacity = 0;
+  for (const lab of labs) {
+    const labHours = getLabMonthlyHours(lab);
+    let hasCapacity = false;
+    for (const ad of assignedDevices.filter((d) => d.hastaneId === lab.id)) {
+      const def = deviceDefs.get(ad.deviceId) || deviceDefs.get(ad.cihazId);
+      const tph = Number(def?.testKapasiteSaatBasi) || 0;
+      if (tph > 0) {
+        monthlyTestCapacity += tph * labHours;
+        hasCapacity = true;
+      }
+    }
+    if (hasCapacity) {
+      monthlyHours += labHours;
+      labsWithCapacity++;
+    }
+  }
+  // Periyot çarpanı kapasiteye de uygulanır
+  const periodCapacity = monthlyTestCapacity * periotAy;
+  const utilization = periodCapacity > 0 ? Math.min(1, totalStockUnits / periodCapacity) : 0;
+  const idleCostTL = ortakGiderler * (1 - utilization);
+  const periotHours = monthlyHours * periotAy;
+  const costPerHourTL = periotHours > 0 ? ortakGiderler / periotHours : 0;
+  const capacityBasedCostPerTestTL = periodCapacity > 0 ? ortakGiderler / periodCapacity : 0;
+
+  // costMode'a göre nihai birim test maliyeti
+  const costModeResolved: CostMode = inputs.costMode || 'stock';
+  let finalCostPerTest = costPerTest; // stock (default)
+  if (costModeResolved === 'capacity' && periodCapacity > 0) {
+    // Tüm maliyet kapasiteye bölünür (stok dahil — kapasite yaklaşımı)
+    finalCostPerTest = testTotalCost / periodCapacity;
+  } else if (costModeResolved === 'hybrid' && periodCapacity > 0 && totalStockUnits > 0) {
+    // Ürün birim maliyeti stoktan, ortak gider kapasiteden
+    const stockUnitCost = totalStockCostTL / totalStockUnits;
+    finalCostPerTest = stockUnitCost + ortakGiderler / periodCapacity;
+  }
+
+  const capacity: CapacityBreakdown | undefined =
+    labsWithCapacity > 0
+      ? {
+          monthlyHours,
+          monthlyTestCapacity: periodCapacity,
+          actualTestVolume: totalStockUnits,
+          utilization,
+          idleCostTL,
+          costPerHourTL,
+          capacityBasedCostPerTestTL,
+        }
+      : undefined;
+
+  if (labsWithCapacity === 0 && (costModeResolved === 'capacity' || costModeResolved === 'hybrid')) {
+    warnings.push('Kapasite verisi yok (cihaz TPH veya lab çalışma saati tanımlı değil) — stok moduna düşüldü');
+  }
+
   const hakEdisTL = toTRY(testDef.hakEdisMiktari || 0, (testDef.currency || 'TRY') as Currency, rates);
-  const marj = hakEdisTL - costPerTest;
+  const marj = hakEdisTL - finalCostPerTest;
 
   return {
     testId: testDef.id,
@@ -457,12 +589,14 @@ export function calculateTestCost(inputs: TestCostInputs): TestCostBreakdown {
     personnelCostMonthlyTL: personnelPeriotTL,
     ortakGiderlerTL: ortakGiderler,
     testTotalCostTL: testTotalCost,
-    costPerTestTL: costPerTest,
+    costPerTestTL: finalCostPerTest,
     hakEdisTL,
     marjTL: marj,
     perLab,
     warnings,
     periotAy,
+    capacity,
+    costMode: costModeResolved,
   };
 }
 

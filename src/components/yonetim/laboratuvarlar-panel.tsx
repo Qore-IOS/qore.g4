@@ -249,6 +249,8 @@ export default function LaboratuvarPanel() {
         perifer: currentHospital.perifer ?? false,
         defaultDepotId: currentHospital.defaultDepotId || null,
         defaultDepotName: currentHospital.defaultDepotId ? (depots.find(d => d.id === currentHospital.defaultDepotId)?.name || null) : null,
+        acilStatusu: (currentHospital as any).acilStatusu ?? false,
+        calismaSaatleri: (currentHospital as any).acilStatusu ? null : ((currentHospital as any).calismaSaatleri || null),
         autoTutanak: (currentHospital as any).autoTutanak ?? false,
         sorumluEmails: responsibleEmails,
         sorumluEmail: responsibleEmails[0] || '',
@@ -792,6 +794,72 @@ export default function LaboratuvarPanel() {
               </div>
 
               <div className="space-y-4">
+                {/* Çalışma Saatleri + Acil Statüsü — kapasite/atıl maliyet hesabı için */}
+                <div className="rounded-md border p-3 space-y-3">
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id="acil-status-switch"
+                      checked={!!(currentHospital as any).acilStatusu}
+                      onCheckedChange={(checked) => setCurrentHospital({ ...currentHospital, acilStatusu: checked })}
+                    />
+                    <Label htmlFor="acil-status-switch">
+                      Acil Statüsü (7/24)
+                      <p className="text-xs text-muted-foreground">
+                        Aktifse lab 7/24 çalışır kabul edilir (720 saat/ay), çalışma saatleri yok sayılır.
+                      </p>
+                    </Label>
+                  </div>
+                  {!(currentHospital as any).acilStatusu && (
+                    <div className="grid grid-cols-2 gap-3 pt-2 border-t">
+                      <div>
+                        <Label className="text-xs font-semibold uppercase tracking-wider">Haftaiçi (Pzt-Cum)</Label>
+                        <div className="flex items-center gap-2 mt-1">
+                          <Input
+                            type="time"
+                            value={(currentHospital as any).calismaSaatleri?.haftaIciStart || '08:00'}
+                            onChange={(e) => setCurrentHospital({
+                              ...currentHospital,
+                              calismaSaatleri: { ...(currentHospital as any).calismaSaatleri, haftaIciStart: e.target.value },
+                            })}
+                          />
+                          <span className="text-xs text-muted-foreground">→</span>
+                          <Input
+                            type="time"
+                            value={(currentHospital as any).calismaSaatleri?.haftaIciEnd || '17:00'}
+                            onChange={(e) => setCurrentHospital({
+                              ...currentHospital,
+                              calismaSaatleri: { ...(currentHospital as any).calismaSaatleri, haftaIciEnd: e.target.value },
+                            })}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <Label className="text-xs font-semibold uppercase tracking-wider">Haftasonu (Cmt-Pzr)</Label>
+                        <div className="flex items-center gap-2 mt-1">
+                          <Input
+                            type="time"
+                            value={(currentHospital as any).calismaSaatleri?.haftaSonuStart || ''}
+                            onChange={(e) => setCurrentHospital({
+                              ...currentHospital,
+                              calismaSaatleri: { ...(currentHospital as any).calismaSaatleri, haftaSonuStart: e.target.value },
+                            })}
+                          />
+                          <span className="text-xs text-muted-foreground">→</span>
+                          <Input
+                            type="time"
+                            value={(currentHospital as any).calismaSaatleri?.haftaSonuEnd || ''}
+                            onChange={(e) => setCurrentHospital({
+                              ...currentHospital,
+                              calismaSaatleri: { ...(currentHospital as any).calismaSaatleri, haftaSonuEnd: e.target.value },
+                            })}
+                          />
+                        </div>
+                        <p className="text-[10px] text-muted-foreground mt-1">Kapalıysa her ikisini de boş bırakın.</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <div className="flex items-center space-x-2 rounded-md border p-3">
                     <Switch
                     id="fefo-enabled-switch"
