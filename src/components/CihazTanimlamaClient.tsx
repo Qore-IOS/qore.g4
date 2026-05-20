@@ -248,6 +248,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       satinAlmaTutari: current.satinAlmaTutari ?? null,
       satinAlmaTarihi: current.satinAlmaTarihi ?? null,
       amortismanAyi: current.amortismanAyi ?? null,
+      testKapasiteSaatBasi: current.testKapasiteSaatBasi ?? null,
     }, currentUserProfile?.companyId), { merge: true });
 
     toast({ title: 'Kaydedildi', description: 'Cihaz tanımı kaydedildi.' });
@@ -1460,6 +1461,23 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                       })}
                     </p>
                   )}
+
+                {/* Saat başına test kapasitesi (TPH) */}
+                <div className="grid md:grid-cols-2 gap-3 pt-2 border-t border-dashed border-muted/40">
+                  <div className="space-y-1">
+                    <Label>Saat Başına Test Kapasitesi</Label>
+                    <Input
+                      type="number"
+                      inputMode="decimal"
+                      placeholder="Örn: 100"
+                      value={current.testKapasiteSaatBasi ?? ''}
+                      onChange={e => setCurrent({ ...current, testKapasiteSaatBasi: e.target.value === '' ? undefined : Number(e.target.value) })}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Teorik maksimum (test/saat). Kapasite ve atıl maliyet hesabında kullanılır.
+                    </p>
+                  </div>
+                </div>
               </div>
               <div className="space-y-1">
                 <Label>Kuran Personel(ler)</Label>
