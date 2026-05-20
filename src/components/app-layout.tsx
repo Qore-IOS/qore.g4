@@ -93,6 +93,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const isEdgeToEdgeRoute =
     pathname?.startsWith("/maliyet-gozlem") ||
     pathname?.startsWith("/cihaz-test-dagilimi") ||
+    // Yönetim ve alt panelleri (envanter yönetimi hariç) yeni tasarım dilinde
+    (pathname?.startsWith("/yonetim") && !pathname?.startsWith("/yonetim/envanter-yonetimi")) ||
     pathname === "/dashboard" ||
     pathname?.startsWith("/dashboard/");
 
