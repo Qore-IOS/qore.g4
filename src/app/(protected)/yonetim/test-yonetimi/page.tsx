@@ -23,6 +23,7 @@ import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import type { ProductCode, TestDefinitionGlobal } from '@/lib/types';
 import BackButton from '@/components/BackButton';
+import { YonetimShell, YonetimHeader, YonetimCard } from '@/components/yonetim-ui/YonetimHub';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Check, ChevronsUpDown } from 'lucide-react';
@@ -334,22 +335,14 @@ export default function HakEdisPage() {
   const totalHakEdis = testDefs.reduce((s, d) => s + (Number(d.hakEdisMiktari) || 0), 0);
 
   return (
-    <div className="p-4 space-y-4">
-      <BackButton fallback="/yonetim/tanimlar" />
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Coins className="h-6 w-6 text-amber-500" />
-            Hak Ediş Paneli (Global Test Tanımları)
-          </CardTitle>
-          <CardDescription>
-            Sistem genelinde SUT kodlarına göre test tanımlamaları. Her test bir veya birden çok ürüne bağlanabilir;
-            tanımlar laboratuvardan bağımsızdır. Test maliyetleri otomatik olarak ürünün tanımlı olduğu laboratuvarlar
-            üzerinden hesaplanır.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
+    <YonetimShell>
+      <YonetimHeader
+        title="Hak Ediş Paneli"
+        description="Sistem genelinde SUT kodlarına göre test tanımlamaları. Her test bir veya birden çok ürüne bağlanabilir; tanımlar laboratuvardan bağımsızdır."
+        backHref="/yonetim/tanimlar"
+      />
+      <YonetimCard>
+        <div className="space-y-6">
           {/* Özet rozetler */}
           <div className="flex flex-wrap gap-4 items-center">
             <Badge variant="outline" className="px-4 py-2 text-base">
@@ -565,8 +558,8 @@ export default function HakEdisPage() {
               </ScrollArea>
             </CardContent>
           </Card>
-        </CardContent>
-      </Card>
+        </div>
+      </YonetimCard>
 
       <TestCostDetailModal
         open={!!costDetailFor}
@@ -574,6 +567,6 @@ export default function HakEdisPage() {
         testDef={costDetailFor}
         allTestDefs={testDefs}
       />
-    </div>
+    </YonetimShell>
   );
 }

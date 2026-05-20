@@ -6,6 +6,7 @@ import { collection, getDocs, addDoc, setDoc, deleteDoc, doc, query, orderBy } f
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { YonetimShell, YonetimHeader, YonetimCard } from '@/components/yonetim-ui/YonetimHub';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PlusCircle, Edit3, Trash2, SlidersHorizontal, Map, Loader2, Warehouse, MapPin, Database } from 'lucide-react';
@@ -156,21 +157,19 @@ export default function DepoYonetimPanel() {
   };
 
   return (
-    <>
-      <Card className="shadow-lg">
-        <CardHeader className="flex flex-row justify-between items-center">
-          <div>
-            <CardTitle className="text-xl font-headline flex items-center">
-              <Warehouse className="mr-2 h-6 w-6 text-orange-500" />
-              Depo Yönetimi
-            </CardTitle>
-            <CardDescription>Yeni depolar ekleyin veya mevcutları düzenleyin.</CardDescription>
-          </div>
-          <Button onClick={openNewDepotModal} size="sm" disabled={isLoading}>
-            <PlusCircle className="mr-2 h-4 w-4" />Yeni Depo
+    <YonetimShell>
+      <YonetimHeader
+        title="Depo Yönetimi"
+        description="Yeni depolar ekleyin veya mevcutları düzenleyin."
+        backHref="/yonetim/tanimlar"
+        rightAction={
+          <Button onClick={openNewDepotModal} size="sm" disabled={isLoading} style={{ background: 'var(--mg-accent)', color: '#0a0a0c', border: 'none', fontWeight: 700 }}>
+            <PlusCircle className="mr-2 h-4 w-4" />
+            Yeni Depo
           </Button>
-        </CardHeader>
-        <CardContent>
+        }
+      />
+      <YonetimCard>
           {isLoading ? (
             <div className="flex justify-center p-4"><Loader2 className="h-6 w-6 animate-spin" /></div>
           ) : (
@@ -232,8 +231,7 @@ export default function DepoYonetimPanel() {
               </Table>
             </ScrollArea>
           )}
-        </CardContent>
-      </Card>
+      </YonetimCard>
 
       <Dialog open={isDepotModalOpen} onOpenChange={setIsDepotModalOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
@@ -421,6 +419,6 @@ export default function DepoYonetimPanel() {
           onClose={() => setIsMapEditorOpen(false)}
         />
       )}
-    </>
+    </YonetimShell>
   );
 }

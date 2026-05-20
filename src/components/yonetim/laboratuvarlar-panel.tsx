@@ -6,6 +6,7 @@ import { collection, getDocs, addDoc, setDoc, deleteDoc, doc, writeBatch, Timest
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { YonetimShell, YonetimHeader, YonetimCard } from '@/components/yonetim-ui/YonetimHub';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PlusCircle, Edit3, Trash2, SlidersHorizontal, Map, Loader2, Warehouse, Network, Plus, X, FlaskConical, Users, Star, FileSpreadsheet, BarChart3, ListOrdered, Mail, Upload, Download, CheckCircle2, AlertCircle, Search, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -575,18 +576,20 @@ export default function LaboratuvarPanel() {
   };
 
   return (
-    <div className="dashboard-neu-page p-3 sm:p-4 md:p-4 space-y-4 sm:space-y-6 pt-6 sm:pt-8 min-h-screen">
-      <div className="space-y-4">
-        <BackButton fallback="/yonetim" />
-        <Card className="cihaz-card shadow-lg">
-          <CardHeader className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div>
-              <CardTitle className="text-xl font-headline flex items-center text-slate-800 dark:text-slate-100">
-                <FlaskConical className="mr-2 h-6 w-6 text-green-500" />
-                Laboratuvar Yönetimi
-              </CardTitle>
-              <CardDescription>Yeni laboratuvarlar ekleyin veya mevcutları düzenleyin.</CardDescription>
+    <YonetimShell>
+      <YonetimHeader
+        title="Laboratuvar Yönetimi"
+        description="Yeni laboratuvarlar ekleyin veya mevcutları düzenleyin."
+        backHref="/yonetim/tanimlar"
+      />
+      <YonetimCard>
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--mg-muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+              <FlaskConical className="inline-block mr-2 h-4 w-4 text-emerald-500" />
+              Kayıtlar
             </div>
+          </div>
             <div className="flex flex-wrap items-center gap-2">
               <Button className="cihaz-action-tile text-xs" variant="outline" onClick={() => setIsEfficiencyPoolListOpen(true)} size="sm" disabled={isLoading}>
                 <BarChart3 className="mr-2 h-4 w-4" />
@@ -622,9 +625,10 @@ export default function LaboratuvarPanel() {
                 Yeni Laboratuvar
               </Button>
             </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center gap-2 max-w-sm">
+        </div>
+
+        <div className="space-y-4 pt-2">
+          <div className="flex items-center gap-2 max-w-sm">
                 <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
@@ -740,9 +744,8 @@ export default function LaboratuvarPanel() {
               </div>
               </>
             )}
-          </CardContent>
-        </Card>
-      </div>
+        </div>
+      </YonetimCard>
 
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
         <DialogContent className="max-w-3xl">
@@ -1318,6 +1321,6 @@ export default function LaboratuvarPanel() {
           )}
         </DialogContent>
       </Dialog>
-    </div>
+    </YonetimShell>
   );
 }
