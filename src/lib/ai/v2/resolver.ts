@@ -95,8 +95,37 @@ interface Candidate {
 }
 
 /**
+ * Generate every "useful" acronym for the target words.
+ * Examples for ["zeynep", "kamil", "kadin", "dogum"]:
+ *   - "zkkd"  (all first letters)
+ *   - "zk"    (first 2)
+ *   - "zkk"   (first 3)
+ *   - "zkkd"
+ *  We collect 2..N length prefixes so "zk", "zkm", "zkkd" all match.
+ */
+function allAcronymVariants(target: string): string[] {
+  const tokens = tokenize(target).filter((t) => !STOPWORDS.has(t));
+  if (tokens.length === 0) return [];
+  const initials = tokens.map((t) => t[0]).join('');
+  const variants = new Set<string>();
+  for (let len = 2; len <= initials.length; len++) variants.add(initials.slice(0, len));
+  // Also include all-words acronym + the first character of every long token as alternative
+  variants.add(initials);
+  return Array.from(variants);
+}
+
+/**
  * Score how well `query` matches `target` (a single name). Returns 0 if no
- * meaningful match.
+ * meaningful match. Strategy stack:
+ *   1. Normalized exact            → 1.00
+ *   2. Acronym (zkm → Zeynep Kamil Mehmet)  → 0.90–0.96
+ *   3. All-query-tokens-in-target  → 0.84–0.92
+ *   4. Token prefix match          → 0.70–0.85 (cob → cobas)
+ *   5. Levenshtein on best token   → 0.55–0.85
+ *   6. Numeric model match         → 0.93 (501 → "Cobas 501")
+ *   7. Extra alias bank            → 0.85–0.96 (tsh → "TSH ELECSYS")
+ *
+ * Short queries (≤4 chars) get a lower min threshold (0.45) handled by caller.
  */
 function scoreText(query: string, target: string, opts: { extraAliases?: string[] } = {}): Candidate {
   if (!query || !target) return { score: 0, reason: 'empty' };
@@ -107,51 +136,69 @@ function scoreText(query: string, target: string, opts: { extraAliases?: string[
 
   // 1. exact
   if (nq === nt) return { score: 1.0, reason: 'tam eşleşme' };
+  // ...with spaces removed (handles "ca125" vs "ca 125")
+  if (nq.replace(/\s+/g, '') === nt.replace(/\s+/g, '')) return { score: 0.98, reason: 'tam eşleşme' };
 
-  // 2. acronym
-  const acr = acronymOf(target);
+  // 2. acronym (full + prefix variants)
+  const acronyms = allAcronymVariants(target);
   const qTokens = meaningfulTokens(query);
-  if (qTokens.length === 1 && qTokens[0].length >= 2 && qTokens[0].length <= 5) {
-    if (acr === qTokens[0]) return { score: 0.96, reason: `baş harfler eşleşti (${acr})` };
-    // also handle partial acronyms like "zk" → first two of "zeynep kamil"
-    if (acr.startsWith(qTokens[0])) return { score: 0.9, reason: `kısaltma (${acr})` };
+  if (qTokens.length === 1) {
+    const q = qTokens[0];
+    if (q.length >= 2 && q.length <= 6) {
+      if (acronyms.includes(q)) return { score: 0.96, reason: `kısaltma eşleşti (${q})` };
+      // q starts/ends overlap with full acronym
+      const full = acronyms[acronyms.length - 1] ?? '';
+      if (full && full.startsWith(q) && q.length >= 2) return { score: 0.9, reason: `kısaltma (${q} ⊂ ${full})` };
+      if (full && q.startsWith(full) && full.length >= 2) return { score: 0.88, reason: `kısaltma (${full} ⊂ ${q})` };
+    }
   }
 
   // 3. all-query-tokens-in-target
-  const qMeaning = meaningfulTokens(query);
+  const qMeaning = qTokens;
   const tTokens = tokenize(target);
   if (qMeaning.length > 0) {
-    const hits = qMeaning.filter((q) => tTokens.some((t) => t.includes(q) || q.includes(t)));
+    const hits = qMeaning.filter((q) => tTokens.some((t) => t.startsWith(q) || t.includes(q) || q.includes(t)));
     const hitRatio = hits.length / qMeaning.length;
     if (hitRatio === 1 && qMeaning.length >= 2) return { score: 0.92, reason: 'tüm kelimeler bulundu' };
     if (hitRatio === 1) return { score: 0.84, reason: 'kelime bulundu' };
     if (hitRatio >= 0.6) return { score: 0.7 + hitRatio * 0.15, reason: `${hits.length}/${qMeaning.length} kelime` };
   }
 
-  // 4. fuzzy on the closest token pair
+  // 4. token prefix (e.g. "cob" → "cobas")
+  if (qMeaning.length === 1 && qMeaning[0].length >= 3) {
+    const q = qMeaning[0];
+    for (const t of tTokens) {
+      if (t.length < q.length) continue;
+      if (t.startsWith(q)) return { score: 0.78, reason: `prefix eşleşti (${t})` };
+    }
+  }
+
+  // 5. fuzzy on the closest token pair
   let bestTok = 0;
+  let bestTokName = '';
   for (const q of qMeaning.length ? qMeaning : [nq]) {
     for (const t of tTokens) {
       if (Math.abs(q.length - t.length) > 4) continue;
       const sim = similarity(q, t);
-      if (sim > bestTok) bestTok = sim;
+      if (sim > bestTok) { bestTok = sim; bestTokName = t; }
     }
   }
-  if (bestTok >= 0.85) return { score: 0.78, reason: 'benzer yazım' };
-  if (bestTok >= 0.7) return { score: 0.6, reason: 'yakın yazım' };
+  if (bestTok >= 0.85) return { score: 0.78, reason: `benzer yazım (${bestTokName})` };
+  if (bestTok >= 0.7) return { score: 0.6, reason: `yakın yazım (${bestTokName})` };
 
-  // 5. extra aliases
+  // 6. numeric model match (e.g. "501" → "Cobas 501")
+  const numMatch = nq.match(/^\d{2,4}$/);
+  if (numMatch && tTokens.includes(nq)) return { score: 0.93, reason: `model no eşleşti (${nq})` };
+
+  // 7. extra aliases (last so others get priority)
   for (const alias of opts.extraAliases ?? []) {
     const na = normalise(alias);
     if (!na) continue;
     if (na === nq) return { score: 0.96, reason: `alias: ${alias}` };
+    const naCompact = na.replace(/\s+/g, '');
+    const nqCompact = nq.replace(/\s+/g, '');
+    if (naCompact === nqCompact) return { score: 0.95, reason: `alias: ${alias}` };
     if (na.includes(nq) || nq.includes(na)) return { score: 0.85, reason: `alias: ${alias}` };
-  }
-
-  // 6. numeric model match (e.g. "501" → "Cobas 501")
-  const numMatch = nq.match(/^\d{2,4}$/);
-  if (numMatch) {
-    if (tTokens.includes(nq)) return { score: 0.93, reason: `model no eşleşti (${nq})` };
   }
 
   return { score: 0, reason: 'eşleşme yok' };
@@ -249,12 +296,22 @@ async function loadCaches(): Promise<Caches> {
         const d = doc.data();
         const name = d.name || d.ad || '';
         if (!name) continue;
+        const aliases = new Set<string>();
+        for (const a of [name, d.kod, d.ad, d.shortName, d.kisaAd] as Array<string | undefined>) {
+          if (a) aliases.add(a);
+        }
+        // Add all acronym variants so "zk", "zkm", "zkmh" all match
+        for (const ac of allAcronymVariants(name)) aliases.add(ac);
+        // Add compact name (no spaces / punctuation) so "feriha öz" matches "ferihaoz"
+        aliases.add(normalise(name).replace(/\s+/g, ''));
+        // Add each significant token as its own alias
+        for (const tok of meaningfulTokens(name)) aliases.add(tok);
         hospitals.push({
           id: doc.id,
           name,
           kod: d.kod ?? undefined,
           companyId: d.companyId,
-          aliases: [name, d.kod, d.ad].filter(Boolean) as string[],
+          aliases: Array.from(aliases).filter(Boolean),
         });
       }
     } else {
@@ -268,11 +325,21 @@ async function loadCaches(): Promise<Caches> {
         const stokKodu = d.stokKodu || doc.id;
         const stokAdi = d.stokAdi || '';
         if (!stokKodu && !stokAdi) continue;
-        const aliases: string[] = [stokKodu, stokAdi, d.testAdi, d.marka, d.cihazGrubu].filter(Boolean) as string[];
+        const aliases = new Set<string>();
+        for (const a of [stokKodu, stokAdi, d.testAdi, d.marka, d.cihazGrubu] as Array<string | undefined>) {
+          if (a) aliases.add(a);
+        }
+        // Compact variants (remove spaces, dashes, dots)
+        if (stokAdi) aliases.add(normalise(stokAdi).replace(/[\s\-_.]+/g, ''));
+        if (d.testAdi) aliases.add(normalise(d.testAdi).replace(/[\s\-_.]+/g, ''));
         // attach hint aliases based on normalized test/product name
-        const normTest = normalise(d.testAdi || stokAdi);
+        const normCombined = normalise(`${d.testAdi ?? ''} ${stokAdi}`);
         for (const [hint, alts] of Object.entries(PRODUCT_ALIAS_HINTS)) {
-          if (normTest.includes(hint)) aliases.push(...alts);
+          if (normCombined.includes(hint)) for (const a of alts) aliases.add(a);
+        }
+        // Tokens from testAdi/stokAdi (so "elecsys" alone matches "TSH ELECSYS 300")
+        for (const tok of meaningfulTokens(`${d.testAdi ?? ''} ${stokAdi}`)) {
+          if (tok.length >= 3) aliases.add(tok);
         }
         products.push({
           stokKodu,
@@ -282,7 +349,7 @@ async function loadCaches(): Promise<Caches> {
           cihazGrubu: d.cihazGrubu,
           urunGrubu: d.urunGrubu,
           ambalajDegeri: typeof d.ambalajDegeri === 'number' ? d.ambalajDegeri : undefined,
-          aliases,
+          aliases: Array.from(aliases).filter(Boolean),
         });
       }
     } else {
@@ -295,6 +362,17 @@ async function loadCaches(): Promise<Caches> {
         const d = doc.data();
         const model = d.model || '';
         if (!model) continue;
+        const aliases = new Set<string>();
+        for (const a of [model, d.brand, d.marka, d.seriNumarasi, d.serial] as Array<string | undefined>) {
+          if (a) aliases.add(a);
+        }
+        // Extract numeric model code (e.g. "Cobas 501" → "501")
+        const m = model.match(/\b(\d{2,4})\b/);
+        if (m) aliases.add(m[1]);
+        // Compact form
+        aliases.add(normalise(model).replace(/\s+/g, ''));
+        // Tokens
+        for (const tok of meaningfulTokens(model)) aliases.add(tok);
         devices.push({
           id: doc.id,
           brand: d.brand || d.marka,
@@ -303,7 +381,7 @@ async function loadCaches(): Promise<Caches> {
           hospitalId: d.hospitalId || d.labId,
           hospitalName: d.hospitalName || d.labName,
           testDistribution: d.testDagilimi || d.testDistribution,
-          aliases: [model, d.brand, d.marka, d.seriNumarasi, d.serial].filter(Boolean) as string[],
+          aliases: Array.from(aliases).filter(Boolean),
         });
       }
     } else {
@@ -336,6 +414,15 @@ export interface ResolveOptions {
   minConfidence?: number;
 }
 
+function adaptiveMinConfidence(query: string, base: number): number {
+  // For very short queries (kısaltma), accept lower scores — but only if we
+  // can't find a high-confidence match. Caller uses this as the floor.
+  const len = normalise(query).replace(/\s+/g, '').length;
+  if (len <= 3) return Math.min(base, 0.45);
+  if (len <= 5) return Math.min(base, 0.55);
+  return base;
+}
+
 export async function resolveHospitals(
   query: string,
   ctx: PermissionContext,
@@ -343,7 +430,7 @@ export async function resolveHospitals(
 ): Promise<ResolvedHospital[]> {
   const { hospitals } = await loadCaches();
   const limit = opts.limit ?? 5;
-  const minConf = opts.minConfidence ?? 0.55;
+  const minConf = adaptiveMinConfidence(query, opts.minConfidence ?? 0.6);
 
   const scored: ResolvedHospital[] = [];
   for (const h of hospitals) {
@@ -375,7 +462,7 @@ export async function resolveProducts(
 ): Promise<ResolvedProduct[]> {
   const { products } = await loadCaches();
   const limit = opts.limit ?? 8;
-  const minConf = opts.minConfidence ?? 0.55;
+  const minConf = adaptiveMinConfidence(query, opts.minConfidence ?? 0.55);
 
   const scored: ResolvedProduct[] = [];
   for (const p of products) {
@@ -411,7 +498,7 @@ export async function resolveDevices(
 ): Promise<ResolvedDevice[]> {
   const { devices } = await loadCaches();
   const limit = opts.limit ?? 8;
-  const minConf = opts.minConfidence ?? 0.55;
+  const minConf = adaptiveMinConfidence(query, opts.minConfidence ?? 0.55);
 
   const scored: ResolvedDevice[] = [];
   for (const d of devices) {
