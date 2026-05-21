@@ -68,6 +68,28 @@ interface PersonnelVisitRecord {
   source: 'form' | 'fault';
 }
 
+interface VisitEvent {
+  id: string;
+  institutionName: string;
+  visitType: 'teknik_servis' | 'aplikasyon';
+  source: 'form' | 'fault';
+  personnelUid?: string;
+  personnelName: string;
+  date: Date | null;
+}
+
+interface AggregatedVisit {
+  id: string;
+  institutionName: string;
+  visitType: 'teknik_servis' | 'aplikasyon';
+  personnelUid?: string;
+  personnelName: string;
+  dayKey: string;
+  date: Date | null;
+  source: 'form' | 'fault' | 'mixed';
+  records: PersonnelVisitRecord[];
+}
+
 function logFirestoreIndexHint(error: unknown, context: string) {
   const err = (error as { message?: string; code?: string; name?: string } | null) || {};
   const message = err.message || '';
@@ -163,6 +185,64 @@ export default function KurumZiyaretAnaliziPage() {
     if (shiftFilter === 'all') return true;
     const inShift = isWithinWorkHours(date);
     return shiftFilter === 'inside' ? inShift : !inShift;
+  };
+
+
+  const getVisitDayKey = (date: Date | null) => {
+    if (!date) return 'tarihsiz';
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  const aggregateVisitEvents = (events: VisitEvent[]) => {
+    const grouped = new Map<string, AggregatedVisit>();
+
+    events.forEach((event) => {
+      const dayKey = getVisitDayKey(event.date);
+      const aggregateKey = `${event.personnelUid || event.personnelName}|${event.visitType}|${event.institutionName}|${dayKey}`;
+      const existing = grouped.get(aggregateKey);
+
+      if (!existing) {
+        grouped.set(aggregateKey, {
+          id: aggregateKey,
+          institutionName: event.institutionName || 'Bilinmeyen Kurum',
+          visitType: event.visitType,
+          personnelUid: event.personnelUid,
+          personnelName: event.personnelName || 'Bilinmiyor',
+          dayKey,
+          date: event.date,
+          source: event.source,
+          records: [{
+            id: event.id,
+            institutionName: event.institutionName || 'Bilinmeyen Kurum',
+            visitType: event.visitType,
+            date: event.date,
+            source: event.source,
+          }],
+        });
+        return;
+      }
+
+      if ((event.date?.getTime() || 0) > (existing.date?.getTime() || 0)) {
+        existing.date = event.date;
+      }
+
+      existing.source = existing.source === event.source ? existing.source : 'mixed';
+      existing.records.push({
+        id: event.id,
+        institutionName: event.institutionName || 'Bilinmeyen Kurum',
+        visitType: event.visitType,
+        date: event.date,
+        source: event.source,
+      });
+    });
+
+    return Array.from(grouped.values()).map((visit) => ({
+      ...visit,
+      records: visit.records.sort((a, b) => (b.date?.getTime() || 0) - (a.date?.getTime() || 0)),
+    }));
   };
 
   const formatDateTime = (date: Date | null) => {
@@ -345,46 +425,77 @@ export default function KurumZiyaretAnaliziPage() {
   const analysis = useMemo(() => {
     const { filteredTeknik, filteredApp, filteredFaults } = filteredData;
 
-    const teknikFormCount = filteredTeknik.length;
-    const appFormCount = filteredApp.length;
-
     const teknikFaultVisits = filteredFaults.filter((f) => f.interventionType === 'kurum_ziyaret' && f.faultType === 'teknik_servis');
     const appFaultVisits = filteredFaults.filter((f) => f.interventionType === 'kurum_ziyaret' && f.faultType === 'aplikasyon');
 
-    const totalTeknik = teknikFormCount + teknikFaultVisits.length;
-    const totalApp = appFormCount + appFaultVisits.length;
+    const allEvents: VisitEvent[] = [
+      ...filteredTeknik.map((f) => ({
+        id: f.id,
+        institutionName: f.labName || (f.hospitalId ? hospitalNamesMap.get(f.hospitalId) || 'Bilinmeyen Kurum' : 'Bilinmeyen Kurum'),
+        visitType: 'teknik_servis' as const,
+        source: 'form' as const,
+        personnelUid: f.createdByUid,
+        personnelName: f.createdByName || 'Bilinmiyor',
+        date: f.createdAt,
+      })),
+      ...filteredApp.map((f) => ({
+        id: f.id,
+        institutionName: f.labName || (f.hospitalId ? hospitalNamesMap.get(f.hospitalId) || 'Bilinmeyen Kurum' : 'Bilinmeyen Kurum'),
+        visitType: 'aplikasyon' as const,
+        source: 'form' as const,
+        personnelUid: f.createdByUid,
+        personnelName: f.createdByName || 'Bilinmiyor',
+        date: f.createdAt,
+      })),
+      ...teknikFaultVisits.map((f) => ({
+        id: f.id,
+        institutionName: f.labName || (f.labId ? hospitalNamesMap.get(f.labId) || 'Bilinmeyen Kurum' : 'Bilinmeyen Kurum'),
+        visitType: 'teknik_servis' as const,
+        source: 'fault' as const,
+        personnelUid: f.assignedToUid,
+        personnelName: f.assignedToName || 'Bilinmiyor',
+        date: f.closedAt,
+      })),
+      ...appFaultVisits.map((f) => ({
+        id: f.id,
+        institutionName: f.labName || (f.labId ? hospitalNamesMap.get(f.labId) || 'Bilinmeyen Kurum' : 'Bilinmeyen Kurum'),
+        visitType: 'aplikasyon' as const,
+        source: 'fault' as const,
+        personnelUid: f.assignedToUid,
+        personnelName: f.assignedToName || 'Bilinmiyor',
+        date: f.closedAt,
+      })),
+    ];
+
+    const aggregatedVisits = aggregateVisitEvents(allEvents);
+    const teknikVisits = aggregatedVisits.filter((v) => v.visitType === 'teknik_servis');
+    const appVisits = aggregatedVisits.filter((v) => v.visitType === 'aplikasyon');
 
     const personnelMap = new Map<string, { name: string; role: string; visitCount: number; formVisitCount: number; faultVisitCount: number }>();
-
-    const addVisit = (uid: string | undefined, name: string, visitType: 'teknik_servis' | 'aplikasyon', source: 'form' | 'fault') => {
-      if (!uid) return;
-      const user = usersMap.get(uid);
+    aggregatedVisits.forEach((visit) => {
+      if (!visit.personnelUid) return;
+      const user = usersMap.get(visit.personnelUid);
       const userRole = user?.role || '';
       const isTeknikPerson = userRole === 'teknik_servis' || userRole === 'teknisyen';
       const isAppPerson = userRole === 'aplikasyon';
-      if (isTeknikPerson && visitType !== 'teknik_servis') return;
-      if (isAppPerson && visitType !== 'aplikasyon') return;
-      const existing = personnelMap.get(uid) || { name: name || user?.name || 'Bilinmiyor', role: userRole, visitCount: 0, formVisitCount: 0, faultVisitCount: 0 };
-      existing.visitCount++;
-      if (source === 'form') existing.formVisitCount++;
-      if (source === 'fault') existing.faultVisitCount++;
-      personnelMap.set(uid, existing);
-    };
-
-    filteredTeknik.forEach((f) => addVisit(f.createdByUid, f.createdByName, 'teknik_servis', 'form'));
-    filteredApp.forEach((f) => addVisit(f.createdByUid, f.createdByName, 'aplikasyon', 'form'));
-    teknikFaultVisits.forEach((f) => addVisit(f.assignedToUid, f.assignedToName || 'Bilinmiyor', 'teknik_servis', 'fault'));
-    appFaultVisits.forEach((f) => addVisit(f.assignedToUid, f.assignedToName || 'Bilinmiyor', 'aplikasyon', 'fault'));
+      if (isTeknikPerson && visit.visitType !== 'teknik_servis') return;
+      if (isAppPerson && visit.visitType !== 'aplikasyon') return;
+      const existing = personnelMap.get(visit.personnelUid) || { name: visit.personnelName || user?.name || 'Bilinmiyor', role: userRole, visitCount: 0, formVisitCount: 0, faultVisitCount: 0 };
+      existing.visitCount += 1;
+      if (visit.source === 'form') existing.formVisitCount += 1;
+      else if (visit.source === 'fault') existing.faultVisitCount += 1;
+      else {
+        existing.formVisitCount += 1;
+        existing.faultVisitCount += 1;
+      }
+      personnelMap.set(visit.personnelUid, existing);
+    });
 
     const personnelList = Array.from(personnelMap.entries()).map(([uid, data]) => ({ uid, ...data })).sort((a, b) => b.visitCount - a.visitCount);
-    const chartData = personnelList.slice(0, 15).map((p) => ({
-      uid: p.uid,
-      name: p.name.length > 15 ? p.name.substring(0, 15) + '...' : p.name,
-      fullName: p.name, role: p.role, ziyaret: p.visitCount, formVisitCount: p.formVisitCount, faultVisitCount: p.faultVisitCount,
-    }));
+    const chartData = personnelList.slice(0, 15).map((p) => ({ uid: p.uid, name: p.name.length > 15 ? p.name.substring(0, 15) + '...' : p.name, fullName: p.name, role: p.role, ziyaret: p.visitCount, formVisitCount: p.formVisitCount, faultVisitCount: p.faultVisitCount }));
 
-    return { totalTeknik, totalApp, teknikFormCount, appFormCount, teknikFaultVisitCount: teknikFaultVisits.length, appFaultVisitCount: appFaultVisits.length, personnelList, chartData };
-  }, [filteredData, usersMap]);
+    return { totalTeknik: teknikVisits.length, totalApp: appVisits.length, teknikFormCount: teknikVisits.filter((v) => v.source !== 'fault').length, appFormCount: appVisits.filter((v) => v.source !== 'fault').length, teknikFaultVisitCount: teknikVisits.filter((v) => v.source !== 'form').length, appFaultVisitCount: appVisits.filter((v) => v.source !== 'form').length, personnelList, chartData, aggregatedVisits };
+  }, [filteredData, usersMap, hospitalNamesMap]);
 
   const availablePersonnel = useMemo(() => {
     const personSet = new Map<string, string>();
@@ -442,71 +553,31 @@ export default function KurumZiyaretAnaliziPage() {
   const selectedPersonnelVisitDetails = useMemo(() => {
     if (!selectedChartPersonnelUid) return [] as PersonnelVisitDetail[];
 
-    const detailsMap = new Map<string, PersonnelVisitDetail>();
-    const addDetail = (
-      institutionName: string,
-      visitType: 'teknik_servis' | 'aplikasyon',
-      record: Omit<PersonnelVisitRecord, 'institutionName' | 'visitType'>,
-    ) => {
-      const normalizedName = institutionName || 'Bilinmeyen Kurum';
-      const detailKey = `${visitType}_${normalizedName}`;
-      const current = detailsMap.get(detailKey) || { institutionName: normalizedName, visitType, visitCount: 0, records: [] };
-      current.visitCount += 1;
-      current.records.push({
-        ...record,
-        institutionName: normalizedName,
-        visitType,
+    const visitsByInstitution = new Map<string, PersonnelVisitDetail>();
+
+    analysis.aggregatedVisits
+      .filter((v) => v.personnelUid === selectedChartPersonnelUid)
+      .forEach((visit) => {
+        const detailKey = `${visit.visitType}_${visit.institutionName}`;
+        const current = visitsByInstitution.get(detailKey) || { institutionName: visit.institutionName, visitType: visit.visitType, visitCount: 0, records: [] };
+        current.visitCount += 1;
+        current.records.push({
+          id: visit.id,
+          institutionName: visit.institutionName,
+          visitType: visit.visitType,
+          date: visit.date,
+          source: visit.source === 'fault' ? 'fault' : 'form',
+        });
+        visitsByInstitution.set(detailKey, current);
       });
-      detailsMap.set(detailKey, current);
-    };
 
-    filteredData.filteredTeknik
-      .filter((f) => f.createdByUid === selectedChartPersonnelUid)
-      .forEach((f) => addDetail(
-        f.labName || (f.hospitalId ? hospitalNamesMap.get(f.hospitalId) || 'Bilinmeyen Kurum' : 'Bilinmeyen Kurum'),
-        'teknik_servis',
-        {
-          id: f.id,
-          date: f.createdAt,
-          source: 'form',
-        },
-      ));
-
-    filteredData.filteredApp
-      .filter((f) => f.createdByUid === selectedChartPersonnelUid)
-      .forEach((f) => addDetail(
-        f.labName || (f.hospitalId ? hospitalNamesMap.get(f.hospitalId) || 'Bilinmeyen Kurum' : 'Bilinmeyen Kurum'),
-        'aplikasyon',
-        {
-          id: f.id,
-          date: f.createdAt,
-          source: 'form',
-        },
-      ));
-
-    filteredData.filteredFaults
-      .filter((f) => f.interventionType === 'kurum_ziyaret' && f.assignedToUid === selectedChartPersonnelUid)
-      .forEach((f) => addDetail(
-        f.labName || (f.labId ? hospitalNamesMap.get(f.labId) || 'Bilinmeyen Kurum' : 'Bilinmeyen Kurum'),
-        f.faultType,
-        {
-          id: f.id,
-          date: f.closedAt,
-          source: 'fault',
-        },
-      ));
-
-    return Array.from(detailsMap.values())
+    return Array.from(visitsByInstitution.values())
       .map((detail) => ({
         ...detail,
-        records: detail.records.sort((a, b) => {
-          const first = a.date ? a.date.getTime() : 0;
-          const second = b.date ? b.date.getTime() : 0;
-          return second - first;
-        }),
+        records: detail.records.sort((a, b) => (b.date?.getTime() || 0) - (a.date?.getTime() || 0)),
       }))
       .sort((a, b) => b.visitCount - a.visitCount || a.institutionName.localeCompare(b.institutionName, 'tr'));
-  }, [selectedChartPersonnelUid, filteredData, hospitalNamesMap]);
+  }, [selectedChartPersonnelUid, analysis.aggregatedVisits]);
 
   const selectedChartPersonnel = useMemo(() => {
     if (!selectedChartPersonnelUid) return null;
@@ -919,7 +990,7 @@ export default function KurumZiyaretAnaliziPage() {
                     <TableCell>
                       <Badge className={cn('text-xs', getRoleBadgeColor(record.visitType))}>{getRoleLabel(record.visitType)}</Badge>
                     </TableCell>
-                    <TableCell>{record.source === 'fault' ? 'Arıza Kapanış' : 'Form Kaydı'}</TableCell>
+                    <TableCell>{record.source === 'fault' ? 'Arıza / Karma Gün' : 'Form / Karma Gün'}</TableCell>
                     <TableCell className="text-right font-medium">{formatDateTime(record.date)}</TableCell>
                   </TableRow>
                 ))}
