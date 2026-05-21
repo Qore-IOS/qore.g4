@@ -145,14 +145,22 @@ export const TOOL_SCHEMAS: GeminiFunctionDeclaration[] = [
   {
     name: 'get_device_faults',
     description:
-      'Cihaz arıza kayıtları. status: open|closed|all. Belirli lab/cihaz veya tipte (teknik_servis/aplikasyon) filtreleyebilirsin.',
+      'Cihaz arıza kayıtları. status değerleri otomatik normalize edilir: "closed" → cozuldu, "open" → atama_bekliyor|mudahale_bekliyor|mudahale_ediliyor. "En son çözülen arıza" gibi sorularda latest=true ver. Strict filtre boş dönerse motor otomatik client-side fallback uygular.',
     parameters: {
       type: 'object',
       properties: {
         hospitalId: { type: 'string' },
-        status: { type: 'string', description: 'open | closed | all (varsayılan open)' },
+        status: {
+          type: 'string',
+          description: 'closed | cozuldu | open | acik | atama_bekliyor | mudahale_bekliyor | mudahale_ediliyor | all. closed ve cozuldu eşdeğer; open hepsini kapsar.',
+        },
         faultType: { type: 'string', description: 'teknik_servis | aplikasyon' },
         days: { type: 'number', description: 'Son N gün (opsiyonel).' },
+        latest: {
+          type: 'boolean',
+          description: 'true: en son N kayıt (orderBy descending). "en son arıza", "son kapanan arıza" sorularında kullan.',
+        },
+        orderBy: { type: 'string', description: 'openedAt | closedAt | assignedAt (varsayılan: latest=true ise closedAt, değilse openedAt).' },
         limit: { type: 'number' },
       },
       required: [],

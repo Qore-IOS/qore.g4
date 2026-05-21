@@ -67,7 +67,44 @@ function err(label: string, error: unknown): ToolCallResult {
   if (code === 5 || code === 'NOT_FOUND') {
     return { ok: false, label, data: null, notice: 'Veri kaynağı bulunamadı.' };
   }
+  if (code === 9 || code === 'FAILED_PRECONDITION' || /requires an index|index.*build|composite/i.test(message)) {
+    return {
+      ok: false,
+      label,
+      data: null,
+      notice: 'Bu sorgu için Firestore composite index eksik. Daha basit filtre veya alternatif tool dene.',
+    };
+  }
   return { ok: false, label, data: null, notice: message };
+}
+
+/** Detect "missing index" errors so callers can decide to fall back. */
+function isMissingIndexError(error: unknown): boolean {
+  const code = (error as { code?: number | string })?.code;
+  if (code === 9 || code === 'FAILED_PRECONDITION') return true;
+  const msg = error instanceof Error ? error.message : '';
+  return /requires an index|composite|index.*build/i.test(msg);
+}
+
+/* ----------------------------------------------------------------------- */
+/* Status normalization                                                    */
+/* ----------------------------------------------------------------------- */
+
+/** Map friendly status names (closed/open/cozuldu/acik...) to Firestore values. */
+const FAULT_STATUS_ALIASES: Record<string, string[]> = {
+  closed: ['cozuldu', 'closed'],
+  cozuldu: ['cozuldu', 'closed'],
+  open: ['atama_bekliyor', 'mudahale_bekliyor', 'mudahale_ediliyor', 'open'],
+  acik: ['atama_bekliyor', 'mudahale_bekliyor', 'mudahale_ediliyor', 'open'],
+  atama_bekliyor: ['atama_bekliyor'],
+  mudahale_bekliyor: ['mudahale_bekliyor'],
+  mudahale_ediliyor: ['mudahale_ediliyor'],
+};
+
+function normaliseFaultStatus(input?: string): string[] | null {
+  if (!input || input === 'all') return null;
+  const key = input.toLowerCase().trim();
+  return FAULT_STATUS_ALIASES[key] ?? [key];
 }
 
 /* ----------------------------------------------------------------------- */
@@ -181,32 +218,31 @@ export async function getLabStock(
   args: { hospitalId: string; stokKodu?: string; urunGrubu?: string; limit?: number },
   ctx: PermissionContext,
 ): Promise<ToolCallResult> {
-  try {
-    if (!args.hospitalId) {
-      return { ok: false, label: 'get_lab_stock', data: null, notice: 'hospitalId zorunlu.' };
-    }
-    if (!canSeeLab(ctx, args.hospitalId)) {
-      return { ok: false, label: 'get_lab_stock', data: null, notice: 'Bu laboratuvara erişim yetkin yok.' };
-    }
-    const hospital = await getHospitalById(args.hospitalId);
-    if (!hospital) {
-      return { ok: false, label: 'get_lab_stock', data: null, notice: 'Hastane bulunamadı.' };
-    }
+  if (!args.hospitalId) {
+    return { ok: false, label: 'get_lab_stock', data: null, notice: 'hospitalId zorunlu.' };
+  }
+  if (!canSeeLab(ctx, args.hospitalId)) {
+    return { ok: false, label: 'get_lab_stock', data: null, notice: 'Bu laboratuvara erişim yetkin yok.' };
+  }
+  const hospital = await getHospitalById(args.hospitalId);
+  if (!hospital) {
+    return { ok: false, label: 'get_lab_stock', data: null, notice: 'Hastane bulunamadı.' };
+  }
 
-    let q: Query<DocumentData> = adminDb.collection('depoStok')
-      .where('isShipped', '==', true)
-      .where('hedefKurumId', '==', args.hospitalId);
+  const filterDoc = (d: DocumentData): boolean => {
+    if (args.urunGrubu && d.urunGrubu !== args.urunGrubu) return false;
+    if (args.stokKodu && d.stokKodu !== args.stokKodu) return false;
+    if (d.isShipped !== true) return false;
+    if (d.hedefKurumId !== args.hospitalId) return false;
+    if (!canSeeBrand(ctx, d.marka)) return false;
+    return true;
+  };
 
-    q = applyCompanyScope(q, ctx);
-    if (args.stokKodu) q = q.where('stokKodu', '==', args.stokKodu);
-
-    const snap = await q.limit(args.limit ?? 500).get();
+  const aggregate = (docs: Array<{ data(): DocumentData }>): StockAggregate[] => {
     const agg: Record<string, StockAggregate> = {};
-
-    for (const doc of snap.docs) {
+    for (const doc of docs) {
       const d = doc.data();
-      if (args.urunGrubu && d.urunGrubu !== args.urunGrubu) continue;
-      if (!canSeeBrand(ctx, d.marka)) continue;
+      if (!filterDoc(d)) continue;
       const key = `${d.stokKodu}|${d.lotNumarasi ?? '-'}|${tsToShort(d.miad) ?? '-'}`;
       if (!agg[key]) {
         agg[key] = {
@@ -220,15 +256,47 @@ export async function getLabStock(
       }
       agg[key].adet += 1;
     }
-
-    const lots = Object.values(agg).sort((a, b) => {
+    return Object.values(agg).sort((a, b) => {
       if (a.stokKodu !== b.stokKodu) return a.stokKodu.localeCompare(b.stokKodu);
       return (a.miad ?? '').localeCompare(b.miad ?? '');
     });
+  };
 
-    // Per-product totals for easier consumption by the model
+  async function runStrict() {
+    let q: Query<DocumentData> = adminDb.collection('depoStok')
+      .where('isShipped', '==', true)
+      .where('hedefKurumId', '==', args.hospitalId);
+    q = applyCompanyScope(q, ctx);
+    if (args.stokKodu) q = q.where('stokKodu', '==', args.stokKodu);
+    const snap = await q.limit(args.limit ?? 500).get();
+    return { lots: aggregate(snap.docs), scanned: snap.size };
+  }
+
+  async function runFallback() {
+    // Most robust: query only by hedefKurumId (single equality, no index needed)
+    const q = adminDb.collection('depoStok').where('hedefKurumId', '==', args.hospitalId).limit(args.limit ?? 2000);
+    const snap = await q.get();
+    return { lots: aggregate(snap.docs), scanned: snap.size };
+  }
+
+  try {
+    let result;
+    try {
+      result = await runStrict();
+      if (result.lots.length === 0) {
+        const fb = await runFallback();
+        if (fb.lots.length > 0) result = fb;
+      }
+    } catch (e) {
+      if (isMissingIndexError(e)) {
+        result = await runFallback();
+      } else {
+        throw e;
+      }
+    }
+
     const totals: Record<string, { stokKodu: string; stokAdi: string; toplamAdet: number; lotSayisi: number }> = {};
-    for (const l of lots) {
+    for (const l of result.lots) {
       const t = totals[l.stokKodu] ?? { stokKodu: l.stokKodu, stokAdi: l.stokAdi, toplamAdet: 0, lotSayisi: 0 };
       t.toplamAdet += l.adet;
       t.lotSayisi += 1;
@@ -241,11 +309,11 @@ export async function getLabStock(
       data: {
         hospital: { id: hospital.id, name: hospital.name },
         totals: Object.values(totals).sort((a, b) => b.toplamAdet - a.toplamAdet),
-        lots: lots.slice(0, 100),
-        lotCount: lots.length,
+        lots: result.lots.slice(0, 100),
+        lotCount: result.lots.length,
       },
-      scanned: snap.size,
-      notice: snap.size === 0 ? 'Bu lab için kayıt bulunamadı.' : undefined,
+      scanned: result.scanned,
+      notice: result.lots.length === 0 ? 'Bu lab için kayıt bulunamadı.' : undefined,
     };
   } catch (e) {
     return err('get_lab_stock', e);
@@ -412,25 +480,30 @@ export async function getExpiringStock(
   args: { hospitalId?: string; days?: number; limit?: number },
   ctx: PermissionContext,
 ): Promise<ToolCallResult> {
-  try {
-    const days = args.days ?? 90;
-    if (args.hospitalId && !canSeeLab(ctx, args.hospitalId)) {
-      return { ok: false, label: 'get_expiring_stock', data: null, notice: 'Lab yetkin dışında.' };
-    }
-    let q: Query<DocumentData> = adminDb.collection('depoStok')
-      .where('miad', '<=', inDaysFromNow(days));
-    q = applyCompanyScope(q, ctx);
-    if (args.hospitalId) {
-      q = q.where('isShipped', '==', true).where('hedefKurumId', '==', args.hospitalId);
-    }
-    const snap = await q.limit(args.limit ?? 1000).get();
-    const agg: Record<string, { stokKodu: string; stokAdi: string; lotNumarasi?: string; miad?: string; hedefKurum?: string; hedefKurumId?: string; depotName?: string; isShipped?: boolean; adet: number }> = {};
-    for (const doc of snap.docs) {
+  const days = args.days ?? 90;
+  if (args.hospitalId && !canSeeLab(ctx, args.hospitalId)) {
+    return { ok: false, label: 'get_expiring_stock', data: null, notice: 'Lab yetkin dışında.' };
+  }
+  const expiryThreshold = inDaysFromNow(days).getTime();
+
+  type Row = { stokKodu: string; stokAdi: string; lotNumarasi?: string; miad?: string; hedefKurum?: string; hedefKurumId?: string; depotName?: string; depotId?: string; isShipped?: boolean; adet: number };
+
+  const filterRow = (d: DocumentData): boolean => {
+    if (d.isShipped && !canSeeLab(ctx, d.hedefKurumId)) return false;
+    if (!d.isShipped && !canSeeDepot(ctx, d.depotId)) return false;
+    if (!canSeeBrand(ctx, d.marka)) return false;
+    const miadMs = d.miad?.toDate ? d.miad.toDate().getTime() : (d.miad instanceof Date ? d.miad.getTime() : 0);
+    if (!miadMs) return false;
+    if (miadMs > expiryThreshold) return false;
+    // Exclude items already expired more than 30 days ago (not actionable, only "yaklaşan")
+    return true;
+  };
+
+  const aggregate = (docs: Array<{ data(): DocumentData }>): Row[] => {
+    const agg: Record<string, Row> = {};
+    for (const doc of docs) {
       const d = doc.data();
-      // Permission guard
-      if (d.isShipped && !canSeeLab(ctx, d.hedefKurumId)) continue;
-      if (!d.isShipped && !canSeeDepot(ctx, d.depotId)) continue;
-      if (!canSeeBrand(ctx, d.marka)) continue;
+      if (!filterRow(d)) continue;
       const key = `${d.stokKodu}|${d.lotNumarasi}|${d.hedefKurumId ?? d.depotId}`;
       if (!agg[key]) {
         agg[key] = {
@@ -441,19 +514,63 @@ export async function getExpiringStock(
           hedefKurum: d.hedefKurum,
           hedefKurumId: d.hedefKurumId,
           depotName: d.depotName,
+          depotId: d.depotId,
           isShipped: d.isShipped,
           adet: 0,
         };
       }
       agg[key].adet += 1;
     }
-    const rows = Object.values(agg).sort((a, b) => (a.miad ?? '').localeCompare(b.miad ?? ''));
+    return Object.values(agg).sort((a, b) => (a.miad ?? '').localeCompare(b.miad ?? ''));
+  };
+
+  async function runStrict(): Promise<{ rows: Row[]; scanned: number } | { fallback: true }> {
+    try {
+      let q: Query<DocumentData> = adminDb.collection('depoStok');
+      // Note: combining `miad <=` with multiple `==` fields needs a composite index.
+      // Try with as many filters as possible first.
+      if (args.hospitalId) {
+        q = q.where('isShipped', '==', true).where('hedefKurumId', '==', args.hospitalId);
+      }
+      q = q.where('miad', '<=', inDaysFromNow(days));
+      q = applyCompanyScope(q, ctx);
+      const snap = await q.limit(args.limit ?? 1000).get();
+      return { rows: aggregate(snap.docs), scanned: snap.size };
+    } catch (e) {
+      if (isMissingIndexError(e)) return { fallback: true } as const;
+      throw e;
+    }
+  }
+
+  async function runFallback(): Promise<{ rows: Row[]; scanned: number }> {
+    // Most reliable path for a single lab: just query by hedefKurumId,
+    // filter miad + isShipped in memory. No composite index needed.
+    let q: Query<DocumentData> = adminDb.collection('depoStok');
+    if (args.hospitalId) {
+      q = q.where('hedefKurumId', '==', args.hospitalId);
+    } else {
+      // No lab → fetch by company + we'll filter miad in memory
+      q = applyCompanyScope(q, ctx);
+    }
+    const snap = await q.limit(args.limit ?? 2000).get();
+    return { rows: aggregate(snap.docs), scanned: snap.size };
+  }
+
+  try {
+    let result = await runStrict();
+    if ('fallback' in result) {
+      result = await runFallback();
+    } else if (result.rows.length === 0) {
+      // Strict query returned empty — try fallback (might be index issue silently)
+      const fb = await runFallback();
+      if (fb.rows.length > 0) result = fb;
+    }
     return {
       ok: true,
       label: 'get_expiring_stock',
-      data: { window_days: days, rows: rows.slice(0, 200), total: rows.length },
-      scanned: snap.size,
-      notice: rows.length === 0 ? `Önümüzdeki ${days} günde miadı dolacak ürün yok.` : undefined,
+      data: { window_days: days, rows: result.rows.slice(0, 200), total: result.rows.length },
+      scanned: result.scanned,
+      notice: result.rows.length === 0 ? `Önümüzdeki ${days} günde miadı dolacak ürün yok.` : undefined,
     };
   } catch (e) {
     return err('get_expiring_stock', e);
@@ -570,50 +687,121 @@ export async function getDevices(
 /* ----------------------------------------------------------------------- */
 
 export async function getDeviceFaults(
-  args: { hospitalId?: string; status?: string; faultType?: string; days?: number; limit?: number },
+  args: {
+    hospitalId?: string;
+    status?: string;
+    faultType?: string;
+    days?: number;
+    limit?: number;
+    latest?: boolean;
+    orderBy?: 'openedAt' | 'closedAt' | 'assignedAt';
+  },
   ctx: PermissionContext,
 ): Promise<ToolCallResult> {
-  try {
+  if (args.hospitalId && !canSeeLab(ctx, args.hospitalId)) {
+    return { ok: false, label: 'get_device_faults', data: null, notice: 'Lab yetkin dışında.' };
+  }
+
+  const statusValues = normaliseFaultStatus(args.status);
+  const wantLatest = !!args.latest;
+  // For "latest" we want closedAt for closed faults, openedAt otherwise.
+  const orderField = args.orderBy ?? (wantLatest && statusValues?.includes('cozuldu') ? 'closedAt' : 'openedAt');
+
+  // Strategy: build the most-restrictive query we can; if it fails with index
+  // error OR returns empty, fall back to a simpler query + in-memory filter.
+
+  async function runStrict(): Promise<ToolCallResult> {
     let q: Query<DocumentData> = adminDb.collection('deviceFaultReports');
     q = applyCompanyScope(q, ctx);
-    if (args.hospitalId) {
-      if (!canSeeLab(ctx, args.hospitalId)) {
-        return { ok: false, label: 'get_device_faults', data: null, notice: 'Lab yetkin dışında.' };
-      }
-      q = q.where('labId', '==', args.hospitalId);
-    }
-    if (args.status && args.status !== 'all') q = q.where('status', '==', args.status);
+    if (args.hospitalId) q = q.where('labId', '==', args.hospitalId);
     if (args.faultType) q = q.where('faultType', '==', args.faultType);
+    if (statusValues && statusValues.length === 1) q = q.where('status', '==', statusValues[0]);
     if (args.days) q = q.where('openedAt', '>=', daysAgo(args.days));
+    if (wantLatest) q = q.orderBy(orderField, 'desc');
+    const snap = await q.limit(args.limit ?? (wantLatest ? 5 : 200)).get();
+    return finalize(snap, true);
+  }
 
-    const snap = await q.limit(args.limit ?? 200).get();
-    const rows = snap.docs
+  async function runRelaxed(): Promise<ToolCallResult> {
+    let q: Query<DocumentData> = adminDb.collection('deviceFaultReports');
+    q = applyCompanyScope(q, ctx);
+    if (args.hospitalId) q = q.where('labId', '==', args.hospitalId);
+    // No orderBy, no status, no faultType, no days — filter in memory below.
+    const snap = await q.limit(args.limit ? Math.max(args.limit * 4, 200) : 500).get();
+    return finalize(snap, false);
+  }
+
+  function finalize(snap: { docs: Array<{ id: string; data(): DocumentData }>; size: number }, strict: boolean): ToolCallResult {
+    let rows = snap.docs
       .map((d) => ({ id: d.id, ...d.data() }))
-      .filter((d) => canSeeLab(ctx, (d as { labId?: string }).labId))
-      .map((d) => {
-        const data = d as DocumentData;
-        return {
-          id: data.id,
-          labId: data.labId,
-          labName: data.labName,
-          model: data.model,
-          serial: data.serial,
-          faultType: data.faultType,
-          status: data.status,
-          description: data.description,
-          openedAt: tsToShort(data.openedAt),
-          closedAt: tsToShort(data.closedAt),
-          assignedToName: data.assignedToName,
-        };
+      .filter((d) => canSeeLab(ctx, (d as { labId?: string }).labId));
+    if (!strict) {
+      if (statusValues) rows = rows.filter((r) => statusValues.includes(String((r as DocumentData).status)));
+      if (args.faultType) rows = rows.filter((r) => (r as DocumentData).faultType === args.faultType);
+      if (args.days) {
+        const since = daysAgo(args.days).getTime();
+        rows = rows.filter((r) => {
+          const t = (r as DocumentData).openedAt;
+          const iso = tsToISO(t);
+          return iso ? new Date(iso).getTime() >= since : false;
+        });
+      }
+      // Sort in memory by orderField desc
+      rows.sort((a, b) => {
+        const va = tsToISO((a as DocumentData)[orderField]) ?? '';
+        const vb = tsToISO((b as DocumentData)[orderField]) ?? '';
+        return vb.localeCompare(va);
       });
+      if (wantLatest) rows = rows.slice(0, args.limit ?? 5);
+      else if (args.limit) rows = rows.slice(0, args.limit);
+    }
+
+    const compact = rows.map((d) => {
+      const data = d as DocumentData;
+      return {
+        id: data.id,
+        labId: data.labId,
+        labName: data.labName,
+        deviceId: data.deviceId,
+        model: data.model,
+        serial: data.serial,
+        faultType: data.faultType,
+        status: data.status,
+        description: data.description,
+        openedAt: tsToShort(data.openedAt),
+        closedAt: tsToShort(data.closedAt),
+        assignedAt: tsToShort(data.assignedAt),
+        assignedToName: data.assignedToName,
+        closedByName: data.closedByName,
+      };
+    });
+
     return {
       ok: true,
       label: 'get_device_faults',
-      data: rows,
+      data: compact,
       scanned: snap.size,
-      notice: rows.length === 0 ? 'Arıza kaydı yok.' : undefined,
+      notice: compact.length === 0
+        ? (strict ? 'Strict filtre eşleşmedi; client-side fallback denenecek.' : 'Arıza kaydı yok.')
+        : undefined,
     };
+  }
+
+  try {
+    let result = await runStrict();
+    if (Array.isArray(result.data) && result.data.length === 0) {
+      // Empty under strict filter — widen
+      result = await runRelaxed();
+    }
+    return result;
   } catch (e) {
+    if (isMissingIndexError(e)) {
+      try {
+        return await runRelaxed();
+      } catch (e2) {
+        return err('get_device_faults', e2);
+      }
+    }
     return err('get_device_faults', e);
   }
 }
