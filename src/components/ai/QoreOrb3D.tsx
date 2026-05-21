@@ -2,8 +2,6 @@
 
 import { useMemo, useRef } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { EffectComposer, Bloom } from '@react-three/postprocessing';
-import { BlendFunction, KernelSize } from 'postprocessing';
 import * as THREE from 'three';
 
 interface QoreOrb3DProps {
@@ -277,6 +275,55 @@ function InnerDepth() {
 }
 
 /* ──────────────────────────────────────────────────────────────────────── */
+/* SoftHalo — backside additive sphere with view-aligned Fresnel falloff.   */
+/* Stacked at 3 radii to fake a post-process bloom around the orb.          */
+/* ──────────────────────────────────────────────────────────────────────── */
+
+function SoftHalo({ radius, intensity, hue }: { radius: number; intensity: number; hue: string }) {
+  const uniforms = useMemo(
+    () => ({
+      uColor: { value: new THREE.Color(hue) },
+      uIntensity: { value: intensity },
+    }),
+    [hue, intensity],
+  );
+  const material = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        vertexShader: /* glsl */ `
+          varying vec3 vNormal;
+          varying vec3 vViewDir;
+          void main(){
+            vec4 mv = viewMatrix * modelMatrix * vec4(position, 1.0);
+            vNormal = normalize(normalMatrix * normal);
+            vViewDir = normalize(-mv.xyz);
+            gl_Position = projectionMatrix * mv;
+          }`,
+        fragmentShader: /* glsl */ `
+          precision highp float;
+          varying vec3 vNormal;
+          varying vec3 vViewDir;
+          uniform vec3 uColor;
+          uniform float uIntensity;
+          void main(){
+            float rim = pow(1.0 - max(dot(normalize(vNormal), normalize(vViewDir)), 0.0), 2.2);
+            // BackSide rendering inverts dot; bias so the silhouette glows.
+            float alpha = rim * uIntensity;
+            gl_FragColor = vec4(uColor * alpha, alpha);
+          }`,
+        uniforms,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.BackSide,
+      }),
+    [uniforms],
+  );
+  const geometry = useMemo(() => new THREE.SphereGeometry(radius, 48, 48), [radius]);
+  return <mesh geometry={geometry} material={material} />;
+}
+
+/* ──────────────────────────────────────────────────────────────────────── */
 /* Camera                                                                   */
 /* ──────────────────────────────────────────────────────────────────────── */
 
@@ -297,17 +344,19 @@ export default function QoreOrb3D({ isProcessing = false, className }: QoreOrb3D
   return (
     <div className={className} style={{ position: 'relative', width: '100%', height: '100%' }}>
       {/* CSS halo — broad atmospheric glow behind the canvas. */}
+      {/* Strengthened CSS halo — compensates for the postprocessing bloom we
+          removed. Three radial gradients with strong opacity + heavy blur. */}
       <div
         aria-hidden
         style={{
           position: 'absolute',
-          inset: '-12%',
+          inset: '-18%',
           pointerEvents: 'none',
           background:
-            'radial-gradient(circle at 38% 32%, rgba(168, 85, 247, 0.55), transparent 55%),' +
-            'radial-gradient(circle at 70% 78%, rgba(34, 211, 238, 0.45), transparent 60%),' +
-            'radial-gradient(circle at 50% 50%, rgba(217, 70, 239, 0.18), transparent 70%)',
-          filter: 'blur(36px)',
+            'radial-gradient(circle at 36% 30%, rgba(168, 85, 247, 0.75), transparent 50%),' +
+            'radial-gradient(circle at 72% 78%, rgba(34, 211, 238, 0.62), transparent 55%),' +
+            'radial-gradient(circle at 50% 50%, rgba(217, 70, 239, 0.32), transparent 70%)',
+          filter: 'blur(48px)',
         }}
       />
       <Canvas
@@ -325,16 +374,14 @@ export default function QoreOrb3D({ isProcessing = false, className }: QoreOrb3D
         <CameraRig />
         <InnerDepth />
         <BubbleShell isProcessing={isProcessing} />
-        <EffectComposer multisampling={0}>
-          <Bloom
-            intensity={1.4}
-            luminanceThreshold={0.35}
-            luminanceSmoothing={0.55}
-            kernelSize={KernelSize.LARGE}
-            mipmapBlur
-            blendFunction={BlendFunction.SCREEN}
-          />
-        </EffectComposer>
+        {/* Multi-layer additive halos approximate a bloom pass without
+            requiring the postprocessing pipeline (which had peer-dep
+            issues at build time). Three concentric BackSide spheres at
+            increasing radius + decreasing opacity create a soft neon
+            "spread" around the orb. */}
+        <SoftHalo radius={1.16} intensity={0.55} hue="#d946ef" />
+        <SoftHalo radius={1.32} intensity={0.35} hue="#22d3ee" />
+        <SoftHalo radius={1.55} intensity={0.18} hue="#7c3aed" />
       </Canvas>
     </div>
   );
