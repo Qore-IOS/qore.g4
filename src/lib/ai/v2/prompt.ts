@@ -330,9 +330,17 @@ J) "Yönetim paneli X tanımı"
 ═══════════════════════════════════════════════════════════════
 8. STATUS SÖZLÜĞÜ — KOLEKSİYON BAZLI GERÇEK DEĞERLER
 ═══════════════════════════════════════════════════════════════
-ÖNEMLİ: Aşağıdaki gerçek Firestore status değerleridir. Sistem bunların
-İngilizce karşılıklarını otomatik tanır (ör. closed→cozuldu) ama tool'a
-yine de doğru/eşdeğer değer ver.
+**Motor merkezi alias sistemi içerir**. Her status/enum/durum filtresi
+'src/lib/ai/v2/aliases.ts' içindeki tabloya bakar ve eşdeğer tüm
+değerleri Firestore "in" ile sorgular. Yani:
+  • status='closed' → otomatik {cozuldu, closed} dener
+  • status='open'   → otomatik {atama_bekliyor, mudahale_bekliyor, mudahale_ediliyor, open} dener
+  • durum='accepted' (verifReports) → "KABUL EDİLDİ" dener
+  • action='use' (sparePartTransferLogs) → "kullanim" dener
+  • urunGrubu='consumable' → "sarf" dener
+
+Hangi terimi kullansan tool çalışacak. Aşağıdaki resmî değerleri
+referans için bilmen yeter.
 
 deviceFaultReports.status:
   • atama_bekliyor  → yeni açılan, kimse üzerine almadı ("acik" sayılır)
@@ -369,13 +377,19 @@ interventionType: telefon | kurum_ziyaret
 faultType: teknik_servis | aplikasyon
 
 ═══════════════════════════════════════════════════════════════
-9. FIRESTORE COMPOSITE INDEX UYARISI
+9. FIRESTORE COMPOSITE INDEX FALLBACK (otomatik)
 ═══════════════════════════════════════════════════════════════
-Bazı tool'larda compound query için composite index gerekebilir.
-"FAILED_PRECONDITION" veya "Bu sorgu için Firestore composite index
-eksik" notice'i alırsan:
-  - Aynı tool'u daha az filtre ile tekrar dene (örn. status veya days
-    parametresini düşür)
+Motor src/lib/ai/v2/query.ts içinde robustQuery ve tryWithFallback
+helper'larıyla şu davranışı garanti eder:
+  • Compound query FAILED_PRECONDITION fırlatırsa → en az-öncelikli
+    filtreyi düşürür, daha az alanla yeniden sorgular ve geri kalanı
+    bellekte filtreler.
+  • Strict sorgu boş dönerse → loose sorgu denenir (aynı şekilde).
+  • Tüm bunlar otomatik, sen aynı parametrelerle çağırmaya devam et.
+
+Yine de "Bu sorgu için composite index eksik" notice'i alırsan
+(çok nadir):
+  - Aynı tool'u daha az filtre ile tekrar dene (örn. days kaldır)
   - Motor kritik tool'larda otomatik fallback yapıyor; yine de boş
     geliyorsa kullanıcıya "indeks eksik olabilir, yöneticinizle
     görüşün" notu ekle (HALA alternatif tool'ları denedikten sonra).
