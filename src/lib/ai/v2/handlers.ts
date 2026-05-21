@@ -87,24 +87,146 @@ function isMissingIndexError(error: unknown): boolean {
 }
 
 /* ----------------------------------------------------------------------- */
-/* Status normalization                                                    */
+/* Robust list helper — central pattern used by every list-style handler   */
 /* ----------------------------------------------------------------------- */
 
-/** Map friendly status names (closed/open/cozuldu/acik...) to Firestore values. */
-const FAULT_STATUS_ALIASES: Record<string, string[]> = {
-  closed: ['cozuldu', 'closed'],
-  cozuldu: ['cozuldu', 'closed'],
-  open: ['atama_bekliyor', 'mudahale_bekliyor', 'mudahale_ediliyor', 'open'],
-  acik: ['atama_bekliyor', 'mudahale_bekliyor', 'mudahale_ediliyor', 'open'],
-  atama_bekliyor: ['atama_bekliyor'],
-  mudahale_bekliyor: ['mudahale_bekliyor'],
-  mudahale_ediliyor: ['mudahale_ediliyor'],
-};
+import { robustQuery, type RobustFilter } from './query';
+import { aliasedFilter, expandAlias } from './aliases';
 
+/** Backward-compat status normalization (kept for explicit lookups). */
 function normaliseFaultStatus(input?: string): string[] | null {
   if (!input || input === 'all') return null;
-  const key = input.toLowerCase().trim();
-  return FAULT_STATUS_ALIASES[key] ?? [key];
+  const expanded = expandAlias('deviceFaultReports', 'status', input);
+  return expanded.length > 0 ? (expanded as string[]) : null;
+}
+
+/**
+ * Add a where-clause with automatic alias expansion.
+ * If the value has aliases registered (e.g. "closed" → ["cozuldu","closed"]),
+ * uses Firestore `in` (server-side OR) so any equivalent value matches.
+ */
+function whereAliased(
+  q: Query<DocumentData>,
+  collection: string,
+  field: string,
+  value: unknown,
+): Query<DocumentData> {
+  if (value === undefined || value === null || value === 'all') return q;
+  const candidates = expandAlias(collection, field, value);
+  if (candidates.length === 1) return q.where(field, '==', candidates[0] as never);
+  if (candidates.length <= 30) return q.where(field, 'in', candidates as never);
+  return q.where(field, '==', value as never);
+}
+
+/**
+ * Try a Firestore query; if it fails with FAILED_PRECONDITION (missing
+ * composite index) OR returns empty, fall back to a "loose" version that
+ * keeps only the named "required" filters and applies the rest in memory.
+ *
+ * This is the universal escape hatch — any handler can wrap its query in
+ * `tryWithFallback` to get index-error resilience and empty-result widening
+ * without rewriting the handler logic.
+ */
+async function tryWithFallback<T>(
+  strict: () => Promise<{ docs: Array<{ id: string; data(): DocumentData }>; size: number }>,
+  loose: () => Promise<{ docs: Array<{ id: string; data(): DocumentData }>; size: number }>,
+  applyMemoryFilters: (doc: DocumentData) => boolean,
+  shape: (doc: DocumentData, id: string) => T,
+): Promise<{ rows: T[]; scanned: number }> {
+  // 1. Strict attempt
+  let snap: Awaited<ReturnType<typeof strict>> | null = null;
+  try {
+    snap = await strict();
+  } catch (e) {
+    if (!isMissingIndexError(e)) throw e;
+  }
+  if (snap) {
+    const rows: T[] = [];
+    for (const doc of snap.docs) {
+      const data = doc.data();
+      if (!applyMemoryFilters(data)) continue;
+      rows.push(shape(data, doc.id));
+    }
+    if (rows.length > 0) return { rows, scanned: snap.size };
+  }
+  // 2. Loose attempt (with in-memory filter on the broader result set)
+  const looseSnap = await loose();
+  const rows: T[] = [];
+  for (const doc of looseSnap.docs) {
+    const data = doc.data();
+    if (!applyMemoryFilters(data)) continue;
+    rows.push(shape(data, doc.id));
+  }
+  return { rows, scanned: looseSnap.size };
+}
+
+interface ListHandlerSpec<T> {
+  label: string;
+  collection: string;
+  /** Required scope (companyId, labId) — never dropped by robustQuery. */
+  scope: RobustFilter[];
+  /** Optional filters in priority order (highest first). */
+  filters: RobustFilter[];
+  /** orderBy field (dropped automatically if index error). */
+  orderBy?: string;
+  orderDir?: 'asc' | 'desc';
+  limit?: number;
+  /** Permission-aware row filter (defense in depth). */
+  rowGuard?: (data: DocumentData) => boolean;
+  /** Shape the row for the model (small object, no PII bloat). */
+  shape: (data: DocumentData, id: string) => T;
+  /** Optional alternate noticeWhenEmpty (default "kayıt yok"). */
+  emptyNotice?: string;
+}
+
+/**
+ * Generic robust list runner. Use this for ANY handler that:
+ *   - lists documents from a collection
+ *   - has scope filters (companyId / lab / depot) that MUST be applied
+ *   - has optional model-supplied filters (status, days, faultType, …) that
+ *     should auto-relax under index errors or empty results
+ *   - needs to shape the rows + apply rowGuard
+ */
+async function runList<T>(spec: ListHandlerSpec<T>): Promise<ToolCallResult> {
+  try {
+    const allFilters: RobustFilter[] = [...spec.scope, ...spec.filters];
+    const result = await robustQuery(adminDb, spec.collection, allFilters, {
+      limit: spec.limit ?? 500,
+      orderBy: spec.orderBy,
+      orderDir: spec.orderDir,
+    });
+    const shaped: T[] = [];
+    for (const doc of result.docs) {
+      const data = doc.data();
+      if (spec.rowGuard && !spec.rowGuard(data)) continue;
+      shaped.push(spec.shape(data, doc.id));
+    }
+    return {
+      ok: true,
+      label: spec.label,
+      data: shaped,
+      scanned: result.scanned,
+      notice: shaped.length === 0 ? (spec.emptyNotice ?? 'Kayıt yok.') : undefined,
+    };
+  } catch (e) {
+    return err(spec.label, e);
+  }
+}
+
+/** Build a scope filter list common to most handlers. */
+function commonScope(ctx: PermissionContext, opts: { labField?: string; labId?: string; depotField?: string; depotId?: string } = {}): RobustFilter[] {
+  const out: RobustFilter[] = [];
+  // CompanyId is required for non-superadmins (security).
+  if (ctx.companyId && !ctx.isSuperAdmin) {
+    out.push({ field: 'companyId', value: ctx.companyId, priority: 'required' });
+  }
+  if (opts.labId && opts.labField) {
+    out.push({ field: opts.labField, value: opts.labId, priority: 'required' });
+  }
+  if (opts.depotId && opts.depotField) {
+    out.push({ field: opts.depotField, value: opts.depotId, priority: 'required' });
+  }
+  return out;
 }
 
 /* ----------------------------------------------------------------------- */
@@ -701,107 +823,73 @@ export async function getDeviceFaults(
   if (args.hospitalId && !canSeeLab(ctx, args.hospitalId)) {
     return { ok: false, label: 'get_device_faults', data: null, notice: 'Lab yetkin dışında.' };
   }
-
   const statusValues = normaliseFaultStatus(args.status);
   const wantLatest = !!args.latest;
-  // For "latest" we want closedAt for closed faults, openedAt otherwise.
   const orderField = args.orderBy ?? (wantLatest && statusValues?.includes('cozuldu') ? 'closedAt' : 'openedAt');
+  const sinceMs = args.days ? daysAgo(args.days).getTime() : null;
 
-  // Strategy: build the most-restrictive query we can; if it fails with index
-  // error OR returns empty, fall back to a simpler query + in-memory filter.
-
-  async function runStrict(): Promise<ToolCallResult> {
-    let q: Query<DocumentData> = adminDb.collection('deviceFaultReports');
-    q = applyCompanyScope(q, ctx);
-    if (args.hospitalId) q = q.where('labId', '==', args.hospitalId);
-    if (args.faultType) q = q.where('faultType', '==', args.faultType);
-    if (statusValues && statusValues.length === 1) q = q.where('status', '==', statusValues[0]);
-    if (args.days) q = q.where('openedAt', '>=', daysAgo(args.days));
-    if (wantLatest) q = q.orderBy(orderField, 'desc');
-    const snap = await q.limit(args.limit ?? (wantLatest ? 5 : 200)).get();
-    return finalize(snap, true);
-  }
-
-  async function runRelaxed(): Promise<ToolCallResult> {
-    let q: Query<DocumentData> = adminDb.collection('deviceFaultReports');
-    q = applyCompanyScope(q, ctx);
-    if (args.hospitalId) q = q.where('labId', '==', args.hospitalId);
-    // No orderBy, no status, no faultType, no days — filter in memory below.
-    const snap = await q.limit(args.limit ? Math.max(args.limit * 4, 200) : 500).get();
-    return finalize(snap, false);
-  }
-
-  function finalize(snap: { docs: Array<{ id: string; data(): DocumentData }>; size: number }, strict: boolean): ToolCallResult {
-    let rows = snap.docs
-      .map((d) => ({ id: d.id, ...d.data() }))
-      .filter((d) => canSeeLab(ctx, (d as { labId?: string }).labId));
-    if (!strict) {
-      if (statusValues) rows = rows.filter((r) => statusValues.includes(String((r as DocumentData).status)));
-      if (args.faultType) rows = rows.filter((r) => (r as DocumentData).faultType === args.faultType);
-      if (args.days) {
-        const since = daysAgo(args.days).getTime();
-        rows = rows.filter((r) => {
-          const t = (r as DocumentData).openedAt;
-          const iso = tsToISO(t);
-          return iso ? new Date(iso).getTime() >= since : false;
-        });
-      }
-      // Sort in memory by orderField desc
-      rows.sort((a, b) => {
-        const va = tsToISO((a as DocumentData)[orderField]) ?? '';
-        const vb = tsToISO((b as DocumentData)[orderField]) ?? '';
-        return vb.localeCompare(va);
-      });
-      if (wantLatest) rows = rows.slice(0, args.limit ?? 5);
-      else if (args.limit) rows = rows.slice(0, args.limit);
+  const memoryFilter = (data: DocumentData): boolean => {
+    if (!canSeeLab(ctx, data.labId)) return false;
+    if (statusValues && !statusValues.includes(String(data.status))) return false;
+    if (args.faultType && data.faultType !== args.faultType) return false;
+    if (sinceMs !== null) {
+      const iso = tsToISO(data.openedAt);
+      if (!iso || new Date(iso).getTime() < sinceMs) return false;
     }
+    return true;
+  };
 
-    const compact = rows.map((d) => {
-      const data = d as DocumentData;
-      return {
-        id: data.id,
-        labId: data.labId,
-        labName: data.labName,
-        deviceId: data.deviceId,
-        model: data.model,
-        serial: data.serial,
-        faultType: data.faultType,
-        status: data.status,
-        description: data.description,
-        openedAt: tsToShort(data.openedAt),
-        closedAt: tsToShort(data.closedAt),
-        assignedAt: tsToShort(data.assignedAt),
-        assignedToName: data.assignedToName,
-        closedByName: data.closedByName,
-      };
-    });
+  const shape = (data: DocumentData, id: string) => ({
+    id,
+    labId: data.labId,
+    labName: data.labName,
+    deviceId: data.deviceId,
+    model: data.model,
+    serial: data.serial,
+    faultType: data.faultType,
+    status: data.status,
+    description: data.description,
+    openedAt: tsToShort(data.openedAt),
+    closedAt: tsToShort(data.closedAt),
+    assignedAt: tsToShort(data.assignedAt),
+    assignedToName: data.assignedToName,
+    closedByName: data.closedByName,
+  });
 
+  try {
+    const strict = async () => {
+      let q: Query<DocumentData> = adminDb.collection('deviceFaultReports');
+      q = applyCompanyScope(q, ctx);
+      if (args.hospitalId) q = q.where('labId', '==', args.hospitalId);
+      if (args.faultType) q = whereAliased(q, 'deviceFaultReports', 'faultType', args.faultType);
+      if (statusValues) q = whereAliased(q, 'deviceFaultReports', 'status', args.status);
+      if (args.days) q = q.where('openedAt', '>=', daysAgo(args.days));
+      if (wantLatest) q = q.orderBy(orderField, 'desc');
+      return q.limit(args.limit ?? (wantLatest ? 5 : 200)).get();
+    };
+    const loose = async () => {
+      let q: Query<DocumentData> = adminDb.collection('deviceFaultReports');
+      q = applyCompanyScope(q, ctx);
+      if (args.hospitalId) q = q.where('labId', '==', args.hospitalId);
+      return q.limit(args.limit ? Math.max(args.limit * 4, 200) : 500).get();
+    };
+
+    const result = await tryWithFallback(strict, loose, memoryFilter, shape);
+    // Sort latest in memory (loose path didn't orderBy)
+    if (wantLatest) {
+      result.rows.sort((a, b) => (b[orderField] ?? '').localeCompare(a[orderField] ?? ''));
+      result.rows = result.rows.slice(0, args.limit ?? 5);
+    } else if (args.limit) {
+      result.rows = result.rows.slice(0, args.limit);
+    }
     return {
       ok: true,
       label: 'get_device_faults',
-      data: compact,
-      scanned: snap.size,
-      notice: compact.length === 0
-        ? (strict ? 'Strict filtre eşleşmedi; client-side fallback denenecek.' : 'Arıza kaydı yok.')
-        : undefined,
+      data: result.rows,
+      scanned: result.scanned,
+      notice: result.rows.length === 0 ? 'Arıza kaydı yok.' : undefined,
     };
-  }
-
-  try {
-    let result = await runStrict();
-    if (Array.isArray(result.data) && result.data.length === 0) {
-      // Empty under strict filter — widen
-      result = await runRelaxed();
-    }
-    return result;
   } catch (e) {
-    if (isMissingIndexError(e)) {
-      try {
-        return await runRelaxed();
-      } catch (e2) {
-        return err('get_device_faults', e2);
-      }
-    }
     return err('get_device_faults', e);
   }
 }
@@ -874,7 +962,7 @@ export async function getOrders(
     let q: Query<DocumentData> = adminDb.collection('orders');
     q = applyCompanyScope(q, ctx);
     if (args.hospitalId) q = q.where('hedefKurumId', '==', args.hospitalId);
-    if (args.status && args.status !== 'all') q = q.where('status', '==', args.status);
+    if (args.status && args.status !== 'all') q = whereAliased(q, 'orders', 'status', args.status);
     if (args.days) q = q.where('createdAt', '>=', daysAgo(args.days));
     const snap = await q.limit(args.limit ?? 100).get();
     const rows = snap.docs
@@ -1096,7 +1184,7 @@ export async function getFaultSlaViolations(
     const scope = (args.scope ?? 'toplam') as 'toplam' | 'mudahale' | 'atama';
     let q: Query<DocumentData> = adminDb.collection('deviceFaultReports');
     q = applyCompanyScope(q, ctx);
-    if (args.status && args.status !== 'all') q = q.where('status', '==', args.status);
+    if (args.status && args.status !== 'all') q = whereAliased(q, 'getFaultSlaViolations', 'status', args.status);
     if (args.days) q = q.where('openedAt', '>=', daysAgo(args.days));
 
     const snap = await q.limit(500).get();
@@ -1425,7 +1513,7 @@ export async function getPersonnelAvailability(
     let q: Query<DocumentData> = adminDb.collection('personnelAvailability');
     q = applyCompanyScope(q, ctx);
     if (args.uid) q = q.where('uid', '==', args.uid);
-    if (args.type) q = q.where('type', '==', args.type);
+    if (args.type) q = whereAliased(q, 'getPersonnelAvailability', 'type', args.type);
     if (args.from) q = q.where('startAt', '>=', new Date(args.from));
     const snap = await q.limit(200).get();
     let rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -1464,7 +1552,7 @@ export async function getExpensePeriods(
     q = applyCompanyScope(q, ctx);
     const filterUid = args.uid ?? (ctx.isAdmin ? undefined : ctx.uid);
     if (filterUid) q = q.where('ownerUid', '==', filterUid);
-    if (args.status && args.status !== 'all') q = q.where('status', '==', args.status);
+    if (args.status && args.status !== 'all') q = whereAliased(q, 'expensePeriods', 'status', args.status);
     if (args.year) q = q.where('year', '==', args.year);
     if (args.month) q = q.where('month', '==', args.month);
     const snap = await q.limit(60).get();
@@ -1508,7 +1596,7 @@ export async function getOvertimeRequests(
     q = applyCompanyScope(q, ctx);
     const filterUid = args.uid ?? (ctx.isAdmin ? undefined : ctx.uid);
     if (filterUid) q = q.where('uid', '==', filterUid);
-    if (args.status && args.status !== 'all') q = q.where('status', '==', args.status);
+    if (args.status && args.status !== 'all') q = whereAliased(q, 'overtimeRequests', 'status', args.status);
     if (args.days) q = q.where('createdAt', '>=', daysAgo(args.days));
     const snap = await q.limit(100).get();
     const rows = snap.docs.map((d) => {
@@ -1621,8 +1709,8 @@ export async function getVerificationReports(
     let q: Query<DocumentData> = adminDb.collection('verificationReports');
     q = applyCompanyScope(q, ctx);
     if (args.ilgiliBelgeId) q = q.where('ilgiliBelgeId', '==', args.ilgiliBelgeId);
-    if (args.raporTipi) q = q.where('raporTipi', '==', args.raporTipi);
-    if (args.durum) q = q.where('durum', '==', args.durum);
+    if (args.raporTipi) q = whereAliased(q, 'verificationReports', 'raporTipi', args.raporTipi);
+    if (args.durum) q = whereAliased(q, 'verificationReports', 'durum', args.durum);
     if (args.days) q = q.where('islemTarihi', '>=', daysAgo(args.days));
     const snap = await q.limit(args.limit ?? 200).get();
     const rows = snap.docs.map((d) => {
@@ -1845,7 +1933,7 @@ export async function getUserRequests(
     let q: Query<DocumentData> = adminDb.collection('userRequests');
     if (args.category) q = q.where('category', '==', args.category);
     if (args.priority) q = q.where('priority', '==', args.priority);
-    if (args.status) q = q.where('status', '==', args.status);
+    if (args.status) q = whereAliased(q, 'userRequests', 'status', args.status);
     if (args.assignedTo) q = q.where('assignedTo', '==', args.assignedTo);
     if (args.createdBy) q = q.where('createdBy', '==', args.createdBy);
     if (args.days) q = q.where('createdAt', '>=', daysAgo(args.days));
@@ -1883,7 +1971,7 @@ export async function getNotifications(
 ): Promise<ToolCallResult> {
   try {
     let q: Query<DocumentData> = adminDb.collection('notifications');
-    if (args.type) q = q.where('type', '==', args.type);
+    if (args.type) q = whereAliased(q, 'notifications', 'type', args.type);
     if (args.days) q = q.where('createdAt', '>=', daysAgo(args.days));
     const snap = await q.limit(args.limit ?? 100).get();
     const rows = snap.docs.map((d) => {
@@ -1933,7 +2021,7 @@ export async function getCountSessions(
         q = q.where('depotId', '==', args.locationId);
       }
     }
-    if (args.status) q = q.where('status', '==', args.status);
+    if (args.status) q = whereAliased(q, collection, 'status', args.status);
     if (args.days) q = q.where('createdAt', '>=', daysAgo(args.days));
     const snap = await q.limit(100).get();
     const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() })).map((r) => {
@@ -2097,7 +2185,7 @@ export async function getCentralOrders(
   try {
     let q: Query<DocumentData> = adminDb.collection('centralOrders');
     q = applyCompanyScope(q, ctx);
-    if (args.status && args.status !== 'all') q = q.where('status', '==', args.status);
+    if (args.status && args.status !== 'all') q = whereAliased(q, 'centralOrders', 'status', args.status);
     if (args.days) q = q.where('createdAt', '>=', daysAgo(args.days));
     const snap = await q.limit(args.limit ?? 100).get();
     const rows = snap.docs.map((d) => {
@@ -2129,7 +2217,7 @@ export async function getConsumableRequests(
     let q: Query<DocumentData> = adminDb.collection('consumableRequests');
     q = applyCompanyScope(q, ctx);
     if (args.hospitalId) q = q.where('hospitalId', '==', args.hospitalId);
-    if (args.status && args.status !== 'all') q = q.where('status', '==', args.status);
+    if (args.status && args.status !== 'all') q = whereAliased(q, 'consumableRequests', 'status', args.status);
     if (args.days) q = q.where('createdAt', '>=', daysAgo(args.days));
     const snap = await q.limit(args.limit ?? 100).get();
     const rows = snap.docs.map((d) => {
@@ -2359,7 +2447,7 @@ export async function getFaultDefinitions(
 ): Promise<ToolCallResult> {
   try {
     let q: Query<DocumentData> = adminDb.collection('faultDefinitions');
-    if (args.type) q = q.where('type', '==', args.type);
+    if (args.type) q = whereAliased(q, 'faultDefinitions', 'type', args.type);
     const snap = await q.limit(500).get();
     const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     return { ok: true, label: 'get_fault_definitions', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Arıza tanımı yok.' : undefined };
@@ -2427,7 +2515,7 @@ export async function getOtherCompanyFaults(
       }
       q = q.where('hospitalId', '==', args.hospitalId);
     }
-    if (args.status && args.status !== 'all') q = q.where('status', '==', args.status);
+    if (args.status && args.status !== 'all') q = whereAliased(q, 'digerFirmaArizalar', 'status', args.status);
     if (args.days) q = q.where('createdAt', '>=', daysAgo(args.days));
     const snap = await q.limit(args.limit ?? 100).get();
     const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -2499,7 +2587,7 @@ export async function getSparePartLog(
     q = applyCompanyScope(q, ctx);
     if (args.depotId) q = q.where('depotId', '==', args.depotId);
     if (args.partCode) q = q.where('stokKodu', '==', args.partCode);
-    if (args.action) q = q.where('action', '==', args.action);
+    if (args.action) q = whereAliased(q, 'yedekParcaDepoLog', 'action', args.action);
     if (args.days) q = q.where('timestamp', '>=', daysAgo(args.days));
     const snap = await q.limit(args.limit ?? 200).get();
     const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((r) => canSeeDepot(ctx, (r as DocumentData).depotId));
@@ -2516,7 +2604,7 @@ export async function getSparePartOrders(
   try {
     let q: Query<DocumentData> = adminDb.collection('yedekParcaSiparisler');
     q = applyCompanyScope(q, ctx);
-    if (args.status && args.status !== 'all') q = q.where('status', '==', args.status);
+    if (args.status && args.status !== 'all') q = whereAliased(q, 'yedekParcaSiparisler', 'status', args.status);
     if (args.days) q = q.where('createdAt', '>=', daysAgo(args.days));
     const snap = await q.limit(args.limit ?? 100).get();
     const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -2534,7 +2622,7 @@ export async function getSparePartTransfers(
     let q: Query<DocumentData> = adminDb.collection('sparePartTransferLogs');
     q = applyCompanyScope(q, ctx);
     if (args.uid) q = q.where('userId', '==', args.uid);
-    if (args.action) q = q.where('action', '==', args.action);
+    if (args.action) q = whereAliased(q, 'sparePartTransferLogs', 'action', args.action);
     if (args.days) q = q.where('timestamp', '>=', daysAgo(args.days));
     const snap = await q.limit(args.limit ?? 200).get();
     const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -2557,7 +2645,7 @@ export async function getPersonalSpareStock(
     const filterUid = args.userId ?? (ctx.isAdmin ? undefined : ctx.uid);
     if (filterUid) q = q.where('userId', '==', filterUid);
     if (args.partCode) q = q.where('stokKodu', '==', args.partCode);
-    if (args.status) q = q.where('status', '==', args.status);
+    if (args.status) q = whereAliased(q, 'personalStock', 'status', args.status);
     const snap = await q.limit(args.limit ?? 200).get();
     const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     return { ok: true, label: 'get_personal_spare_stock', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Kişisel zimmet yok.' : undefined };
@@ -2575,7 +2663,7 @@ export async function getPoolWarehouseStock(
     q = applyCompanyScope(q, ctx);
     if (args.poolId) q = q.where('poolId', '==', args.poolId);
     if (args.partCode) q = q.where('stokKodu', '==', args.partCode);
-    if (args.status) q = q.where('status', '==', args.status);
+    if (args.status) q = whereAliased(q, 'poolWarehouseStock', 'status', args.status);
     const snap = await q.limit(500).get();
     const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     return { ok: true, label: 'get_pool_warehouse_stock', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Havuz depo stoğu yok.' : undefined };
@@ -2916,7 +3004,7 @@ export async function getRoutes(
   try {
     let q: Query<DocumentData> = adminDb.collection('routes');
     q = applyCompanyScope(q, ctx);
-    if (args.status) q = q.where('status', '==', args.status);
+    if (args.status) q = whereAliased(q, 'routes', 'status', args.status);
     if (args.days) q = q.where('date', '>=', daysAgo(args.days));
     const snap = await q.limit(args.limit ?? 100).get();
     const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -2933,7 +3021,7 @@ export async function getPurchasingTasks(
   try {
     let q: Query<DocumentData> = adminDb.collection('purchasingTasks');
     q = applyCompanyScope(q, ctx);
-    if (args.status) q = q.where('status', '==', args.status);
+    if (args.status) q = whereAliased(q, 'purchasingTasks', 'status', args.status);
     if (args.days) q = q.where('date', '>=', daysAgo(args.days));
     const snap = await q.limit(args.limit ?? 200).get();
     const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
