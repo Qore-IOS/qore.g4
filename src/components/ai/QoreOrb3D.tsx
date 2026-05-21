@@ -1,257 +1,265 @@
 'use client';
 
-import { useEffect, useMemo, useRef } from 'react';
+import { useMemo, useRef } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 
 interface QoreOrb3DProps {
+  /** Reserved for future "processing" state — currently the orb is always idle. */
   isProcessing?: boolean;
   className?: string;
 }
 
-const PARTICLE_COUNT = 4500;
+/* ──────────────────────────────────────────────────────────────────────── */
+/* GLSL shader source                                                       */
+/* ──────────────────────────────────────────────────────────────────────── */
 
-const COLOR_PURPLE = new THREE.Color('#a855f7');
-const COLOR_VIOLET = new THREE.Color('#7c3aed');
-const COLOR_BLUE = new THREE.Color('#3b82f6');
-const COLOR_CYAN = new THREE.Color('#22d3ee');
-
-function fibonacciSphere(count: number) {
-  const positions = new Float32Array(count * 3);
-  const colors = new Float32Array(count * 3);
-  const offsets = new Float32Array(count * 3);
-  const seeds = new Float32Array(count);
-  const golden = Math.PI * (3 - Math.sqrt(5));
-
-  const tmp = new THREE.Color();
-
-  for (let i = 0; i < count; i++) {
-    const y = 1 - (i / (count - 1)) * 2;
-    const radius = Math.sqrt(1 - y * y);
-    const theta = golden * i;
-    const x = Math.cos(theta) * radius;
-    const z = Math.sin(theta) * radius;
-
-    positions[i * 3 + 0] = x;
-    positions[i * 3 + 1] = y;
-    positions[i * 3 + 2] = z;
-
-    // Gradient: top-left purple → bottom-right cyan, with violet/blue midtones
-    const mixA = (x + 1) * 0.5;
-    const mixB = (y + 1) * 0.5;
-    tmp.copy(COLOR_PURPLE).lerp(COLOR_VIOLET, mixB);
-    const tmp2 = COLOR_BLUE.clone().lerp(COLOR_CYAN, mixA);
-    tmp.lerp(tmp2, 1 - mixB * 0.7);
-
-    colors[i * 3 + 0] = tmp.r;
-    colors[i * 3 + 1] = tmp.g;
-    colors[i * 3 + 2] = tmp.b;
-
-    // Random scatter offset (where each particle drifts to when "processing")
-    const sx = (Math.random() - 0.5) * 2.0;
-    const sy = (Math.random() - 0.5) * 2.0;
-    const sz = (Math.random() - 0.5) * 2.0;
-    offsets[i * 3 + 0] = sx;
-    offsets[i * 3 + 1] = sy;
-    offsets[i * 3 + 2] = sz;
-
-    seeds[i] = Math.random() * 1000;
-  }
-
-  return { positions, colors, offsets, seeds };
+/**
+ * 3D Simplex noise (Ashima Arts / Stefan Gustavson, public-domain).
+ * Used for both vertex displacement and fragment colour flow.
+ */
+const NOISE_GLSL = /* glsl */ `
+vec3 mod289(vec3 x){return x-floor(x*(1.0/289.0))*289.0;}
+vec4 mod289(vec4 x){return x-floor(x*(1.0/289.0))*289.0;}
+vec4 permute(vec4 x){return mod289(((x*34.0)+1.0)*x);}
+vec4 taylorInvSqrt(vec4 r){return 1.79284291400159-0.85373472095314*r;}
+float snoise(vec3 v){
+  const vec2 C=vec2(1.0/6.0,1.0/3.0); const vec4 D=vec4(0.0,0.5,1.0,2.0);
+  vec3 i=floor(v+dot(v,C.yyy)); vec3 x0=v-i+dot(i,C.xxx);
+  vec3 g=step(x0.yzx,x0.xyz); vec3 l=1.0-g;
+  vec3 i1=min(g.xyz,l.zxy); vec3 i2=max(g.xyz,l.zxy);
+  vec3 x1=x0-i1+C.xxx; vec3 x2=x0-i2+C.yyy; vec3 x3=x0-D.yyy;
+  i=mod289(i);
+  vec4 p=permute(permute(permute(i.z+vec4(0.0,i1.z,i2.z,1.0))+i.y+vec4(0.0,i1.y,i2.y,1.0))+i.x+vec4(0.0,i1.x,i2.x,1.0));
+  float n_=0.142857142857; vec3 ns=n_*D.wyz-D.xzx;
+  vec4 j=p-49.0*floor(p*ns.z*ns.z);
+  vec4 x_=floor(j*ns.z); vec4 y_=floor(j-7.0*x_);
+  vec4 x=x_*ns.x+ns.yyyy; vec4 y=y_*ns.x+ns.yyyy;
+  vec4 h=1.0-abs(x)-abs(y);
+  vec4 b0=vec4(x.xy,y.xy); vec4 b1=vec4(x.zw,y.zw);
+  vec4 s0=floor(b0)*2.0+1.0; vec4 s1=floor(b1)*2.0+1.0;
+  vec4 sh=-step(h,vec4(0.0));
+  vec4 a0=b0.xzyw+s0.xzyw*sh.xxyy; vec4 a1=b1.xzyw+s1.xzyw*sh.zzww;
+  vec3 p0=vec3(a0.xy,h.x); vec3 p1=vec3(a0.zw,h.y);
+  vec3 p2=vec3(a1.xy,h.z); vec3 p3=vec3(a1.zw,h.w);
+  vec4 norm=taylorInvSqrt(vec4(dot(p0,p0),dot(p1,p1),dot(p2,p2),dot(p3,p3)));
+  p0*=norm.x; p1*=norm.y; p2*=norm.z; p3*=norm.w;
+  vec4 m=max(0.6-vec4(dot(x0,x0),dot(x1,x1),dot(x2,x2),dot(x3,x3)),0.0);
+  m=m*m;
+  return 42.0*dot(m*m,vec4(dot(p0,x0),dot(p1,x1),dot(p2,x2),dot(p3,x3)));
 }
+`;
 
-function ParticleOrb({ isProcessing }: { isProcessing: boolean }) {
-  const pointsRef = useRef<THREE.Points>(null);
+const VERTEX_SHADER = /* glsl */ `
+varying vec3 vNormal;
+varying vec3 vWorldPos;
+varying vec3 vViewDir;
+varying float vNoise;
+
+uniform float uTime;
+uniform float uDisplacement;
+uniform float uFlowSpeed;
+
+${NOISE_GLSL}
+
+void main() {
+  vec3 pos = position;
+
+  // Low-frequency wobble (large soft bulges) — preserves spherical form.
+  float n1 = snoise(pos * 1.1 + vec3(0.0, uTime * uFlowSpeed * 0.6, uTime * uFlowSpeed * 0.4));
+  // Higher frequency micro-ripple — gives the jelly "skin" feel.
+  float n2 = snoise(pos * 2.4 + vec3(uTime * uFlowSpeed * 0.3, 0.0, 0.0));
+
+  vNoise = n1 * 0.7 + n2 * 0.3;
+  float disp = (n1 * 0.65 + n2 * 0.35) * uDisplacement;
+  pos += normal * disp;
+
+  // Normal stays approximately correct because displacement is small.
+  vNormal = normalize(normalMatrix * normal);
+
+  vec4 worldPos = modelMatrix * vec4(pos, 1.0);
+  vWorldPos = worldPos.xyz;
+  vec4 mvPos = viewMatrix * worldPos;
+  vViewDir = normalize(-mvPos.xyz);
+  gl_Position = projectionMatrix * mvPos;
+}
+`;
+
+const FRAGMENT_SHADER = /* glsl */ `
+precision highp float;
+
+varying vec3 vNormal;
+varying vec3 vWorldPos;
+varying vec3 vViewDir;
+varying float vNoise;
+
+uniform float uTime;
+uniform vec3 uColorA; // deep violet  (#5b21b6)
+uniform vec3 uColorB; // magenta hi   (#c026d3)
+uniform vec3 uColorC; // royal blue   (#1d4ed8)
+uniform vec3 uColorD; // cyan glow    (#22d3ee)
+uniform float uFlowSpeed;
+
+${NOISE_GLSL}
+
+void main() {
+  vec3 N = normalize(vNormal);
+  vec3 V = normalize(vViewDir);
+
+  // Two flowing noise layers determine where each colour dominates.
+  float nA = snoise(vWorldPos * 1.4 + vec3(uTime * uFlowSpeed * 0.5, uTime * uFlowSpeed * 0.4, uTime * uFlowSpeed * 0.3));
+  float nB = snoise(vWorldPos * 0.7 - vec3(uTime * uFlowSpeed * 0.35, 0.0, uTime * uFlowSpeed * 0.25));
+  float tA = clamp(0.5 + nA * 0.5, 0.0, 1.0);
+  float tB = clamp(0.5 + nB * 0.5, 0.0, 1.0);
+
+  // Two cross gradients, then blended.
+  vec3 grad1 = mix(uColorA, uColorB, tA); // violet → magenta
+  vec3 grad2 = mix(uColorC, uColorD, tA); // blue → cyan
+  vec3 baseColor = mix(grad1, grad2, tB);
+
+  // Inject a brighter "swirl" highlight where noise is positive — bright cyan/magenta veins.
+  float veins = smoothstep(0.55, 0.95, abs(nA + nB) * 0.5);
+  baseColor = mix(baseColor, mix(uColorB, uColorD, tB), veins * 0.45);
+
+  // Lighting — soft top-front key light, bottom-back fill (cyan).
+  vec3 keyDir  = normalize(vec3(0.45, 0.65, 0.85));
+  vec3 fillDir = normalize(vec3(-0.55, -0.25, 0.30));
+
+  float key  = max(dot(N, keyDir), 0.0);
+  float fill = max(dot(N, fillDir), 0.0);
+
+  // Smooth wrap for the jelly softness.
+  float wrap = pow(0.5 + 0.5 * dot(N, keyDir), 1.4);
+
+  // Specular highlight (top-left glossy spot).
+  vec3 H = normalize(keyDir + V);
+  float spec = pow(max(dot(N, H), 0.0), 40.0);
+
+  // Fresnel rim — makes the silhouette glow brightly.
+  float fresnel = pow(1.0 - max(dot(N, V), 0.0), 2.2);
+
+  vec3 ambient  = baseColor * 0.30;
+  vec3 diffuse  = baseColor * (wrap * 0.65 + fill * 0.18);
+  vec3 specCol  = vec3(1.0, 0.92, 1.0) * spec * 0.55;
+  vec3 rim      = mix(uColorB, uColorD, tB) * fresnel * 0.95;
+
+  // Subtle depth darkening near the centre for "thickness".
+  float thickness = smoothstep(0.0, 1.0, 1.0 - fresnel);
+  vec3 inner = mix(uColorA, vec3(0.05, 0.02, 0.10), thickness * 0.45);
+  vec3 finalCol = ambient + diffuse + specCol + rim;
+  finalCol = mix(finalCol, finalCol * 0.85 + inner * 0.15, thickness * 0.4);
+
+  // Soft tone shape — keep highlights from blowing out, deepen mids.
+  finalCol = pow(finalCol, vec3(0.92));
+
+  gl_FragColor = vec4(finalCol, 1.0);
+}
+`;
+
+/* ──────────────────────────────────────────────────────────────────────── */
+/* Jelly orb mesh                                                           */
+/* ──────────────────────────────────────────────────────────────────────── */
+
+function JellyOrb({ isProcessing }: { isProcessing: boolean }) {
+  const meshRef = useRef<THREE.Mesh>(null);
   const groupRef = useRef<THREE.Group>(null);
-  const data = useMemo(() => fibonacciSphere(PARTICLE_COUNT), []);
 
-  // Animation state (smoothly lerps between 0 = idle / 1 = processing)
-  const stateRef = useRef(0);
-  // Smooth random target rotations for idle wandering
-  const targetRotation = useRef({ x: 0, y: 0, z: 0 });
-  const currentRotation = useRef({ x: 0, y: 0, z: 0 });
-  const wanderTimer = useRef(0);
-  const baseTime = useRef(Math.random() * 100);
+  const uniforms = useMemo(
+    () => ({
+      uTime: { value: 0 },
+      uDisplacement: { value: 0.075 }, // small — form preserved
+      uFlowSpeed: { value: 0.18 }, // slow flow inside the orb
+      uColorA: { value: new THREE.Color('#5b21b6') }, // deep violet
+      uColorB: { value: new THREE.Color('#c026d3') }, // magenta highlight
+      uColorC: { value: new THREE.Color('#1d4ed8') }, // royal blue
+      uColorD: { value: new THREE.Color('#22d3ee') }, // cyan glow
+    }),
+    [],
+  );
 
-  const geometryRef = useRef<THREE.BufferGeometry>(null);
+  // High-detail icosahedron so vertex displacement looks smooth.
+  const geometry = useMemo(() => new THREE.IcosahedronGeometry(1, 5), []);
+  const material = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        vertexShader: VERTEX_SHADER,
+        fragmentShader: FRAGMENT_SHADER,
+        uniforms,
+        transparent: false,
+      }),
+    [uniforms],
+  );
 
-  // Build geometry once
-  useEffect(() => {
-    if (!geometryRef.current) return;
-    geometryRef.current.setAttribute(
-      'position',
-      new THREE.BufferAttribute(new Float32Array(data.positions), 3),
-    );
-    geometryRef.current.setAttribute(
-      'color',
-      new THREE.BufferAttribute(data.colors, 3),
-    );
-  }, [data]);
-
-  // Build particle texture (soft round sprite) once
-  const particleTexture = useMemo(() => {
-    if (typeof document === 'undefined') return null;
-    const size = 128;
-    const canvas = document.createElement('canvas');
-    canvas.width = canvas.height = size;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return null;
-    const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-    grad.addColorStop(0, 'rgba(255,255,255,1)');
-    grad.addColorStop(0.25, 'rgba(255,255,255,0.85)');
-    grad.addColorStop(0.55, 'rgba(255,255,255,0.25)');
-    grad.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, size, size);
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.minFilter = THREE.LinearFilter;
-    tex.magFilter = THREE.LinearFilter;
-    return tex;
-  }, []);
-
+  // Slow rotation around its own axes + gentle pitch/roll.
   useFrame((state, delta) => {
-    if (!geometryRef.current || !pointsRef.current || !groupRef.current) return;
-    const dt = Math.min(delta, 0.06);
-    const t = state.clock.elapsedTime + baseTime.current;
+    const t = state.clock.elapsedTime;
+    uniforms.uTime.value = t;
 
-    // Smoothly approach the desired state (0 = idle, 1 = scattered)
-    const target = isProcessing ? 1 : 0;
-    stateRef.current += (target - stateRef.current) * Math.min(1, dt * 2.2);
-    const s = stateRef.current;
+    // Future hook: speed up flow when processing. Idle stays slow.
+    uniforms.uFlowSpeed.value = isProcessing ? 0.45 : 0.18;
 
-    // ── Idle: pick new random rotation targets occasionally for smooth wandering
-    wanderTimer.current -= dt;
-    if (wanderTimer.current <= 0) {
-      wanderTimer.current = 2.5 + Math.random() * 2.5;
-      targetRotation.current.x += (Math.random() - 0.5) * 0.7;
-      targetRotation.current.y += (Math.random() - 0.5) * 1.6;
-      targetRotation.current.z += (Math.random() - 0.5) * 0.4;
-    }
-
-    // Smooth rotation lerp (additional global rotation increases when processing)
-    const idleSpeed = 0.7;
-    const procBoost = 1 + s * 2.5;
-    currentRotation.current.x += (targetRotation.current.x - currentRotation.current.x) * dt * idleSpeed;
-    currentRotation.current.y += (targetRotation.current.y - currentRotation.current.y) * dt * idleSpeed;
-    currentRotation.current.z += (targetRotation.current.z - currentRotation.current.z) * dt * idleSpeed;
-
-    groupRef.current.rotation.x = currentRotation.current.x + t * 0.05 * procBoost;
-    groupRef.current.rotation.y = currentRotation.current.y + t * 0.12 * procBoost;
-    groupRef.current.rotation.z = currentRotation.current.z + Math.sin(t * 0.2) * 0.08;
-
-    // Breathing scale (subtle when idle, more pronounced when processing)
-    const breath = 1 + Math.sin(t * 0.8) * (0.03 + s * 0.04);
-    groupRef.current.scale.setScalar(breath);
-
-    // Update each particle's position
-    const positions = geometryRef.current.attributes.position.array as Float32Array;
-    const base = data.positions;
-    const offsets = data.offsets;
-    const seeds = data.seeds;
-
-    // Idle radius slightly < 1; scatter pushes outward up to ~2.2
-    const idleRadius = 1.0;
-    const scatterRadius = 2.2;
-    const easeS = s * s * (3 - 2 * s); // smoothstep
-
-    for (let i = 0; i < PARTICLE_COUNT; i++) {
-      const i3 = i * 3;
-      const bx = base[i3 + 0];
-      const by = base[i3 + 1];
-      const bz = base[i3 + 2];
-
-      const ox = offsets[i3 + 0];
-      const oy = offsets[i3 + 1];
-      const oz = offsets[i3 + 2];
-
-      const seed = seeds[i];
-
-      // Smooth flowing distortion of the sphere surface (idle "fluid" look)
-      const wob = Math.sin(t * 0.9 + seed * 0.07) * 0.04
-                + Math.cos(t * 0.6 + seed * 0.13) * 0.04;
-
-      // Increased turbulence during processing
-      const turb = easeS * (
-          Math.sin(t * 3.2 + seed * 0.5) * 0.4 +
-          Math.cos(t * 2.7 + seed * 0.3) * 0.35
-        );
-
-      // Idle target: slightly wobbling sphere
-      const ix = bx * (idleRadius + wob);
-      const iy = by * (idleRadius + wob);
-      const iz = bz * (idleRadius + wob);
-
-      // Scatter target: pushed along its own offset vector + turbulence
-      const sx = bx * scatterRadius + ox * 0.9 + Math.sin(t * 1.5 + seed) * 0.25;
-      const sy = by * scatterRadius + oy * 0.9 + Math.cos(t * 1.4 + seed * 0.9) * 0.25;
-      const sz = bz * scatterRadius + oz * 0.9 + Math.sin(t * 1.7 + seed * 1.1) * 0.25;
-
-      positions[i3 + 0] = ix + (sx - ix) * easeS + turb * 0.1;
-      positions[i3 + 1] = iy + (sy - iy) * easeS + turb * 0.1;
-      positions[i3 + 2] = iz + (sz - iz) * easeS + turb * 0.1;
-    }
-
-    geometryRef.current.attributes.position.needsUpdate = true;
-
-    // Material adjustments
-    const mat = pointsRef.current.material as THREE.PointsMaterial;
-    if (mat) {
-      mat.opacity = 0.85 + s * 0.1;
-      mat.size = 0.045 + s * 0.018;
+    if (groupRef.current) {
+      // Primary spin on Y — visible but slow (≈ 1 turn / 42 s)
+      groupRef.current.rotation.y += delta * 0.15;
+      // Subtle pitch and roll so it feels alive, not mechanical
+      groupRef.current.rotation.x = Math.sin(t * 0.08) * 0.12;
+      groupRef.current.rotation.z = Math.cos(t * 0.06) * 0.06;
+      // Tiny breathing scale (≤2%)
+      const breath = 1 + Math.sin(t * 0.5) * 0.015;
+      groupRef.current.scale.setScalar(breath);
     }
   });
 
   return (
     <group ref={groupRef}>
-      <points ref={pointsRef}>
-        <bufferGeometry ref={geometryRef} />
-        <pointsMaterial
-          size={0.05}
-          vertexColors
-          transparent
-          opacity={0.9}
-          depthWrite={false}
-          sizeAttenuation
-          blending={THREE.AdditiveBlending}
-          map={particleTexture ?? undefined}
-        />
-      </points>
+      <mesh ref={meshRef} geometry={geometry} material={material} />
     </group>
   );
 }
 
-function GlowSphere({ isProcessing }: { isProcessing: boolean }) {
+/* ──────────────────────────────────────────────────────────────────────── */
+/* Soft outer glow halo                                                     */
+/* ──────────────────────────────────────────────────────────────────────── */
+
+function GlowHalo() {
   const meshRef = useRef<THREE.Mesh>(null);
-  const stateRef = useRef(0);
-
-  useFrame((state, delta) => {
+  useFrame((state) => {
     if (!meshRef.current) return;
-    const target = isProcessing ? 1 : 0;
-    stateRef.current += (target - stateRef.current) * Math.min(1, delta * 2.2);
     const t = state.clock.elapsedTime;
-    const breath = 1.05 + Math.sin(t * 0.7) * 0.035;
-    meshRef.current.scale.setScalar(breath);
-    const mat = meshRef.current.material as THREE.MeshBasicMaterial;
-    if (mat) mat.opacity = (0.18 - stateRef.current * 0.13);
+    const s = 1.25 + Math.sin(t * 0.6) * 0.025;
+    meshRef.current.scale.setScalar(s);
   });
-
   return (
     <mesh ref={meshRef}>
-      <sphereGeometry args={[0.92, 32, 32]} />
-      <meshBasicMaterial color="#6d28d9" transparent opacity={0.18} blending={THREE.AdditiveBlending} depthWrite={false} />
+      <sphereGeometry args={[1, 32, 32]} />
+      <meshBasicMaterial
+        color="#7c3aed"
+        transparent
+        opacity={0.07}
+        blending={THREE.AdditiveBlending}
+        depthWrite={false}
+        side={THREE.BackSide}
+      />
     </mesh>
   );
 }
 
+/* ──────────────────────────────────────────────────────────────────────── */
+/* Camera setup                                                             */
+/* ──────────────────────────────────────────────────────────────────────── */
+
 function CameraRig() {
   const { camera } = useThree();
-  useEffect(() => {
-    camera.position.set(0, 0, 3.2);
+  useMemo(() => {
+    camera.position.set(0, 0, 3.0);
     camera.lookAt(0, 0, 0);
   }, [camera]);
   return null;
 }
+
+/* ──────────────────────────────────────────────────────────────────────── */
+/* Public component                                                         */
+/* ──────────────────────────────────────────────────────────────────────── */
 
 export default function QoreOrb3D({ isProcessing = false, className }: QoreOrb3DProps) {
   return (
@@ -259,12 +267,11 @@ export default function QoreOrb3D({ isProcessing = false, className }: QoreOrb3D
       <Canvas
         gl={{ alpha: true, antialias: true, powerPreference: 'high-performance' }}
         dpr={[1, 2]}
-        camera={{ fov: 50, near: 0.1, far: 100, position: [0, 0, 3.2] }}
+        camera={{ fov: 45, near: 0.1, far: 100, position: [0, 0, 3.0] }}
       >
         <CameraRig />
-        <ambientLight intensity={0.3} />
-        <GlowSphere isProcessing={isProcessing} />
-        <ParticleOrb isProcessing={isProcessing} />
+        <GlowHalo />
+        <JellyOrb isProcessing={isProcessing} />
       </Canvas>
     </div>
   );
