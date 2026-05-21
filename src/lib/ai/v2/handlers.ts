@@ -1840,6 +1840,1085 @@ function compactUser(d: DocumentData, ctx: PermissionContext) {
   };
 }
 
+/* ======================================================================= */
+/* MAL KABUL / SİPARİŞ EK / TÜKETİM EK                                     */
+/* ======================================================================= */
+
+export async function getMalKabulHistory(
+  args: { depotId?: string; days?: number; irsaliyeNo?: string; supplierName?: string; includeLines?: boolean; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('malKabulTransactions');
+    q = applyCompanyScope(q, ctx);
+    if (args.depotId) {
+      if (!canSeeDepot(ctx, args.depotId)) {
+        return { ok: false, label: 'get_mal_kabul_history', data: null, notice: 'Depo yetkin dışında.' };
+      }
+      q = q.where('depotId', '==', args.depotId);
+    }
+    if (args.irsaliyeNo) q = q.where('irsaliyeNo', '==', args.irsaliyeNo);
+    if (args.days) q = q.where('createdAt', '>=', daysAgo(args.days));
+    const snap = await q.limit(args.limit ?? 100).get();
+    const rows: Array<DocumentData & { lines?: DocumentData[] }> = [];
+    for (const doc of snap.docs) {
+      const data = doc.data();
+      if (!canSeeDepot(ctx, data.depotId)) continue;
+      if (args.supplierName) {
+        const s = String(data.supplierName ?? data.tedarikciAdi ?? '').toLowerCase();
+        if (!s.includes(args.supplierName.toLowerCase())) continue;
+      }
+      const out: DocumentData = {
+        id: doc.id,
+        depotId: data.depotId,
+        depotName: data.depotName,
+        irsaliyeNo: data.irsaliyeNo,
+        supplierName: data.supplierName ?? data.tedarikciAdi,
+        createdAt: tsToShort(data.createdAt),
+        createdByName: data.createdByName,
+        toplamKalemSayisi: data.toplamKalemSayisi ?? data.lineCount,
+        status: data.status,
+      };
+      if (args.includeLines && rows.length < 5) {
+        try {
+          const linesSnap = await adminDb.collection('malKabulTransactions').doc(doc.id).collection('lines').limit(50).get();
+          out.lines = linesSnap.docs.map((l) => {
+            const ld = l.data();
+            return { stokKodu: ld.stokKodu, stokAdi: ld.stokAdi, lotNumarasi: ld.lotNumarasi, miad: tsToShort(ld.miad), adet: ld.adet ?? ld.quantity };
+          });
+        } catch { /* ignore */ }
+      }
+      rows.push(out);
+    }
+    return {
+      ok: true,
+      label: 'get_mal_kabul_history',
+      data: rows,
+      scanned: snap.size,
+      notice: rows.length === 0 ? 'Mal kabul kaydı yok.' : undefined,
+    };
+  } catch (e) {
+    return err('get_mal_kabul_history', e);
+  }
+}
+
+export async function getCentralOrders(
+  args: { status?: string; days?: number; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('centralOrders');
+    q = applyCompanyScope(q, ctx);
+    if (args.status && args.status !== 'all') q = q.where('status', '==', args.status);
+    if (args.days) q = q.where('createdAt', '>=', daysAgo(args.days));
+    const snap = await q.limit(args.limit ?? 100).get();
+    const rows = snap.docs.map((d) => {
+      const data = d.data();
+      return {
+        id: d.id,
+        status: data.status,
+        supplierName: data.supplierName ?? data.tedarikciAdi,
+        depotName: data.depotName,
+        createdAt: tsToShort(data.createdAt),
+        completedAt: tsToShort(data.completedAt),
+        totalItems: Array.isArray(data.items) ? data.items.length : data.itemCount,
+      };
+    });
+    return { ok: true, label: 'get_central_orders', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Merkez sipariş yok.' : undefined };
+  } catch (e) {
+    return err('get_central_orders', e);
+  }
+}
+
+export async function getConsumableRequests(
+  args: { hospitalId?: string; status?: string; days?: number; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    if (args.hospitalId && !canSeeLab(ctx, args.hospitalId)) {
+      return { ok: false, label: 'get_consumable_requests', data: null, notice: 'Lab yetkin dışında.' };
+    }
+    let q: Query<DocumentData> = adminDb.collection('consumableRequests');
+    q = applyCompanyScope(q, ctx);
+    if (args.hospitalId) q = q.where('hospitalId', '==', args.hospitalId);
+    if (args.status && args.status !== 'all') q = q.where('status', '==', args.status);
+    if (args.days) q = q.where('createdAt', '>=', daysAgo(args.days));
+    const snap = await q.limit(args.limit ?? 100).get();
+    const rows = snap.docs.map((d) => {
+      const data = d.data();
+      return {
+        id: d.id,
+        hospitalId: data.hospitalId,
+        hospitalName: data.hospitalName ?? data.kurumAdi,
+        status: data.status,
+        urgency: data.urgency,
+        createdAt: tsToShort(data.createdAt),
+        createdByName: data.createdByName,
+        itemCount: Array.isArray(data.items) ? data.items.length : data.itemCount,
+      };
+    }).filter((r) => canSeeLab(ctx, r.hospitalId));
+    return { ok: true, label: 'get_consumable_requests', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Sarf talebi yok.' : undefined };
+  } catch (e) {
+    return err('get_consumable_requests', e);
+  }
+}
+
+export async function getTotalEfficiencyRecords(
+  args: { hospitalId?: string; labId?: string; stokKodu?: string; year?: number; month?: number; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    const labId = args.hospitalId ?? args.labId;
+    if (labId && !canSeeLab(ctx, labId)) {
+      return { ok: false, label: 'get_total_efficiency_records', data: null, notice: 'Lab yetkin dışında.' };
+    }
+    let q: Query<DocumentData> = adminDb.collection('totalEfficiencyRecords');
+    q = applyCompanyScope(q, ctx);
+    if (labId) q = q.where('labId', '==', labId);
+    if (args.stokKodu) q = q.where('stokKodu', '==', args.stokKodu);
+    if (args.year) q = q.where('year', '==', args.year);
+    if (args.month) q = q.where('month', '==', args.month);
+    const snap = await q.limit(args.limit ?? 200).get();
+    const rows = snap.docs.map((d) => {
+      const data = d.data();
+      return {
+        id: d.id,
+        labId: data.labId,
+        labName: data.labName,
+        year: data.year,
+        month: data.month,
+        stokKodu: data.stokKodu,
+        stokAdi: data.stokAdi,
+        testAdi: data.testAdi,
+        ambalajDegeri: data.ambalajDegeri,
+        cihazGrubu: data.cihazGrubu,
+        baslangicStokuKutu: data.baslangicStokuKutu,
+        ayBasiCihazUstuTest: data.ayBasiCihazUstuTest,
+        totalAyBasiStok: data.totalAyBasiStok,
+        sevkiyatKutu: data.sevkiyatKutu,
+        sevkiyatTest: data.sevkiyatTest,
+        toplamTuketim: data.toplamTuketim ?? data.tuketim,
+        verimlilikSonucu: data.verimlilikSonucu,
+      };
+    }).filter((r) => canSeeLab(ctx, r.labId));
+    return { ok: true, label: 'get_total_efficiency_records', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Total verimlilik kaydı yok.' : undefined };
+  } catch (e) {
+    return err('get_total_efficiency_records', e);
+  }
+}
+
+export async function getCihazUstuHistory(
+  args: { hospitalId?: string; period?: string; stokKodu?: string; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    if (args.hospitalId && !canSeeLab(ctx, args.hospitalId)) {
+      return { ok: false, label: 'get_cihaz_ustu_history', data: null, notice: 'Lab yetkin dışında.' };
+    }
+    let q: Query<DocumentData> = adminDb.collection('cihazUstuGecmisi');
+    q = applyCompanyScope(q, ctx);
+    if (args.hospitalId) q = q.where('hospitalId', '==', args.hospitalId);
+    if (args.period) q = q.where('period', '==', args.period);
+    if (args.stokKodu) q = q.where('stokKodu', '==', args.stokKodu);
+    const snap = await q.limit(args.limit ?? 200).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((r) => canSeeLab(ctx, (r as DocumentData).hospitalId));
+    return { ok: true, label: 'get_cihaz_ustu_history', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Cihaz üstü geçmişi yok.' : undefined };
+  } catch (e) {
+    return err('get_cihaz_ustu_history', e);
+  }
+}
+
+export async function getKumulatifRaporlar(
+  args: { hospitalId?: string; days?: number; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('kumulatifRaporlar');
+    q = applyCompanyScope(q, ctx);
+    if (args.hospitalId) {
+      if (!canSeeLab(ctx, args.hospitalId)) {
+        return { ok: false, label: 'get_kumulatif_raporlar', data: null, notice: 'Lab yetkin dışında.' };
+      }
+      q = q.where('hospitalId', '==', args.hospitalId);
+    }
+    if (args.days) q = q.where('createdAt', '>=', daysAgo(args.days));
+    const snap = await q.limit(args.limit ?? 100).get();
+    const rows = snap.docs.map((d) => {
+      const data = d.data();
+      return {
+        id: d.id,
+        hospitalId: data.hospitalId,
+        hospitalName: data.hospitalName,
+        period: data.period,
+        createdAt: tsToShort(data.createdAt),
+        createdByName: data.createdByName,
+        toplamTestSayisi: data.toplamTestSayisi ?? data.totalTests,
+        kayitSayisi: Array.isArray(data.kayitlar) ? data.kayitlar.length : undefined,
+      };
+    }).filter((r) => canSeeLab(ctx, r.hospitalId));
+    return { ok: true, label: 'get_kumulatif_raporlar', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Kümülatif rapor yok.' : undefined };
+  } catch (e) {
+    return err('get_kumulatif_raporlar', e);
+  }
+}
+
+export async function getCostCheckpoints(
+  args: { hospitalId?: string; year?: number; month?: number; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    if (args.hospitalId && !canSeeLab(ctx, args.hospitalId)) {
+      return { ok: false, label: 'get_cost_checkpoints', data: null, notice: 'Lab yetkin dışında.' };
+    }
+    let q: Query<DocumentData> = adminDb.collection('costCheckpoints');
+    q = applyCompanyScope(q, ctx);
+    if (args.hospitalId) q = q.where('hospitalId', '==', args.hospitalId);
+    if (args.year) q = q.where('year', '==', args.year);
+    if (args.month) q = q.where('month', '==', args.month);
+    const snap = await q.limit(args.limit ?? 60).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((r) => !args.hospitalId || canSeeLab(ctx, (r as DocumentData).hospitalId));
+    return { ok: true, label: 'get_cost_checkpoints', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Maliyet checkpoint yok.' : undefined };
+  } catch (e) {
+    return err('get_cost_checkpoints', e);
+  }
+}
+
+export async function getDailyConsumptionStats(
+  args: { hospitalId?: string; stokKodu?: string; days?: number; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    if (args.hospitalId && !canSeeLab(ctx, args.hospitalId)) {
+      return { ok: false, label: 'get_daily_consumption_stats', data: null, notice: 'Lab yetkin dışında.' };
+    }
+    let q: Query<DocumentData> = adminDb.collection('dailyConsumptionStats');
+    q = applyCompanyScope(q, ctx);
+    if (args.hospitalId) q = q.where('hospitalId', '==', args.hospitalId);
+    if (args.stokKodu) q = q.where('stokKodu', '==', args.stokKodu);
+    if (args.days) q = q.where('date', '>=', daysAgo(args.days));
+    const snap = await q.limit(args.limit ?? 200).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((r) => canSeeLab(ctx, (r as DocumentData).hospitalId));
+    return { ok: true, label: 'get_daily_consumption_stats', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Günlük tüketim istatistiği yok.' : undefined };
+  } catch (e) {
+    return err('get_daily_consumption_stats', e);
+  }
+}
+
+export async function getNfcDisposalEvents(
+  args: { hospitalId?: string; days?: number; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    if (args.hospitalId && !canSeeLab(ctx, args.hospitalId)) {
+      return { ok: false, label: 'get_nfc_disposal_events', data: null, notice: 'Lab yetkin dışında.' };
+    }
+    let q: Query<DocumentData> = adminDb.collection('nfcDisposalEvents');
+    q = applyCompanyScope(q, ctx);
+    if (args.hospitalId) q = q.where('hospitalId', '==', args.hospitalId);
+    if (args.days) q = q.where('createdAt', '>=', daysAgo(args.days));
+    const snap = await q.limit(args.limit ?? 100).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((r) => !args.hospitalId || canSeeLab(ctx, (r as DocumentData).hospitalId));
+    return { ok: true, label: 'get_nfc_disposal_events', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'NFC imha kaydı yok.' : undefined };
+  } catch (e) {
+    return err('get_nfc_disposal_events', e);
+  }
+}
+
+/* ======================================================================= */
+/* CİHAZ YÖNETİMİ EK                                                       */
+/* ======================================================================= */
+
+export async function getDeviceModelDefinitions(
+  args: { brand?: string; model?: string },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('deviceModelDefinitions');
+    q = applyCompanyScope(q, ctx);
+    const snap = await q.limit(500).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((r) => {
+      const data = r as DocumentData;
+      if (args.brand && !String(data.brand ?? data.marka ?? '').toLowerCase().includes(args.brand.toLowerCase())) return false;
+      if (args.model && !String(data.model ?? '').toLowerCase().includes(args.model.toLowerCase())) return false;
+      return true;
+    });
+    return { ok: true, label: 'get_device_model_definitions', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Cihaz modeli tanımı yok.' : undefined };
+  } catch (e) {
+    return err('get_device_model_definitions', e);
+  }
+}
+
+export async function getDeviceBrandModels(
+  args: { brand?: string },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('deviceBrandModels');
+    q = applyCompanyScope(q, ctx);
+    const snap = await q.limit(500).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((r) =>
+      !args.brand || String((r as DocumentData).brand ?? (r as DocumentData).marka ?? '').toLowerCase().includes(args.brand.toLowerCase()),
+    );
+    return { ok: true, label: 'get_device_brand_models', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Marka-model kaydı yok.' : undefined };
+  } catch (e) {
+    return err('get_device_brand_models', e);
+  }
+}
+
+export async function getFaultDefinitions(
+  args: { type?: string },
+  _ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('faultDefinitions');
+    if (args.type) q = q.where('type', '==', args.type);
+    const snap = await q.limit(500).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    return { ok: true, label: 'get_fault_definitions', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Arıza tanımı yok.' : undefined };
+  } catch (e) {
+    return err('get_fault_definitions', e);
+  }
+}
+
+export async function getPeriodicPartChanges(
+  args: { deviceId?: string; hospitalId?: string; kind?: string },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    const kind = (args.kind ?? 'plans') as 'plans' | 'logs';
+    const collection = kind === 'logs' ? 'periodicPartChangeLogs' : 'periodicPartChanges';
+    let q: Query<DocumentData> = adminDb.collection(collection);
+    q = applyCompanyScope(q, ctx);
+    if (args.deviceId) q = q.where('deviceId', '==', args.deviceId);
+    if (args.hospitalId) {
+      if (!canSeeLab(ctx, args.hospitalId)) {
+        return { ok: false, label: 'get_periodic_part_changes', data: null, notice: 'Lab yetkin dışında.' };
+      }
+      q = q.where('hospitalId', '==', args.hospitalId);
+    }
+    const snap = await q.limit(200).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    return { ok: true, label: 'get_periodic_part_changes', data: { kind, rows }, scanned: snap.size, notice: rows.length === 0 ? 'Periyodik parça değişimi yok.' : undefined };
+  } catch (e) {
+    return err('get_periodic_part_changes', e);
+  }
+}
+
+export async function getHospitalDeviceAssignments(
+  args: { hospitalId?: string; deviceId?: string },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('hospitalDeviceAssignments');
+    q = applyCompanyScope(q, ctx);
+    if (args.hospitalId) {
+      if (!canSeeLab(ctx, args.hospitalId)) {
+        return { ok: false, label: 'get_hospital_device_assignments', data: null, notice: 'Lab yetkin dışında.' };
+      }
+      q = q.where('hospitalId', '==', args.hospitalId);
+    }
+    if (args.deviceId) q = q.where('deviceId', '==', args.deviceId);
+    const snap = await q.limit(500).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((r) => canSeeLab(ctx, (r as DocumentData).hospitalId));
+    return { ok: true, label: 'get_hospital_device_assignments', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Atama kaydı yok.' : undefined };
+  } catch (e) {
+    return err('get_hospital_device_assignments', e);
+  }
+}
+
+export async function getOtherCompanyFaults(
+  args: { hospitalId?: string; status?: string; days?: number; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('digerFirmaArizalar');
+    q = applyCompanyScope(q, ctx);
+    if (args.hospitalId) {
+      if (!canSeeLab(ctx, args.hospitalId)) {
+        return { ok: false, label: 'get_other_company_faults', data: null, notice: 'Lab yetkin dışında.' };
+      }
+      q = q.where('hospitalId', '==', args.hospitalId);
+    }
+    if (args.status && args.status !== 'all') q = q.where('status', '==', args.status);
+    if (args.days) q = q.where('createdAt', '>=', daysAgo(args.days));
+    const snap = await q.limit(args.limit ?? 100).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    return { ok: true, label: 'get_other_company_faults', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Diğer firma arızası yok.' : undefined };
+  } catch (e) {
+    return err('get_other_company_faults', e);
+  }
+}
+
+/* ======================================================================= */
+/* YEDEK PARÇA                                                             */
+/* ======================================================================= */
+
+export async function getSparePartStock(
+  args: { depotId?: string; partCode?: string; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('yedekParcaDepoStok');
+    q = applyCompanyScope(q, ctx);
+    if (args.depotId) {
+      if (!canSeeDepot(ctx, args.depotId)) {
+        return { ok: false, label: 'get_spare_part_stock', data: null, notice: 'Depo yetkin dışında.' };
+      }
+      q = q.where('depotId', '==', args.depotId);
+    }
+    if (args.partCode) q = q.where('stokKodu', '==', args.partCode);
+    const snap = await q.limit(args.limit ?? 500).get();
+    const agg: Record<string, { stokKodu: string; stokAdi: string; depotName?: string; depotId?: string; adet: number; lots: Set<string> }> = {};
+    for (const doc of snap.docs) {
+      const d = doc.data();
+      if (!canSeeDepot(ctx, d.depotId)) continue;
+      const key = `${d.depotId}|${d.stokKodu}`;
+      if (!agg[key]) agg[key] = { stokKodu: d.stokKodu, stokAdi: d.stokAdi, depotName: d.depotName, depotId: d.depotId, adet: 0, lots: new Set() };
+      agg[key].adet += 1;
+      if (d.lotNumarasi) agg[key].lots.add(d.lotNumarasi);
+    }
+    const rows = Object.values(agg).map((r) => ({ ...r, lotSayisi: r.lots.size, lots: undefined }));
+    rows.sort((a, b) => b.adet - a.adet);
+    return { ok: true, label: 'get_spare_part_stock', data: rows.slice(0, 200), scanned: snap.size, notice: rows.length === 0 ? 'Yedek parça stoğu yok.' : undefined };
+  } catch (e) {
+    return err('get_spare_part_stock', e);
+  }
+}
+
+export async function getSparePartMinMax(
+  args: { depotId?: string; partCode?: string },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('yedekParcaDepoMinMax');
+    q = applyCompanyScope(q, ctx);
+    if (args.depotId) q = q.where('depotId', '==', args.depotId);
+    if (args.partCode) q = q.where('stokKodu', '==', args.partCode);
+    const snap = await q.limit(300).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((r) => canSeeDepot(ctx, (r as DocumentData).depotId));
+    return { ok: true, label: 'get_spare_part_min_max', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Min/max yok.' : undefined };
+  } catch (e) {
+    return err('get_spare_part_min_max', e);
+  }
+}
+
+export async function getSparePartLog(
+  args: { depotId?: string; partCode?: string; days?: number; action?: string; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('yedekParcaDepoLog');
+    q = applyCompanyScope(q, ctx);
+    if (args.depotId) q = q.where('depotId', '==', args.depotId);
+    if (args.partCode) q = q.where('stokKodu', '==', args.partCode);
+    if (args.action) q = q.where('action', '==', args.action);
+    if (args.days) q = q.where('timestamp', '>=', daysAgo(args.days));
+    const snap = await q.limit(args.limit ?? 200).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((r) => canSeeDepot(ctx, (r as DocumentData).depotId));
+    return { ok: true, label: 'get_spare_part_log', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Yedek parça log\'u yok.' : undefined };
+  } catch (e) {
+    return err('get_spare_part_log', e);
+  }
+}
+
+export async function getSparePartOrders(
+  args: { status?: string; days?: number; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('yedekParcaSiparisler');
+    q = applyCompanyScope(q, ctx);
+    if (args.status && args.status !== 'all') q = q.where('status', '==', args.status);
+    if (args.days) q = q.where('createdAt', '>=', daysAgo(args.days));
+    const snap = await q.limit(args.limit ?? 100).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    return { ok: true, label: 'get_spare_part_orders', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Yedek parça siparişi yok.' : undefined };
+  } catch (e) {
+    return err('get_spare_part_orders', e);
+  }
+}
+
+export async function getSparePartTransfers(
+  args: { uid?: string; action?: string; days?: number; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('sparePartTransferLogs');
+    q = applyCompanyScope(q, ctx);
+    if (args.uid) q = q.where('userId', '==', args.uid);
+    if (args.action) q = q.where('action', '==', args.action);
+    if (args.days) q = q.where('timestamp', '>=', daysAgo(args.days));
+    const snap = await q.limit(args.limit ?? 200).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    return { ok: true, label: 'get_spare_part_transfers', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Yedek parça transferi yok.' : undefined };
+  } catch (e) {
+    return err('get_spare_part_transfers', e);
+  }
+}
+
+export async function getPersonalSpareStock(
+  args: { userId?: string; partCode?: string; status?: string; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    if (!ctx.isAdmin && args.userId && args.userId !== ctx.uid) {
+      return { ok: false, label: 'get_personal_spare_stock', data: null, notice: 'Sadece kendi kişisel stoğunu görebilirsin.' };
+    }
+    let q: Query<DocumentData> = adminDb.collection('personalStock');
+    q = applyCompanyScope(q, ctx);
+    const filterUid = args.userId ?? (ctx.isAdmin ? undefined : ctx.uid);
+    if (filterUid) q = q.where('userId', '==', filterUid);
+    if (args.partCode) q = q.where('stokKodu', '==', args.partCode);
+    if (args.status) q = q.where('status', '==', args.status);
+    const snap = await q.limit(args.limit ?? 200).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    return { ok: true, label: 'get_personal_spare_stock', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Kişisel zimmet yok.' : undefined };
+  } catch (e) {
+    return err('get_personal_spare_stock', e);
+  }
+}
+
+export async function getPoolWarehouseStock(
+  args: { poolId?: string; partCode?: string; status?: string },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('poolWarehouseStock');
+    q = applyCompanyScope(q, ctx);
+    if (args.poolId) q = q.where('poolId', '==', args.poolId);
+    if (args.partCode) q = q.where('stokKodu', '==', args.partCode);
+    if (args.status) q = q.where('status', '==', args.status);
+    const snap = await q.limit(500).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    return { ok: true, label: 'get_pool_warehouse_stock', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Havuz depo stoğu yok.' : undefined };
+  } catch (e) {
+    return err('get_pool_warehouse_stock', e);
+  }
+}
+
+export async function getPendingReturns(
+  args: { userId?: string; days?: number; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('pendingReturns');
+    q = applyCompanyScope(q, ctx);
+    const filterUid = args.userId ?? (ctx.isAdmin ? undefined : ctx.uid);
+    if (filterUid) q = q.where('userId', '==', filterUid);
+    if (args.days) q = q.where('createdAt', '>=', daysAgo(args.days));
+    const snap = await q.limit(args.limit ?? 100).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    return { ok: true, label: 'get_pending_returns', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Bekleyen iade yok.' : undefined };
+  } catch (e) {
+    return err('get_pending_returns', e);
+  }
+}
+
+export async function getBorrowedSpareParts(
+  args: { fromDepotId?: string; toCompany?: string },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('borrowedSpareParts');
+    q = applyCompanyScope(q, ctx);
+    if (args.fromDepotId) q = q.where('fromDepotId', '==', args.fromDepotId);
+    if (args.toCompany) q = q.where('toCompany', '==', args.toCompany);
+    const snap = await q.limit(200).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    return { ok: true, label: 'get_borrowed_spare_parts', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Ödünç verilen parça yok.' : undefined };
+  } catch (e) {
+    return err('get_borrowed_spare_parts', e);
+  }
+}
+
+export async function getPostClosurePartChanges(
+  args: { deviceId?: string; days?: number; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('postClosurePartChangeLogs');
+    q = applyCompanyScope(q, ctx);
+    if (args.deviceId) q = q.where('deviceId', '==', args.deviceId);
+    if (args.days) q = q.where('createdAt', '>=', daysAgo(args.days));
+    const snap = await q.limit(args.limit ?? 100).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    return { ok: true, label: 'get_post_closure_part_changes', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Arıza sonrası değişim yok.' : undefined };
+  } catch (e) {
+    return err('get_post_closure_part_changes', e);
+  }
+}
+
+/* ======================================================================= */
+/* YÖNETİM TANIMLARI / KATALOG                                             */
+/* ======================================================================= */
+
+const DEFINITION_COLLECTIONS: Record<string, string> = {
+  marka: 'def_brands',
+  cihaz_grubu: 'def_deviceGroups',
+  lab_grubu: 'def_labGroups',
+  birim: 'def_mainUnits',
+  urun_grubu: 'def_productGroups',
+  test_grubu: 'def_testGroups',
+  test: 'testDefinitions',
+};
+
+export async function getDefinitions(
+  args: { kind: string; searchText?: string; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    const col = DEFINITION_COLLECTIONS[args.kind];
+    if (!col) {
+      return { ok: false, label: 'get_definitions', data: null, notice: `Bilinmeyen kind: ${args.kind}. Geçerli: ${Object.keys(DEFINITION_COLLECTIONS).join(', ')}` };
+    }
+    let q: Query<DocumentData> = adminDb.collection(col);
+    if (col !== 'testDefinitions') q = applyCompanyScope(q, ctx);
+    const snap = await q.limit(args.limit ?? 500).get();
+    const needle = args.searchText ? normaliseLocal(args.searchText) : '';
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((r) => {
+      if (!needle) return true;
+      const data = r as DocumentData;
+      const txt = normaliseLocal(`${data.name ?? ''} ${data.ad ?? ''} ${data.kod ?? ''}`);
+      return txt.includes(needle);
+    });
+    return { ok: true, label: 'get_definitions', data: { kind: args.kind, collection: col, rows: rows.slice(0, 200) }, scanned: snap.size, notice: rows.length === 0 ? 'Eşleşen tanım yok.' : undefined };
+  } catch (e) {
+    return err('get_definitions', e);
+  }
+}
+
+export async function getCompanies(
+  args: { limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    if (!ctx.isAdmin) {
+      // Non-admins only see their own company
+      const snap = await adminDb.collection('companies').doc(ctx.companyId ?? '').get();
+      const data = snap.exists ? [{ id: snap.id, ...snap.data() }] : [];
+      return { ok: true, label: 'get_companies', data, scanned: 1 };
+    }
+    const snap = await adminDb.collection('companies').limit(args.limit ?? 100).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    return { ok: true, label: 'get_companies', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Şirket kaydı yok.' : undefined };
+  } catch (e) {
+    return err('get_companies', e);
+  }
+}
+
+export async function getDepots(
+  args: { companyId?: string; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('depots');
+    q = applyCompanyScope(q, ctx);
+    if (args.companyId && ctx.isSuperAdmin) q = q.where('companyId', '==', args.companyId);
+    const snap = await q.limit(args.limit ?? 100).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((r) => canSeeDepot(ctx, (r as DocumentData).id ?? d_id(r)));
+    return { ok: true, label: 'get_depots', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Depo yok.' : undefined };
+  } catch (e) {
+    return err('get_depots', e);
+  }
+}
+
+function d_id(r: unknown): string | undefined { return (r as { id?: string })?.id; }
+
+export async function getAddressDefinitions(
+  args: { searchText?: string; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('addressDefinitions');
+    q = applyCompanyScope(q, ctx);
+    const snap = await q.limit(args.limit ?? 500).get();
+    const needle = args.searchText ? normaliseLocal(args.searchText) : '';
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((r) => {
+      if (!needle) return true;
+      const data = r as DocumentData;
+      const txt = normaliseLocal(`${data.name ?? ''} ${data.address ?? ''} ${data.kisaAd ?? ''}`);
+      return txt.includes(needle);
+    });
+    return { ok: true, label: 'get_address_definitions', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Adres tanımı yok.' : undefined };
+  } catch (e) {
+    return err('get_address_definitions', e);
+  }
+}
+
+export async function getBarcodeFormats(
+  args: { brand?: string; searchText?: string; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('barcodeFormats');
+    q = applyCompanyScope(q, ctx);
+    const snap = await q.limit(args.limit ?? 500).get();
+    const needle = args.searchText ? normaliseLocal(args.searchText) : '';
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((r) => {
+      const data = r as DocumentData;
+      if (args.brand && !String(data.brand ?? data.marka ?? '').toLowerCase().includes(args.brand.toLowerCase())) return false;
+      if (needle) {
+        const txt = normaliseLocal(`${data.name ?? ''} ${data.format ?? ''} ${data.brand ?? ''}`);
+        if (!txt.includes(needle)) return false;
+      }
+      return true;
+    });
+    return { ok: true, label: 'get_barcode_formats', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Barkod formatı yok.' : undefined };
+  } catch (e) {
+    return err('get_barcode_formats', e);
+  }
+}
+
+export async function getAssets(
+  args: { category?: string; konum?: string; zimmetliKisi?: string; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('assets');
+    q = applyCompanyScope(q, ctx);
+    if (args.category) q = q.where('category', '==', args.category);
+    const snap = await q.limit(args.limit ?? 500).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((r) => {
+      const data = r as DocumentData;
+      if (args.konum && !String(data.konum ?? '').toLowerCase().includes(args.konum.toLowerCase())) return false;
+      if (args.zimmetliKisi && !String(data.zimmetliKisi ?? '').toLowerCase().includes(args.zimmetliKisi.toLowerCase())) return false;
+      return true;
+    });
+    return { ok: true, label: 'get_assets', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Demirbaş yok.' : undefined };
+  } catch (e) {
+    return err('get_assets', e);
+  }
+}
+
+export async function getAssetCategories(_args: unknown, ctx: PermissionContext): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('assetCategories');
+    q = applyCompanyScope(q, ctx);
+    const snap = await q.limit(100).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    return { ok: true, label: 'get_asset_categories', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Kategori yok.' : undefined };
+  } catch (e) {
+    return err('get_asset_categories', e);
+  }
+}
+
+export async function getVehicles(
+  args: { searchText?: string },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('vehicles');
+    q = applyCompanyScope(q, ctx);
+    const snap = await q.limit(200).get();
+    const needle = args.searchText ? normaliseLocal(args.searchText) : '';
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((r) => {
+      if (!needle) return true;
+      const data = r as DocumentData;
+      return normaliseLocal(`${data.plate ?? ''} ${data.brand ?? ''} ${data.model ?? ''} ${data.driverName ?? ''}`).includes(needle);
+    });
+    return { ok: true, label: 'get_vehicles', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Araç yok.' : undefined };
+  } catch (e) {
+    return err('get_vehicles', e);
+  }
+}
+
+export async function getBorcDepots(_args: unknown, ctx: PermissionContext): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('borcDepots');
+    q = applyCompanyScope(q, ctx);
+    const snap = await q.limit(100).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    return { ok: true, label: 'get_borc_depots', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Borç depo yok.' : undefined };
+  } catch (e) {
+    return err('get_borc_depots', e);
+  }
+}
+
+export async function getBorcTransfers(
+  args: { days?: number; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('borcTransfers');
+    q = applyCompanyScope(q, ctx);
+    if (args.days) q = q.where('createdAt', '>=', daysAgo(args.days));
+    const snap = await q.limit(args.limit ?? 100).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    return { ok: true, label: 'get_borc_transfers', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Borç transferi yok.' : undefined };
+  } catch (e) {
+    return err('get_borc_transfers', e);
+  }
+}
+
+/* ======================================================================= */
+/* RAPORLAMA / DOSYA / SATIN ALMA / LOJİSTİK / NÖBET                       */
+/* ======================================================================= */
+
+export async function getIrsaliyeFiles(
+  args: { kind?: string; depotId?: string; days?: number; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    const col = args.kind === 'files' ? 'irsaliyeFiles' : 'irsaliyeDosyalari';
+    let q: Query<DocumentData> = adminDb.collection(col);
+    q = applyCompanyScope(q, ctx);
+    if (args.depotId) q = q.where('depotId', '==', args.depotId);
+    if (args.days) q = q.where('uploadedAt', '>=', daysAgo(args.days));
+    const snap = await q.limit(args.limit ?? 100).get();
+    const rows = snap.docs.map((d) => {
+      const data = d.data();
+      return {
+        id: d.id,
+        depotId: data.depotId,
+        depotName: data.depotName,
+        irsaliyeNo: data.irsaliyeNo,
+        supplierName: data.supplierName ?? data.tedarikciAdi,
+        uploadedAt: tsToShort(data.uploadedAt ?? data.createdAt),
+        fileUrl: data.fileUrl ?? data.url,
+        ocrStatus: data.ocrStatus,
+      };
+    });
+    return { ok: true, label: 'get_irsaliye_files', data: { collection: col, rows }, scanned: snap.size, notice: rows.length === 0 ? 'İrsaliye dosyası yok.' : undefined };
+  } catch (e) {
+    return err('get_irsaliye_files', e);
+  }
+}
+
+export async function getAnalysisResults(
+  args: { days?: number; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('analysis_results');
+    q = applyCompanyScope(q, ctx);
+    if (args.days) q = q.where('createdAt', '>=', daysAgo(args.days));
+    const snap = await q.limit(args.limit ?? 50).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    return { ok: true, label: 'get_analysis_results', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Analiz sonucu yok.' : undefined };
+  } catch (e) {
+    return err('get_analysis_results', e);
+  }
+}
+
+export async function getArchiveRacks(
+  args: { hospitalId?: string; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('archiveRacks');
+    q = applyCompanyScope(q, ctx);
+    if (args.hospitalId) {
+      if (!canSeeLab(ctx, args.hospitalId)) {
+        return { ok: false, label: 'get_archive_racks', data: null, notice: 'Lab yetkin dışında.' };
+      }
+      q = q.where('hospitalId', '==', args.hospitalId);
+    }
+    const snap = await q.limit(args.limit ?? 200).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((r) => !args.hospitalId || canSeeLab(ctx, (r as DocumentData).hospitalId));
+    return { ok: true, label: 'get_archive_racks', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Arşiv rafı yok.' : undefined };
+  } catch (e) {
+    return err('get_archive_racks', e);
+  }
+}
+
+export async function getRoutes(
+  args: { days?: number; status?: string; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('routes');
+    q = applyCompanyScope(q, ctx);
+    if (args.status) q = q.where('status', '==', args.status);
+    if (args.days) q = q.where('date', '>=', daysAgo(args.days));
+    const snap = await q.limit(args.limit ?? 100).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    return { ok: true, label: 'get_routes', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Rota kaydı yok.' : undefined };
+  } catch (e) {
+    return err('get_routes', e);
+  }
+}
+
+export async function getPurchasingTasks(
+  args: { status?: string; days?: number; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('purchasingTasks');
+    q = applyCompanyScope(q, ctx);
+    if (args.status) q = q.where('status', '==', args.status);
+    if (args.days) q = q.where('date', '>=', daysAgo(args.days));
+    const snap = await q.limit(args.limit ?? 200).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    return { ok: true, label: 'get_purchasing_tasks', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Satın alma görevi yok.' : undefined };
+  } catch (e) {
+    return err('get_purchasing_tasks', e);
+  }
+}
+
+export async function getPurchasingWorkflows(
+  args: { limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('purchasingWorkflows');
+    q = applyCompanyScope(q, ctx);
+    const snap = await q.limit(args.limit ?? 50).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    return { ok: true, label: 'get_purchasing_workflows', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'İş akışı yok.' : undefined };
+  } catch (e) {
+    return err('get_purchasing_workflows', e);
+  }
+}
+
+export async function getPendingCeomedIrsaliye(
+  args: { days?: number; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('pendingCeomedIrsaliye');
+    q = applyCompanyScope(q, ctx);
+    if (args.days) q = q.where('createdAt', '>=', daysAgo(args.days));
+    const snap = await q.limit(args.limit ?? 100).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    return { ok: true, label: 'get_pending_ceomed_irsaliye', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Bekleyen CEOMED irsaliye yok.' : undefined };
+  } catch (e) {
+    return err('get_pending_ceomed_irsaliye', e);
+  }
+}
+
+export async function getDutyShifts(
+  args: { uid?: string; days?: number; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('dutyShifts');
+    q = applyCompanyScope(q, ctx);
+    const filterUid = args.uid ?? (ctx.isAdmin ? undefined : ctx.uid);
+    if (filterUid) q = q.where('uid', '==', filterUid);
+    if (args.days) q = q.where('date', '>=', daysAgo(args.days));
+    const snap = await q.limit(args.limit ?? 100).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    return { ok: true, label: 'get_duty_shifts', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Nöbet yok.' : undefined };
+  } catch (e) {
+    return err('get_duty_shifts', e);
+  }
+}
+
+export async function getShiftSchedules(
+  args: { uid?: string; days?: number; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    let q: Query<DocumentData> = adminDb.collection('shiftSchedules');
+    q = applyCompanyScope(q, ctx);
+    const filterUid = args.uid ?? (ctx.isAdmin ? undefined : ctx.uid);
+    if (filterUid) q = q.where('uid', '==', filterUid);
+    if (args.days) q = q.where('date', '>=', daysAgo(args.days));
+    const snap = await q.limit(args.limit ?? 100).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    return { ok: true, label: 'get_shift_schedules', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Vardiya yok.' : undefined };
+  } catch (e) {
+    return err('get_shift_schedules', e);
+  }
+}
+
+export async function getPersonnelHistory(
+  args: { uid?: string; days?: number; limit?: number },
+  ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    if (!ctx.isAdmin) {
+      return { ok: false, label: 'get_personnel_history', data: null, notice: 'Personel hareket logları yalnızca admin yetkili kullanıcıya açık.' };
+    }
+    let q: Query<DocumentData> = adminDb.collection('personnelHistoryLogs');
+    q = applyCompanyScope(q, ctx);
+    if (args.uid) q = q.where('uid', '==', args.uid);
+    if (args.days) q = q.where('createdAt', '>=', daysAgo(args.days));
+    const snap = await q.limit(args.limit ?? 100).get();
+    const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    return { ok: true, label: 'get_personnel_history', data: rows, scanned: snap.size, notice: rows.length === 0 ? 'Personel hareket logu yok.' : undefined };
+  } catch (e) {
+    return err('get_personnel_history', e);
+  }
+}
+
+/* ======================================================================= */
+/* TEKNİK SERVİS BİLGİ TABANI (teknik_doc.txt)                            */
+/* ======================================================================= */
+
+let kbContent: string | null = null;
+let kbLines: string[] | null = null;
+
+async function loadKnowledgeBase(): Promise<string[]> {
+  if (kbLines) return kbLines;
+  try {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const filePath = path.join(process.cwd(), 'public', 'teknik_doc.txt');
+    kbContent = await fs.readFile(filePath, 'utf-8');
+    kbLines = kbContent.split('\n');
+    aiLogger.info('Knowledge base loaded', { lines: kbLines.length, bytes: kbContent.length });
+    return kbLines;
+  } catch (e) {
+    aiLogger.warn('Knowledge base load failed', { message: (e as Error).message });
+    kbLines = [];
+    return kbLines;
+  }
+}
+
+export async function searchKnowledgeBase(
+  args: { query: string; limit?: number },
+  _ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  try {
+    if (!args.query || args.query.trim().length === 0) {
+      return { ok: false, label: 'search_knowledge_base', data: null, notice: 'Sorgu boş.' };
+    }
+    const lines = await loadKnowledgeBase();
+    if (lines.length === 0) {
+      return { ok: true, label: 'search_knowledge_base', data: [], notice: 'Bilgi tabanı yüklenemedi.' };
+    }
+    const limit = Math.min(args.limit ?? 4, 6);
+    const tokens = args.query.toLowerCase().split(/\s+/).filter((t) => t.length >= 2);
+    if (tokens.length === 0) return { ok: true, label: 'search_knowledge_base', data: [], notice: 'Geçerli arama terimi yok.' };
+
+    // Score lines: token-hit count, with bonus for proximity in same line
+    const scored: Array<{ index: number; score: number }> = [];
+    for (let i = 0; i < lines.length; i++) {
+      const lower = lines[i].toLowerCase();
+      let hits = 0;
+      for (const t of tokens) if (lower.includes(t)) hits++;
+      if (hits > 0) scored.push({ index: i, score: hits / tokens.length });
+    }
+    scored.sort((a, b) => b.score - a.score);
+
+    const results: Array<{ context: string; lineNumber: number; score: number }> = [];
+    const taken = new Set<number>();
+    for (const { index, score } of scored) {
+      if (results.length >= limit) break;
+      // Skip overlapping results
+      let skip = false;
+      for (const t of Array.from(taken)) if (Math.abs(t - index) < 8) { skip = true; break; }
+      if (skip) continue;
+      taken.add(index);
+      const start = Math.max(0, index - 3);
+      const end = Math.min(lines.length, index + 5);
+      const excerpt = lines.slice(start, end).join('\n').slice(0, 700);
+      results.push({ context: excerpt, lineNumber: index + 1, score: round(score) });
+    }
+
+    return {
+      ok: true,
+      label: 'search_knowledge_base',
+      data: { query: args.query, results },
+      scanned: lines.length,
+      notice: results.length === 0 ? 'Bilgi tabanında eşleşme bulunamadı.' : undefined,
+    };
+  } catch (e) {
+    return err('search_knowledge_base', e);
+  }
+}
+
 /* ----------------------------------------------------------------------- */
 /* Dispatcher                                                              */
 /* ----------------------------------------------------------------------- */
@@ -1934,6 +3013,110 @@ export async function runTool(
       return getCountSessions(args as Parameters<typeof getCountSessions>[0], ctx);
     case 'get_maintenance':
       return getMaintenance(args as Parameters<typeof getMaintenance>[0], ctx);
+
+    // ===== Mal kabul / Sipariş ek / Verimlilik ek / Tüketim ek =====
+    case 'get_mal_kabul_history':
+      return getMalKabulHistory(args as Parameters<typeof getMalKabulHistory>[0], ctx);
+    case 'get_central_orders':
+      return getCentralOrders(args as Parameters<typeof getCentralOrders>[0], ctx);
+    case 'get_consumable_requests':
+      return getConsumableRequests(args as Parameters<typeof getConsumableRequests>[0], ctx);
+    case 'get_total_efficiency_records':
+      return getTotalEfficiencyRecords(args as Parameters<typeof getTotalEfficiencyRecords>[0], ctx);
+    case 'get_cihaz_ustu_history':
+      return getCihazUstuHistory(args as Parameters<typeof getCihazUstuHistory>[0], ctx);
+    case 'get_kumulatif_raporlar':
+      return getKumulatifRaporlar(args as Parameters<typeof getKumulatifRaporlar>[0], ctx);
+    case 'get_cost_checkpoints':
+      return getCostCheckpoints(args as Parameters<typeof getCostCheckpoints>[0], ctx);
+    case 'get_daily_consumption_stats':
+      return getDailyConsumptionStats(args as Parameters<typeof getDailyConsumptionStats>[0], ctx);
+    case 'get_nfc_disposal_events':
+      return getNfcDisposalEvents(args as Parameters<typeof getNfcDisposalEvents>[0], ctx);
+
+    // ===== Cihaz yönetimi ek =====
+    case 'get_device_model_definitions':
+      return getDeviceModelDefinitions(args as Parameters<typeof getDeviceModelDefinitions>[0], ctx);
+    case 'get_device_brand_models':
+      return getDeviceBrandModels(args as Parameters<typeof getDeviceBrandModels>[0], ctx);
+    case 'get_fault_definitions':
+      return getFaultDefinitions(args as Parameters<typeof getFaultDefinitions>[0], ctx);
+    case 'get_periodic_part_changes':
+      return getPeriodicPartChanges(args as Parameters<typeof getPeriodicPartChanges>[0], ctx);
+    case 'get_hospital_device_assignments':
+      return getHospitalDeviceAssignments(args as Parameters<typeof getHospitalDeviceAssignments>[0], ctx);
+    case 'get_other_company_faults':
+      return getOtherCompanyFaults(args as Parameters<typeof getOtherCompanyFaults>[0], ctx);
+
+    // ===== Yedek parça =====
+    case 'get_spare_part_stock':
+      return getSparePartStock(args as Parameters<typeof getSparePartStock>[0], ctx);
+    case 'get_spare_part_min_max':
+      return getSparePartMinMax(args as Parameters<typeof getSparePartMinMax>[0], ctx);
+    case 'get_spare_part_log':
+      return getSparePartLog(args as Parameters<typeof getSparePartLog>[0], ctx);
+    case 'get_spare_part_orders':
+      return getSparePartOrders(args as Parameters<typeof getSparePartOrders>[0], ctx);
+    case 'get_spare_part_transfers':
+      return getSparePartTransfers(args as Parameters<typeof getSparePartTransfers>[0], ctx);
+    case 'get_personal_spare_stock':
+      return getPersonalSpareStock(args as Parameters<typeof getPersonalSpareStock>[0], ctx);
+    case 'get_pool_warehouse_stock':
+      return getPoolWarehouseStock(args as Parameters<typeof getPoolWarehouseStock>[0], ctx);
+    case 'get_pending_returns':
+      return getPendingReturns(args as Parameters<typeof getPendingReturns>[0], ctx);
+    case 'get_borrowed_spare_parts':
+      return getBorrowedSpareParts(args as Parameters<typeof getBorrowedSpareParts>[0], ctx);
+    case 'get_post_closure_part_changes':
+      return getPostClosurePartChanges(args as Parameters<typeof getPostClosurePartChanges>[0], ctx);
+
+    // ===== Yönetim tanımları / katalog =====
+    case 'get_definitions':
+      return getDefinitions(args as Parameters<typeof getDefinitions>[0], ctx);
+    case 'get_companies':
+      return getCompanies(args as Parameters<typeof getCompanies>[0], ctx);
+    case 'get_depots':
+      return getDepots(args as Parameters<typeof getDepots>[0], ctx);
+    case 'get_address_definitions':
+      return getAddressDefinitions(args as Parameters<typeof getAddressDefinitions>[0], ctx);
+    case 'get_barcode_formats':
+      return getBarcodeFormats(args as Parameters<typeof getBarcodeFormats>[0], ctx);
+    case 'get_assets':
+      return getAssets(args as Parameters<typeof getAssets>[0], ctx);
+    case 'get_asset_categories':
+      return getAssetCategories(args, ctx);
+    case 'get_vehicles':
+      return getVehicles(args as Parameters<typeof getVehicles>[0], ctx);
+    case 'get_borc_depots':
+      return getBorcDepots(args, ctx);
+    case 'get_borc_transfers':
+      return getBorcTransfers(args as Parameters<typeof getBorcTransfers>[0], ctx);
+
+    // ===== Raporlama / Dosya / Satın alma / Lojistik / Nöbet =====
+    case 'get_irsaliye_files':
+      return getIrsaliyeFiles(args as Parameters<typeof getIrsaliyeFiles>[0], ctx);
+    case 'get_analysis_results':
+      return getAnalysisResults(args as Parameters<typeof getAnalysisResults>[0], ctx);
+    case 'get_archive_racks':
+      return getArchiveRacks(args as Parameters<typeof getArchiveRacks>[0], ctx);
+    case 'get_routes':
+      return getRoutes(args as Parameters<typeof getRoutes>[0], ctx);
+    case 'get_purchasing_tasks':
+      return getPurchasingTasks(args as Parameters<typeof getPurchasingTasks>[0], ctx);
+    case 'get_purchasing_workflows':
+      return getPurchasingWorkflows(args as Parameters<typeof getPurchasingWorkflows>[0], ctx);
+    case 'get_pending_ceomed_irsaliye':
+      return getPendingCeomedIrsaliye(args as Parameters<typeof getPendingCeomedIrsaliye>[0], ctx);
+    case 'get_duty_shifts':
+      return getDutyShifts(args as Parameters<typeof getDutyShifts>[0], ctx);
+    case 'get_shift_schedules':
+      return getShiftSchedules(args as Parameters<typeof getShiftSchedules>[0], ctx);
+    case 'get_personnel_history':
+      return getPersonnelHistory(args as Parameters<typeof getPersonnelHistory>[0], ctx);
+
+    // ===== Teknik servis bilgi tabanı =====
+    case 'search_knowledge_base':
+      return searchKnowledgeBase(args as Parameters<typeof searchKnowledgeBase>[0], ctx);
 
     default:
       return { ok: false, label: name, data: null, notice: `Bilinmeyen tool: ${name}` };
