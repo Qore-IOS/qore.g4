@@ -2,6 +2,7 @@
 
 import { useMemo, useRef } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { Environment } from '@react-three/drei';
 import * as THREE from 'three';
 
 interface QoreOrb3DProps {
@@ -11,13 +12,9 @@ interface QoreOrb3DProps {
 }
 
 /* ──────────────────────────────────────────────────────────────────────── */
-/* GLSL shader source                                                       */
+/* Shared GLSL — 3D Simplex noise (public-domain, Ashima Arts)             */
 /* ──────────────────────────────────────────────────────────────────────── */
 
-/**
- * 3D Simplex noise (Ashima Arts / Stefan Gustavson, public-domain).
- * Used for both vertex displacement and fragment colour flow.
- */
 const NOISE_GLSL = /* glsl */ `
 vec3 mod289(vec3 x){return x-floor(x*(1.0/289.0))*289.0;}
 vec4 mod289(vec4 x){return x-floor(x*(1.0/289.0))*289.0;}
@@ -50,208 +47,288 @@ float snoise(vec3 v){
 }
 `;
 
-const VERTEX_SHADER = /* glsl */ `
-varying vec3 vNormal;
-varying vec3 vWorldPos;
-varying vec3 vViewDir;
-varying float vNoise;
+/* ──────────────────────────────────────────────────────────────────────── */
+/* Inner volumetric core — colored swirls visible THROUGH the glass shell  */
+/* ──────────────────────────────────────────────────────────────────────── */
 
-uniform float uTime;
-uniform float uDisplacement;
-uniform float uFlowSpeed;
-
-${NOISE_GLSL}
-
-void main() {
-  vec3 pos = position;
-
-  // Low-frequency wobble (large soft bulges) — preserves spherical form.
-  float n1 = snoise(pos * 1.1 + vec3(0.0, uTime * uFlowSpeed * 0.6, uTime * uFlowSpeed * 0.4));
-  // Higher frequency micro-ripple — gives the jelly "skin" feel.
-  float n2 = snoise(pos * 2.4 + vec3(uTime * uFlowSpeed * 0.3, 0.0, 0.0));
-
-  vNoise = n1 * 0.7 + n2 * 0.3;
-  float disp = (n1 * 0.65 + n2 * 0.35) * uDisplacement;
-  pos += normal * disp;
-
-  // Normal stays approximately correct because displacement is small.
-  vNormal = normalize(normalMatrix * normal);
-
-  vec4 worldPos = modelMatrix * vec4(pos, 1.0);
-  vWorldPos = worldPos.xyz;
-  vec4 mvPos = viewMatrix * worldPos;
-  vViewDir = normalize(-mvPos.xyz);
-  gl_Position = projectionMatrix * mvPos;
-}
-`;
-
-const FRAGMENT_SHADER = /* glsl */ `
+const CORE_FRAG = /* glsl */ `
 precision highp float;
 
-varying vec3 vNormal;
 varying vec3 vWorldPos;
-varying vec3 vViewDir;
-varying float vNoise;
+varying vec3 vNormal;
 
 uniform float uTime;
-uniform vec3 uColorA; // deep violet  (#5b21b6)
-uniform vec3 uColorB; // magenta hi   (#c026d3)
-uniform vec3 uColorC; // royal blue   (#1d4ed8)
-uniform vec3 uColorD; // cyan glow    (#22d3ee)
-uniform float uFlowSpeed;
+uniform float uFlow;
+uniform vec3 uViolet;
+uniform vec3 uMagenta;
+uniform vec3 uBlue;
+uniform vec3 uCyan;
 
 ${NOISE_GLSL}
 
-void main() {
-  vec3 N = normalize(vNormal);
-  vec3 V = normalize(vViewDir);
+// fBM (4 octaves) for richer swirls
+float fbm(vec3 p){
+  float v = 0.0;
+  float a = 0.5;
+  for (int i = 0; i < 4; i++) {
+    v += a * snoise(p);
+    p *= 2.0;
+    a *= 0.5;
+  }
+  return v;
+}
 
-  // Two flowing noise layers determine where each colour dominates.
-  float nA = snoise(vWorldPos * 1.4 + vec3(uTime * uFlowSpeed * 0.5, uTime * uFlowSpeed * 0.4, uTime * uFlowSpeed * 0.3));
-  float nB = snoise(vWorldPos * 0.7 - vec3(uTime * uFlowSpeed * 0.35, 0.0, uTime * uFlowSpeed * 0.25));
-  float tA = clamp(0.5 + nA * 0.5, 0.0, 1.0);
-  float tB = clamp(0.5 + nB * 0.5, 0.0, 1.0);
+void main(){
+  vec3 p = vWorldPos * 1.6;
+  // Two displaced noise fields advected by time, in different directions.
+  vec3 q = vec3(
+    fbm(p + vec3(0.0, uTime * uFlow * 0.40, uTime * uFlow * 0.18)),
+    fbm(p + vec3(uTime * uFlow * 0.32, 0.0, uTime * uFlow * 0.21)),
+    fbm(p + vec3(uTime * uFlow * 0.25, uTime * uFlow * 0.30, 0.0))
+  );
+  float swirl = fbm(p + q * 1.5);
+  float band = abs(swirl);
+  float ribbon = smoothstep(0.45, 0.20, band) * 1.4;        // bright ribbons
+  float deep   = smoothstep(0.95, 0.55, band);              // dark gaps
 
-  // Two cross gradients, then blended.
-  vec3 grad1 = mix(uColorA, uColorB, tA); // violet → magenta
-  vec3 grad2 = mix(uColorC, uColorD, tA); // blue → cyan
-  vec3 baseColor = mix(grad1, grad2, tB);
+  // Color rampa
+  vec3 col = mix(uBlue, uViolet, smoothstep(-0.4, 0.6, swirl));
+  col = mix(col, uCyan,    smoothstep(0.05, 0.35, swirl));
+  col = mix(col, uMagenta, ribbon * 0.7);
 
-  // Inject a brighter "swirl" highlight where noise is positive — bright cyan/magenta veins.
-  float veins = smoothstep(0.55, 0.95, abs(nA + nB) * 0.5);
-  baseColor = mix(baseColor, mix(uColorB, uColorD, tB), veins * 0.45);
+  // Inner depth darkening so swirls feel volumetric.
+  col *= mix(0.35, 1.4, ribbon);
+  col = mix(col, vec3(0.02, 0.0, 0.06), deep * 0.6);
 
-  // Lighting — soft top-front key light, bottom-back fill (cyan).
-  vec3 keyDir  = normalize(vec3(0.45, 0.65, 0.85));
-  vec3 fillDir = normalize(vec3(-0.55, -0.25, 0.30));
+  // Brighten centre slightly so the bubble has internal "soul".
+  float radial = 1.0 - length(vWorldPos);
+  col += uCyan * pow(max(radial, 0.0), 3.0) * 0.25;
 
-  float key  = max(dot(N, keyDir), 0.0);
-  float fill = max(dot(N, fillDir), 0.0);
-
-  // Smooth wrap for the jelly softness.
-  float wrap = pow(0.5 + 0.5 * dot(N, keyDir), 1.4);
-
-  // Specular highlight (top-left glossy spot).
-  vec3 H = normalize(keyDir + V);
-  float spec = pow(max(dot(N, H), 0.0), 40.0);
-
-  // Fresnel rim — makes the silhouette glow brightly.
-  float fresnel = pow(1.0 - max(dot(N, V), 0.0), 2.2);
-
-  vec3 ambient  = baseColor * 0.30;
-  vec3 diffuse  = baseColor * (wrap * 0.65 + fill * 0.18);
-  vec3 specCol  = vec3(1.0, 0.92, 1.0) * spec * 0.55;
-  vec3 rim      = mix(uColorB, uColorD, tB) * fresnel * 0.95;
-
-  // Subtle depth darkening near the centre for "thickness".
-  float thickness = smoothstep(0.0, 1.0, 1.0 - fresnel);
-  vec3 inner = mix(uColorA, vec3(0.05, 0.02, 0.10), thickness * 0.45);
-  vec3 finalCol = ambient + diffuse + specCol + rim;
-  finalCol = mix(finalCol, finalCol * 0.85 + inner * 0.15, thickness * 0.4);
-
-  // Soft tone shape — keep highlights from blowing out, deepen mids.
-  finalCol = pow(finalCol, vec3(0.92));
-
-  gl_FragColor = vec4(finalCol, 1.0);
+  gl_FragColor = vec4(col, 1.0);
 }
 `;
 
-/* ──────────────────────────────────────────────────────────────────────── */
-/* Jelly orb mesh                                                           */
-/* ──────────────────────────────────────────────────────────────────────── */
+const CORE_VERT = /* glsl */ `
+varying vec3 vWorldPos;
+varying vec3 vNormal;
 
-function JellyOrb({ isProcessing }: { isProcessing: boolean }) {
+void main(){
+  vec4 wp = modelMatrix * vec4(position, 1.0);
+  vWorldPos = wp.xyz;
+  vNormal = normalize(normalMatrix * normal);
+  gl_Position = projectionMatrix * viewMatrix * wp;
+}
+`;
+
+function VolumetricCore({ isProcessing }: { isProcessing: boolean }) {
   const meshRef = useRef<THREE.Mesh>(null);
-  const groupRef = useRef<THREE.Group>(null);
-
   const uniforms = useMemo(
     () => ({
       uTime: { value: 0 },
-      uDisplacement: { value: 0.075 }, // small — form preserved
-      uFlowSpeed: { value: 0.18 }, // slow flow inside the orb
-      uColorA: { value: new THREE.Color('#5b21b6') }, // deep violet
-      uColorB: { value: new THREE.Color('#c026d3') }, // magenta highlight
-      uColorC: { value: new THREE.Color('#1d4ed8') }, // royal blue
-      uColorD: { value: new THREE.Color('#22d3ee') }, // cyan glow
+      uFlow: { value: 0.22 },
+      uViolet: { value: new THREE.Color('#6d28d9') },
+      uMagenta: { value: new THREE.Color('#d946ef') },
+      uBlue: { value: new THREE.Color('#2563eb') },
+      uCyan: { value: new THREE.Color('#22d3ee') },
     }),
     [],
   );
-
-  // High-detail icosahedron so vertex displacement looks smooth.
-  const geometry = useMemo(() => new THREE.IcosahedronGeometry(1, 5), []);
   const material = useMemo(
     () =>
       new THREE.ShaderMaterial({
-        vertexShader: VERTEX_SHADER,
-        fragmentShader: FRAGMENT_SHADER,
+        vertexShader: CORE_VERT,
+        fragmentShader: CORE_FRAG,
         uniforms,
+        side: THREE.DoubleSide,
         transparent: false,
       }),
     [uniforms],
   );
+  const geometry = useMemo(() => new THREE.IcosahedronGeometry(0.82, 4), []);
 
-  // Slow rotation around its own axes + gentle pitch/roll.
   useFrame((state, delta) => {
     const t = state.clock.elapsedTime;
     uniforms.uTime.value = t;
+    uniforms.uFlow.value = isProcessing ? 0.55 : 0.22;
+    if (meshRef.current) {
+      // Inner core spins the opposite direction → swirls cross over the shell's motion
+      meshRef.current.rotation.y -= delta * 0.09;
+      meshRef.current.rotation.x = Math.cos(t * 0.07) * 0.18;
+    }
+  });
 
-    // Future hook: speed up flow when processing. Idle stays slow.
-    uniforms.uFlowSpeed.value = isProcessing ? 0.45 : 0.18;
+  return <mesh ref={meshRef} geometry={geometry} material={material} />;
+}
 
+/* ──────────────────────────────────────────────────────────────────────── */
+/* Glass shell — MeshPhysicalMaterial with transmission + iridescence +    */
+/* asymmetric vertex displacement for the irregular bubble silhouette.     */
+/* ──────────────────────────────────────────────────────────────────────── */
+
+function GlassShell({ isProcessing }: { isProcessing: boolean }) {
+  const meshRef = useRef<THREE.Mesh>(null);
+  const groupRef = useRef<THREE.Group>(null);
+  const shaderRef = useRef<{ uniforms: Record<string, { value: number }> } | null>(null);
+
+  const geometry = useMemo(() => new THREE.IcosahedronGeometry(1.0, 6), []);
+
+  const material = useMemo(() => {
+    const m = new THREE.MeshPhysicalMaterial({
+      color: new THREE.Color('#b89cff'),
+      roughness: 0.08,
+      metalness: 0.0,
+      transmission: 0.95,
+      thickness: 1.4,
+      ior: 1.35,
+      attenuationColor: new THREE.Color('#7c3aed'),
+      attenuationDistance: 0.9,
+      iridescence: 1.0,
+      iridescenceIOR: 1.3,
+      iridescenceThicknessRange: [120, 540],
+      clearcoat: 1.0,
+      clearcoatRoughness: 0.06,
+      transparent: true,
+      side: THREE.FrontSide,
+      envMapIntensity: 1.4,
+    });
+
+    // Inject animated, asymmetric vertex displacement into the PBR vertex shader.
+    m.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = { value: 0 };
+      shader.uniforms.uDisp = { value: 0.18 };
+      shader.uniforms.uFlow = { value: 0.14 };
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <common>',
+          `#include <common>
+           uniform float uTime;
+           uniform float uDisp;
+           uniform float uFlow;
+           ${NOISE_GLSL}`,
+        )
+        .replace(
+          '#include <begin_vertex>',
+          `vec3 transformed = vec3(position);
+           // Asymmetric noise — different scales per axis so the form is NOT a perfect sphere.
+           float n1 = snoise(transformed * vec3(1.30, 0.95, 1.12) + vec3(uTime * uFlow * 0.85, uTime * uFlow * 0.40, uTime * uFlow * 0.60));
+           float n2 = snoise(transformed * vec3(2.30, 2.70, 1.90) + vec3(-uTime * uFlow * 0.55, uTime * uFlow * 0.35, 0.0));
+           float n3 = snoise(transformed * 0.55 + vec3(uTime * uFlow * 0.20));
+           float disp = (n1 * 0.65 + n2 * 0.25 + n3 * 0.35) * uDisp;
+           transformed += normal * disp;`,
+        );
+      shaderRef.current = shader;
+    };
+    // Force shader recompile on first render
+    m.needsUpdate = true;
+    return m;
+  }, []);
+
+  useFrame((state, delta) => {
+    const t = state.clock.elapsedTime;
+    if (shaderRef.current?.uniforms) {
+      shaderRef.current.uniforms.uTime.value = t;
+      shaderRef.current.uniforms.uFlow.value = isProcessing ? 0.45 : 0.14;
+      shaderRef.current.uniforms.uDisp.value = isProcessing ? 0.28 : 0.18;
+    }
     if (groupRef.current) {
-      // Primary spin on Y — visible but slow (≈ 1 turn / 42 s)
-      groupRef.current.rotation.y += delta * 0.15;
-      // Subtle pitch and roll so it feels alive, not mechanical
-      groupRef.current.rotation.x = Math.sin(t * 0.08) * 0.12;
-      groupRef.current.rotation.z = Math.cos(t * 0.06) * 0.06;
-      // Tiny breathing scale (≤2%)
-      const breath = 1 + Math.sin(t * 0.5) * 0.015;
+      groupRef.current.rotation.y += delta * 0.14;
+      groupRef.current.rotation.x = Math.sin(t * 0.09) * 0.16;
+      groupRef.current.rotation.z = Math.cos(t * 0.07) * 0.08;
+      const breath = 1 + Math.sin(t * 0.45) * 0.012;
       groupRef.current.scale.setScalar(breath);
     }
   });
 
   return (
     <group ref={groupRef}>
+      <VolumetricCore isProcessing={isProcessing} />
       <mesh ref={meshRef} geometry={geometry} material={material} />
     </group>
   );
 }
 
 /* ──────────────────────────────────────────────────────────────────────── */
-/* Soft outer glow halo                                                     */
+/* Outer additive halo — neon aura around the bubble                       */
 /* ──────────────────────────────────────────────────────────────────────── */
 
-function GlowHalo() {
+const HALO_FRAG = /* glsl */ `
+precision highp float;
+varying vec3 vWorldPos;
+varying vec3 vNormal;
+varying vec3 vViewDir;
+uniform vec3 uColorA;
+uniform vec3 uColorB;
+uniform float uTime;
+
+void main(){
+  vec3 N = normalize(vNormal);
+  vec3 V = normalize(vViewDir);
+  float rim = pow(1.0 - max(dot(N, V), 0.0), 2.4);
+  // Hue shift between magenta and cyan over time → "iridescent" halo motion
+  float t = 0.5 + 0.5 * sin(uTime * 0.4 + vWorldPos.y * 1.5);
+  vec3 col = mix(uColorA, uColorB, t);
+  gl_FragColor = vec4(col * rim, rim * 0.85);
+}
+`;
+
+const HALO_VERT = /* glsl */ `
+varying vec3 vWorldPos;
+varying vec3 vNormal;
+varying vec3 vViewDir;
+void main(){
+  vec4 wp = modelMatrix * vec4(position, 1.0);
+  vWorldPos = wp.xyz;
+  vNormal = normalize(normalMatrix * normal);
+  vec4 mv = viewMatrix * wp;
+  vViewDir = normalize(-mv.xyz);
+  gl_Position = projectionMatrix * mv;
+}
+`;
+
+function NeonHalo() {
   const meshRef = useRef<THREE.Mesh>(null);
-  useFrame((state) => {
-    if (!meshRef.current) return;
-    const t = state.clock.elapsedTime;
-    const s = 1.25 + Math.sin(t * 0.6) * 0.025;
-    meshRef.current.scale.setScalar(s);
-  });
-  return (
-    <mesh ref={meshRef}>
-      <sphereGeometry args={[1, 32, 32]} />
-      <meshBasicMaterial
-        color="#7c3aed"
-        transparent
-        opacity={0.07}
-        blending={THREE.AdditiveBlending}
-        depthWrite={false}
-        side={THREE.BackSide}
-      />
-    </mesh>
+  const uniforms = useMemo(
+    () => ({
+      uTime: { value: 0 },
+      uColorA: { value: new THREE.Color('#d946ef') }, // magenta
+      uColorB: { value: new THREE.Color('#22d3ee') }, // cyan
+    }),
+    [],
   );
+  const material = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        vertexShader: HALO_VERT,
+        fragmentShader: HALO_FRAG,
+        uniforms,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.BackSide,
+      }),
+    [uniforms],
+  );
+  const geometry = useMemo(() => new THREE.SphereGeometry(1.35, 64, 64), []);
+
+  useFrame((state) => {
+    uniforms.uTime.value = state.clock.elapsedTime;
+    if (meshRef.current) {
+      const s = 1 + Math.sin(state.clock.elapsedTime * 0.5) * 0.03;
+      meshRef.current.scale.setScalar(s);
+    }
+  });
+
+  return <mesh ref={meshRef} geometry={geometry} material={material} />;
 }
 
 /* ──────────────────────────────────────────────────────────────────────── */
-/* Camera setup                                                             */
+/* Camera                                                                   */
 /* ──────────────────────────────────────────────────────────────────────── */
 
 function CameraRig() {
   const { camera } = useThree();
   useMemo(() => {
-    camera.position.set(0, 0, 3.0);
+    camera.position.set(0, 0, 3.1);
     camera.lookAt(0, 0, 0);
   }, [camera]);
   return null;
@@ -263,15 +340,44 @@ function CameraRig() {
 
 export default function QoreOrb3D({ isProcessing = false, className }: QoreOrb3DProps) {
   return (
-    <div className={className} style={{ width: '100%', height: '100%' }}>
+    <div className={className} style={{ position: 'relative', width: '100%', height: '100%' }}>
+      {/* CSS atmospheric bloom — soft purple + cyan radial behind the canvas. */}
+      <div
+        aria-hidden
+        style={{
+          position: 'absolute',
+          inset: '-15%',
+          pointerEvents: 'none',
+          background:
+            'radial-gradient(circle at 40% 30%, rgba(168, 85, 247, 0.45), transparent 55%),' +
+            'radial-gradient(circle at 65% 75%, rgba(34, 211, 238, 0.40), transparent 60%),' +
+            'radial-gradient(circle at 50% 50%, rgba(217, 70, 239, 0.22), transparent 65%)',
+          filter: 'blur(28px)',
+        }}
+      />
       <Canvas
-        gl={{ alpha: true, antialias: true, powerPreference: 'high-performance' }}
+        gl={{
+          alpha: true,
+          antialias: true,
+          powerPreference: 'high-performance',
+          toneMapping: THREE.ACESFilmicToneMapping,
+          outputColorSpace: THREE.SRGBColorSpace,
+        }}
         dpr={[1, 2]}
-        camera={{ fov: 45, near: 0.1, far: 100, position: [0, 0, 3.0] }}
+        camera={{ fov: 42, near: 0.1, far: 100, position: [0, 0, 3.1] }}
+        style={{ position: 'relative', zIndex: 1 }}
       >
         <CameraRig />
-        <GlowHalo />
-        <JellyOrb isProcessing={isProcessing} />
+        {/* Environment provides reflections for transmission (NOT shown as background). */}
+        <Environment preset="night" background={false} environmentIntensity={0.8} />
+        {/* Three colored point lights — accent the bubble like the reference. */}
+        <pointLight position={[2.5, 2.5, 2.0]} intensity={3.5} color="#d946ef" />
+        <pointLight position={[-2.5, -1.5, 2.0]} intensity={3.0} color="#22d3ee" />
+        <pointLight position={[0, 0, -2.5]} intensity={1.5} color="#7c3aed" />
+        <ambientLight intensity={0.15} />
+
+        <NeonHalo />
+        <GlassShell isProcessing={isProcessing} />
       </Canvas>
     </div>
   );
