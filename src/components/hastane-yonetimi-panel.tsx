@@ -1115,8 +1115,9 @@ export default function LaboratuvarYonetimiPanel() {
 
           {selectedLabId && (
             <BekleyenIrsaliyelerPanel
-              selectedLabId={selectedLabId}
-              selectedLabName={selectedLabName}
+              locationType="hospital"
+              locationId={selectedLabId}
+              locationName={selectedLabName}
             />
           )}
 
