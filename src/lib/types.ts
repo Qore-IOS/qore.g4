@@ -145,6 +145,7 @@ export interface Depot {
   // Ceomed entegrasyonu
   ceomedEnabled?: boolean; // true ise bu depo Ceomed ERP'den senkronize edilir
   ceomedDepoKodu?: string; // Ceomed'deki depo kodu (örn. "77") — selectMerkezDepoListesi'ndeki DEPO{kod} alanını okur
+  ceomedCariKodu?: string; // Ceomed cari kodu (örn. M51001) — Ceomed irsaliye eşleştirmesi için
   [k: string]: any;
 }
 
