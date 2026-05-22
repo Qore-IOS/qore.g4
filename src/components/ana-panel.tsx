@@ -1687,6 +1687,14 @@ export default function AnaPanel(props: AnaPanelProps) {
       return { ...prev, [key]: { ...v, verifiedSerials: nextSet } };
     });
   };
+
+  const getVerifyLineForGroup = (group: ScanRow): CeomedVerifyLine | null => {
+    const raw = `${group.stokKodu || ''}||${group.lotNumarasi || ''}||${group.miad || ''}`;
+    if (ceomedVerifyMap[raw]) return ceomedVerifyMap[raw];
+    const normalized = `${group.stokKodu || ''}||${group.lotNumarasi || ''}||${group.miad ? normalizeMiad(group.miad) : ''}`;
+    if (ceomedVerifyMap[normalized]) return ceomedVerifyMap[normalized];
+    return null;
+  };
   
   // Barkodsuz giriş için tüm non-serial ürünleri listele (lot_manual, qty_manual, lot_barcode, qty_barcode)
   const allNonSerialProducts = useMemo(() => {
@@ -2168,6 +2176,7 @@ export default function AnaPanel(props: AnaPanelProps) {
                 const trackingMode = (group.stokKodu && productTracking[group.stokKodu]) || resolveDefaultTrackingMode({stokAdi: group.stokAdi} as any);
                 const hasSerials = trackingMode === 'serial';
                 const meta = productMetaByCode.get(group.stokKodu || '');
+                const verifyLine = getVerifyLineForGroup(group);
                 const multiplier = formatUnitMultiplier(meta);
                 const missingAddress = !group.rafAdresi;
                 const missingIrsaliye = !group.irsaliyeNumarasi;
@@ -2238,12 +2247,23 @@ export default function AnaPanel(props: AnaPanelProps) {
                         <span className="text-[11px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</span>
                       </div>
                       <div className="text-center">
-                        <button
-                          onClick={() => deleteGroup(group.key)}
-                          className="p-1 rounded-lg hover:bg-red-100 transition-colors"
-                        >
-                          <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                        </button>
+                        <div className="flex items-center justify-center gap-1">
+                          {verifyLine && (
+                            <button
+                              onClick={() => markVerifyLineComplete(group)}
+                              className="p-1 rounded-lg hover:bg-emerald-100 transition-colors"
+                              title="Bu satırdaki tüm seri numaralarını okutulmuş say"
+                            >
+                              <CheckSquare className="h-3.5 w-3.5 text-emerald-600" />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => deleteGroup(group.key)}
+                            className="p-1 rounded-lg hover:bg-red-100 transition-colors"
+                          >
+                            <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                          </button>
+                        </div>
                       </div>
                     </div>
 
@@ -2318,11 +2338,11 @@ export default function AnaPanel(props: AnaPanelProps) {
                     {/* Serial number expansion */}
                     {hasSerials && group.items && group.items.length > 0 && (
                       <div className="px-5 sm:px-10 py-2 bg-[var(--dashboard-surface-2)] border-t border-[var(--dashboard-stroke)]">
-                        {ceomedVerifyMap[`${group.stokKodu}||${group.lotNumarasi || ''}||${group.miad || ''}`] && (
+                        {verifyLine && (
                           <div className="flex items-center justify-between mb-2">
                             <div className="text-xs text-[var(--dashboard-muted)]">
-                              Okutulan {ceomedVerifyMap[`${group.stokKodu}||${group.lotNumarasi || ''}||${group.miad || ''}`].verifiedSerials.size}
-                              / Beklenen {ceomedVerifyMap[`${group.stokKodu}||${group.lotNumarasi || ''}||${group.miad || ''}`].serials.length}
+                              Okutulan {verifyLine.verifiedSerials.size}
+                              / Beklenen {verifyLine.serials.length}
                             </div>
                             <Button size="sm" variant="outline" onClick={() => markVerifyLineComplete(group)}>✓ Tümü Okutuldu</Button>
                           </div>
