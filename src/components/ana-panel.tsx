@@ -1689,9 +1689,28 @@ export default function AnaPanel(props: AnaPanelProps) {
     const key = `${group.stokKodu}||${group.lotNumarasi || ''}||${group.miad || ''}`;
     setCeomedVerifyMap((prev) => {
       const v = prev[key];
-      if (!v) return prev;
-      const nextSet = new Set(v.serials);
-      return { ...prev, [key]: { ...v, verifiedSerials: nextSet } };
+      if (v) {
+        const nextSet = new Set(v.serials);
+        return { ...prev, [key]: { ...v, verifiedSerials: nextSet } };
+      }
+      // fallback: map key bulunamazsa satırdaki seriallardan doğrulama satırı oluştur
+      const rowSerials = Array.from(new Set((group.items || []).map(i => i.seriNumarasi).filter(Boolean) as string[]));
+      if (rowSerials.length === 0) return prev;
+      const normalizedKey = `${group.stokKodu || ''}||${group.lotNumarasi || ''}||${group.miad ? normalizeMiad(group.miad) : ''}`;
+      return {
+        ...prev,
+        [normalizedKey]: {
+          key: normalizedKey,
+          stokKodu: group.stokKodu || '',
+          stokAdi: group.stokAdi || '',
+          marka: '',
+          lot: group.lotNumarasi || '',
+          miad: group.miad || '',
+          adet: rowSerials.length,
+          serials: rowSerials,
+          verifiedSerials: new Set(rowSerials),
+        },
+      };
     });
   };
 
@@ -2281,7 +2300,7 @@ export default function AnaPanel(props: AnaPanelProps) {
                       </div>
                       <div className="text-center">
                         <div className="flex items-center justify-center gap-1">
-                          {verifyLine && (
+                          {(verifyLine || (selectedPendingIrs && hasSerials)) && (
                             <button
                               onClick={() => markVerifyLineComplete(group)}
                               className="p-1 rounded-lg hover:bg-emerald-100 transition-colors"
