@@ -189,6 +189,12 @@ type PendingCeomedIrsaliye = {
   items: CeomedItem[];
 };
 
+const PENDING_CEOMED_DURUM_SET = new Set([
+  'IRSALIYE YAZDIRILABILIR',
+  'IRSALIYE YAZDIRILDI',
+  'KURUMA SEVK EDILDI',
+]);
+
 // =============================================================================
 // UTILITY FUNCTIONS
 // =============================================================================
@@ -663,7 +669,7 @@ export default function AnaPanel(props: AnaPanelProps) {
       const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as PendingCeomedIrsaliye[];
       const filtered = rows.filter((r) =>
         (r.cariKodu || '').trim().toUpperCase() === cari &&
-        (r.durumAciklama || '').toUpperCase() === 'IRSALIYE YAZDIRILABILIR'
+        PENDING_CEOMED_DURUM_SET.has((r.durumAciklama || '').trim().toUpperCase())
       );
       setPendingCeomedIrsaliye(filtered);
     }, () => setPendingCeomedIrsaliye([]));
@@ -2312,7 +2318,7 @@ export default function AnaPanel(props: AnaPanelProps) {
           <DialogHeader>
             <DialogTitle>Bekleyen Ceomed İrsaliyeleri</DialogTitle>
             <DialogDescription>
-              Seçili deponun cari kodu ile eşleşen ve "İrsaliye Yazdırılabilir" durumundaki kayıtlar.
+              Seçili deponun cari kodu ile eşleşen ve "İrsaliye Yazdırılabilir / İrsaliye Yazdırıldı / Kuruma Sevk Edildi" durumundaki kayıtlar.
             </DialogDescription>
           </DialogHeader>
           <div className="flex-1 overflow-y-auto space-y-3 pr-1">
