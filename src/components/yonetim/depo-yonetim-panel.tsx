@@ -345,7 +345,6 @@ export default function DepoYonetimPanel() {
                     </div>
                   </ScrollArea>
                 </div>
-                </>
               )}
 
               <div>
