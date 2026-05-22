@@ -169,6 +169,43 @@ type MalKabulHeader = {
   mode: 'verified' | 'unverified';
 };
 
+type CeomedItem = {
+  BARKOD_SERI: string;
+  STOK_KODU: string;
+  LOT: string;
+  MIYAT: string;
+  MIKTAR: number;
+};
+
+type PendingCeomedIrsaliye = {
+  id: string;
+  ceomedId: number;
+  irsaliyeNo: string;
+  tarih: string;
+  cariKodu: string;
+  cariUnvan: string;
+  durumAciklama: string;
+  status: 'pending' | 'approved' | 'rejected' | 'deleted';
+  items: CeomedItem[];
+};
+type PendingCeomedLine = {
+  key: string;
+  stokKodu: string;
+  stokAdi: string;
+  marka: string;
+  lot: string;
+  miad: string;
+  adet: number;
+  serials: string[];
+};
+type CeomedVerifyLine = PendingCeomedLine & { verifiedSerials: Set<string> };
+
+const PENDING_CEOMED_DURUM_SET = new Set([
+  'IRSALIYE YAZDIRILABILIR',
+  'IRSALIYE YAZDIRILDI',
+  'KURUMA SEVK EDILDI',
+]);
+
 // =============================================================================
 // UTILITY FUNCTIONS
 // =============================================================================
@@ -520,6 +557,11 @@ export default function AnaPanel(props: AnaPanelProps) {
   const [isBatchScanning, setIsBatchScanning] = useState(false);
   const [isOcrModalOpen, setIsOcrModalOpen] = useState(false);
   const [pendingIrsaliyeCount, setPendingIrsaliyeCount] = useState(0);
+  const [pendingCeomedIrsaliye, setPendingCeomedIrsaliye] = useState<PendingCeomedIrsaliye[]>([]);
+  const [isPendingCeomedModalOpen, setIsPendingCeomedModalOpen] = useState(false);
+  const [ceomedApprovingId, setCeomedApprovingId] = useState<string | null>(null);
+  const [selectedPendingIrs, setSelectedPendingIrs] = useState<PendingCeomedIrsaliye | null>(null);
+  const [ceomedVerifyMap, setCeomedVerifyMap] = useState<Record<string, CeomedVerifyLine>>({});
   const [isBulkBarcodeScanOpen, setIsBulkBarcodeScanOpen] = useState(false);
   const [isBulkScanMode, setIsBulkScanMode] = useState(false);
 
@@ -533,8 +575,9 @@ export default function AnaPanel(props: AnaPanelProps) {
   const [showUnverified, setShowUnverified] = useState(false);
   const [commitInfo, setCommitInfo] = useState<{ commits: number; pending: number } | null>(null);
   
-  // Map: stokKodu -> Set<seriNumarasi> - oturum içi mükerrer kontrolü ürün bazında
+  // Map: stokKodu||lot -> Set<seriNumarasi> - oturum içi mükerrer kontrolü ürün+lot bazında
   const scannedSerialsRef = useRef(new Map<string, Set<string>>());
+  const serialLotKey = useCallback((stokKodu?: string, lotNumarasi?: string) => `${stokKodu || ''}||${lotNumarasi || ''}`, []);
 
 
   const incomingQuantities = useMemo(() => {
@@ -584,6 +627,7 @@ export default function AnaPanel(props: AnaPanelProps) {
   const sessionsQuery = useDepotCountSessions(selectedDepotId);
   const scannedItemsQuery = useScannedItems(activeSession?.id ?? null);
   const irsaliyeQuery = useIrsaliyeFiles(selectedDepotId);
+  const selectedDepot = useMemo(() => sourceDepots.find(d => d.id === selectedDepotId), [sourceDepots, selectedDepotId]);
 
   // Derive state from queries
   const availableSessions = useMemo(() => 
@@ -628,22 +672,42 @@ export default function AnaPanel(props: AnaPanelProps) {
     }
   }, [irsaliyeQuery.data, selectedDepotId]);
 
+  useEffect(() => {
+    const cari = ((selectedDepot as any)?.ceomedCariKodu || '').toString().trim().toUpperCase();
+    if (!cari) {
+      setPendingCeomedIrsaliye([]);
+      return;
+    }
+    const q = query(collection(db, 'pendingCeomedIrsaliye'), where('status', '==', 'pending'));
+    const unsub = onSnapshot(q, (snap) => {
+      const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as PendingCeomedIrsaliye[];
+      const filtered = rows.filter((r) =>
+        (r.cariKodu || '').trim().toUpperCase() === cari &&
+        PENDING_CEOMED_DURUM_SET.has((r.durumAciklama || '').trim().toUpperCase())
+      );
+      setPendingCeomedIrsaliye(filtered);
+    }, () => setPendingCeomedIrsaliye([]));
+    return () => unsub();
+  }, [selectedDepot]);
+
   // Build existing serials map from TanStack Query data (polling instead of real-time listener)
   // This reduces Firestore reads dramatically
   const existingDepotSerials = useMemo(() => {
-    const serialsByProduct = new Map<string, Set<string>>();
+    const serialsByProductLot = new Map<string, Set<string>>();
     depotStockData.forEach(item => {
       const serial = item.seriNumarasi;
       const stokKodu = item.stokKodu;
+      const lot = item.lotNumarasi || '';
       if (serial && stokKodu) {
-        if (!serialsByProduct.has(stokKodu)) {
-          serialsByProduct.set(stokKodu, new Set());
+        const key = serialLotKey(stokKodu, lot);
+        if (!serialsByProductLot.has(key)) {
+          serialsByProductLot.set(key, new Set());
         }
-        serialsByProduct.get(stokKodu)!.add(serial);
+        serialsByProductLot.get(key)!.add(serial);
       }
     });
-    return serialsByProduct;
-  }, [depotStockData]);
+    return serialsByProductLot;
+  }, [depotStockData, serialLotKey]);
   
   const processScan = useCallback(async (barcodeData: string, source: 'barcode' | 'bulk_item' = 'barcode') => {
     const scanCorrelationId = createCorrelationId();
@@ -726,8 +790,9 @@ export default function AnaPanel(props: AnaPanelProps) {
             if (!seriNumarasi) throw new Error('Bu ürün seri numarası ile takip edilir, barkod seri içermiyor.');
 
             // Mükerrer kontrolü: aynı ürün için aynı seri numarası kontrol edilir
-            const sessionSerials = scannedSerialsRef.current.get(stokKodu);
-            const depotSerials = existingDepotSerials.get(stokKodu);
+            const serialKey = serialLotKey(stokKodu, lotNumarasi || '');
+            const sessionSerials = scannedSerialsRef.current.get(serialKey);
+            const depotSerials = existingDepotSerials.get(serialKey);
             const isInSession = sessionSerials?.has(seriNumarasi) ?? false;
             const isInDepot = depotSerials?.has(seriNumarasi) ?? false;
 
@@ -754,16 +819,26 @@ export default function AnaPanel(props: AnaPanelProps) {
             const newItem: ScanRow = {
               id: generateId(), barkod: trimmedData, stokKodu: stokKodu, stokAdi: matchedProduct.stokAdi,
               lotNumarasi: lotNumarasi || '', miad: miadFormatted || '', seriNumarasi: seriNumarasi || '',
-              rafAdresi: '', irsaliyeNumarasi: '', isSelected: false, timestamp: new Date(), isProcessed: false,
+              rafAdresi: '', irsaliyeNumarasi: selectedPendingIrs?.irsaliyeNo || '', isSelected: false, timestamp: new Date(), isProcessed: false,
               adet: 1, isGroup: false, bulkQrAssigned: false
             };
             newItem.key = `${newItem.stokKodu}-${newItem.lotNumarasi}-${newItem.miad}`;
             // Oturum içi mükerrer takibi: stokKodu -> Set<seriNumarasi>
-            if (!scannedSerialsRef.current.has(stokKodu)) {
-              scannedSerialsRef.current.set(stokKodu, new Set());
+            if (!scannedSerialsRef.current.has(serialKey)) {
+              scannedSerialsRef.current.set(serialKey, new Set());
             }
-            scannedSerialsRef.current.get(stokKodu)!.add(seriNumarasi);
+            scannedSerialsRef.current.get(serialKey)!.add(seriNumarasi);
             setScannedItems(prev => [newItem, ...prev]);
+            if (selectedPendingIrs) {
+              const verifyKey = `${stokKodu}||${lotNumarasi || ''}||${miadFormatted || ''}`;
+              setCeomedVerifyMap((prev) => {
+                const v = prev[verifyKey];
+                if (!v) return prev;
+                const nextSet = new Set(v.verifiedSerials);
+                nextSet.add(seriNumarasi);
+                return { ...prev, [verifyKey]: { ...v, verifiedSerials: nextSet } };
+              });
+            }
             if (source === 'barcode') setLastScannedProduct(newItem);
 
         } else {
@@ -914,8 +989,9 @@ export default function AnaPanel(props: AnaPanelProps) {
       // If serial number exists, add as individual serial-tracked item
       if (seriNumarasi) {
         // Duplicate check
-        const sessionSerials = scannedSerialsRef.current.get(stokKodu);
-        const depotSerials = existingDepotSerials.get(stokKodu);
+        const serialKey = serialLotKey(stokKodu, lotNumarasi || '');
+        const sessionSerials = scannedSerialsRef.current.get(serialKey);
+        const depotSerials = existingDepotSerials.get(serialKey);
         if (sessionSerials?.has(seriNumarasi) || depotSerials?.has(seriNumarasi)) {
           skipped++;
           return;
@@ -940,10 +1016,10 @@ export default function AnaPanel(props: AnaPanelProps) {
           bulkQrAssigned: false,
         };
 
-        if (!scannedSerialsRef.current.has(stokKodu)) {
-          scannedSerialsRef.current.set(stokKodu, new Set());
+        if (!scannedSerialsRef.current.has(serialKey)) {
+          scannedSerialsRef.current.set(serialKey, new Set());
         }
-        scannedSerialsRef.current.get(stokKodu)!.add(seriNumarasi);
+        scannedSerialsRef.current.get(serialKey)!.add(seriNumarasi);
         setScannedItems((prev) => [newItem, ...prev]);
         addedSerial++;
         addedAdet++;
@@ -1039,7 +1115,7 @@ export default function AnaPanel(props: AnaPanelProps) {
         const itemsToRemove = prev.filter(item => item.key === groupKey);
         itemsToRemove.forEach(item => {
             if(item.seriNumarasi && item.stokKodu) {
-                const productSerials = scannedSerialsRef.current.get(item.stokKodu);
+                const productSerials = scannedSerialsRef.current.get(serialLotKey(item.stokKodu, item.lotNumarasi || ''));
                 productSerials?.delete(item.seriNumarasi);
             }
         });
@@ -1304,11 +1380,12 @@ export default function AnaPanel(props: AnaPanelProps) {
     // Geçici olarak map'i temizle ve kalan öğeleri yeniden ekle
     scannedSerialsRef.current.clear();
     scannedItems.forEach(item => {
-      if (item.id && !processedIds.has(item.id) && item.seriNumarasi && item.stokKodu) {
-        if (!scannedSerialsRef.current.has(item.stokKodu)) {
-          scannedSerialsRef.current.set(item.stokKodu, new Set());
+        if (item.id && !processedIds.has(item.id) && item.seriNumarasi && item.stokKodu) {
+        const serialKey = serialLotKey(item.stokKodu, item.lotNumarasi || '');
+        if (!scannedSerialsRef.current.has(serialKey)) {
+          scannedSerialsRef.current.set(serialKey, new Set());
         }
-        scannedSerialsRef.current.get(item.stokKodu)!.add(item.seriNumarasi);
+        scannedSerialsRef.current.get(serialKey)!.add(item.seriNumarasi);
       }
     });
 
@@ -1337,7 +1414,7 @@ export default function AnaPanel(props: AnaPanelProps) {
         const docsToCreate: Array<{ ref: ReturnType<typeof doc>; data: any; serial?: string; item: ScanRow }> = [];
 
         for (const item of itemsToProcess) {
-          const depotProductSerials = item.stokKodu ? existingDepotSerials.get(item.stokKodu) : undefined;
+          const depotProductSerials = item.stokKodu ? existingDepotSerials.get(serialLotKey(item.stokKodu, item.lotNumarasi || '')) : undefined;
           if (item.seriNumarasi && depotProductSerials?.has(item.seriNumarasi)) {
             continue;
           }
@@ -1422,10 +1499,11 @@ export default function AnaPanel(props: AnaPanelProps) {
         scannedSerialsRef.current.clear();
         previousScannedItems.forEach(item => {
           if (item.seriNumarasi && item.stokKodu) {
-            if (!scannedSerialsRef.current.has(item.stokKodu)) {
-              scannedSerialsRef.current.set(item.stokKodu, new Set());
+            const serialKey = serialLotKey(item.stokKodu, item.lotNumarasi || '');
+            if (!scannedSerialsRef.current.has(serialKey)) {
+              scannedSerialsRef.current.set(serialKey, new Set());
             }
-            scannedSerialsRef.current.get(item.stokKodu)!.add(item.seriNumarasi);
+            scannedSerialsRef.current.get(serialKey)!.add(item.seriNumarasi);
           }
         });
         toast({ 
@@ -1445,13 +1523,229 @@ export default function AnaPanel(props: AnaPanelProps) {
       return;
     }
   
-    const itemsToProcess = scannedItems.filter(i => !i.isProcessed && !!i.rafAdresi && !!i.irsaliyeNumarasi);
+    const expectedSerials = new Set(
+      Object.values(ceomedVerifyMap).flatMap((v) => v.serials.map((s) => `${v.stokKodu}||${v.lot || ''}||${v.miad || ''}||${s}`))
+    );
+    const verifiedSerials = new Set(
+      Object.values(ceomedVerifyMap).flatMap((v) => Array.from(v.verifiedSerials).map((s) => `${v.stokKodu}||${v.lot || ''}||${v.miad || ''}||${s}`))
+    );
+    const itemsToProcess = scannedItems.filter(i => {
+      if (i.isProcessed || !i.rafAdresi) return false;
+      const hasIrs = !!i.irsaliyeNumarasi || !!selectedPendingIrs;
+      if (!hasIrs) return false;
+      if (!i.seriNumarasi) return true;
+      const key = `${i.stokKodu || ''}||${i.lotNumarasi || ''}||${i.miad || ''}||${i.seriNumarasi || ''}`;
+      if (!expectedSerials.has(key)) return true; // irsaliyede olmayan ama okutulanlar da stoğa eklensin
+      return verifiedSerials.has(key); // irsaliyede olup doğrulanmayanlar eklenmesin
+    }).map(i => ({ ...i, irsaliyeNumarasi: i.irsaliyeNumarasi || selectedPendingIrs?.irsaliyeNo || '' }));
     if (itemsToProcess.length === 0) {
       toast({ title: 'Bilgi', description: 'İşlenecek yeni ürün yok (adres ve irsaliye atanmamış olabilir).', variant: "default" });
       return;
     }
     
     performGoodsReceipt(itemsToProcess);
+  };
+
+  const handleApproveCeomedToDepot = async (irs: PendingCeomedIrsaliye) => {
+    if (!selectedDepotId || !selectedDepot) return;
+    setCeomedApprovingId(irs.id);
+    try {
+      const batch = writeBatch(db);
+      let added = 0;
+      const lineMap = new Map<string, MalKabulLine>();
+
+      for (const item of (irs.items || [])) {
+        const product = productCodes.find((p) => (p.stokKodu || '').trim() === (item.STOK_KODU || '').trim());
+        if (!product || ((product as any).trackingMode !== 'serial')) continue;
+        const qty = Math.max(1, Number(item.MIKTAR) || 1);
+        for (let i = 0; i < qty; i++) {
+          const ref = doc(collection(db, 'depoStok'));
+          batch.set(ref, withCompanyScope({
+            depotId: selectedDepotId,
+            depotName: selectedDepot.name || '',
+            stokKodu: item.STOK_KODU,
+            stokAdi: product.stokAdi || '',
+            lotNumarasi: item.LOT || '',
+            miad: item.MIYAT ? normalizeMiad(item.MIYAT) : '',
+            seriNumarasi: item.BARKOD_SERI || '',
+            rafAdresi: '',
+            irsaliyeNumarasi: irs.irsaliyeNo,
+            eklenmeTarihi: Timestamp.now(),
+            isShipped: false,
+            hedefKurumId: '',
+            hedefKurum: '',
+            createdByName: currentUserProfile?.name || currentUser?.email || 'Ceomed Sync',
+            createdByUid: currentUser?.uid || null,
+            source: 'ceomed',
+            ceomedIrsaliyeId: irs.ceomedId,
+          }, currentCompanyId));
+          added++;
+        }
+        const key = `${item.STOK_KODU}||${item.LOT || ''}||${item.MIYAT || ''}`;
+        const prev = lineMap.get(key) || { stokKodu: item.STOK_KODU, stokAdi: product.stokAdi || '', lotNumarasi: item.LOT || '', miad: item.MIYAT ? normalizeMiad(item.MIYAT) : '', adet: 0, serials: [] };
+        prev.adet += qty;
+        if (item.BARKOD_SERI) prev.serials.push(item.BARKOD_SERI);
+        lineMap.set(key, prev);
+      }
+      await batch.commit();
+
+      const txRef = doc(db, 'malKabulTransactions', `MK-CEOMED-${irs.ceomedId}`);
+      const lineBatch = writeBatch(db);
+      lineBatch.set(txRef, withCompanyScope({
+        transactionId: `MK-CEOMED-${irs.ceomedId}`,
+        depotId: selectedDepotId,
+        depotName: selectedDepot.name || '',
+        userId: currentUser?.uid || '',
+        userName: currentUserProfile?.name || currentUser?.email || 'Ceomed Sync',
+        timestamp: Timestamp.now(),
+        irsaliyeNo: irs.irsaliyeNo,
+        itemCount: added,
+        mode: 'verified',
+        source: 'ceomed',
+        ceomedIrsaliyeId: irs.ceomedId,
+      }, currentCompanyId));
+      for (const line of lineMap.values()) lineBatch.set(doc(collection(txRef, 'lines')), withCompanyScope(line, currentCompanyId));
+      lineBatch.set(doc(db, 'pendingCeomedIrsaliye', irs.id), {
+        status: 'approved',
+        approvedAt: Timestamp.now(),
+        approvedBy: currentUser?.uid || null,
+        approvedByName: currentUserProfile?.name || currentUser?.email || '',
+        depotId: selectedDepotId,
+        depotName: selectedDepot.name || '',
+      }, { merge: true });
+      await lineBatch.commit();
+      await touchStockMetadata();
+      invalidateDepoStok();
+      toast({ title: 'İrsaliye stoğa aktarıldı', description: `${irs.irsaliyeNo} için ${added} kayıt depoya eklendi.` });
+    } catch (e: any) {
+      toast({ title: 'Hata', description: e?.message || 'Ceomed aktarım hatası', variant: 'destructive' });
+    } finally {
+      setCeomedApprovingId(null);
+    }
+  };
+
+  const buildPendingLines = useCallback((irs: PendingCeomedIrsaliye | null): PendingCeomedLine[] => {
+    if (!irs) return [];
+    const grouped = new Map<string, PendingCeomedLine>();
+    for (const it of (irs.items || [])) {
+      const key = `${it.STOK_KODU}||${it.LOT || ''}||${it.MIYAT || ''}`;
+      const p = productCodes.find((x) => (x.stokKodu || '').trim() === (it.STOK_KODU || '').trim());
+      const prev = grouped.get(key) || {
+        key,
+        stokKodu: it.STOK_KODU,
+        lot: it.LOT || '',
+        miad: it.MIYAT ? normalizeMiad(it.MIYAT) : '',
+        stokAdi: p?.stokAdi || '',
+        marka: (p as any)?.marka || '',
+        adet: 0,
+        serials: [],
+      };
+      prev.adet += Math.max(1, Number(it.MIKTAR) || 1);
+      if (it.BARKOD_SERI) prev.serials.push(it.BARKOD_SERI);
+      grouped.set(key, prev);
+    }
+    return Array.from(grouped.values());
+  }, [productCodes]);
+
+  const handleStartVerifiedCeomedReceipt = (irs: PendingCeomedIrsaliye) => {
+    const lines = buildPendingLines(irs);
+    const rows: ScanRow[] = [];
+    for (const line of lines) {
+      if (line.serials.length > 0) {
+        for (const s of line.serials) {
+          rows.push({
+            id: generateId(),
+            barkod: s,
+            stokKodu: line.stokKodu,
+            stokAdi: line.stokAdi || line.stokKodu,
+            lotNumarasi: line.lot,
+            miad: line.miad,
+            seriNumarasi: s,
+            rafAdresi: '',
+            irsaliyeNumarasi: irs.irsaliyeNo,
+            isSelected: false,
+            timestamp: new Date(),
+            isProcessed: false,
+            adet: 1,
+            isGroup: false,
+            bulkQrAssigned: false,
+            key: `${line.stokKodu}-${line.lot}-${line.miad}`,
+          } as ScanRow);
+        }
+      }
+    }
+    setScannedItems((prev) => [...rows, ...prev]);
+    setSelectedPendingIrs(irs);
+    const verify: Record<string, CeomedVerifyLine> = {};
+    for (const line of lines) {
+      if (line.serials.length > 0) verify[line.key] = { ...line, verifiedSerials: new Set<string>() };
+    }
+    setCeomedVerifyMap(verify);
+    setIsPendingCeomedModalOpen(false);
+    toast({ title: 'Doğrulamalı moda aktarıldı', description: `${irs.irsaliyeNo} seri numaraları mal kabul listesine eklendi. Adres ataması yapıp doğrulayarak devam edin.` });
+  };
+
+  const markVerifyLineComplete = (group: ScanRow) => {
+    const key = `${group.stokKodu}||${group.lotNumarasi || ''}||${group.miad || ''}`;
+    setCeomedVerifyMap((prev) => {
+      const v = prev[key];
+      if (v) {
+        const nextSet = new Set(v.serials);
+        return { ...prev, [key]: { ...v, verifiedSerials: nextSet } };
+      }
+      // fallback: map key bulunamazsa satırdaki seriallardan doğrulama satırı oluştur
+      const rowSerials = Array.from(new Set((group.items || []).map(i => i.seriNumarasi).filter(Boolean) as string[]));
+      if (rowSerials.length === 0) return prev;
+      const normalizedKey = `${group.stokKodu || ''}||${group.lotNumarasi || ''}||${group.miad ? normalizeMiad(group.miad) : ''}`;
+      return {
+        ...prev,
+        [normalizedKey]: {
+          key: normalizedKey,
+          stokKodu: group.stokKodu || '',
+          stokAdi: group.stokAdi || '',
+          marka: '',
+          lot: group.lotNumarasi || '',
+          miad: group.miad || '',
+          adet: rowSerials.length,
+          serials: rowSerials,
+          verifiedSerials: new Set(rowSerials),
+        },
+      };
+    });
+  };
+
+  const getVerifyLineForGroup = (group: ScanRow): CeomedVerifyLine | null => {
+    const raw = `${group.stokKodu || ''}||${group.lotNumarasi || ''}||${group.miad || ''}`;
+    if (ceomedVerifyMap[raw]) return ceomedVerifyMap[raw];
+    const normalized = `${group.stokKodu || ''}||${group.lotNumarasi || ''}||${group.miad ? normalizeMiad(group.miad) : ''}`;
+    if (ceomedVerifyMap[normalized]) return ceomedVerifyMap[normalized];
+    // Fallback: doğrulamalı modda map key tutarsızlığı olsa bile satırdaki seriallardan üret
+    if (selectedPendingIrs && group.items && group.items.length > 0) {
+      const serials = Array.from(new Set(group.items.map((it) => it.seriNumarasi).filter(Boolean) as string[]));
+      if (serials.length > 0) {
+        const verifiedSerials = new Set(
+          group.items
+            .filter((it) => !!it.seriNumarasi)
+            .map((it) => it.seriNumarasi as string)
+            .filter((s) => {
+              const k = `${group.stokKodu || ''}||${group.lotNumarasi || ''}||${group.miad || ''}`;
+              return ceomedVerifyMap[k]?.verifiedSerials.has(s) || ceomedVerifyMap[normalized]?.verifiedSerials.has(s);
+            })
+        );
+        return {
+          key: normalized,
+          stokKodu: group.stokKodu || '',
+          stokAdi: group.stokAdi || '',
+          marka: '',
+          lot: group.lotNumarasi || '',
+          miad: group.miad || '',
+          adet: serials.length,
+          serials,
+          verifiedSerials,
+        };
+      }
+    }
+    return null;
   };
   
   // Barkodsuz giriş için tüm non-serial ürünleri listele (lot_manual, qty_manual, lot_barcode, qty_barcode)
@@ -1555,6 +1849,19 @@ export default function AnaPanel(props: AnaPanelProps) {
           >
             <History className="h-4 w-4" />
             <span>Geçmiş</span>
+          </button>
+          <button
+            onClick={() => setIsPendingCeomedModalOpen(true)}
+            disabled={!selectedDepotId || !((selectedDepot as any)?.ceomedCariKodu)}
+            className="cihaz-tool-item relative flex items-center gap-2 px-4 py-2.5 text-sm font-medium self-start sm:self-center"
+          >
+            <FileText className="h-4 w-4" />
+            <span>Bekleyen İrsaliyeler</span>
+            {pendingCeomedIrsaliye.length > 0 && (
+              <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center animate-pulse">
+                {pendingCeomedIrsaliye.length}
+              </span>
+            )}
           </button>
         </div>
       </header>
@@ -1921,6 +2228,7 @@ export default function AnaPanel(props: AnaPanelProps) {
                 const trackingMode = (group.stokKodu && productTracking[group.stokKodu]) || resolveDefaultTrackingMode({stokAdi: group.stokAdi} as any);
                 const hasSerials = trackingMode === 'serial';
                 const meta = productMetaByCode.get(group.stokKodu || '');
+                const verifyLine = getVerifyLineForGroup(group);
                 const multiplier = formatUnitMultiplier(meta);
                 const missingAddress = !group.rafAdresi;
                 const missingIrsaliye = !group.irsaliyeNumarasi;
@@ -1991,12 +2299,23 @@ export default function AnaPanel(props: AnaPanelProps) {
                         <span className="text-[11px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</span>
                       </div>
                       <div className="text-center">
-                        <button
-                          onClick={() => deleteGroup(group.key)}
-                          className="p-1 rounded-lg hover:bg-red-100 transition-colors"
-                        >
-                          <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                        </button>
+                        <div className="flex items-center justify-center gap-1">
+                          {(verifyLine || (selectedPendingIrs && hasSerials)) && (
+                            <button
+                              onClick={() => markVerifyLineComplete(group)}
+                              className="p-1 rounded-lg hover:bg-emerald-100 transition-colors"
+                              title="Bu satırdaki tüm seri numaralarını okutulmuş say"
+                            >
+                              <CheckSquare className="h-3.5 w-3.5 text-emerald-600" />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => deleteGroup(group.key)}
+                            className="p-1 rounded-lg hover:bg-red-100 transition-colors"
+                          >
+                            <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                          </button>
+                        </div>
                       </div>
                     </div>
 
@@ -2071,10 +2390,24 @@ export default function AnaPanel(props: AnaPanelProps) {
                     {/* Serial number expansion */}
                     {hasSerials && group.items && group.items.length > 0 && (
                       <div className="px-5 sm:px-10 py-2 bg-[var(--dashboard-surface-2)] border-t border-[var(--dashboard-stroke)]">
+                        {verifyLine && (
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="text-xs text-[var(--dashboard-muted)]">
+                              Okutulan {verifyLine.verifiedSerials.size}
+                              / Beklenen {verifyLine.serials.length}
+                            </div>
+                            <Button size="sm" variant="outline" onClick={() => markVerifyLineComplete(group)}>✓ Tümü Okutuldu</Button>
+                          </div>
+                        )}
                         <div className="text-[10px] font-mono grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-4 gap-y-0.5 text-[var(--dashboard-muted)]">
-                          {group.items.slice(0, 100).map(item => (
-                            <span key={item.id} className="truncate">{item.seriNumarasi}</span>
-                          ))}
+                          {group.items.slice(0, 100).map(item => {
+                            const key = `${group.stokKodu}||${group.lotNumarasi || ''}||${group.miad || ''}`;
+                            const vm = ceomedVerifyMap[key];
+                            const verified = !!(vm && item.seriNumarasi && vm.verifiedSerials.has(item.seriNumarasi));
+                            return (
+                              <span key={item.id} className={cn("truncate px-2 py-0.5 rounded border", verified ? "border-emerald-400 text-emerald-700" : "border-red-300 text-red-600")}>{item.seriNumarasi}</span>
+                            );
+                          })}
                           {group.items.length > 100 && (
                             <span>+{group.items.length - 100} daha...</span>
                           )}
@@ -2174,6 +2507,68 @@ export default function AnaPanel(props: AnaPanelProps) {
       </Dialog>
 
       {/* OCR Modal */}
+      <Dialog open={isPendingCeomedModalOpen} onOpenChange={setIsPendingCeomedModalOpen}>
+        <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Bekleyen Ceomed İrsaliyeleri</DialogTitle>
+            <DialogDescription>
+              Seçili deponun cari kodu ile eşleşen ve "İrsaliye Yazdırılabilir / İrsaliye Yazdırıldı / Kuruma Sevk Edildi" durumundaki kayıtlar.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+            {pendingCeomedIrsaliye.length === 0 ? (
+              <div className="text-sm text-[var(--dashboard-muted)] py-10 text-center">Bekleyen irsaliye bulunamadı.</div>
+            ) : pendingCeomedIrsaliye.map((irs) => {
+              const lines = buildPendingLines(irs);
+              const brands = Array.from(new Set(lines.map(l => l.marka).filter(Boolean)));
+              const isSelected = selectedPendingIrs?.id === irs.id;
+              return (
+                <Card key={irs.id} className={cn("cursor-pointer", isSelected && "ring-1 ring-[var(--dashboard-accent)]")} onClick={() => setSelectedPendingIrs(irs)}>
+                  <CardHeader className="py-3">
+                    <CardTitle className="text-sm flex items-center justify-between">
+                      <span>{irs.irsaliyeNo}</span>
+                      <span className="text-xs font-normal text-[var(--dashboard-muted)]">{irs.cariKodu}</span>
+                    </CardTitle>
+                    <CardDescription className="text-xs truncate">
+                      {brands.length ? `Markalar: ${brands.join(', ')}` : 'Marka bilgisi yok'}
+                    </CardDescription>
+                  </CardHeader>
+                  {isSelected && (
+                  <CardContent className="space-y-2 pt-0">
+                    {lines.map((g, idx) => (
+                      <Accordion key={`${g.stokKodu}-${g.lot}-${idx}`} type="single" collapsible>
+                        <AccordionItem value="s">
+                          <AccordionTrigger>
+                            <div className="flex w-full justify-between pr-2 text-sm">
+                              <span>{g.stokKodu} - {g.stokAdi} • Lot: {g.lot || '-'} • SKT: {g.miad || '-'}</span>
+                              <span className="font-semibold">Adet: {g.adet}</span>
+                            </div>
+                          </AccordionTrigger>
+                          <AccordionContent>
+                            <div className="text-xs grid grid-cols-2 md:grid-cols-4 gap-1 font-mono">
+                              {g.serials.length ? g.serials.map((s, i) => <span key={`${s}-${i}`} className="px-2 py-1 rounded border border-red-300 text-red-600">{s}</span>) : <span>Seri yok</span>}
+                            </div>
+                          </AccordionContent>
+                        </AccordionItem>
+                      </Accordion>
+                    ))}
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" onClick={() => handleStartVerifiedCeomedReceipt(irs)}>
+                        Doğrulamalı Stoğa Aktar
+                      </Button>
+                      <Button onClick={() => handleApproveCeomedToDepot(irs)} disabled={ceomedApprovingId === irs.id}>
+                        {ceomedApprovingId === irs.id ? 'Aktarılıyor...' : 'Stoğa Aktar'}
+                      </Button>
+                    </div>
+                  </CardContent>
+                  )}
+                </Card>
+              );
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {isOcrModalOpen && (
         <IrsaliyeOcrModal
           isOpen={isOcrModalOpen}
