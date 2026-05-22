@@ -1700,6 +1700,32 @@ export default function AnaPanel(props: AnaPanelProps) {
     if (ceomedVerifyMap[raw]) return ceomedVerifyMap[raw];
     const normalized = `${group.stokKodu || ''}||${group.lotNumarasi || ''}||${group.miad ? normalizeMiad(group.miad) : ''}`;
     if (ceomedVerifyMap[normalized]) return ceomedVerifyMap[normalized];
+    // Fallback: doğrulamalı modda map key tutarsızlığı olsa bile satırdaki seriallardan üret
+    if (selectedPendingIrs && group.items && group.items.length > 0) {
+      const serials = Array.from(new Set(group.items.map((it) => it.seriNumarasi).filter(Boolean) as string[]));
+      if (serials.length > 0) {
+        const verifiedSerials = new Set(
+          group.items
+            .filter((it) => !!it.seriNumarasi)
+            .map((it) => it.seriNumarasi as string)
+            .filter((s) => {
+              const k = `${group.stokKodu || ''}||${group.lotNumarasi || ''}||${group.miad || ''}`;
+              return ceomedVerifyMap[k]?.verifiedSerials.has(s) || ceomedVerifyMap[normalized]?.verifiedSerials.has(s);
+            })
+        );
+        return {
+          key: normalized,
+          stokKodu: group.stokKodu || '',
+          stokAdi: group.stokAdi || '',
+          marka: '',
+          lot: group.lotNumarasi || '',
+          miad: group.miad || '',
+          adet: serials.length,
+          serials,
+          verifiedSerials,
+        };
+      }
+    }
     return null;
   };
   
