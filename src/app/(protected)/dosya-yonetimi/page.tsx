@@ -30,10 +30,14 @@ import {
   Download,
   FileUp,
   AlertCircle,
+  Scan,
+  CheckCircle2,
 } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import CeomedIrsaliyePanel from '@/components/ceomed/CeomedIrsaliyePanel';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import IrsaliyeScanModal from '@/components/dosya-yonetimi/IrsaliyeScanModal';
+import { useProductCodes } from '@/hooks/useFirebaseQueries';
 
 interface IrsaliyeDosya {
   id: string;
@@ -67,6 +71,9 @@ export default function DosyaYonetimiPage() {
   const [isDragging, setIsDragging] = useState(false);
   const [selectedLocationType, setSelectedLocationType] = useState<'hospital' | 'depot' | ''>('');
   const [selectedLocationId, setSelectedLocationId] = useState<string>('');
+  const [scanningFile, setScanningFile] = useState<IrsaliyeDosya | null>(null);
+  const [pendingScannedDosyaIds, setPendingScannedDosyaIds] = useState<Set<string>>(new Set());
+  const { data: productCodes = [] } = useProductCodes();
 
   // Listen to irsaliye files in real-time
   useEffect(() => {
@@ -90,6 +97,24 @@ export default function DosyaYonetimiPage() {
       setLoading(false);
     });
 
+    return () => unsubscribe();
+  }, [currentCompanyId, isSuperAdmin]);
+
+  // Track which uploaded files already have a pending scanned invoice waiting
+  // for transfer — so we can show a "Onaylandı, lab stoğa gönderildi" badge.
+  useEffect(() => {
+    const q = query(collection(db, 'bekleyenIrsaliyeler'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const ids = new Set<string>();
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data() as any;
+        if (!matchesCompanyScope(data, currentCompanyId, isSuperAdmin)) return;
+        if (data?.status === 'pending' && data?.dosyaId) ids.add(String(data.dosyaId));
+      });
+      setPendingScannedDosyaIds(ids);
+    }, (error) => {
+      console.error('Bekleyen irsaliyeler dinlenemiyor:', error);
+    });
     return () => unsubscribe();
   }, [currentCompanyId, isSuperAdmin]);
 
@@ -506,60 +531,90 @@ export default function DosyaYonetimiPage() {
             </div>
           ) : (
             <div className="max-h-[400px] overflow-y-auto">
-              {gorunenDosyalar.map((dosya) => (
-                <div
-                  key={dosya.id}
-                  className="flex items-center justify-between px-6 py-3 transition-colors hover:opacity-80"
-                  style={{ borderBottom: '1px solid var(--dashboard-stroke)' }}
-                >
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <span className="dashboard-panel-icon flex items-center justify-center w-9 h-9 rounded-full shrink-0">
-                      {dosya.fileType === 'pdf' ? (
-                        <FileText className="h-4 w-4 text-red-500" />
-                      ) : (
-                        <FileSpreadsheet className="h-4 w-4 text-green-600" />
-                      )}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="font-medium text-sm truncate" style={{ color: 'var(--dashboard-text)' }}>{dosya.fileName}</p>
-                      <div className="flex items-center gap-3 text-xs mt-0.5" style={{ color: 'var(--dashboard-muted)' }}>
-                        <span>{formatFileSize(dosya.fileSize)}</span>
-                        <span className="hidden sm:inline">{dosya.uploadedByName}</span>
-                        <span className="hidden md:inline">{dosya.locationName || 'Konum belirtilmedi'}</span>
-                        <span className="flex items-center gap-1">
-                          <Clock className="h-3 w-3" />
-                          {getRemainingDays(dosya.expiresAt)}
-                        </span>
+              {gorunenDosyalar.map((dosya) => {
+                const isScanned = pendingScannedDosyaIds.has(dosya.id);
+                const canScan = dosya.fileType === 'pdf' && !!dosya.locationType && !!dosya.locationId;
+                return (
+                  <div
+                    key={dosya.id}
+                    className="flex items-center justify-between px-6 py-3 transition-colors hover:opacity-80"
+                    style={{ borderBottom: '1px solid var(--dashboard-stroke)' }}
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <span className="dashboard-panel-icon flex items-center justify-center w-9 h-9 rounded-full shrink-0">
+                        {dosya.fileType === 'pdf' ? (
+                          <FileText className="h-4 w-4 text-red-500" />
+                        ) : (
+                          <FileSpreadsheet className="h-4 w-4 text-green-600" />
+                        )}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="font-medium text-sm truncate" style={{ color: 'var(--dashboard-text)' }}>{dosya.fileName}</p>
+                          {isScanned && (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700">
+                              <CheckCircle2 className="h-3 w-3" />
+                              Lab stoğunda bekliyor
+                            </span>
+                          )}
+                          {!isScanned && dosya.fileType === 'pdf' && (
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700">
+                              Taranmadı
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3 text-xs mt-0.5" style={{ color: 'var(--dashboard-muted)' }}>
+                          <span>{formatFileSize(dosya.fileSize)}</span>
+                          <span className="hidden sm:inline">{dosya.uploadedByName}</span>
+                          <span className="hidden md:inline">{dosya.locationName || 'Konum belirtilmedi'}</span>
+                          <span className="flex items-center gap-1">
+                            <Clock className="h-3 w-3" />
+                            {getRemainingDays(dosya.expiresAt)}
+                          </span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0 ml-2">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 rounded-lg"
-                      onClick={() => window.open(dosya.downloadURL, '_blank')}
-                      title="İndir"
-                    >
-                      <Download className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 rounded-lg text-red-500 hover:text-red-700 hover:bg-red-500/10"
-                      onClick={() => handleDelete(dosya)}
-                      disabled={deleting === dosya.id}
-                      title="Sil"
-                    >
-                      {deleting === dosya.id ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Trash2 className="h-4 w-4" />
+                    <div className="flex items-center gap-1 shrink-0 ml-2">
+                      {dosya.fileType === 'pdf' && (
+                        <Button
+                          variant={isScanned ? 'outline' : 'default'}
+                          size="sm"
+                          className="h-8 text-xs"
+                          onClick={() => setScanningFile(dosya)}
+                          disabled={!canScan}
+                          title={canScan ? (isScanned ? 'Yeniden Tara' : 'Tara') : 'Önce konum atanmalı'}
+                        >
+                          <Scan className="h-3.5 w-3.5 mr-1" />
+                          {isScanned ? 'Yeniden Tara' : 'Tara'}
+                        </Button>
                       )}
-                    </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 rounded-lg"
+                        onClick={() => window.open(dosya.downloadURL, '_blank')}
+                        title="İndir"
+                      >
+                        <Download className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 rounded-lg text-red-500 hover:text-red-700 hover:bg-red-500/10"
+                        onClick={() => handleDelete(dosya)}
+                        disabled={deleting === dosya.id}
+                        title="Sil"
+                      >
+                        {deleting === dosya.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -577,6 +632,13 @@ export default function DosyaYonetimiPage() {
       <div className="mt-6">
         <CeomedIrsaliyePanel />
       </div>
+
+      <IrsaliyeScanModal
+        isOpen={!!scanningFile}
+        file={scanningFile}
+        onClose={() => setScanningFile(null)}
+        productCodes={productCodes}
+      />
     </div>
   );
 }

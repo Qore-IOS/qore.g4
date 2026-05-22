@@ -28,6 +28,20 @@ interface GenerateOptions {
   tools?: GeminiFunctionDeclaration[];
 }
 
+export interface GeminiVisionImage {
+  mimeType: string;
+  base64: string;
+}
+
+interface GenerateVisionOptions {
+  systemPrompt?: string;
+  prompt: string;
+  images: GeminiVisionImage[];
+  temperature?: number;
+  maxOutputTokens?: number;
+  responseJson?: boolean;
+}
+
 const DEFAULT_GEMINI_MODELS = [
   'gemini-2.5-flash',
   'gemini-3-flash-preview',
@@ -37,6 +51,13 @@ const DEFAULT_GEMINI_MODELS = [
   'gemini-2.0-flash-lite',
   'gemini-2.5-pro',
   'gemini-3-pro-preview',
+];
+
+const DEFAULT_VISION_MODELS = [
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-001',
+  'gemini-2.5-pro',
 ];
 
 function toGeminiContents(messages: GeminiMessage[]) {
@@ -119,6 +140,83 @@ export async function generateWithGemini(options: GenerateOptions): Promise<{ te
     throw new Error('Gemini API kotası doldu (rate limit). Lütfen 30-60 saniye bekleyip tekrar deneyin veya farklı bir API anahtarı kullanın.');
   }
   if (lastDebug.startsWith('gemini_http_503')) {
+    throw new Error('Gemini API geçici olarak meşgul. Lütfen birkaç saniye sonra tekrar deneyin.');
+  }
+  throw new Error(lastDebug);
+}
+
+/**
+ * Call Gemini with one or more images attached. Used for image-based OCR.
+ * Falls through a small list of vision-capable models so the same payload
+ * keeps working when Google rotates preview model names.
+ */
+export async function generateVisionWithGemini(
+  options: GenerateVisionOptions
+): Promise<{ text: string; model: string }> {
+  const apiKey = getGeminiApiKey();
+  if (!apiKey) throw new Error('GEMINI_API_KEY environment variable ayarlanmamis');
+
+  const envModel = process.env.GEMINI_VISION_MODEL?.trim() || process.env.GEMINI_MODEL?.trim();
+  const models = envModel
+    ? [envModel, ...DEFAULT_VISION_MODELS.filter((m) => m !== envModel)]
+    : DEFAULT_VISION_MODELS;
+
+  let lastDebug = 'gemini_vision_no_attempt';
+
+  for (const model of models) {
+    const parts: Array<Record<string, unknown>> = options.images.map((img) => ({
+      inlineData: { mimeType: img.mimeType, data: img.base64 },
+    }));
+    parts.push({ text: options.prompt });
+
+    const body: Record<string, unknown> = {
+      contents: [{ role: 'user', parts }],
+      generationConfig: {
+        temperature: options.temperature ?? 0.1,
+        maxOutputTokens: options.maxOutputTokens ?? 4096,
+        ...(options.responseJson ? { responseMimeType: 'application/json' } : {}),
+      },
+    };
+    if (options.systemPrompt) {
+      body.systemInstruction = { parts: [{ text: options.systemPrompt }] };
+    }
+
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }
+    );
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      lastDebug = `gemini_vision_http_${res.status}:${model}:${errText.slice(0, 180)}`;
+      if (res.status === 400 || res.status === 404 || res.status === 429 || res.status === 503) continue;
+      throw new Error(lastDebug);
+    }
+
+    const data = await res.json();
+    const responseParts = data?.candidates?.[0]?.content?.parts ?? [];
+    const text = responseParts
+      .filter((p: { text?: string }) => typeof p?.text === 'string')
+      .map((p: { text: string }) => p.text)
+      .join('\n')
+      .trim();
+
+    if (!text) {
+      lastDebug = `gemini_vision_empty_response:${model}`;
+      continue;
+    }
+    return { text, model };
+  }
+
+  aiLogger.error('Gemini Vision tum modellerde basarisiz oldu', { debug: lastDebug });
+  if (lastDebug.includes('http_429')) {
+    throw new Error('Gemini API kotası doldu (rate limit). Lütfen 30-60 saniye bekleyip tekrar deneyin.');
+  }
+  if (lastDebug.includes('http_503')) {
     throw new Error('Gemini API geçici olarak meşgul. Lütfen birkaç saniye sonra tekrar deneyin.');
   }
   throw new Error(lastDebug);

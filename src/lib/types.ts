@@ -1643,3 +1643,73 @@ export interface UserRequest {
   comments?: UserRequestComment[];
   unreadByUser: boolean;
 }
+
+/**
+ * Bekleyen İrsaliye — Dosya yönetiminde OCR ile taranıp onaylanmış,
+ * lab stoğuna aktarılmayı bekleyen irsaliye kaydı.
+ */
+export type BekleyenIrsaliyeStatus = 'pending' | 'transferred' | 'cancelled';
+
+export interface BekleyenIrsaliyeItem {
+  stokKodu: string;
+  stokAdi: string;
+  marka?: string;
+  lot?: string;
+  miad?: string; // dd.MM.yyyy
+  rawLine?: string;
+  /** Faturada yazan ham miktar (örn. 750). */
+  sourceQuantity: number;
+  /** Faturada yazan birim (ADET, KUTU, PAKET, ...). */
+  sourceUnit?: string;
+  /** Sistem ana birimine dönüştürülmüş miktar (örn. 30 kutu). */
+  convertedQuantity: number;
+  /** Sistem ana birimi (örn. "Kutu"). */
+  convertedUnit?: string;
+  /** Sistem tarafında tanımlı ana birim. */
+  anaBirim?: string;
+  /** Sistem tarafında tanımlı ambalaj değeri. */
+  ambalajDegeri?: number;
+  /** Birim dönüşümü gerçekten uygulandı mı? */
+  conversionApplied?: boolean;
+  conversionReasoning?: string;
+  /** Eşleşmenin gücü. */
+  matchConfidence: 'high' | 'medium' | 'low';
+  /** stokKodu üzerinden mi yoksa stokAdı üzerinden mi eşleşti? */
+  matchedBy?: 'stok_kodu' | 'stok_adi' | 'none';
+}
+
+export interface BekleyenIrsaliye {
+  id: string;
+  companyId?: string;
+  /** irsaliyeDosyalari koleksiyonundaki kaynağa referans. */
+  dosyaId: string;
+  dosyaName: string;
+  storagePath?: string;
+  downloadURL?: string;
+  locationType: 'hospital' | 'depot';
+  locationId: string;
+  locationName: string;
+  /** Faturadan tespit edilen irsaliye numarası (varsa). */
+  irsaliyeNumber?: string;
+  /** Faturadan tespit edilen irsaliye tarihi (dd.MM.yyyy). */
+  irsaliyeDate?: string;
+  /** Faturadaki satıcı/firma adı. */
+  supplierName?: string;
+  /** Faturada tespit edilen markaların listesi. */
+  brands: string[];
+  /** Faturadaki toplam satır sayısı (ürün çeşit sayısı). */
+  itemCount: number;
+  /** Sistem ana birimine dönüştürülmüş toplam adet (genel özet için). */
+  totalConvertedQuantity: number;
+  items: BekleyenIrsaliyeItem[];
+  status: BekleyenIrsaliyeStatus;
+  scannedAt: TimestampLike;
+  scannedByUid?: string;
+  scannedByName?: string;
+  transferredAt?: TimestampLike;
+  transferredByUid?: string;
+  transferredByName?: string;
+  /** Genel AI yorumu (örn. okuyamadığı yerler). */
+  aiNotes?: string;
+  scanModel?: string;
+}
