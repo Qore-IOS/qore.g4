@@ -122,7 +122,7 @@ export async function renderFirstPageToBlob(file: File): Promise<Blob | null> {
     const fileAsArrayBuffer = await file.arrayBuffer();
     const pdf = await pdfjsLib.getDocument({ data: fileAsArrayBuffer }).promise;
     if (pdf.numPages === 0) return null;
-    
+
     const page = await pdf.getPage(1);
     const viewport = page.getViewport({ scale: 2.0 });
     const canvas = document.createElement('canvas');
@@ -135,6 +135,50 @@ export async function renderFirstPageToBlob(file: File): Promise<Blob | null> {
         return new Promise(resolve => canvas.toBlob(blob => resolve(blob), 'image/png'));
     }
     return null;
+}
+
+/**
+ * Render every page of a PDF as JPEG blobs (one per page).
+ * Used to feed pages into vision-capable AI models for OCR + structural parsing.
+ * JPEG (quality=0.85) keeps payload small while preserving text legibility.
+ */
+export async function renderPdfPagesToImages(
+    file: File,
+    options: { scale?: number; quality?: number; maxPages?: number } = {}
+): Promise<Blob[]> {
+    const { scale = 2.0, quality = 0.85, maxPages = 12 } = options;
+    const pdfjsLib = await getPdfJs();
+    const buffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+    const pageCount = Math.min(pdf.numPages, maxPages);
+    const images: Blob[] = [];
+
+    for (let i = 1; i <= pageCount; i++) {
+        const page = await pdf.getPage(i);
+        const viewport = page.getViewport({ scale });
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (!ctx) continue;
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        const blob: Blob | null = await new Promise(resolve =>
+            canvas.toBlob(b => resolve(b), 'image/jpeg', quality)
+        );
+        if (blob) images.push(blob);
+    }
+    return images;
+}
+
+export async function blobToBase64(blob: Blob): Promise<string> {
+    const buf = await blob.arrayBuffer();
+    let binary = '';
+    const bytes = new Uint8Array(buf);
+    const chunkSize = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunkSize)) as any);
+    }
+    return btoa(binary);
 }
 
 export async function ocrBlob(imageBlob: Blob): Promise<string> {

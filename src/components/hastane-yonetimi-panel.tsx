@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from '@/components/ui/table';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, doc, deleteDoc, getDocFromServer, writeBatch, Timestamp, onSnapshot, orderBy } from 'firebase/firestore';
+import { collection, getDocs, query, where, doc, deleteDoc, getDocFromServer, writeBatch, Timestamp } from 'firebase/firestore';
 import type { DepoStokItem, Laboratory, MinMaxRule } from '@/lib/types';
 import { Loader2, Search, ListChecks, History, FileSpreadsheet, MoreVertical, Eye, AlertCircle, AlertTriangle, Upload, CheckCircle, Pencil, Check, X, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
 import { touchStockMetadata, useLabStock, useLabPools, useHospitals, useProductCodes, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
@@ -26,8 +26,8 @@ import { formatMiad, normalizeMiad } from '@/lib/date';
 import { useAuth } from '@/contexts/auth-context';
 import { differenceInDays, isValid, parse } from 'date-fns';
 import { resolveDefaultTrackingMode } from '@/lib/tracking';
-import LabIrsaliyeOcrModal, { type LabOcrResult } from '@/components/lab/LabIrsaliyeOcrModal';
-import { matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import BekleyenIrsaliyelerPanel from '@/components/lab/BekleyenIrsaliyelerPanel';
+import { withCompanyScope } from '@/lib/company-scope';
 
 function normalizeKey(key: string): string {
   return key
@@ -185,9 +185,6 @@ export default function LaboratuvarYonetimiPanel() {
   const [isParsingExcel, setIsParsingExcel] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState('');
-  const [isOcrModalOpen, setIsOcrModalOpen] = useState(false);
-  const [isOcrProcessing, setIsOcrProcessing] = useState(false);
-  const [pendingIrsaliyeCount, setPendingIrsaliyeCount] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Use TanStack Query hooks for data fetching
@@ -271,28 +268,6 @@ export default function LaboratuvarYonetimiPanel() {
     return laboratories.find(l => l.id === selectedLabId)?.name || '';
   }, [laboratories, selectedLabId]);
 
-  useEffect(() => {
-    if (!selectedLabId) {
-      setPendingIrsaliyeCount(0);
-      return;
-    }
-    const unsub = onSnapshot(
-      query(collection(db, 'irsaliyeDosyalari'), orderBy('uploadedAt', 'desc')),
-      (snapshot) => {
-        let count = 0;
-        snapshot.forEach((docSnap) => {
-          const data = docSnap.data() as any;
-          const inScope = matchesCompanyScope(data, currentCompanyId, isSuperAdmin);
-          const notExpired = data?.expiresAt?.toMillis?.() > Date.now();
-          const labMatch = data?.locationType === 'hospital' && data?.locationId === selectedLabId;
-          if (inScope && notExpired && labMatch) count += 1;
-        });
-        setPendingIrsaliyeCount(count);
-      },
-      () => setPendingIrsaliyeCount(0)
-    );
-    return () => unsub();
-  }, [selectedLabId, currentCompanyId, isSuperAdmin]);
 
   const groupedMap = useMemo(() => {
     const map: Record<string, {
@@ -929,113 +904,6 @@ export default function LaboratuvarYonetimiPanel() {
     }
   }, [validRows, selectedLabId, selectedLabName, currentCompanyId, toast, invalidateDepoStok]);
 
-  const handleOcrResults = useCallback(async (
-    results: LabOcrResult[],
-    file: { id: string; storagePath: string; fileName: string }
-  ) => {
-    if (!selectedLabId || results.length === 0) return;
-    setIsOcrProcessing(true);
-    try {
-      const aiPayload = results.map((item) => {
-        const product = products.find(p => p.stokKodu === item.stokKodu);
-        return {
-          stokKodu: item.stokKodu,
-          stokAdi: product?.stokAdi || '',
-          parsedQuantity: Math.max(1, item.quantity || 1),
-          rawLine: item.rawLine || '',
-          anaBirim: product?.anaBirim || '',
-          ambalajDegeri: Number(product?.ambalajDegeri || 0),
-        };
-      });
-
-      let aiConvertedMap = new Map<string, number>();
-      try {
-        const aiRes = await fetch('/api/ai/irsaliye-unit-convert', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ items: aiPayload }),
-        });
-        const aiData = await aiRes.json().catch(() => ({}));
-        const convertedList = Array.isArray(aiData?.converted) ? aiData.converted : [];
-        aiConvertedMap = new Map(
-          convertedList.map((item: any) => [
-            String(item?.stokKodu || ''),
-            Math.max(1, Number(item?.convertedQuantity || 1)),
-          ])
-        );
-      } catch (aiError) {
-        console.warn('AI quantity conversion skipped, using fallback:', aiError);
-      }
-
-      const batch = writeBatch(db);
-      let totalDocs = 0;
-
-      for (const item of results) {
-        const product = products.find(p => p.stokKodu === item.stokKodu);
-        if (!product) continue;
-
-        const parsedQty = Math.max(1, item.quantity || 1);
-        const fallbackQty = (() => {
-          const ambalaj = Number(product.ambalajDegeri || 0);
-          const anaBirim = String(product.anaBirim || '').toLowerCase();
-          const raw = String(item.rawLine || '').toLowerCase();
-          const usesPackLikeUnit = anaBirim.includes('paket') || anaBirim.includes('kutu');
-          const invoiceLooksAdet = raw.includes(' adet') || raw.endsWith('adet');
-          if (usesPackLikeUnit && invoiceLooksAdet && ambalaj > 0) {
-            return Math.max(1, Math.round(parsedQty / ambalaj));
-          }
-          return parsedQty;
-        })();
-        const qty = aiConvertedMap.get(item.stokKodu) || fallbackQty;
-        for (let i = 0; i < qty; i++) {
-          const ref = doc(collection(db, 'depoStok'));
-          batch.set(ref, withCompanyScope({
-            stokKodu: item.stokKodu,
-            stokAdi: product.stokAdi || item.stokKodu,
-            lotNumarasi: item.lot || '',
-            miad: item.miad ? normalizeMiad(item.miad) : '',
-            seriNumarasi: '',
-            isShipped: true,
-            hedefKurumId: selectedLabId,
-            hedefKurum: selectedLabName,
-            eklenmeTarihi: Timestamp.now(),
-            sevkTarihi: Timestamp.now(),
-            kaynak: 'irsaliye_ocr',
-            createdByName: currentUserProfile?.name || currentUserProfile?.email || 'Unknown',
-            createdByUid: currentUserProfile?.uid || null,
-          }, currentCompanyId));
-          totalDocs++;
-        }
-      }
-
-      await batch.commit();
-      await touchStockMetadata();
-      await invalidateDepoStok();
-
-      // Optional cleanup of consumed file
-      await deleteDoc(doc(db, 'irsaliyeDosyalari', file.id));
-      await fetch('/api/storage/delete-file', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ storagePath: file.storagePath }),
-      });
-
-      toast({
-        title: 'Stok girişi tamamlandı',
-        description: `${totalDocs} birim ürün laboratuvar stoğuna eklendi.`,
-      });
-    } catch (error: any) {
-      console.error('Lab OCR stock entry error:', error);
-      toast({
-        title: 'Hata',
-        description: error?.message || 'İrsaliye işlenirken hata oluştu.',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsOcrProcessing(false);
-    }
-  }, [selectedLabId, selectedLabName, products, currentUserProfile, currentCompanyId, toast, invalidateDepoStok]);
-
   return (
     <div className="space-y-6">
       <Card>
@@ -1222,23 +1090,6 @@ export default function LaboratuvarYonetimiPanel() {
                         {isParsingExcel ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Upload className="mr-2 h-5 w-5" />}
                         Excel ile Stok Ekle
                     </Button>
-                    <Button
-                        onClick={() => setIsOcrModalOpen(true)}
-                        disabled={!selectedLabId || isOcrProcessing}
-                        variant="outline"
-                        className="w-full sm:w-auto relative"
-                        >
-                        {isOcrProcessing
-                          ? <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                          : <FileSpreadsheet className="mr-2 h-5 w-5" />
-                        }
-                        İrsaliye Seç
-                        {pendingIrsaliyeCount > 0 && (
-                          <span className="absolute -top-2 -right-2 min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
-                            {pendingIrsaliyeCount}
-                          </span>
-                        )}
-                    </Button>
                     <input
                       ref={fileInputRef}
                       type="file"
@@ -1261,6 +1112,13 @@ export default function LaboratuvarYonetimiPanel() {
               </div>
             </div>
           </div>
+
+          {selectedLabId && (
+            <BekleyenIrsaliyelerPanel
+              selectedLabId={selectedLabId}
+              selectedLabName={selectedLabName}
+            />
+          )}
 
           {selectedLabId && (
             <div className="cihaz-card-strong overflow-hidden mt-4">
@@ -1592,15 +1450,6 @@ export default function LaboratuvarYonetimiPanel() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <LabIrsaliyeOcrModal
-        isOpen={isOcrModalOpen}
-        onClose={() => setIsOcrModalOpen(false)}
-        productCodes={products}
-        onResults={handleOcrResults}
-        locationType="hospital"
-        locationId={selectedLabId}
-      />
     </div>
   );
 }

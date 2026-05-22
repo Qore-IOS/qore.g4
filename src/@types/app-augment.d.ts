@@ -1065,4 +1065,54 @@ declare module "@/lib/types" {
     laboratoryNames: string[];
     dateRanges: ShiftDateRange[];
   }
+
+  // ---------- Bekleyen İrsaliye (file management → lab stock pipeline) ----------
+  export type BekleyenIrsaliyeStatus = "pending" | "transferred" | "cancelled";
+
+  export interface BekleyenIrsaliyeItem {
+    stokKodu: string;
+    stokAdi: string;
+    marka?: string;
+    lot?: string;
+    miad?: string;
+    rawLine?: string;
+    sourceQuantity: number;
+    sourceUnit?: string;
+    convertedQuantity: number;
+    convertedUnit?: string;
+    anaBirim?: string;
+    ambalajDegeri?: number;
+    conversionApplied?: boolean;
+    conversionReasoning?: string;
+    matchConfidence: "high" | "medium" | "low";
+    matchedBy?: "stok_kodu" | "stok_adi" | "none";
+  }
+
+  export interface BekleyenIrsaliye {
+    id: string;
+    companyId?: string;
+    dosyaId: string;
+    dosyaName: string;
+    storagePath?: string;
+    downloadURL?: string;
+    locationType: "hospital" | "depot";
+    locationId: string;
+    locationName: string;
+    irsaliyeNumber?: string;
+    irsaliyeDate?: string;
+    supplierName?: string;
+    brands: string[];
+    itemCount: number;
+    totalConvertedQuantity: number;
+    items: BekleyenIrsaliyeItem[];
+    status: BekleyenIrsaliyeStatus;
+    scannedAt: TimestampLike;
+    scannedByUid?: string;
+    scannedByName?: string;
+    transferredAt?: TimestampLike;
+    transferredByUid?: string;
+    transferredByName?: string;
+    aiNotes?: string;
+    scanModel?: string;
+  }
 }
