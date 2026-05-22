@@ -198,6 +198,7 @@ type PendingCeomedLine = {
   adet: number;
   serials: string[];
 };
+type CeomedVerifyLine = PendingCeomedLine & { verifiedSerials: Set<string> };
 
 const PENDING_CEOMED_DURUM_SET = new Set([
   'IRSALIYE YAZDIRILABILIR',
@@ -560,6 +561,7 @@ export default function AnaPanel(props: AnaPanelProps) {
   const [isPendingCeomedModalOpen, setIsPendingCeomedModalOpen] = useState(false);
   const [ceomedApprovingId, setCeomedApprovingId] = useState<string | null>(null);
   const [selectedPendingIrs, setSelectedPendingIrs] = useState<PendingCeomedIrsaliye | null>(null);
+  const [ceomedVerifyMap, setCeomedVerifyMap] = useState<Record<string, CeomedVerifyLine>>({});
   const [isBulkBarcodeScanOpen, setIsBulkBarcodeScanOpen] = useState(false);
   const [isBulkScanMode, setIsBulkScanMode] = useState(false);
 
@@ -813,7 +815,7 @@ export default function AnaPanel(props: AnaPanelProps) {
             const newItem: ScanRow = {
               id: generateId(), barkod: trimmedData, stokKodu: stokKodu, stokAdi: matchedProduct.stokAdi,
               lotNumarasi: lotNumarasi || '', miad: miadFormatted || '', seriNumarasi: seriNumarasi || '',
-              rafAdresi: '', irsaliyeNumarasi: '', isSelected: false, timestamp: new Date(), isProcessed: false,
+              rafAdresi: '', irsaliyeNumarasi: selectedPendingIrs?.irsaliyeNo || '', isSelected: false, timestamp: new Date(), isProcessed: false,
               adet: 1, isGroup: false, bulkQrAssigned: false
             };
             newItem.key = `${newItem.stokKodu}-${newItem.lotNumarasi}-${newItem.miad}`;
@@ -823,6 +825,16 @@ export default function AnaPanel(props: AnaPanelProps) {
             }
             scannedSerialsRef.current.get(stokKodu)!.add(seriNumarasi);
             setScannedItems(prev => [newItem, ...prev]);
+            if (selectedPendingIrs) {
+              const verifyKey = `${stokKodu}||${lotNumarasi || ''}||${miadFormatted || ''}`;
+              setCeomedVerifyMap((prev) => {
+                const v = prev[verifyKey];
+                if (!v) return prev;
+                const nextSet = new Set(v.verifiedSerials);
+                nextSet.add(seriNumarasi);
+                return { ...prev, [verifyKey]: { ...v, verifiedSerials: nextSet } };
+              });
+            }
             if (source === 'barcode') setLastScannedProduct(newItem);
 
         } else {
@@ -1504,7 +1516,21 @@ export default function AnaPanel(props: AnaPanelProps) {
       return;
     }
   
-    const itemsToProcess = scannedItems.filter(i => !i.isProcessed && !!i.rafAdresi && !!i.irsaliyeNumarasi);
+    const expectedSerials = new Set(
+      Object.values(ceomedVerifyMap).flatMap((v) => v.serials.map((s) => `${v.stokKodu}||${v.lot || ''}||${v.miad || ''}||${s}`))
+    );
+    const verifiedSerials = new Set(
+      Object.values(ceomedVerifyMap).flatMap((v) => Array.from(v.verifiedSerials).map((s) => `${v.stokKodu}||${v.lot || ''}||${v.miad || ''}||${s}`))
+    );
+    const itemsToProcess = scannedItems.filter(i => {
+      if (i.isProcessed || !i.rafAdresi) return false;
+      const hasIrs = !!i.irsaliyeNumarasi || !!selectedPendingIrs;
+      if (!hasIrs) return false;
+      if (!i.seriNumarasi) return true;
+      const key = `${i.stokKodu || ''}||${i.lotNumarasi || ''}||${i.miad || ''}||${i.seriNumarasi || ''}`;
+      if (!expectedSerials.has(key)) return true; // irsaliyede olmayan ama okutulanlar da stoğa eklensin
+      return verifiedSerials.has(key); // irsaliyede olup doğrulanmayanlar eklenmesin
+    }).map(i => ({ ...i, irsaliyeNumarasi: i.irsaliyeNumarasi || selectedPendingIrs?.irsaliyeNo || '' }));
     if (itemsToProcess.length === 0) {
       toast({ title: 'Bilgi', description: 'İşlenecek yeni ürün yok (adres ve irsaliye atanmamış olabilir).', variant: "default" });
       return;
@@ -1643,8 +1669,23 @@ export default function AnaPanel(props: AnaPanelProps) {
     }
     setScannedItems((prev) => [...rows, ...prev]);
     setSelectedPendingIrs(irs);
+    const verify: Record<string, CeomedVerifyLine> = {};
+    for (const line of lines) {
+      if (line.serials.length > 0) verify[line.key] = { ...line, verifiedSerials: new Set<string>() };
+    }
+    setCeomedVerifyMap(verify);
     setIsPendingCeomedModalOpen(false);
     toast({ title: 'Doğrulamalı moda aktarıldı', description: `${irs.irsaliyeNo} seri numaraları mal kabul listesine eklendi. Adres ataması yapıp doğrulayarak devam edin.` });
+  };
+
+  const markVerifyLineComplete = (group: ScanRow) => {
+    const key = `${group.stokKodu}||${group.lotNumarasi || ''}||${group.miad || ''}`;
+    setCeomedVerifyMap((prev) => {
+      const v = prev[key];
+      if (!v) return prev;
+      const nextSet = new Set(v.serials);
+      return { ...prev, [key]: { ...v, verifiedSerials: nextSet } };
+    });
   };
   
   // Barkodsuz giriş için tüm non-serial ürünleri listele (lot_manual, qty_manual, lot_barcode, qty_barcode)
@@ -2277,10 +2318,24 @@ export default function AnaPanel(props: AnaPanelProps) {
                     {/* Serial number expansion */}
                     {hasSerials && group.items && group.items.length > 0 && (
                       <div className="px-5 sm:px-10 py-2 bg-[var(--dashboard-surface-2)] border-t border-[var(--dashboard-stroke)]">
+                        {ceomedVerifyMap[`${group.stokKodu}||${group.lotNumarasi || ''}||${group.miad || ''}`] && (
+                          <div className="flex items-center justify-between mb-2">
+                            <div className="text-xs text-[var(--dashboard-muted)]">
+                              Okutulan {ceomedVerifyMap[`${group.stokKodu}||${group.lotNumarasi || ''}||${group.miad || ''}`].verifiedSerials.size}
+                              / Beklenen {ceomedVerifyMap[`${group.stokKodu}||${group.lotNumarasi || ''}||${group.miad || ''}`].serials.length}
+                            </div>
+                            <Button size="sm" variant="outline" onClick={() => markVerifyLineComplete(group)}>✓ Tümü Okutuldu</Button>
+                          </div>
+                        )}
                         <div className="text-[10px] font-mono grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-4 gap-y-0.5 text-[var(--dashboard-muted)]">
-                          {group.items.slice(0, 100).map(item => (
-                            <span key={item.id} className="truncate">{item.seriNumarasi}</span>
-                          ))}
+                          {group.items.slice(0, 100).map(item => {
+                            const key = `${group.stokKodu}||${group.lotNumarasi || ''}||${group.miad || ''}`;
+                            const vm = ceomedVerifyMap[key];
+                            const verified = !!(vm && item.seriNumarasi && vm.verifiedSerials.has(item.seriNumarasi));
+                            return (
+                              <span key={item.id} className={cn("truncate px-2 py-0.5 rounded border", verified ? "border-emerald-400 text-emerald-700" : "border-red-300 text-red-600")}>{item.seriNumarasi}</span>
+                            );
+                          })}
                           {group.items.length > 100 && (
                             <span>+{group.items.length - 100} daha...</span>
                           )}
