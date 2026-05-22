@@ -111,6 +111,7 @@ export default function DepoYonetimPanel() {
         linkedDeviceLabPoolIds: currentDepot.isPoolWarehouse ? (currentDepot.linkedDeviceLabPoolIds || []).filter(Boolean) : [],
         ceomedEnabled: currentDepot.ceomedEnabled || false,
         ceomedDepoKodu: currentDepot.ceomedEnabled ? (currentDepot.ceomedDepoKodu || '').toString().trim() : '',
+        ceomedCariKodu: currentDepot.ceomedEnabled ? (currentDepot.ceomedCariKodu || '').toString().trim().toUpperCase() : '',
       };
 
       if (currentDepot.id) {
@@ -279,6 +280,7 @@ export default function DepoYonetimPanel() {
                 />
               </div>
               {currentDepot.ceomedEnabled && (
+                <>
                 <div>
                   <label className="text-sm text-muted-foreground">Ceomed Depo Kodu *</label>
                   <p className="text-xs text-muted-foreground mb-1">
@@ -291,6 +293,19 @@ export default function DepoYonetimPanel() {
                     className="mt-1"
                   />
                 </div>
+                <div>
+                  <label className="text-sm text-muted-foreground">Ceomed Cari Kodu</label>
+                  <p className="text-xs text-muted-foreground mb-1">
+                    Bu depoya otomatik düşecek irsaliyeler için Ceomed cari kodu (örn. M51001).
+                  </p>
+                  <Input
+                    value={currentDepot.ceomedCariKodu || ''}
+                    onChange={(e) => setCurrentDepot({ ...currentDepot, ceomedCariKodu: e.target.value.trim().toUpperCase() })}
+                    placeholder="M51001"
+                    className="mt-1"
+                  />
+                </div>
+                </>
               )}
 
               {/* Cihaz Laboratuvar Grubu seçimi - Sadece havuz depo seçiliyken */}
@@ -329,6 +344,7 @@ export default function DepoYonetimPanel() {
                     </div>
                   </ScrollArea>
                 </div>
+                </>
               )}
 
               <div>
