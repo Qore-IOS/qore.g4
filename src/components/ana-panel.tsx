@@ -60,6 +60,7 @@ import { sanitizeBarcode, sanitizeStockCode, securityCheck } from '@/lib/mal-kab
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { formatQuantityWithUnit, formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
 import { matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import BekleyenIrsaliyelerPanel from '@/components/lab/BekleyenIrsaliyelerPanel';
 
 // Child Components
 const ManualInlineAdder = dynamic(() => import('@/components/mal-kabul/ManualInlineAdder'), {
@@ -1865,6 +1866,15 @@ export default function AnaPanel(props: AnaPanelProps) {
           </button>
         </div>
       </header>
+
+      {/* ── Bekleyen İrsaliyeler (dosya yönetiminde taranıp onaylanmış) ── */}
+      {selectedDepotId && selectedDepot && (
+        <BekleyenIrsaliyelerPanel
+          locationType="depot"
+          locationId={selectedDepotId}
+          locationName={selectedDepot.name || ''}
+        />
+      )}
 
       {/* ── KPI Row – Son Okutulan Detay + Okuma Adetleri + Ürün Ekle ── */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">

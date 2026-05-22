@@ -21,18 +21,22 @@ import { matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import type { BekleyenIrsaliye, BekleyenIrsaliyeItem } from '@/lib/types';
 import { touchStockMetadata, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
 import { normalizeMiad } from '@/lib/date';
+import { generateId } from '@/lib/utils';
 import TimestampText from '@/components/TimestampText';
 
 interface BekleyenIrsaliyelerPanelProps {
-  selectedLabId: string;
-  selectedLabName: string;
+  /** Hangi konum türü için bekleyen irsaliyeleri göstereceğimiz. */
+  locationType: 'hospital' | 'depot';
+  locationId: string;
+  locationName: string;
 }
 
 export default function BekleyenIrsaliyelerPanel({
-  selectedLabId,
-  selectedLabName,
+  locationType,
+  locationId,
+  locationName,
 }: BekleyenIrsaliyelerPanelProps) {
-  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
   const { invalidateDepoStok } = useInvalidateQueries();
   const [allItems, setAllItems] = useState<BekleyenIrsaliye[]>([]);
@@ -42,7 +46,7 @@ export default function BekleyenIrsaliyelerPanel({
   const [deleting, setDeleting] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!selectedLabId) {
+    if (!locationId) {
       setAllItems([]);
       setLoading(false);
       return;
@@ -55,15 +59,15 @@ export default function BekleyenIrsaliyelerPanel({
         const data = docSnap.data() as any;
         if (!matchesCompanyScope(data, currentCompanyId, isSuperAdmin)) return;
         if (data.status !== 'pending') return;
-        // Only show invoices linked to the selected lab.
-        if (data.locationType !== 'hospital' || data.locationId !== selectedLabId) return;
+        // Only show invoices linked to the selected location of the right type.
+        if (data.locationType !== locationType || data.locationId !== locationId) return;
         list.push({ id: docSnap.id, ...data } as BekleyenIrsaliye);
       });
       setAllItems(list);
       setLoading(false);
     }, () => setLoading(false));
     return () => unsubscribe();
-  }, [selectedLabId, currentCompanyId, isSuperAdmin]);
+  }, [locationType, locationId, currentCompanyId, isSuperAdmin]);
 
   const items = useMemo(() => allItems, [allItems]);
 
@@ -77,55 +81,142 @@ export default function BekleyenIrsaliyelerPanel({
       toast({ title: 'Aktarılacak ürün yok', description: 'Bu irsaliyede geçerli ürün bulunmuyor.', variant: 'destructive' });
       return;
     }
-    if (!confirm(`${irsaliye.dosyaName}\n\n${matched.length} ürün, toplam ${irsaliye.totalConvertedQuantity} birim ${selectedLabName} stoğuna aktarılacak. Devam edilsin mi?`)) {
+    if (!confirm(`${irsaliye.dosyaName}\n\n${matched.length} ürün, toplam ${irsaliye.totalConvertedQuantity} birim ${locationName} stoğuna aktarılacak. Devam edilsin mi?`)) {
       return;
     }
 
     setTransferring(irsaliye.id);
     try {
-      // Chunked batch writes (Firestore limit: 500 ops per batch).
-      const totalDocsToCreate = matched.reduce((sum, it) => sum + it.convertedQuantity, 0);
+      const userName = currentUserProfile.name || currentUserProfile.email || 'Bilinmeyen';
+      const userUid = currentUserProfile.uid || currentUser?.uid || null;
+      const irsaliyeNo = irsaliye.irsaliyeNumber || irsaliye.dosyaName;
+      // For depots we mirror the Ceomed flow: depoStok docs use depotId/depotName
+      // and a malKabulTransactions document is written so the receipt shows up in
+      // mal kabul geçmişi. Hospitals keep the old "shipped to lab" semantics.
+      const isDepot = locationType === 'depot';
+      const transactionId = isDepot ? `MK-IRS-${generateId()}` : '';
+      // Aggregate lines per stokKodu+lot+miad for mal kabul transaction.
+      const lineMap = new Map<string, {
+        stokKodu: string;
+        stokAdi: string;
+        lotNumarasi: string;
+        miad: string;
+        adet: number;
+        serials: string[];
+      }>();
+
       let written = 0;
       let docsInBatch = 0;
       let batch = writeBatch(db);
+      const commitAndReset = async () => {
+        if (docsInBatch === 0) return;
+        await batch.commit();
+        batch = writeBatch(db);
+        docsInBatch = 0;
+      };
 
       for (const item of matched) {
         const qty = Math.max(1, Math.round(item.convertedQuantity || 0));
-        for (let i = 0; i < qty; i++) {
-          const ref = doc(collection(db, 'depoStok'));
-          batch.set(ref, withCompanyScope({
+        const miadNorm = item.miad ? (normalizeMiad(item.miad) || item.miad) : '';
+        if (isDepot) {
+          const key = `${item.stokKodu}||${item.lot || ''}||${miadNorm}`;
+          const prev = lineMap.get(key) || {
             stokKodu: item.stokKodu,
             stokAdi: item.stokAdi || item.stokKodu,
             lotNumarasi: item.lot || '',
-            miad: item.miad ? (normalizeMiad(item.miad) || item.miad) : '',
-            seriNumarasi: '',
-            isShipped: true,
-            hedefKurumId: selectedLabId,
-            hedefKurum: selectedLabName,
-            eklenmeTarihi: Timestamp.now(),
-            sevkTarihi: Timestamp.now(),
-            kaynak: 'bekleyen_irsaliye',
-            kaynakDosyaId: irsaliye.dosyaId,
-            kaynakIrsaliyeId: irsaliye.id,
-            kaynakIrsaliyeNumarasi: irsaliye.irsaliyeNumber || null,
-            createdByName: currentUserProfile.name || currentUserProfile.email || 'Bilinmeyen',
-            createdByUid: currentUserProfile.uid || null,
-          }, currentCompanyId));
+            miad: miadNorm,
+            adet: 0,
+            serials: [] as string[],
+          };
+          prev.adet += qty;
+          lineMap.set(key, prev);
+        }
+        for (let i = 0; i < qty; i++) {
+          const ref = doc(collection(db, 'depoStok'));
+          const base = isDepot
+            ? {
+                depotId: locationId,
+                depotName: locationName,
+                stokKodu: item.stokKodu,
+                stokAdi: item.stokAdi || item.stokKodu,
+                lotNumarasi: item.lot || '',
+                miad: miadNorm,
+                seriNumarasi: '',
+                rafAdresi: '',
+                irsaliyeNumarasi: irsaliye.irsaliyeNumber || '',
+                eklenmeTarihi: Timestamp.now(),
+                isShipped: false,
+                hedefKurumId: '',
+                hedefKurum: '',
+                createdByName: userName,
+                createdByUid: userUid,
+                source: 'bekleyen_irsaliye',
+                kaynak: 'bekleyen_irsaliye',
+                kaynakDosyaId: irsaliye.dosyaId,
+                kaynakIrsaliyeId: irsaliye.id,
+                kaynakIrsaliyeNumarasi: irsaliye.irsaliyeNumber || null,
+                malKabulTransactionId: transactionId,
+              }
+            : {
+                stokKodu: item.stokKodu,
+                stokAdi: item.stokAdi || item.stokKodu,
+                lotNumarasi: item.lot || '',
+                miad: miadNorm,
+                seriNumarasi: '',
+                isShipped: true,
+                hedefKurumId: locationId,
+                hedefKurum: locationName,
+                eklenmeTarihi: Timestamp.now(),
+                sevkTarihi: Timestamp.now(),
+                kaynak: 'bekleyen_irsaliye',
+                kaynakDosyaId: irsaliye.dosyaId,
+                kaynakIrsaliyeId: irsaliye.id,
+                kaynakIrsaliyeNumarasi: irsaliye.irsaliyeNumber || null,
+                createdByName: userName,
+                createdByUid: userUid,
+              };
+          batch.set(ref, withCompanyScope(base, currentCompanyId));
           docsInBatch += 1;
           written += 1;
-          if (docsInBatch >= 450) {
-            await batch.commit();
-            batch = writeBatch(db);
-            docsInBatch = 0;
-          }
+          if (docsInBatch >= 450) await commitAndReset();
         }
       }
-      // Mark the pending invoice as transferred in the same final batch.
+
+      // For depot transfers: write malKabulTransactions header + lines so the
+      // receipt appears in mal kabul geçmişi exactly like a Ceomed approval.
+      if (isDepot) {
+        const txRef = doc(db, 'malKabulTransactions', transactionId);
+        batch.set(txRef, withCompanyScope({
+          transactionId,
+          depotId: locationId,
+          depotName: locationName,
+          userId: userUid || '',
+          userName,
+          timestamp: Timestamp.now(),
+          irsaliyeNo,
+          itemCount: written,
+          brands: irsaliye.brands || [],
+          mode: 'verified',
+          source: 'bekleyen_irsaliye',
+          kaynakIrsaliyeId: irsaliye.id,
+          kaynakDosyaId: irsaliye.dosyaId,
+        }, currentCompanyId));
+        docsInBatch += 1;
+        for (const line of lineMap.values()) {
+          const lineRef = doc(collection(txRef, 'lines'));
+          batch.set(lineRef, withCompanyScope(line, currentCompanyId));
+          docsInBatch += 1;
+          if (docsInBatch >= 450) await commitAndReset();
+        }
+      }
+
+      // Mark the pending invoice as transferred in the final batch.
       batch.update(doc(db, 'bekleyenIrsaliyeler', irsaliye.id), {
         status: 'transferred',
         transferredAt: Timestamp.now(),
-        transferredByUid: currentUserProfile.uid || null,
-        transferredByName: currentUserProfile.name || currentUserProfile.email || 'Bilinmeyen',
+        transferredByUid: userUid,
+        transferredByName: userName,
+        ...(transactionId ? { malKabulTransactionId: transactionId } : {}),
       });
       await batch.commit();
       await touchStockMetadata();
@@ -133,7 +224,9 @@ export default function BekleyenIrsaliyelerPanel({
 
       toast({
         title: 'Stoğa aktarıldı',
-        description: `${written} birim ürün ${selectedLabName} stoğuna eklendi.`,
+        description: isDepot
+          ? `${written} kayıt ${locationName} deposuna eklendi. Mal kabul geçmişine yazıldı.`
+          : `${written} birim ürün ${locationName} stoğuna eklendi.`,
       });
       setSelectedIrsaliye(null);
     } catch (err: any) {
@@ -160,7 +253,7 @@ export default function BekleyenIrsaliyelerPanel({
     }
   };
 
-  if (!selectedLabId) return null;
+  if (!locationId) return null;
 
   return (
     <div className="space-y-2">
@@ -181,7 +274,7 @@ export default function BekleyenIrsaliyelerPanel({
         ) : items.length === 0 ? (
           <div className="text-center py-8 px-4 text-sm text-muted-foreground">
             <Inbox className="h-8 w-8 mx-auto mb-2 opacity-40" />
-            Bu laboratuvar için bekleyen irsaliye bulunmuyor.
+            Bu {locationType === 'depot' ? 'depo' : 'laboratuvar'} için bekleyen irsaliye bulunmuyor.
             <p className="text-xs mt-1">Dosya yönetiminde bir PDF irsaliye tarayıp onayladığınızda burada görünür.</p>
           </div>
         ) : (
