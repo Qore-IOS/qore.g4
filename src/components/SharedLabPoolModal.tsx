@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { LabSelector } from '@/components/common/LabSelector';
 import { useToast } from '@/hooks/use-toast';
 import type { Laboratory } from '@/lib/types';
 
@@ -78,22 +79,16 @@ export default function SharedLabPoolModal({ open, onOpenChange }: Props) {
             <Input value={name} onChange={e => setName(e.target.value)} placeholder="Örn: Kadıköy Bölge Havuzu" />
           </div>
 
-          <ScrollArea className="h-72 border rounded-md p-3">
-            <ul className="space-y-2">
-              {labs
-                .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
-                .map(l => (
-                <li key={l.id} className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <Checkbox id={`lab-${l.id}`} checked={selected.has(l.id)} onCheckedChange={() => toggle(l.id)} />
-                    <label htmlFor={`lab-${l.id}`} className="cursor-pointer">{l.name}</label>
-                  </div>
-                  <span className="text-xs text-muted-foreground">{l.address || ''}</span>
-                </li>
-              ))}
-            </ul>
-          </ScrollArea>
-          <p className="text-xs text-muted-foreground">* En az iki laboratuvar seçin. Bu havuz sadece Kullanım ekranında geçerlidir.</p>
+          <LabSelector
+            mode="multi"
+            label="Laboratuvarlar"
+            labs={labs.map(l => ({ id: l.id, name: l.name, kod: l.kod, meta: l.address || undefined }))}
+            values={Array.from(selected)}
+            onValuesChange={(ids) => setSelected(new Set(ids))}
+            placeholder="Laboratuvar seçin"
+            helperText="* En az iki laboratuvar seçin. Bu havuz sadece Kullanım ekranında geçerlidir."
+            showChips
+          />
         </div>
 
         <DialogFooter>

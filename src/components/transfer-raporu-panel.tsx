@@ -22,6 +22,7 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
+import { LabSelector } from '@/components/common/LabSelector';
 import { useToast } from '@/hooks/use-toast';
 import {
   ArrowLeftRight,
@@ -97,10 +98,6 @@ export default function TransferRaporuPanel() {
   const [startDate, setStartDate] = useState<string>('');
   const [endDate, setEndDate] = useState<string>('');
 
-  // Lab selection dropdown state
-  const [isLabDropdownOpen, setIsLabDropdownOpen] = useState(false);
-  const [labSearchQuery, setLabSearchQuery] = useState('');
-
   // Report data
   const [reportData, setReportData] = useState<ProductTransferSummary[]>([]);
   const [reportMeta, setReportMeta] = useState<ReportMeta | null>(null);
@@ -139,16 +136,6 @@ export default function TransferRaporuPanel() {
     fetchOptions();
   }, [toast]);
 
-  // Filtered labs for dropdown
-  const filteredLabs = useMemo(() => {
-    if (!filterOptions) return [];
-    if (!labSearchQuery) return filterOptions.laboratories;
-    const query = labSearchQuery.toLowerCase();
-    return filterOptions.laboratories.filter(
-      lab => lab.name.toLowerCase().includes(query)
-    );
-  }, [filterOptions, labSearchQuery]);
-
   // Filtered products for dropdown
   const filteredProducts = useMemo(() => {
     if (!filterOptions) return [];
@@ -161,26 +148,6 @@ export default function TransferRaporuPanel() {
       )
       .slice(0, 50);
   }, [filterOptions, productSearchQuery]);
-
-  // Toggle lab selection
-  const toggleLabSelection = (labId: string) => {
-    setSelectedLabIds(prev =>
-      prev.includes(labId)
-        ? prev.filter(id => id !== labId)
-        : [...prev, labId]
-    );
-  };
-
-  // Select all labs
-  const selectAllLabs = () => {
-    if (!filterOptions) return;
-    setSelectedLabIds(filterOptions.laboratories.map(l => l.id));
-  };
-
-  // Clear all labs
-  const clearAllLabs = () => {
-    setSelectedLabIds([]);
-  };
 
   // Generate report
   const handleGenerateReport = async () => {
@@ -285,14 +252,6 @@ export default function TransferRaporuPanel() {
     return filterOptions.depots.find(d => d.id === selectedDepotId)?.name || '';
   }, [filterOptions, selectedDepotId]);
 
-  // Get selected labs names
-  const selectedLabNames = useMemo(() => {
-    if (!filterOptions || selectedLabIds.length === 0) return [];
-    return selectedLabIds.map(id =>
-      filterOptions.laboratories.find(l => l.id === id)?.name || id
-    );
-  }, [filterOptions, selectedLabIds]);
-
   if (isLoadingOptions) {
     return (
       <Card className="shadow-lg">
@@ -339,85 +298,15 @@ export default function TransferRaporuPanel() {
               </div>
 
               {/* Lab Selection */}
-              <div className="space-y-2">
-                <Label>Hedef Laboratuvarlar *</Label>
-                <div className="relative">
-                  <Button
-                    variant="outline"
-                    className="w-full justify-between"
-                    onClick={() => setIsLabDropdownOpen(!isLabDropdownOpen)}
-                  >
-                    <span className="truncate">
-                      {selectedLabIds.length === 0
-                        ? 'Laboratuvar secin...'
-                        : `${selectedLabIds.length} laboratuvar secili`}
-                    </span>
-                    {isLabDropdownOpen ? (
-                      <ChevronUp className="h-4 w-4 ml-2" />
-                    ) : (
-                      <ChevronDown className="h-4 w-4 ml-2" />
-                    )}
-                  </Button>
-
-                  {isLabDropdownOpen && (
-                    <div className="absolute z-50 w-full mt-1 bg-background border rounded-md shadow-lg">
-                      <div className="p-2 border-b">
-                        <Input
-                          placeholder="Laboratuvar ara..."
-                          value={labSearchQuery}
-                          onChange={e => setLabSearchQuery(e.target.value)}
-                          className="h-8"
-                        />
-                      </div>
-                      <div className="p-2 border-b flex gap-2">
-                        <Button size="sm" variant="outline" onClick={selectAllLabs}>
-                          Tumunu Sec
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={clearAllLabs}>
-                          Temizle
-                        </Button>
-                      </div>
-                      <ScrollArea className="h-48">
-                        <div className="p-2 space-y-1">
-                          {filteredLabs.map(lab => (
-                            <div
-                              key={lab.id}
-                              className="flex items-center space-x-2 p-2 hover:bg-muted rounded cursor-pointer"
-                              onClick={() => toggleLabSelection(lab.id)}
-                            >
-                              <Checkbox
-                                checked={selectedLabIds.includes(lab.id)}
-                                onCheckedChange={() => toggleLabSelection(lab.id)}
-                              />
-                              <span className="text-sm">{lab.name}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </ScrollArea>
-                    </div>
-                  )}
-                </div>
-
-                {/* Selected labs badges */}
-                {selectedLabIds.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-2">
-                    {selectedLabNames.slice(0, 3).map((name, idx) => (
-                      <Badge key={idx} variant="secondary" className="text-xs">
-                        {name}
-                        <X
-                          className="h-3 w-3 ml-1 cursor-pointer"
-                          onClick={() => toggleLabSelection(selectedLabIds[idx])}
-                        />
-                      </Badge>
-                    ))}
-                    {selectedLabNames.length > 3 && (
-                      <Badge variant="outline" className="text-xs">
-                        +{selectedLabNames.length - 3} daha
-                      </Badge>
-                    )}
-                  </div>
-                )}
-              </div>
+              <LabSelector
+                mode="multi"
+                label="Hedef Laboratuvarlar *"
+                labs={(filterOptions?.laboratories ?? []).map(l => ({ id: l.id, name: l.name }))}
+                values={selectedLabIds}
+                onValuesChange={setSelectedLabIds}
+                placeholder="Laboratuvar secin..."
+                showChips
+              />
             </div>
 
             {/* Row 2: Date Range */}

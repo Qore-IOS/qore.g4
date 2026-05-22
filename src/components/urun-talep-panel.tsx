@@ -65,6 +65,7 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command';
+import { LabSelector } from '@/components/common/LabSelector';
 
 /* =======================================================
    DUTY SCHEDULE HELPERS (preserved from original)
@@ -591,9 +592,6 @@ export default function UrunTalepPanel() {
   // More menu
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
 
-  // Lab popover for multi-lab users
-  const [isLabPopoverOpen, setIsLabPopoverOpen] = useState(false);
-
 
   // -- Derived Data --
   const userHospitals = useMemo(() => {
@@ -970,46 +968,19 @@ export default function UrunTalepPanel() {
         {/* Lab selector — hidden for single-lab users */}
         {showLabPicker && (
           <div className="cihaz-card p-3 sm:p-4 flex-1 min-w-[220px]">
-            <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1.5">Hedef Laboratuvar</label>
-            <Popover open={isLabPopoverOpen} onOpenChange={setIsLabPopoverOpen}>
-              <PopoverTrigger asChild>
-                <button
-                  className={cn(
-                    "w-full flex items-center justify-between px-3 h-10 rounded-xl text-sm transition-all border border-[var(--dashboard-stroke)]",
-                    selectedLabId
-                      ? "bg-[var(--dashboard-surface)] shadow-[var(--dashboard-raised-soft)] font-medium text-[var(--dashboard-text)]"
-                      : "bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)]"
-                  )}
-                  disabled={loading || userHospitals.length === 0}
-                >
-                  <span className="truncate">{selectedLabName || 'Laboratuvar seçin...'}</span>
-                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                </button>
-              </PopoverTrigger>
-              <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
-                <Command>
-                  <CommandInput placeholder="Laboratuvar ara..." />
-                  <CommandList>
-                    <CommandEmpty>Laboratuvar bulunamadı.</CommandEmpty>
-                    <CommandGroup>
-                      {userHospitals.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')).map((hospital) => (
-                        <CommandItem
-                          key={hospital.id}
-                          value={hospital.name ?? ''}
-                          onSelect={() => { setSelectedLabId(hospital.id ?? ''); setIsLabPopoverOpen(false); }}
-                        >
-                          <Check className={cn("mr-2 h-4 w-4", selectedLabId === hospital.id ? "opacity-100" : "opacity-0")} />
-                          <span>{hospital.name}</span>
-                          {hospital.perifer && (
-                            <span className="ml-auto text-[10px] font-bold uppercase tracking-wide text-purple-500 px-1.5 py-0.5 rounded bg-purple-500/10">Perifer</span>
-                          )}
-                        </CommandItem>
-                      ))}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
+            <LabSelector
+              label="Hedef Laboratuvar"
+              labs={userHospitals.map(h => ({
+                id: h.id ?? '',
+                name: h.name,
+                kod: h.kod,
+                meta: h.perifer ? 'Perifer' : undefined,
+              }))}
+              value={selectedLabId}
+              onChange={(id) => setSelectedLabId(id)}
+              placeholder="Laboratuvar seçin..."
+              disabled={loading || userHospitals.length === 0}
+            />
           </div>
         )}
 

@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Checkbox } from '@/components/ui/checkbox';
+import { LabSelector } from '@/components/common/LabSelector';
 import { Loader2, Users, Building2, Crown } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { collection, getDocs, addDoc, Timestamp, query, orderBy } from 'firebase/firestore';
@@ -57,26 +58,22 @@ export default function EfficiencyPoolModal({ open, onOpenChange, onPoolCreated 
     }
   };
 
-  const handleLabSelect = (labId: string, checked: boolean) => {
+  const handleLabValuesChange = (nextIds: string[]) => {
     setSelectedLabIds(prev => {
-      const newSet = new Set(prev);
-      if (checked) {
-        newSet.add(labId);
-
-        // Eğer seçilen laboratuvar bir ortak havuzun ana laboratuvarı ise,
-        // o havuzdaki tüm laboratuvarları da seç
-        const pool = labPools.find(p => p.mainLabId === labId);
-        if (pool) {
-          pool.memberIds.forEach(memberId => newSet.add(memberId));
-        }
-      } else {
-        newSet.delete(labId);
-        // Eğer silinen lab merkez lab ise, merkez lab seçimini temizle
-        if (centerLabId === labId) {
-          setCenterLabId('');
+      const nextSet = new Set(nextIds);
+      // Eğer seçilen laboratuvar bir ortak havuzun ana laboratuvarı ise,
+      // o havuzdaki tüm laboratuvarları da seç
+      for (const id of nextIds) {
+        if (!prev.has(id)) {
+          const pool = labPools.find(p => p.mainLabId === id);
+          if (pool) pool.memberIds.forEach(m => nextSet.add(m));
         }
       }
-      return newSet;
+      // Eğer silinen lab merkez lab ise, merkez lab seçimini temizle
+      if (centerLabId && !nextSet.has(centerLabId)) {
+        setCenterLabId('');
+      }
+      return nextSet;
     });
   };
 
@@ -151,67 +148,29 @@ export default function EfficiencyPoolModal({ open, onOpenChange, onPoolCreated 
           </div>
 
           <div>
-            <Label>Laboratuvar Seçimi</Label>
-            <p className="text-xs text-muted-foreground mb-2">
-              Havuza dahil edilecek laboratuvarları seçin. Ortak laboratuvar havuzuna dahil bir ana laboratuvar seçildiğinde,
-              o havuzdaki tüm laboratuvarların min-max listesi birleştirilecektir.
-            </p>
-
-            {isLoading ? (
-              <div className="flex items-center justify-center h-48">
-                <Loader2 className="h-6 w-6 animate-spin" />
-              </div>
-            ) : (
-              <ScrollArea className="h-64 border rounded-md p-2">
-                <div className="space-y-2">
-                  {hospitals.map(lab => {
-                    const poolInfo = getPoolInfo(lab.id);
-                    return (
-                      <div
-                        key={lab.id}
-                        className={`flex items-center justify-between p-2 rounded-md hover:bg-muted/50 ${
-                          selectedLabIds.has(lab.id) ? 'bg-primary/10' : ''
-                        }`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <Checkbox
-                            checked={selectedLabIds.has(lab.id)}
-                            onCheckedChange={(checked) => handleLabSelect(lab.id, !!checked)}
-                          />
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium">{lab.name}</span>
-                              {lab.kod && (
-                                <span className="text-xs font-mono text-muted-foreground">
-                                  ({lab.kod})
-                                </span>
-                              )}
-                            </div>
-                            {poolInfo && (
-                              <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                                <Building2 className="h-3 w-3" />
-                                <span>
-                                  {poolInfo.poolName}
-                                  {poolInfo.isMainLab && ' (Ana Lab)'}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </ScrollArea>
-            )}
+            <LabSelector
+              mode="multi"
+              label="Laboratuvar Seçimi"
+              helperText="Havuza dahil edilecek laboratuvarları seçin. Ortak laboratuvar havuzuna dahil bir ana laboratuvar seçildiğinde, o havuzdaki tüm laboratuvarların min-max listesi birleştirilecektir."
+              labs={hospitals.map(lab => {
+                const info = getPoolInfo(lab.id);
+                return {
+                  id: lab.id,
+                  name: lab.name,
+                  kod: lab.kod,
+                  meta: info ? `${info.poolName}${info.isMainLab ? ' (Ana Lab)' : ''}` : undefined,
+                };
+              })}
+              values={Array.from(selectedLabIds)}
+              onValuesChange={handleLabValuesChange}
+              loading={isLoading}
+              placeholder="Laboratuvar seçin"
+              showChips
+            />
           </div>
 
           {selectedLabIds.size > 0 && (
             <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                {selectedLabIds.size} laboratuvar seçildi
-              </p>
-
               {/* Merkez Laboratuvar Seçimi */}
               <div className="p-3 border rounded-md bg-amber-50/50 dark:bg-amber-950/20">
                 <Label className="flex items-center gap-2 mb-2">
@@ -221,27 +180,16 @@ export default function EfficiencyPoolModal({ open, onOpenChange, onPoolCreated 
                 <p className="text-xs text-muted-foreground mb-2">
                   Diğer laboratuvarlardan merkeze gönderilen testler için hak ediş hesaplamasında kullanılır.
                 </p>
-                <Select value={centerLabId || '__none__'} onValueChange={(val) => setCenterLabId(val === '__none__' ? '' : val)}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Merkez laboratuvar seçin..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">Seçilmedi</SelectItem>
-                    {hospitals
-                      .filter(h => selectedLabIds.has(h.id))
-                      .map(lab => (
-                        <SelectItem key={lab.id} value={lab.id}>
-                          <div className="flex items-center gap-2">
-                            <span>{lab.name}</span>
-                            {lab.kod && (
-                              <span className="text-xs font-mono text-muted-foreground">({lab.kod})</span>
-                            )}
-                          </div>
-                        </SelectItem>
-                      ))
-                    }
-                  </SelectContent>
-                </Select>
+                <LabSelector
+                  labs={hospitals
+                    .filter(h => selectedLabIds.has(h.id))
+                    .map(l => ({ id: l.id, name: l.name, kod: l.kod }))}
+                  value={centerLabId || '__none__'}
+                  onChange={(val) => setCenterLabId(val === '__none__' ? '' : val)}
+                  placeholder="Merkez laboratuvar seçin..."
+                  allOption={{ value: '__none__', label: 'Seçilmedi' }}
+                  icon={<Crown className="h-4 w-4" />}
+                />
               </div>
             </div>
           )}

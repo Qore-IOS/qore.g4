@@ -67,6 +67,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
+import { LabSelector } from '@/components/common/LabSelector';
 import { autoPrintTutanakFromTransferId, isAutoTutanakEnabled } from '@/lib/tutanak-autoprint';
 import { emitFefoOverride } from '@/lib/notifications';
 import { VirtualizedList } from '@/components/ui/virtualized-list';
@@ -287,7 +288,6 @@ export default function DirektTransferPanel() {
   const [templatesLoading, setTemplatesLoading] = useState(false);
 
   const [selectedFormatId, setSelectedFormatId] = useState<FormatValue>('__auto__');
-  const [isLabPopoverOpen, setIsLabPopoverOpen] = useState(false);
   
   const [fefoViolations, setFefoViolations] = useState<FefoViolation[]>([]);
 
@@ -1270,41 +1270,14 @@ export default function DirektTransferPanel() {
 
               {/* Target */}
               {!isBorcMode ? (
-                <div className="space-y-1">
-                  <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Hedef Laboratuvar</label>
-                  <Popover open={isLabPopoverOpen} onOpenChange={setIsLabPopoverOpen}>
-                    <PopoverTrigger asChild>
-                      <button
-                        className={cn(
-                          "w-full flex items-center justify-between px-3 h-10 rounded-xl text-sm transition-all",
-                          selectedLabId
-                            ? "bg-[var(--dashboard-surface)] border border-[var(--dashboard-stroke)] shadow-[var(--dashboard-raised-soft)] font-medium text-[var(--dashboard-text)]"
-                            : "bg-[var(--dashboard-surface-2)] border border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)]"
-                        )}
-                        disabled={hospitals.length === 0}
-                      >
-                        <span className="truncate">{selectedLabName || 'Laboratuvar seçin'}</span>
-                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                      </button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
-                      <Command>
-                        <CommandInput placeholder="Laboratuvar ara..." />
-                        <CommandList>
-                          <CommandEmpty>Laboratuvar bulunamadı.</CommandEmpty>
-                          <CommandGroup>
-                            {hospitals.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')).map((lab) => (
-                              <CommandItem key={lab.id} value={lab.name ?? ''} onSelect={() => { setSelectedLabId(lab.id); setIsLabPopoverOpen(false); }}>
-                                <Check className={cn("mr-2 h-4 w-4", selectedLabId === lab.id ? "opacity-100" : "opacity-0")} />
-                                {lab.name ?? ''}
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
-                </div>
+                <LabSelector
+                  label="Hedef Laboratuvar"
+                  labs={hospitals.map(l => ({ id: l.id, name: l.name ?? '', kod: l.kod }))}
+                  value={selectedLabId}
+                  onChange={setSelectedLabId}
+                  placeholder="Laboratuvar seçin"
+                  disabled={hospitals.length === 0}
+                />
               ) : null}
 
               {/* Borç Mode Toggle */}

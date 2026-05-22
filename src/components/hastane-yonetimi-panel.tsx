@@ -6,6 +6,7 @@ import {
   Card, CardHeader, CardTitle, CardDescription, CardContent
 } from '@/components/ui/card';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { LabSelector } from '@/components/common/LabSelector';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
@@ -1186,19 +1187,14 @@ export default function LaboratuvarYonetimiPanel() {
 
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="flex-grow">
-              <label className="block text-sm font-medium mb-1">Laboratuvar Seçin</label>
-              <Select value={selectedLabId} onValueChange={setSelectedLabId} disabled={isLoading}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Bir laboratuvar seçin" />
-                </SelectTrigger>
-                <SelectContent>
-                  {laboratories.map(l => (
-                    <SelectItem key={l.id ?? String(l.name)} value={l.id ?? ''}>
-                      {l.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <LabSelector
+                label="Laboratuvar Seçin"
+                labs={laboratories.map(l => ({ id: l.id ?? '', name: l.name, kod: l.kod }))}
+                value={selectedLabId}
+                onChange={setSelectedLabId}
+                placeholder="Bir laboratuvar seçin"
+                disabled={isLoading}
+              />
             </div>
             {selectedLabId && (
                 <div className="flex items-end gap-2">

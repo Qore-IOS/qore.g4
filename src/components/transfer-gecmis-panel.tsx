@@ -43,6 +43,7 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui/select';
+import { LabSelector } from '@/components/common/LabSelector';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { useRowFocus } from '@/hooks/useRowFocus';
@@ -252,21 +253,16 @@ export default function TransferGecmisPanel() {
 
             <div className="space-y-2">
               <label htmlFor="lab-filter-select" className="text-sm font-medium flex items-center gap-2"><CalendarClock className="h-4 w-4 text-[var(--dashboard-primary)]" />Hedef Laboratuvar</label>
-              <Select value={selectedLabId} onValueChange={setSelectedLabId}>
-                <SelectTrigger
-                  id="lab-filter-select"
-                  className="w-full bg-[var(--dashboard-surface-1)] border-[var(--dashboard-border)]"
-                  aria-label="Laboratuvar filtresi"
-                >
-                  <SelectValue placeholder="Laboratuvar Seçin..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Tüm Laboratuvarlar</SelectItem>
-                  {labs.map(l => (
-                    <SelectItem key={l.id} value={l.id}>{l.name || l.id}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <LabSelector
+                id="lab-filter-select"
+                ariaLabel="Laboratuvar filtresi"
+                labs={labs.map(l => ({ id: l.id, name: l.name || l.id, kod: l.kod }))}
+                value={selectedLabId}
+                onChange={setSelectedLabId}
+                placeholder="Laboratuvar Seçin..."
+                allOption={{ value: 'all', label: 'Tüm Laboratuvarlar' }}
+                icon={false}
+              />
             </div>
           </div>
           

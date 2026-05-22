@@ -30,6 +30,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { LabSelector } from '@/components/common/LabSelector';
 import DeliveryHistory, {
   type PartialDelivery,
 } from '@/components/lojistik-terminal/delivery-history';
@@ -271,19 +272,15 @@ export default function LojistikSiparisGecmisPanel() {
 
             {visibleHospitals.length > 1 && (
               <div className="px-4 py-2 border-b" style={{ borderColor: 'var(--loj-stroke)' }}>
-                <select
+                <LabSelector
+                  size="sm"
+                  labs={visibleHospitals.map(h => ({ id: h.id, name: h.name || h.ad || h.id, kod: h.kod }))}
                   value={labFilter}
-                  onChange={(e) => setLabFilter(e.target.value)}
-                  className="w-full h-8 rounded-lg text-xs px-2 border-0 outline-none"
-                  style={{ background: 'var(--loj-surface-2)', color: 'var(--loj-text)' }}
-                >
-                  <option value="all">Tüm laboratuvarlar</option>
-                  {visibleHospitals.map((h) => (
-                    <option key={h.id} value={h.id}>
-                      {h.name || h.ad || h.id}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setLabFilter}
+                  placeholder="Tüm laboratuvarlar"
+                  allOption={{ value: 'all', label: 'Tüm laboratuvarlar' }}
+                  icon={false}
+                />
               </div>
             )}
 

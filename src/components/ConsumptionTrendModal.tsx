@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { Checkbox } from '@/components/ui/checkbox';
+import { LabSelector } from '@/components/common/LabSelector';
 import { format, subMonths, eachMonthOfInterval, startOfMonth, endOfMonth, isValid, startOfWeek, endOfWeek, eachDayOfInterval, startOfDay, endOfDay, subDays, addDays, subWeeks, addWeeks, subYears, addYears } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { X, TrendingUp, ChevronLeft, ChevronRight, FileDown } from 'lucide-react';
@@ -219,18 +220,6 @@ export default function ConsumptionTrendModal({
     setIsReportOptionsOpen(false);
   }, [consumptionRecords, hospitals, reportLabSelection]);
 
-  const toggleLabSelection = (labId: string) => {
-    setSelectedLabIds(prev =>
-      prev.includes(labId) ? prev.filter(id => id !== labId) : [...prev, labId]
-    );
-  };
-  
-  const toggleReportLabSelection = (labId: string) => {
-    setReportLabSelection(prev =>
-      prev.includes(labId) ? prev.filter(id => id !== labId) : [...prev, labId]
-    );
-  };
-
   return (
     <>
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -303,26 +292,16 @@ export default function ConsumptionTrendModal({
           <Card className="lg:col-span-1 glass-card">
             <CardHeader><CardTitle className="text-lg">Laboratuvarlar</CardTitle></CardHeader>
             <CardContent>
-              <ScrollArea className="h-[calc(80vh-120px)] pr-3">
-                <div className="space-y-2">
-                  {hospitals.filter(h => h.consumptionTrackingEnabled !== false).map((lab, index) => (
-                    <div
-                      key={lab.id}
-                      className="flex items-center space-x-3 p-2 rounded-md hover:bg-white/10 transition-colors cursor-pointer"
-                      onClick={() => toggleLabSelection(lab.id)}
-                    >
-                      <Checkbox
-                        id={`lab-${lab.id}-modal`}
-                        checked={selectedLabIds.includes(lab.id)}
-                        style={{ color: COLORS[index % COLORS.length] }}
-                      />
-                      <label htmlFor={`lab-${lab.id}-modal`} className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer">
-                        {lab.name}
-                      </label>
-                    </div>
-                  ))}
-                </div>
-              </ScrollArea>
+              <LabSelector
+                mode="multi"
+                labs={hospitals
+                  .filter(h => h.consumptionTrackingEnabled !== false)
+                  .map(l => ({ id: l.id, name: l.name, kod: l.kod }))}
+                values={selectedLabIds}
+                onValuesChange={setSelectedLabIds}
+                placeholder="Karşılaştırılacak laboratuvarları seçin"
+                showChips
+              />
             </CardContent>
           </Card>
         </div>
@@ -343,25 +322,18 @@ export default function ConsumptionTrendModal({
               PDF raporuna dahil edilecek laboratuvarları seçin. Hiçbir seçim yapılmazsa, otomatik tüketim takibi kapalı olan tüm laboratuvarlar dahil edilir.
             </DialogDescription>
           </DialogHeader>
-          <ScrollArea className="h-64 mt-4 border rounded-md p-4">
-            <div className="space-y-2">
-              {hospitals.filter(h => h.consumptionTrackingEnabled !== false).map((lab) => (
-                <div
-                  key={`report-${lab.id}`}
-                  className="flex items-center space-x-3 p-2 rounded-md hover:bg-muted/50 transition-colors cursor-pointer"
-                  onClick={() => toggleReportLabSelection(lab.id)}
-                >
-                  <Checkbox
-                    id={`report-lab-${lab.id}`}
-                    checked={reportLabSelection.includes(lab.id)}
-                  />
-                  <label htmlFor={`report-lab-${lab.id}`} className="text-sm font-medium leading-none cursor-pointer">
-                    {lab.name}
-                  </label>
-                </div>
-              ))}
-            </div>
-          </ScrollArea>
+          <div className="mt-4">
+            <LabSelector
+              mode="multi"
+              labs={hospitals
+                .filter(h => h.consumptionTrackingEnabled !== false)
+                .map(l => ({ id: l.id, name: l.name, kod: l.kod }))}
+              values={reportLabSelection}
+              onValuesChange={setReportLabSelection}
+              placeholder="Tüm laboratuvarlar dahil"
+              showChips
+            />
+          </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsReportOptionsOpen(false)}>İptal</Button>
             <Button onClick={generateConsumptionReportPDF}>

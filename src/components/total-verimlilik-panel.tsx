@@ -75,6 +75,7 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { Checkbox } from '@/components/ui/checkbox';
+import { LabSelector } from '@/components/common/LabSelector';
 import { Label } from '@/components/ui/label';
 import { collection, getDocs, query, orderBy, doc, setDoc, getDoc, Timestamp, where, collectionGroup } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -4212,43 +4213,15 @@ export default function TotalVerimlilikPanel({
               </Select>
             </div>
             {/* Alıcı Laboratuvar Seçimi */}
-            <div className="space-y-2">
-              <Label className="font-medium">Alıcı Laboratuvarlar</Label>
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="selectAllSevkiyat"
-                  checked={selectedLabsForSevkiyat.size === poolLabs.length && poolLabs.length > 0}
-                  onCheckedChange={(checked) => {
-                    if (checked) {
-                      setSelectedLabsForSevkiyat(new Set(poolLabs.map(l => l.id)));
-                    } else {
-                      setSelectedLabsForSevkiyat(new Set());
-                    }
-                  }}
-                />
-                <Label htmlFor="selectAllSevkiyat" className="font-medium text-sm">Tümünü Seç</Label>
-              </div>
-              <div className="border rounded-md p-3 max-h-48 overflow-y-auto space-y-2">
-                {poolLabs.map(lab => (
-                  <div key={lab.id} className="flex items-center gap-2">
-                    <Checkbox
-                      id={`sevkiyat-${lab.id}`}
-                      checked={selectedLabsForSevkiyat.has(lab.id)}
-                      onCheckedChange={(checked) => {
-                        const newSet = new Set(selectedLabsForSevkiyat);
-                        if (checked) {
-                          newSet.add(lab.id);
-                        } else {
-                          newSet.delete(lab.id);
-                        }
-                        setSelectedLabsForSevkiyat(newSet);
-                      }}
-                    />
-                    <Label htmlFor={`sevkiyat-${lab.id}`} className="text-sm">{lab.name}</Label>
-                  </div>
-                ))}
-              </div>
-            </div>
+            <LabSelector
+              mode="multi"
+              label="Alıcı Laboratuvarlar"
+              labs={poolLabs.map(l => ({ id: l.id, name: l.name, kod: l.kod }))}
+              values={Array.from(selectedLabsForSevkiyat)}
+              onValuesChange={(ids) => setSelectedLabsForSevkiyat(new Set(ids))}
+              placeholder="Laboratuvar seçin"
+              showChips
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowSevkiyatBilgisiModal(false)}>

@@ -10,6 +10,7 @@ import type { Hospital, Depot, ProductCode, DepoStokItem, DestroyedKitRecord } f
 import BackButton from '@/components/BackButton';
 import { playFeedback, generateId } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { LabSelector } from '@/components/common/LabSelector';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -692,14 +693,12 @@ export default function ImhaEdilenKitlerPanel() {
                                 {selectedSourceType === 'laboratory' ? 'Laboratuvar' : 'Depo'}
                             </label>
                             {selectedSourceType === 'laboratory' ? (
-                                <Select value={selectedLabId} onValueChange={setSelectedLabId}>
-                                    <SelectTrigger className="cihaz-pressed border-none h-10">
-                                        <SelectValue placeholder="Laboratuvar seçin" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {hospitals.map(h => <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>)}
-                                    </SelectContent>
-                                </Select>
+                                <LabSelector
+                                    labs={hospitals.map(h => ({ id: h.id, name: h.name, kod: h.kod }))}
+                                    value={selectedLabId}
+                                    onChange={setSelectedLabId}
+                                    placeholder="Laboratuvar seçin"
+                                />
                             ) : (
                                 <Select value={selectedDepotId} onValueChange={setSelectedDepotId}>
                                     <SelectTrigger className="cihaz-pressed border-none h-10">

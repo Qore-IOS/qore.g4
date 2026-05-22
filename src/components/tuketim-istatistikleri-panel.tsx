@@ -11,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { LabSelector } from "@/components/common/LabSelector";
 import {
   Card,
   CardContent,
@@ -459,34 +460,18 @@ export default function TuketimIstatistikleriPanel({
           </Button>
         </CardHeader>
         <CardContent>
-          <div className="mb-4">
-            <label
-              htmlFor="laboratory-select-stats"
-              className="block text-sm font-medium mb-1"
-            >
-              Laboratuvar Seçin
-            </label>
-            <Select
+          <div className="mb-4 w-full md:w-1/2 lg:w-1/3">
+            <LabSelector
+              id="laboratory-select-stats"
+              label="Laboratuvar Seçin"
+              labs={hospitals.map(h => ({ id: h.id, name: h.name, kod: h.kod }))}
               value={selectedHospitalId}
-              onValueChange={(v) => {
+              onChange={(v) => {
                 setSelectedHospitalId(v);
                 setShowAll(false);
               }}
-            >
-              <SelectTrigger
-                id="laboratory-select-stats"
-                className="w-full md:w-1/2 lg:w-1/3 rounded-md"
-              >
-                <SelectValue placeholder="Analiz için laboratuvar seçin..." />
-              </SelectTrigger>
-              <SelectContent>
-                {hospitals.map((h) => (
-                  <SelectItem key={h.id} value={h.id}>
-                    {h.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              placeholder="Analiz için laboratuvar seçin..."
+            />
           </div>
 
           <Card className="border-border dark:border-input rounded-lg p-4 mt-4">
@@ -609,25 +594,16 @@ export default function TuketimIstatistikleriPanel({
                   <TableHeader>
                     <TableRow>
                       {(showAll || isDataFetched) && (
-                        <TableHead>
-                          <Select
+                        <TableHead className="min-w-[180px]">
+                          <LabSelector
+                            size="sm"
+                            icon={false}
+                            labs={uniqueLabs.map((lab) => ({ id: lab as string, name: lab as string }))}
                             value={labFilter}
-                            onValueChange={setLabFilter}
-                          >
-                            <SelectTrigger className="border-none p-0 h-auto font-semibold bg-transparent focus:ring-0 focus:ring-offset-0 [&>span]:line-clamp-1">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="all">
-                                Laboratuvar (Tümü)
-                              </SelectItem>
-                              {uniqueLabs.map((lab) => (
-                                <SelectItem key={lab} value={lab}>
-                                  {lab}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                            onChange={setLabFilter}
+                            placeholder="Laboratuvar"
+                            allOption={{ value: 'all', label: 'Laboratuvar (Tümü)' }}
+                          />
                         </TableHead>
                       )}
                       <SortableHeader
