@@ -26,6 +26,7 @@ import Image from 'next/image';
 import { ScrollArea } from './ui/scroll-area';
 import { Calendar, Plus, Trash2, Wrench, FlaskConical, Loader2, Package, ChevronsUpDown, Check as CheckIcon, FileDown, ClipboardList, Building2, Search, Settings, Server, Pencil, Boxes, Upload, Download, Image as ImageIcon } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
+import { LabSelector } from '@/components/common/LabSelector';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn, exportDevicesToPdf, exportDataToExcel } from '@/lib/utils';
@@ -588,20 +589,6 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     }
   };
 
-  const toggleLabSelection = (labId: string) => {
-    setSelectedLabIds(prev =>
-      prev.includes(labId) ? prev.filter(id => id !== labId) : [...prev, labId]
-    );
-  };
-
-  const toggleAllLabs = () => {
-    if (selectedLabIds.length === labsWithDevices.length) {
-      setSelectedLabIds([]);
-    } else {
-      setSelectedLabIds(labsWithDevices.map(l => l.id));
-    }
-  };
-
   const toggleDeviceSelection = (deviceId: string) => {
     setSelectedDeviceIds(prev =>
       prev.includes(deviceId) ? prev.filter(id => id !== deviceId) : [...prev, deviceId]
@@ -1137,13 +1124,13 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
               {Array.from(new Set(devices.map(d => d.brand).filter(Boolean))).map(brand => <SelectItem key={brand} value={brand}>{brand}</SelectItem>)}
             </SelectContent>
           </Select>
-          <Select value={labFilter} onValueChange={setLabFilter}>
-            <SelectTrigger className="bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)]"><SelectValue placeholder="Laboratuvar" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Tüm Laboratuvarlar</SelectItem>
-              {hospitals.map(h => <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <LabSelector
+            labs={hospitals.map(h => ({ id: h.id, name: h.name, kod: h.kod }))}
+            value={labFilter}
+            onChange={setLabFilter}
+            placeholder="Laboratuvar"
+            allOption={{ value: 'all', label: 'Tüm Laboratuvarlar' }}
+          />
           <Select value={planFilter} onValueChange={(v) => setPlanFilter(v as 'all' | 'planned' | 'unplanned')}>
             <SelectTrigger className="bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)]"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -2391,47 +2378,20 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
 
           {selectionMode === 'lab' ? (
             <>
-              <p className="text-sm text-muted-foreground">
-                Bakım planının atanacağı laboratuvarları seçin. Seçilen laboratuvarlardaki tüm cihazlara plan kaydedilecektir.
-              </p>
-
-              <div className="flex items-center gap-2 border-b pb-3 mb-3">
-                <Checkbox
-                  id="select-all-labs"
-                  checked={selectedLabIds.length === labsWithDevices.length && labsWithDevices.length > 0}
-                  onCheckedChange={toggleAllLabs}
-                />
-                <Label htmlFor="select-all-labs" className="text-sm font-medium cursor-pointer">
-                  Tümünü Seç ({labsWithDevices.length} laboratuvar)
-                </Label>
-              </div>
-
-              <ScrollArea className="max-h-[40vh]">
-                <div className="space-y-2">
-                  {labsWithDevices.map(lab => {
-                    const deviceCount = devices.filter(d => d.hospitalId === lab.id).length;
-                    return (
-                      <div
-                        key={lab.id}
-                        className={cn(
-                          "flex items-center gap-3 p-3 rounded-md border cursor-pointer transition-colors",
-                          selectedLabIds.includes(lab.id) ? "bg-primary/10 border-primary" : "hover:bg-muted/50"
-                        )}
-                        onClick={() => toggleLabSelection(lab.id)}
-                      >
-                        <Checkbox
-                          checked={selectedLabIds.includes(lab.id)}
-                          onCheckedChange={() => toggleLabSelection(lab.id)}
-                        />
-                        <div className="flex-1">
-                          <p className="font-medium text-sm">{lab.name}</p>
-                          <p className="text-xs text-muted-foreground">{deviceCount} cihaz</p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </ScrollArea>
+              <LabSelector
+                mode="multi"
+                helperText="Bakım planının atanacağı laboratuvarları seçin. Seçilen laboratuvarlardaki tüm cihazlara plan kaydedilecektir."
+                labs={labsWithDevices.map(lab => ({
+                  id: lab.id,
+                  name: lab.name,
+                  kod: lab.kod,
+                  meta: `${devices.filter(d => d.hospitalId === lab.id).length} cihaz`,
+                }))}
+                values={selectedLabIds}
+                onValuesChange={setSelectedLabIds}
+                placeholder="Laboratuvar seçin"
+                showChips
+              />
 
               {selectedLabIds.length > 0 && (
                 <div className="bg-muted/50 rounded-md p-3 text-sm">

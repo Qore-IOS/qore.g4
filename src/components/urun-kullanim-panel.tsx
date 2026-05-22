@@ -42,6 +42,7 @@ import QRCode from 'qrcode';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
+import { LabSelector } from '@/components/common/LabSelector';
 import { useLightDashboardData } from './dashboard/useDashboardData';
 import { useBarcodeFormatsQuery, useLabStock, useRecentConsumption, useSubPoints, useInvalidateQueries, useMinMaxRules, useLabPools, useDevices, useUsers, useActiveDutyShifts, useUpcomingDutyShifts } from '@/hooks/useFirebaseQueries';
 import type { DutyShift } from '@/lib/types';
@@ -467,7 +468,6 @@ export default function UrunKullanimPanel() {
   const [customFaultTitle, setCustomFaultTitle] = useState('');
   const [customFaultDescription, setCustomFaultDescription] = useState('');
   
-  const [isLabPopoverOpen, setIsLabPopoverOpen] = useState(false);
   const [isManualDeductionOpen, setIsManualDeductionOpen] = useState(false);
   const [manualProductCode, setManualProductCode] = useState('');
   const [manualLotKey, setManualLotKey] = useState('');
@@ -1831,51 +1831,17 @@ export default function UrunKullanimPanel() {
 
                 {/* Right: Lab selector */}
                 <div className="flex items-center gap-3 flex-shrink-0">
-
-                  {/* Lab selector */}
-                  <Popover open={isLabPopoverOpen} onOpenChange={setIsLabPopoverOpen}>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        role="combobox"
-                        aria-expanded={isLabPopoverOpen}
-                        className="w-[160px] justify-between font-medium h-8 text-sm frosted-glass-btn"
-                        disabled={isLoading || (assignedLaboratories.length <= 1 && currentUserProfile?.role !== 'admin')}
-                      >
-                        <span className="truncate">
-                          {selectedLabId
-                            ? assignedLaboratories.find((lab) => lab.id === selectedLabId)?.name
-                            : "Lab seçin..."}
-                        </span>
-                        <ChevronsUpDown className="ml-1 h-3 w-3 shrink-0 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-[200px] p-0">
-                      <Command>
-                        <CommandInput placeholder="Laboratuvar ara..." />
-                        <CommandList>
-                          {isLoading ? <div className="p-4 text-sm text-center">Yükleniyor...</div> :
-                           <CommandEmpty>Laboratuvar bulunamadı.</CommandEmpty>
-                          }
-                          <CommandGroup>
-                            {assignedLaboratories.sort((a, b) => (a.name || '').localeCompare(b.name || '')).map((lab) => (
-                              <CommandItem
-                                key={lab.id}
-                                value={lab.name}
-                                onSelect={() => {
-                                  onHospitalSelect(lab.id);
-                                  setIsLabPopoverOpen(false);
-                                }}
-                              >
-                                <Check className={cn("mr-2 h-4 w-4", selectedLabId === lab.id ? "opacity-100" : "opacity-0")} />
-                                {lab.name}
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
+                  <div className="w-[180px]">
+                    <LabSelector
+                      labs={assignedLaboratories.map(l => ({ id: l.id, name: l.name, kod: l.kod }))}
+                      value={selectedLabId}
+                      onChange={onHospitalSelect}
+                      placeholder="Lab seçin..."
+                      size="sm"
+                      disabled={isLoading || (assignedLaboratories.length <= 1 && currentUserProfile?.role !== 'admin')}
+                      loading={isLoading}
+                    />
+                  </div>
                 </div>
               </div>
             </div>

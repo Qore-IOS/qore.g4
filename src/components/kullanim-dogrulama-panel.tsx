@@ -5,6 +5,7 @@ import type { Laboratory, ProductCode, ConsumptionRecord } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { LabSelector } from '@/components/common/LabSelector';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Progress } from '@/components/ui/progress';
@@ -665,12 +666,12 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
 
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,0.8fr)_auto]">
             <div>
-              <label htmlFor="lab-select-nfc" className="block text-sm font-medium mb-1">
-                Laboratuvar Seçin
-              </label>
-              <Select
+              <LabSelector
+                id="lab-select-nfc"
+                label="Laboratuvar Seçin"
+                labs={laboratories.map(l => ({ id: l.id, name: l.name, kod: l.kod }))}
                 value={selectedLaboratoryId}
-                onValueChange={(value) => {
+                onChange={(value) => {
                   setSelectedLaboratoryId(value);
                   setHasFetchedData(false);
                   setConsumptionRecords([]);
@@ -680,18 +681,10 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
                   clearSubscriptions();
                   syncLabUrl(value);
                 }}
-              >
-                <SelectTrigger id="lab-select-nfc" className="w-full rounded-md" disabled={isLabsLoading}>
-                  <SelectValue placeholder={isLabsLoading ? 'Laboratuvarlar yükleniyor...' : 'Doğrulama yapılacak laboratuvarı seçin'} />
-                </SelectTrigger>
-                <SelectContent>
-                  {laboratories.map((laboratory) => (
-                    <SelectItem key={laboratory.id} value={laboratory.id}>
-                      {laboratory.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                placeholder={isLabsLoading ? 'Laboratuvarlar yükleniyor...' : 'Doğrulama yapılacak laboratuvarı seçin'}
+                disabled={isLabsLoading}
+                loading={isLabsLoading}
+              />
             </div>
 
             <div>

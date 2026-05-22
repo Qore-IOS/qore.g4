@@ -78,6 +78,7 @@ import type {
     TrashBinRecord,
 } from '@/lib/types';
 import { cn, generateId } from '@/lib/utils';
+import { LabSelector } from '@/components/common/LabSelector';
 import BackButton from '@/components/BackButton';
 import { openEjectedKitFaultReport } from '@/lib/faults';
 import { format } from 'date-fns';
@@ -113,7 +114,6 @@ export default function EjectedKitPanel() {
     const [aciklama, setAciklama] = useState<string>('');
 
     // Modal State
-    const [isLabModalOpen, setIsLabModalOpen] = useState(false);
     const [isDeviceModalOpen, setIsDeviceModalOpen] = useState(false);
     const [isProductModalOpen, setIsProductModalOpen] = useState(false);
 
@@ -249,7 +249,6 @@ export default function EjectedKitPanel() {
         setSelectedLabId(labId);
         setSelectedDeviceId('');
         setSelectedProductId('');
-        setIsLabModalOpen(false);
     };
 
     const handleDeviceSelect = (deviceId: string) => {
@@ -395,17 +394,13 @@ export default function EjectedKitPanel() {
 
                         <TabsContent value="kayit" className="space-y-6 pt-4">
                             {/* Lab Selection */}
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium">Laboratuvar</label>
-                                <Button
-                                    variant="outline"
-                                    className="w-full justify-start"
-                                    onClick={() => setIsLabModalOpen(true)}
-                                >
-                                    <Building2 className="mr-2 h-4 w-4" />
-                                    {selectedLab ? selectedLab.name : 'Laboratuvar seçin...'}
-                                </Button>
-                            </div>
+                            <LabSelector
+                                label="Laboratuvar"
+                                labs={sortedHospitals.map(h => ({ id: h.id, name: h.name, kod: h.kod }))}
+                                value={selectedLabId}
+                                onChange={(id) => handleLabSelect(id)}
+                                placeholder="Laboratuvar seçin..."
+                            />
 
                             {/* Device Selection */}
                             {selectedLabId && (
@@ -654,42 +649,6 @@ export default function EjectedKitPanel() {
                     </Tabs>
                 </CardContent>
             </Card>
-
-            {/* Lab Selection Modal */}
-            <Dialog open={isLabModalOpen} onOpenChange={setIsLabModalOpen}>
-                <DialogContent className="max-w-md">
-                    <DialogHeader>
-                        <DialogTitle>Laboratuvar Seçin</DialogTitle>
-                    </DialogHeader>
-                    <Command className="rounded-lg border shadow-md">
-                        <CommandInput placeholder="Laboratuvar ara..." />
-                        <CommandList>
-                            <CommandEmpty>Laboratuvar bulunamadı.</CommandEmpty>
-                            <CommandGroup>
-                                <ScrollArea className="h-[300px]">
-                                    {sortedHospitals.map((hospital) => (
-                                        <CommandItem
-                                            key={hospital.id}
-                                            value={hospital.name}
-                                            onSelect={() => handleLabSelect(hospital.id)}
-                                        >
-                                            <Check
-                                                className={cn(
-                                                    'mr-2 h-4 w-4',
-                                                    selectedLabId === hospital.id
-                                                        ? 'opacity-100'
-                                                        : 'opacity-0'
-                                                )}
-                                            />
-                                            {hospital.name}
-                                        </CommandItem>
-                                    ))}
-                                </ScrollArea>
-                            </CommandGroup>
-                        </CommandList>
-                    </Command>
-                </DialogContent>
-            </Dialog>
 
             {/* Device Selection Modal */}
             <Dialog open={isDeviceModalOpen} onOpenChange={setIsDeviceModalOpen}>

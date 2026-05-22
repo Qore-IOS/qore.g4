@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, ChangeEvent, useRef } from 're
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { LabSelector } from '@/components/common/LabSelector';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
 import { Loader2, PackagePlus, Save, Upload, Download, FileSpreadsheet } from 'lucide-react';
@@ -282,10 +283,12 @@ export default function CihazUstuEklePanel() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Select value={selectedHospitalId} onValueChange={setSelectedHospitalId}>
-              <SelectTrigger><SelectValue placeholder="Laboratuvar Seçin..." /></SelectTrigger>
-              <SelectContent>{hospitals.map(h => <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>)}</SelectContent>
-            </Select>
+            <LabSelector
+              labs={hospitals.map(h => ({ id: h.id, name: h.name, kod: h.kod }))}
+              value={selectedHospitalId}
+              onChange={setSelectedHospitalId}
+              placeholder="Laboratuvar Seçin..."
+            />
             <Select value={String(selectedMonth)} onValueChange={v => setSelectedMonth(Number(v))}>
               <SelectTrigger><SelectValue/></SelectTrigger>
               <SelectContent>{MONTHS.map(m => <SelectItem key={m.value} value={String(m.value)}>{m.label}</SelectItem>)}</SelectContent>

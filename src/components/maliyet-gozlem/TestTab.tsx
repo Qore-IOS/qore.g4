@@ -35,6 +35,7 @@ import { filterByCompanyScope } from '@/lib/company-scope';
 import { useAuth } from '@/contexts/auth-context';
 import { getExchangeRates } from '@/lib/exchange-rates';
 import { Loader2, ChevronDown, ChevronsUpDown, Search, Check, X } from 'lucide-react';
+import { LabSelector } from '@/components/common/LabSelector';
 
 // ────────────────────────────────────────────────────────────────────────────
 // Filtre satırı (lab + tek/çoklu seçim)
@@ -530,14 +531,17 @@ function FilterBar({
       </div>
 
       {/* Lab seçici (aramalı multiselect) */}
-      <MultiSelect
-        label="Lab"
-        placeholder="Laboratuvar ara…"
-        options={labs.map((l) => ({ id: l.id, label: l.name }))}
-        selected={selectedLabIds}
-        onChange={setSelectedLabIds}
-        width={isMobile ? 0 : 280}
-      />
+      <div style={{ width: isMobile ? '100%' : 280 }}>
+        <LabSelector
+          mode="multi"
+          label="Lab"
+          labs={labs.map((l) => ({ id: l.id, name: l.name, kod: l.kod }))}
+          values={selectedLabIds}
+          onValuesChange={setSelectedLabIds}
+          placeholder="Laboratuvar seç..."
+          searchPlaceholder="Laboratuvar ara..."
+        />
+      </div>
 
       {/* Test seçici (aramalı multiselect) */}
       <MultiSelect

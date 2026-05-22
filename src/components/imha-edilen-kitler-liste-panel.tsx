@@ -13,6 +13,7 @@ import type { DestroyedKitRecord, Hospital } from '@/lib/types';
 import BackButton from '@/components/BackButton';
 import { exportDataToExcel, cn } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { LabSelector } from '@/components/common/LabSelector';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Input } from '@/components/ui/input';
 
@@ -650,18 +651,14 @@ export default function ImhaEdilenKitlerListePanel() {
                     </div>
 
                     {/* Laboratory */}
-                    <div className="space-y-1.5">
-                        <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Laboratuvar</label>
-                        <Select value={labFilter} onValueChange={setLabFilter}>
-                            <SelectTrigger className="cihaz-pressed border-none h-10">
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">Tümü</SelectItem>
-                                {hospitals.map(h => <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>)}
-                            </SelectContent>
-                        </Select>
-                    </div>
+                    <LabSelector
+                        label="Laboratuvar"
+                        labs={hospitals.map(h => ({ id: h.id, name: h.name, kod: h.kod }))}
+                        value={labFilter}
+                        onChange={setLabFilter}
+                        placeholder="Laboratuvar"
+                        allOption={{ value: 'all', label: 'Tümü' }}
+                    />
 
                     {/* Source Type */}
                     <div className="space-y-1.5">

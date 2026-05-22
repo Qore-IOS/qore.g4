@@ -80,6 +80,7 @@ import {
 } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { LabSelector } from '@/components/common/LabSelector';
 import { cn } from '@/lib/utils';
 
 // Types
@@ -1025,18 +1026,17 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
           </Select>
 
           {/* Lab Filter */}
-          <Select value={selectedLabId} onValueChange={setSelectedLabId}>
-            <SelectTrigger className="w-[200px] bg-background" aria-label="Laboratuvar seçin">
-              <FlaskConical className="h-4 w-4 mr-2 text-muted-foreground" aria-hidden="true" />
-              <SelectValue placeholder="Laboratuvar seçin..." />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Tüm Laboratuvarlar</SelectItem>
-              {poolLabs.map(lab => (
-                <SelectItem key={lab.id} value={lab.id}>{lab.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="w-[220px]">
+            <LabSelector
+              ariaLabel="Laboratuvar seçin"
+              labs={poolLabs.map(l => ({ id: l.id, name: l.name, kod: l.kod }))}
+              value={selectedLabId}
+              onChange={setSelectedLabId}
+              placeholder="Laboratuvar seçin..."
+              allOption={{ value: 'all', label: 'Tüm Laboratuvarlar' }}
+              icon={<FlaskConical className="h-4 w-4" />}
+            />
+          </div>
 
           {/* Period Filter */}
           <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>

@@ -17,6 +17,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { LabSelector } from '@/components/common/LabSelector';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -221,7 +222,6 @@ export default function MerkezSiparisPanel() {
   const [selectedYear, setSelectedYear] = useState<number>(CURRENT_YEAR);
 
   const [depotSearch, setDepotSearch] = useState('');
-  const [labSearch, setLabSearch] = useState('');
   const [showSelectionPanel, setShowSelectionPanel] = useState(true);
   const [generatedItems, setGeneratedItems] = useState<GeneratedOrderItem[]>([]);
   const [tableFilters, setTableFilters] = useState<Record<string, string>>({});
@@ -634,7 +634,6 @@ export default function MerkezSiparisPanel() {
   };
 
   const filteredDepots = depots.filter(d => d.name?.toLowerCase().includes(depotSearch.toLowerCase()));
-  const filteredLabs = hospitals.filter(h => h.name?.toLowerCase().includes(labSearch.toLowerCase()));
 
   const handleGeneratedItemChange = (key: string, field: 'cihazUstuAdet' | 'siparisAdedi', value: string) => {
     const numericValue = Math.max(0, Number(value) || 0);
@@ -742,20 +741,15 @@ export default function MerkezSiparisPanel() {
                   </ScrollArea>
                 </div>
 
-                <div className="space-y-2">
-                  <Label>Laboratuvarlar</Label>
-                  <Input placeholder="Laboratuvar ara..." value={labSearch} onChange={e => setLabSearch(e.target.value)} />
-                  <ScrollArea className="h-52 border rounded-md p-2">
-                    <div className="space-y-2">
-                      {filteredLabs.map(hospital => (
-                        <label key={hospital.id} className="flex items-center gap-2 text-sm cursor-pointer">
-                          <Checkbox checked={selectedLabIds.includes(hospital.id)} onCheckedChange={() => toggleSelection(hospital.id, selectedLabIds, setSelectedLabIds)} />
-                          <span>{hospital.name}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </ScrollArea>
-                </div>
+                <LabSelector
+                  mode="multi"
+                  label="Laboratuvarlar"
+                  labs={hospitals.map(h => ({ id: h.id, name: h.name, kod: h.kod }))}
+                  values={selectedLabIds}
+                  onValuesChange={setSelectedLabIds}
+                  placeholder="Laboratuvar seçin"
+                  showChips
+                />
               </CardContent>
             </Card>
             )}

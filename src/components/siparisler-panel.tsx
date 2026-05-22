@@ -69,6 +69,7 @@ import * as XLSX from 'xlsx';
 import { useRowFocus } from '@/hooks/useRowFocus';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
+import { LabSelector } from '@/components/common/LabSelector';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { formatMiad, toDateFromAny } from '@/lib/date';
@@ -149,8 +150,6 @@ export default function SiparislerPanel(): JSX.Element {
   const [showBulk, setShowBulk] = useState(false);
   const [selectedBulkDepots, setSelectedBulkDepots] = useState<string[]>([]);
   const [selectedBulkLabs, setSelectedBulkLabs] = useState<string[]>([]);
-  
-  const [isLabPopoverOpen, setIsLabPopoverOpen] = useState(false);
 
   // Listen to orders in real-time for the selected depot
   useEffect(() => {
@@ -790,42 +789,13 @@ export default function SiparislerPanel(): JSX.Element {
               {/* Lab selector */}
               <div className="cihaz-card-strong p-4 sm:p-5 space-y-3">
                 <p className="cihaz-section-label">Hedef Laboratuvar</p>
-                <Popover open={isLabPopoverOpen} onOpenChange={setIsLabPopoverOpen}>
-                  <PopoverTrigger asChild>
-                    <button
-                      className={cn(
-                        "w-full flex items-center justify-between px-3 h-10 rounded-xl text-sm transition-all border border-[var(--dashboard-stroke)]",
-                        selectedLabId
-                          ? "bg-[var(--dashboard-surface)] shadow-[var(--dashboard-raised-soft)] font-medium text-[var(--dashboard-text)]"
-                          : "bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)]"
-                      )}
-                      disabled={!selectedDepotId || hospitals.length === 0}
-                    >
-                      <span className="truncate">{selectedLabName || 'Laboratuvar seçin...'}</span>
-                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
-                    <Command>
-                      <CommandInput placeholder="Laboratuvar ara..." />
-                      <CommandList>
-                        <CommandEmpty>Laboratuvar bulunamadı.</CommandEmpty>
-                        <CommandGroup>
-                          {hospitals.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')).map((hospital) => (
-                            <CommandItem
-                              key={hospital.id}
-                              value={hospital.name ?? ''}
-                              onSelect={() => { setSelectedLabId(hospital.id ?? ''); setIsLabPopoverOpen(false); }}
-                            >
-                              <Check className={cn("mr-2 h-4 w-4", selectedLabId === hospital.id ? "opacity-100" : "opacity-0")} />
-                              {hospital.name}
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
+                <LabSelector
+                  labs={hospitals.map(h => ({ id: h.id ?? '', name: h.name, kod: h.kod }))}
+                  value={selectedLabId}
+                  onChange={(id) => setSelectedLabId(id)}
+                  placeholder="Laboratuvar seçin..."
+                  disabled={!selectedDepotId || hospitals.length === 0}
+                />
 
                 {/* Min/Max button */}
                 <button
