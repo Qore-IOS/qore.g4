@@ -12,11 +12,12 @@ import {
   updateDoc,
   serverTimestamp,
   getDocs,
+  setDoc,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope } from '@/lib/company-scope';
-import { useHospitals, useProductCodes } from '@/hooks/useFirebaseQueries';
+import { useDepots, useHospitals, useProductCodes } from '@/hooks/useFirebaseQueries';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -89,6 +90,7 @@ function parseTarih(s: string): Date | null {
 export default function CeomedIrsaliyePanel() {
   const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
   const { data: hospitals = [] } = useHospitals();
+  const { data: depots = [] } = useDepots();
   const { data: productCodes = [] } = useProductCodes();
   const { toast } = useToast();
 
@@ -104,6 +106,7 @@ export default function CeomedIrsaliyePanel() {
   const [selected, setSelected] = useState<PendingIrsaliye | null>(null);
   const [approving, setApproving] = useState(false);
   const [targetHospitalId, setTargetHospitalId] = useState<string>('');
+  const [targetDepotId, setTargetDepotId] = useState<string>('');
 
   useEffect(() => {
     const q = query(collection(db, 'pendingCeomedIrsaliye'));
@@ -135,6 +138,16 @@ export default function CeomedIrsaliyePanel() {
     }
     return map;
   }, [hospitals]);
+
+  // Depot lookup by ceomedCariKodu
+  const depotByCari = useMemo(() => {
+    const map = new Map<string, { id: string; name: string }>();
+    for (const d of depots) {
+      const c = (d as any).ceomedCariKodu;
+      if (c) map.set(String(c).trim().toUpperCase(), { id: d.id, name: d.name });
+    }
+    return map;
+  }, [depots]);
 
   // Product lookup by stokKodu
   const productByStokKodu = useMemo(() => {
@@ -207,23 +220,35 @@ export default function CeomedIrsaliyePanel() {
   };
 
   const handleApprove = async (irs: PendingIrsaliye) => {
-    const mainMatch = hospitalByCari.get((irs.cariKodu || '').trim().toUpperCase());
-    if (!mainMatch) {
+    const cari = (irs.cariKodu || '').trim().toUpperCase();
+    const mainHospitalMatch = hospitalByCari.get(cari);
+    const mainDepotMatch = depotByCari.get(cari);
+
+    if (!mainHospitalMatch && !mainDepotMatch) {
       toast({
         title: 'Eşleşme yok',
-        description: `${irs.cariKodu} kodlu cariye karşılık gelen laboratuvar bulunamadı. Yönetim → Laboratuvarlar'dan ceomedCariKodu alanını doldurun.`,
+        description: `${irs.cariKodu} kodlu cariye karşılık gelen laboratuvar/depo bulunamadı. Yönetim → Laboratuvarlar veya Yönetim → Depolar'dan Ceomed Cari Kodu alanını doldurun.`,
         variant: 'destructive',
       });
       return;
     }
-    // Hedef: kullanici secmisse o, yoksa ana eslesme
-    const targetId = targetHospitalId || mainMatch.id;
-    const targetHospital = hospitals.find((h) => h.id === targetId);
-    if (!targetHospital) {
+
+    const targetHospital = mainHospitalMatch
+      ? hospitals.find((h) => h.id === (targetHospitalId || mainHospitalMatch.id))
+      : null;
+    const targetDepot = mainDepotMatch
+      ? depots.find((d) => d.id === (targetDepotId || mainDepotMatch.id))
+      : null;
+
+    const useDepot = !!targetDepotId || (!targetHospital && !!targetDepot);
+    if (!useDepot && !targetHospital) {
       toast({ title: 'Hata', description: 'Hedef laboratuvar bulunamadı.', variant: 'destructive' });
       return;
     }
-    const match = { id: targetHospital.id, name: targetHospital.name };
+    if (useDepot && !targetDepot) {
+      toast({ title: 'Hata', description: 'Hedef depo bulunamadı.', variant: 'destructive' });
+      return;
+    }
 
     setApproving(true);
     try {
@@ -250,8 +275,8 @@ export default function CeomedIrsaliyePanel() {
             ref,
             withCompanyScope(
               {
-                depotId: '',
-                depotName: '',
+                depotId: useDepot ? targetDepot!.id : '',
+                depotName: useDepot ? targetDepot!.name : '',
                 stokKodu: item.STOK_KODU,
                 stokAdi: product.stokAdi || '',
                 lotNumarasi: item.LOT || '',
@@ -260,9 +285,9 @@ export default function CeomedIrsaliyePanel() {
                 rafAdresi: '',
                 irsaliyeNumarasi: irs.irsaliyeNo,
                 eklenmeTarihi: Timestamp.now(),
-                isShipped: true,
-                hedefKurumId: match.id,
-                hedefKurum: match.name,
+                isShipped: !useDepot,
+                hedefKurumId: useDepot ? '' : targetHospital!.id,
+                hedefKurum: useDepot ? '' : targetHospital!.name,
                 createdByName: currentUserProfile?.name || currentUser?.email || 'Ceomed Sync',
                 createdByUid: currentUser?.uid || null,
                 source: 'ceomed',
@@ -277,23 +302,57 @@ export default function CeomedIrsaliyePanel() {
 
       await batch.commit();
 
-      const wasRouted = match.id !== mainMatch.id;
+      if (useDepot) {
+        const txRef = doc(db, 'malKabulTransactions', `MK-CEOMED-${irs.ceomedId}`);
+        const lineMap = new Map<string, { stokKodu: string; stokAdi: string; lotNumarasi: string; miad: string; adet: number; serials: string[] }>();
+        for (const item of irs.items || []) {
+          const product = productByStokKodu.get(String(item.STOK_KODU).trim());
+          if (!product || product.trackingMode !== 'serial') continue;
+          const key = `${item.STOK_KODU}||${item.LOT || ''}||${item.MIYAT || ''}`;
+          const prev = lineMap.get(key) || { stokKodu: item.STOK_KODU, stokAdi: product.stokAdi || '', lotNumarasi: item.LOT || '', miad: item.MIYAT ? normalizeMiad(item.MIYAT) : '', adet: 0, serials: [] };
+          prev.adet += Math.max(1, Number(item.MIKTAR) || 1);
+          if (item.BARKOD_SERI) prev.serials.push(item.BARKOD_SERI);
+          lineMap.set(key, prev);
+        }
+        const lineBatch = writeBatch(db);
+        lineBatch.set(txRef, withCompanyScope({
+          transactionId: `MK-CEOMED-${irs.ceomedId}`,
+          depotId: targetDepot!.id,
+          depotName: targetDepot!.name,
+          userId: currentUser?.uid || '',
+          userName: currentUserProfile?.name || currentUser?.email || 'Ceomed Sync',
+          timestamp: Timestamp.now(),
+          irsaliyeNo: irs.irsaliyeNo,
+          itemCount: added,
+          mode: 'verified',
+          source: 'ceomed',
+          ceomedIrsaliyeId: irs.ceomedId,
+        }, currentCompanyId));
+        for (const line of lineMap.values()) {
+          lineBatch.set(doc(collection(txRef, 'lines')), withCompanyScope(line, currentCompanyId));
+        }
+        await lineBatch.commit();
+      }
+
       await updateDoc(doc(db, 'pendingCeomedIrsaliye', irs.id), {
         status: 'approved',
         approvedAt: serverTimestamp(),
         approvedBy: currentUser?.uid || null,
         approvedByName: currentUserProfile?.name || currentUser?.email || '',
-        hospitalId: match.id,
-        hospitalName: match.name,
-        mainHospitalId: mainMatch.id,
-        mainHospitalName: mainMatch.name,
-        routedTo: wasRouted ? match.id : null,
+        hospitalId: useDepot ? null : targetHospital!.id,
+        hospitalName: useDepot ? null : targetHospital!.name,
+        depotId: useDepot ? targetDepot!.id : null,
+        depotName: useDepot ? targetDepot!.name : null,
+        mainHospitalId: mainHospitalMatch?.id || null,
+        mainHospitalName: mainHospitalMatch?.name || null,
+        mainDepotId: mainDepotMatch?.id || null,
+        mainDepotName: mainDepotMatch?.name || null,
       });
 
       toast({
         title: 'İrsaliye onaylandı',
         description:
-          `${match.name} stoğuna ${added} kayıt eklendi.` +
+          `${useDepot ? targetDepot!.name : targetHospital!.name} stoğuna ${added} kayıt eklendi.` +
           (skippedNoProduct ? ` ${skippedNoProduct} ürün eşleşmedi.` : '') +
           (skippedNotSeri ? ` ${skippedNotSeri} ürün seri takipli değil.` : ''),
       });
@@ -482,7 +541,7 @@ export default function CeomedIrsaliyePanel() {
       </div>
 
       {/* Detay Dialog */}
-      <Dialog open={!!selected} onOpenChange={(o) => { if (!o) { setSelected(null); setTargetHospitalId(''); } }}>
+      <Dialog open={!!selected} onOpenChange={(o) => { if (!o) { setSelected(null); setTargetHospitalId(''); setTargetDepotId(''); } }}>
         <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle>
