@@ -188,6 +188,16 @@ type PendingCeomedIrsaliye = {
   status: 'pending' | 'approved' | 'rejected' | 'deleted';
   items: CeomedItem[];
 };
+type PendingCeomedLine = {
+  key: string;
+  stokKodu: string;
+  stokAdi: string;
+  marka: string;
+  lot: string;
+  miad: string;
+  adet: number;
+  serials: string[];
+};
 
 const PENDING_CEOMED_DURUM_SET = new Set([
   'IRSALIYE YAZDIRILABILIR',
@@ -549,6 +559,7 @@ export default function AnaPanel(props: AnaPanelProps) {
   const [pendingCeomedIrsaliye, setPendingCeomedIrsaliye] = useState<PendingCeomedIrsaliye[]>([]);
   const [isPendingCeomedModalOpen, setIsPendingCeomedModalOpen] = useState(false);
   const [ceomedApprovingId, setCeomedApprovingId] = useState<string | null>(null);
+  const [selectedPendingIrs, setSelectedPendingIrs] = useState<PendingCeomedIrsaliye | null>(null);
   const [isBulkBarcodeScanOpen, setIsBulkBarcodeScanOpen] = useState(false);
   const [isBulkScanMode, setIsBulkScanMode] = useState(false);
 
@@ -1579,6 +1590,62 @@ export default function AnaPanel(props: AnaPanelProps) {
       setCeomedApprovingId(null);
     }
   };
+
+  const buildPendingLines = useCallback((irs: PendingCeomedIrsaliye | null): PendingCeomedLine[] => {
+    if (!irs) return [];
+    const grouped = new Map<string, PendingCeomedLine>();
+    for (const it of (irs.items || [])) {
+      const key = `${it.STOK_KODU}||${it.LOT || ''}||${it.MIYAT || ''}`;
+      const p = productCodes.find((x) => (x.stokKodu || '').trim() === (it.STOK_KODU || '').trim());
+      const prev = grouped.get(key) || {
+        key,
+        stokKodu: it.STOK_KODU,
+        lot: it.LOT || '',
+        miad: it.MIYAT ? normalizeMiad(it.MIYAT) : '',
+        stokAdi: p?.stokAdi || '',
+        marka: (p as any)?.marka || '',
+        adet: 0,
+        serials: [],
+      };
+      prev.adet += Math.max(1, Number(it.MIKTAR) || 1);
+      if (it.BARKOD_SERI) prev.serials.push(it.BARKOD_SERI);
+      grouped.set(key, prev);
+    }
+    return Array.from(grouped.values());
+  }, [productCodes]);
+
+  const handleStartVerifiedCeomedReceipt = (irs: PendingCeomedIrsaliye) => {
+    const lines = buildPendingLines(irs);
+    const rows: ScanRow[] = [];
+    for (const line of lines) {
+      if (line.serials.length > 0) {
+        for (const s of line.serials) {
+          rows.push({
+            id: generateId(),
+            barkod: s,
+            stokKodu: line.stokKodu,
+            stokAdi: line.stokAdi || line.stokKodu,
+            lotNumarasi: line.lot,
+            miad: line.miad,
+            seriNumarasi: s,
+            rafAdresi: '',
+            irsaliyeNumarasi: irs.irsaliyeNo,
+            isSelected: false,
+            timestamp: new Date(),
+            isProcessed: false,
+            adet: 1,
+            isGroup: false,
+            bulkQrAssigned: false,
+            key: `${line.stokKodu}-${line.lot}-${line.miad}`,
+          } as ScanRow);
+        }
+      }
+    }
+    setScannedItems((prev) => [...rows, ...prev]);
+    setSelectedPendingIrs(irs);
+    setIsPendingCeomedModalOpen(false);
+    toast({ title: 'Doğrulamalı moda aktarıldı', description: `${irs.irsaliyeNo} seri numaraları mal kabul listesine eklendi. Adres ataması yapıp doğrulayarak devam edin.` });
+  };
   
   // Barkodsuz giriş için tüm non-serial ürünleri listele (lot_manual, qty_manual, lot_barcode, qty_barcode)
   const allNonSerialProducts = useMemo(() => {
@@ -2325,23 +2392,23 @@ export default function AnaPanel(props: AnaPanelProps) {
             {pendingCeomedIrsaliye.length === 0 ? (
               <div className="text-sm text-[var(--dashboard-muted)] py-10 text-center">Bekleyen irsaliye bulunamadı.</div>
             ) : pendingCeomedIrsaliye.map((irs) => {
-              const grouped = new Map<string, { stokKodu: string; lot: string; miad: string; stokAdi: string; adet: number; serials: string[] }>();
-              for (const it of (irs.items || [])) {
-                const key = `${it.STOK_KODU}||${it.LOT || ''}||${it.MIYAT || ''}`;
-                const p = productCodes.find((x) => (x.stokKodu || '').trim() === (it.STOK_KODU || '').trim());
-                const prev = grouped.get(key) || { stokKodu: it.STOK_KODU, lot: it.LOT || '', miad: it.MIYAT ? normalizeMiad(it.MIYAT) : '', stokAdi: p?.stokAdi || '', adet: 0, serials: [] };
-                prev.adet += Math.max(1, Number(it.MIKTAR) || 1);
-                if (it.BARKOD_SERI) prev.serials.push(it.BARKOD_SERI);
-                grouped.set(key, prev);
-              }
+              const lines = buildPendingLines(irs);
+              const brands = Array.from(new Set(lines.map(l => l.marka).filter(Boolean)));
+              const isSelected = selectedPendingIrs?.id === irs.id;
               return (
-                <Card key={irs.id}>
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-base">{irs.irsaliyeNo}</CardTitle>
-                    <CardDescription>{irs.cariKodu} • {irs.cariUnvan}</CardDescription>
+                <Card key={irs.id} className={cn("cursor-pointer", isSelected && "ring-1 ring-[var(--dashboard-accent)]")} onClick={() => setSelectedPendingIrs(irs)}>
+                  <CardHeader className="py-3">
+                    <CardTitle className="text-sm flex items-center justify-between">
+                      <span>{irs.irsaliyeNo}</span>
+                      <span className="text-xs font-normal text-[var(--dashboard-muted)]">{irs.cariKodu}</span>
+                    </CardTitle>
+                    <CardDescription className="text-xs truncate">
+                      {brands.length ? `Markalar: ${brands.join(', ')}` : 'Marka bilgisi yok'}
+                    </CardDescription>
                   </CardHeader>
-                  <CardContent className="space-y-2">
-                    {Array.from(grouped.values()).map((g, idx) => (
+                  {isSelected && (
+                  <CardContent className="space-y-2 pt-0">
+                    {lines.map((g, idx) => (
                       <Accordion key={`${g.stokKodu}-${g.lot}-${idx}`} type="single" collapsible>
                         <AccordionItem value="s">
                           <AccordionTrigger>
@@ -2352,18 +2419,22 @@ export default function AnaPanel(props: AnaPanelProps) {
                           </AccordionTrigger>
                           <AccordionContent>
                             <div className="text-xs grid grid-cols-2 md:grid-cols-4 gap-1 font-mono">
-                              {g.serials.length ? g.serials.map((s, i) => <span key={`${s}-${i}`}>{s}</span>) : <span>Seri yok</span>}
+                              {g.serials.length ? g.serials.map((s, i) => <span key={`${s}-${i}`} className="px-2 py-1 rounded border border-red-300 text-red-600">{s}</span>) : <span>Seri yok</span>}
                             </div>
                           </AccordionContent>
                         </AccordionItem>
                       </Accordion>
                     ))}
-                    <div className="flex justify-end">
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" onClick={() => handleStartVerifiedCeomedReceipt(irs)}>
+                        Doğrulamalı Stoğa Aktar
+                      </Button>
                       <Button onClick={() => handleApproveCeomedToDepot(irs)} disabled={ceomedApprovingId === irs.id}>
                         {ceomedApprovingId === irs.id ? 'Aktarılıyor...' : 'Stoğa Aktar'}
                       </Button>
                     </div>
                   </CardContent>
+                  )}
                 </Card>
               );
             })}
