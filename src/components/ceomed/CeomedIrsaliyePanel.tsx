@@ -400,7 +400,7 @@ export default function CeomedIrsaliyePanel() {
           </h2>
           <p className="text-sm" style={{ color: 'var(--dashboard-muted)' }}>
             Ceomed ERP'den çekilmiş onay bekleyen irsaliyeler. Cari kodu eşleşen
-            laboratuvara seri takipli ürünler aktarılır.
+            laboratuvar/depo hedefine seri takipli ürünler aktarılır.
           </p>
         </div>
       </div>
@@ -469,7 +469,9 @@ export default function CeomedIrsaliyePanel() {
         ) : (
           <div className="space-y-2">
             {filtered.map((i) => {
-              const match = hospitalByCari.get((i.cariKodu || '').trim().toUpperCase());
+              const cari = (i.cariKodu || '').trim().toUpperCase();
+              const hospitalMatch = hospitalByCari.get(cari);
+              const depotMatch = depotByCari.get(cari);
               const statusBadge =
                 i.status === 'approved'
                   ? { text: 'Onaylandı', cls: 'bg-emerald-100 text-emerald-700' }
@@ -505,9 +507,12 @@ export default function CeomedIrsaliyePanel() {
                         <span className="truncate">{i.cariUnvan}</span>
                       </div>
                       <div className="mt-1">
-                        {match ? (
+                        {(hospitalMatch || depotMatch) ? (
                           <span className="inline-flex items-center gap-1 text-[11px] text-emerald-600">
-                            <CheckCircle className="h-3 w-3" /> Eşleşti: {match.name}
+                            <CheckCircle className="h-3 w-3" /> Eşleşti:
+                            {hospitalMatch ? ` Lab: ${hospitalMatch.name}` : ''}
+                            {hospitalMatch && depotMatch ? ' • ' : ''}
+                            {depotMatch ? ` Depo: ${depotMatch.name}` : ''}
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 text-[11px] text-amber-600">
