@@ -20,6 +20,7 @@ import { db } from '@/lib/firebase';
 import { collection, writeBatch, doc, getDocs, query, where, serverTimestamp, addDoc, onSnapshot } from 'firebase/firestore';
 import { cn, generateId, playFeedback } from '@/lib/utils';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { LabSelector } from '@/components/common/LabSelector';
 import { Label } from '@/components/ui/label';
 import { useBarcodeParser } from '@/hooks/useBarcodeParser';
 import useHidScanner from '@/hooks/useHidScanner';
@@ -299,13 +300,14 @@ export default function UrunIadePanel() {
                         </Select>
                     </div>
                      <div className="flex-1 max-w-sm">
-                        <Label className="block text-sm font-medium mb-1">Kaynak Laboratuvar</Label>
-                        <Select value={selectedLabId} onValueChange={setSelectedLabId} disabled={isLoading}>
-                            <SelectTrigger><SelectValue placeholder="Laboratuvar seçin..." /></SelectTrigger>
-                            <SelectContent>
-                                {hospitals.map(l => <SelectItem key={l.id!} value={l.id!}>{l.name}</SelectItem>)}
-                            </SelectContent>
-                        </Select>
+                        <LabSelector
+                            label="Kaynak Laboratuvar"
+                            labs={hospitals.map(l => ({ id: l.id!, name: l.name, kod: l.kod }))}
+                            value={selectedLabId}
+                            onChange={setSelectedLabId}
+                            placeholder="Laboratuvar seçin..."
+                            disabled={isLoading}
+                        />
                     </div>
                 </div>
             </CardContent>
