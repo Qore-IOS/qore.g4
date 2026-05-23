@@ -55,3 +55,7 @@ qore-studio-work
 .env.local
 .env*.local
 .test-dist-cost/
+
+# Multi-tenancy audit reports (may contain tenant data)
+audit-report.json
+reports/audit-*.json
