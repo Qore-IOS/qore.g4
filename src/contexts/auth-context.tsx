@@ -170,11 +170,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                   userPermissions.push('kullanici-talepleri');
               }
 
+              // Force-refresh ID token so we pick up custom claims set by the
+              // onUserClaimSync Cloud Function. Token claims are the source of
+              // truth for Firestore Security Rules (Faz 6). Falls back to the
+              // users doc if claims haven't propagated yet.
+              let claimCompanyId: string | undefined;
+              let claimIsSuperAdmin: boolean | undefined;
+              try {
+                const tokenResult = await user.getIdTokenResult(true);
+                claimCompanyId = tokenResult.claims.companyId as string | undefined;
+                claimIsSuperAdmin = tokenResult.claims.isSuperAdmin as boolean | undefined;
+              } catch (err) {
+                console.warn('Token claim okunamadı, users doc fallback:', err);
+              }
+
               setCurrentUserProfile({...userData, accessibleViews: userPermissions});
-              setIsSuperAdmin(userData.role === 'super_admin');
+              setIsSuperAdmin(claimIsSuperAdmin ?? userData.role === 'super_admin');
               setIsAdmin(userData.role === 'super_admin' || userData.role === 'admin' || userData.role === 'admin_developer' || user.uid === ADMIN_USER_UID);
               setIsAdminDeveloper(userData.role === 'super_admin' || userData.role === 'admin_developer' || user.uid === ADMIN_USER_UID);
-              setCurrentCompanyId(userData.companyId || LEGACY_COMPANY_ID);
+              setCurrentCompanyId(claimCompanyId || userData.companyId || LEGACY_COMPANY_ID);
               setPermissions(userPermissions);
 
               // Force dark mode for 'user' role, otherwise apply user's preference
