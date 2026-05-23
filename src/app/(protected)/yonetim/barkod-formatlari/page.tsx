@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDocs, orderBy, query, setDoc, deleteDoc, writeBatch, deleteField } from 'firebase/firestore';
+import { useAuth } from '@/contexts/auth-context';
 import type { BarcodeFormat, ExpiryPattern } from '@/lib/barcode';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -80,6 +81,7 @@ function cleanExpiry(p?: any) {
 
 export default function BarkodFormatlariPage() {
   const { toast } = useToast();
+  const { currentCompanyId } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
   const [formats, setFormats] = useState<BarcodeFormat[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -159,6 +161,10 @@ export default function BarkodFormatlariPage() {
       payload.expiry = deleteField();
     }
   
+    if (!editing.id) {
+      payload.companyId = currentCompanyId;
+    }
+
     try {
       await setDoc(doc(db, 'barcodeFormats', id), payload, { merge: true });
       toast({ title: 'Kaydedildi', description: 'Barkod formatı güncellendi.' });
