@@ -798,9 +798,12 @@ export default function DosyaYonetimiPage() {
                             </span>
                           )}
                           {hasLocation && wasAutoMatched && (
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-violet-100 text-violet-700" title="Konum dosya adından otomatik eşleştirildi">
+                            <span
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-violet-100 text-violet-700"
+                              title={`Konum dosya adından otomatik eşleştirildi (${(dosya as any).autoMatchReason || 'name'}, %${Math.round(((dosya as any).autoMatchConfidence || 0) * 100)})`}
+                            >
                               <Wand2 className="h-3 w-3" />
-                              Otomatik atandı
+                              Otomatik atandı{(dosya as any).autoMatchReason === 'akronim' ? ' · kısaltma' : (dosya as any).autoMatchReason === 'ilk_kelime' ? ' · ilk kelime' : (dosya as any).autoMatchReason === 'kod' ? ' · kod' : ''}
                             </span>
                           )}
                           {!hasLocation && (
