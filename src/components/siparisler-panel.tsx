@@ -64,7 +64,8 @@ import { tr } from 'date-fns/locale';
 import { Loader2, PlusCircle, Trash2, Check, FileSpreadsheet, History, Calculator, ChevronsUpDown, Undo, ClipboardPlus, ShoppingCart, Package, Plus, Minus, MoreHorizontal, ArrowRight, Search, CheckCircle2, Edit3, Save, Send, Share2 } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { useDepots, useHospitals, useProductCodes, useDepoStok, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
-import { filterByCompanyScope } from '@/lib/company-scope';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import * as XLSX from 'xlsx';
 import { useRowFocus } from '@/hooks/useRowFocus';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -179,8 +180,10 @@ export default function SiparislerPanel(): JSX.Element {
   
     const startListener = () => {
       try {
-        const q1 = query(
-          collection(db, 'orders'),
+        const q1 = scopedQuery(
+          'orders',
+          currentCompanyId,
+          isSuperAdmin,
           where('depotId', '==', selectedDepotId),
           orderBy('createdAt', 'desc')
         );
@@ -193,7 +196,7 @@ export default function SiparislerPanel(): JSX.Element {
               errorMessage: error instanceof Error ? error.message : String(error),
             });
             if (unsubscribe) unsubscribe();
-            const q2 = query(collection(db, 'orders'), where('depotId', '==', selectedDepotId));
+            const q2 = scopedQuery('orders', currentCompanyId, isSuperAdmin, where('depotId', '==', selectedDepotId));
             unsubscribe = onSnapshot(q2, (snapshot) => mapSnapshot(snapshot));
           }
         );
@@ -202,14 +205,14 @@ export default function SiparislerPanel(): JSX.Element {
           depotId: selectedDepotId,
           error: e instanceof Error ? e.message : String(e),
         });
-        const q2 = query(collection(db, 'orders'), where('depotId', '==', selectedDepotId));
+        const q2 = scopedQuery('orders', currentCompanyId, isSuperAdmin, where('depotId', '==', selectedDepotId));
         unsubscribe = onSnapshot(q2, (snapshot) => mapSnapshot(snapshot));
       }
     };
   
     startListener();
     return () => { if (unsubscribe) unsubscribe(); };
-  }, [selectedDepotId]);
+  }, [selectedDepotId, currentCompanyId, isSuperAdmin]);
 
   // Fallback Migration: Geriye dönük uyumluluk için eski (targetDepotId ile kaydedilmiş)
   // siparişleri tespit edip depotId olarak veritabanında güncelliyoruz.
@@ -218,7 +221,7 @@ export default function SiparislerPanel(): JSX.Element {
     if (!selectedDepotId) return;
     const fixLegacyOrders = async () => {
       try {
-        const qFix = query(collection(db, 'orders'), where('targetDepotId', '==', selectedDepotId));
+        const qFix = scopedQuery('orders', currentCompanyId, isSuperAdmin, where('targetDepotId', '==', selectedDepotId));
         const snap = await getDocs(qFix);
         if (!snap.empty) {
           const batch = writeBatch(db);
@@ -270,7 +273,7 @@ export default function SiparislerPanel(): JSX.Element {
       setPeripheralOrders(rows);
     };
 
-    const qPerif = query(collection(db, 'orders'), where('isPeripheral', '==', true));
+    const qPerif = scopedQuery('orders', currentCompanyId, isSuperAdmin, where('isPeripheral', '==', true));
     const unsub = onSnapshot(qPerif, mapSnap, (err) => {
       siparislerLogger.warn('Perifer sipariş dinleyici hatası', {
         errorMessage: err instanceof Error ? err.message : String(err),
@@ -328,11 +331,11 @@ export default function SiparislerPanel(): JSX.Element {
       createdById: currentUser?.uid || 'unknown',
       transferredAt: null,
     };
-    await setDoc(doc(db, 'orders', orderId), {
+    await setDoc(doc(db, 'orders', orderId), withCompanyScope({
       ...newOrder,
       id: orderId,
       createdAt: Timestamp.fromDate(newOrder.createdAt as Date),
-    });
+    }, currentCompanyId));
     
     // Bildirim için kısa ürün özeti: ilk 3 ürünü "Ad x adet" formatıyla, fazlasını "+N kalem" olarak göster.
     const totalAdetForNotif = orderItems.reduce((s, it) => s + (Number(it.adet) || 0), 0);

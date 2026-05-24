@@ -28,6 +28,8 @@ import { Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
 import { collection, query, where, getDocs, orderBy, Timestamp, onSnapshot } from 'firebase/firestore';
+import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { format as formatDate } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import type { Shipment, Order, Depot } from '@/lib/types';
@@ -48,6 +50,7 @@ export default function SiparisGecmisPanel(): JSX.Element {
   const router = useRouter();
   const depotIdFromUrl = searchParams.get('depotId') || '';
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   const [depots, setDepots] = useState<Depot[]>([]);
   const [selectedDepotId, setSelectedDepotId] = useState<string>(depotIdFromUrl);
@@ -91,7 +94,7 @@ export default function SiparisGecmisPanel(): JSX.Element {
             for (let i = 0; i < uniqueOrderIds.length; i += 30) {
                 orderChunks.push(uniqueOrderIds.slice(i, i + 30));
             }
-            const orderPromises = orderChunks.map(chunk => getDocs(query(collection(db, 'orders'), where('id', 'in', chunk))));
+            const orderPromises = orderChunks.map(chunk => getDocs(scopedQuery('orders', currentCompanyId, isSuperAdmin, where('id', 'in', chunk))));
             const orderSnaps = await Promise.all(orderPromises);
             
             const ordersData: Record<string, Order> = {};

@@ -14,6 +14,7 @@ import { format as formatDate } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import type { Hospital, Order, ProductCode } from '@/lib/types';
 import {
   ArrowLeft,
@@ -62,7 +63,7 @@ function getStatusInfo(order: Order) {
 
 export default function LojistikSiparisGecmisPanel() {
   const router = useRouter();
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
@@ -97,7 +98,7 @@ export default function LojistikSiparisGecmisPanel() {
 
   // Listen to ALL peripheral orders the user has access to
   useEffect(() => {
-    const q = query(collection(db, 'orders'), where('isPeripheral', '==', true));
+    const q = scopedQuery('orders', currentCompanyId, isSuperAdmin, where('isPeripheral', '==', true));
     const unsub = onSnapshot(q, (snap) => {
       const list = snap.docs
         .map((d) => {

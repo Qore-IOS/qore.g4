@@ -115,6 +115,7 @@ service cloud.firestore {
     match /irsaliyeFiles/{id}                 { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /productCodes/{id}                  { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /notifications/{id}                 { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /orders/{id}                        { allow read: if inCompany(); allow write: if writingInCompany(); }
 
     // -----------------------------
     // LOOSE tier — not yet scoped (TODO: tighten as queries migrate)
@@ -153,7 +154,6 @@ service cloud.firestore {
     match /malKabulTransactions/{id}          { allow read, write: if isSignedIn(); }
     match /minMaxHistory/{id}                 { allow read, write: if isSignedIn(); }
     match /nfcDisposalEvents/{id}             { allow read, write: if isSignedIn(); }
-    match /orders/{id}                        { allow read, write: if isSignedIn(); }
     match /overtimeRequests/{id}              { allow read, write: if isSignedIn(); }
     match /pendingCeomedIrsaliye/{id}         { allow read, write: if isSignedIn(); }
     match /pendingReturns/{id}                { allow read, write: if isSignedIn(); }

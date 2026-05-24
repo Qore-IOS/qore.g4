@@ -27,6 +27,7 @@ import type {
   Currency,
 } from '../lib/types';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { useAuth } from '@/contexts/auth-context';
 import { getExchangeRates } from '@/lib/exchange-rates';
 
@@ -65,13 +66,13 @@ export default function TestCostDetailModal({ open, onOpenChange, testDef, allTe
       try {
         const [productsSnap, labsSnap, devicesSnap, assignedSnap, assetsSnap, personnelSnap, stokSnap, rates] =
           await Promise.all([
-            getDocs(query(collection(db, 'productCodes'), orderBy('stokAdi', 'asc'))),
-            getDocs(query(collection(db, 'hospitals'), orderBy('name', 'asc'))),
-            getDocs(collection(db, 'devices')),
-            getDocs(collection(db, 'hospitalDeviceAssignments')),
-            getDocs(collection(db, 'assets')),
-            getDocs(collection(db, 'personnel')),
-            getDocs(collection(db, 'depoStok')),
+            getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin, orderBy('stokAdi', 'asc'))),
+            getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin, orderBy('name', 'asc'))),
+            getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
+            getDocs(scopedQuery('hospitalDeviceAssignments', currentCompanyId, isSuperAdmin)),
+            getDocs(scopedQuery('assets', currentCompanyId, isSuperAdmin)),
+            getDocs(scopedQuery('personnel', currentCompanyId, isSuperAdmin)),
+            getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin)),
             getExchangeRates().catch(() => ({ EUR: 1, USD: 1.08, TRY: 38.5 })),
           ]);
 
