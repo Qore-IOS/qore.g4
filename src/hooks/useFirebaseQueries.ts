@@ -47,6 +47,7 @@ import type {
 import { DepotStockCountSession } from '@/lib/mal-kabul/types';
 import { SayimSession } from '@/lib/cost-analytics';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 // Helper to convert Firestore timestamps
 const processTimestamp = (docData: any) => {
@@ -68,12 +69,15 @@ const processTimestamp = (docData: any) => {
  * Cache for 1 hour, refetch on window focus
  */
 export function useProductCodes() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
-    queryKey: ['productCodes'],
+    queryKey: ['productCodes', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'productCodes'));
-      return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as ProductCode));
+      const snap = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin));
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as ProductCode));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 60 * 60 * 1000, // 1 hour
     gcTime: 2 * 60 * 60 * 1000, // 2 hours
     refetchOnWindowFocus: true,
@@ -88,10 +92,11 @@ export function useDepots() {
   return useQuery({
     queryKey: ['depots', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'depots'));
+      const snap = await getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin));
       const depots = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Depot));
       return filterByCompanyScope(depots, currentCompanyId, isSuperAdmin);
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 60 * 60 * 1000,
     gcTime: 2 * 60 * 60 * 1000,
     refetchOnWindowFocus: true,
@@ -106,10 +111,11 @@ export function useHospitals() {
   return useQuery({
     queryKey: ['hospitals', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'hospitals'));
+      const snap = await getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin));
       const hospitals = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Hospital));
       return filterByCompanyScope(hospitals, currentCompanyId, isSuperAdmin);
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 60 * 60 * 1000,
     gcTime: 2 * 60 * 60 * 1000,
     refetchOnWindowFocus: true,
@@ -124,10 +130,11 @@ export function useBorcDepots() {
   return useQuery({
     queryKey: ['borcDepots', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'borcDepots'));
+      const snap = await getDocs(scopedQuery('borcDepots', currentCompanyId, isSuperAdmin));
       const depots = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Depot));
       return filterByCompanyScope(depots, currentCompanyId, isSuperAdmin);
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 60 * 60 * 1000,
     gcTime: 2 * 60 * 60 * 1000,
   });
@@ -141,10 +148,11 @@ export function useDevices() {
   return useQuery({
     queryKey: ['devices', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'devices'));
+      const snap = await getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin));
       const devices = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Device));
       return filterByCompanyScope(devices, currentCompanyId, isSuperAdmin);
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 30 * 60 * 1000, // 30 minutes
     gcTime: 60 * 60 * 1000,
     refetchOnWindowFocus: true,
@@ -159,10 +167,11 @@ export function usePurchasingTasks() {
   return useQuery({
     queryKey: ['purchasingTasks', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'purchasingTasks'));
+      const snap = await getDocs(scopedQuery('purchasingTasks', currentCompanyId, isSuperAdmin));
       const tasks = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as PurchasingTask));
       return filterByCompanyScope(tasks, currentCompanyId, isSuperAdmin);
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 10 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
   });
@@ -192,10 +201,11 @@ export function useDeviceGroups() {
   return useQuery({
     queryKey: ['deviceGroups', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'deviceGroups'));
+      const snap = await getDocs(scopedQuery('deviceGroups', currentCompanyId, isSuperAdmin));
       const groups = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DeviceGroup));
       return filterByCompanyScope(groups, currentCompanyId, isSuperAdmin);
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 60 * 60 * 1000,
     gcTime: 2 * 60 * 60 * 1000,
   });
@@ -249,10 +259,11 @@ export function useLabPools() {
   return useQuery({
     queryKey: ['labPools', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'labPools'));
+      const snap = await getDocs(scopedQuery('labPools', currentCompanyId, isSuperAdmin));
       const labPools = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as LabPool));
       return filterByCompanyScope(labPools, currentCompanyId, isSuperAdmin);
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 60 * 60 * 1000,
     gcTime: 2 * 60 * 60 * 1000,
   });
@@ -262,13 +273,16 @@ export function useLabPools() {
  * Barcode Formats - Active only
  */
 export function useBarcodeFormatsQuery() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
-    queryKey: ['barcodeFormats'],
+    queryKey: ['barcodeFormats', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const q = query(collection(db, 'barcodeFormats'), where('active', '==', true));
-      const snap = await getDocs(q);
+      const snap = await getDocs(
+        scopedQuery('barcodeFormats', currentCompanyId, isSuperAdmin, where('active', '==', true)),
+      );
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as BarcodeFormat));
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 60 * 60 * 1000,
     gcTime: 2 * 60 * 60 * 1000,
   });
@@ -282,10 +296,11 @@ export function useAddressDefinitions() {
   return useQuery({
     queryKey: ['addressDefinitions', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'addressDefinitions'));
+      const snap = await getDocs(scopedQuery('addressDefinitions', currentCompanyId, isSuperAdmin));
       const addresses = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as AddressDefinition));
       return filterByCompanyScope(addresses, currentCompanyId, isSuperAdmin);
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 60 * 60 * 1000,
     gcTime: 2 * 60 * 60 * 1000,
   });
@@ -299,10 +314,11 @@ export function useUsers() {
   return useQuery({
     queryKey: ['users', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'users'));
+      const snap = await getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin));
       const users = snap.docs.map(d => ({ uid: d.id, ...processTimestamp(d.data()) } as AppUser));
       return filterByCompanyScope(users, currentCompanyId, isSuperAdmin);
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 30 * 60 * 1000,
     gcTime: 60 * 60 * 1000,
   });
@@ -317,10 +333,11 @@ export function useHospitalDeviceAssignments() {
   return useQuery({
     queryKey: ['hospitalDeviceAssignments', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'hospitalDeviceAssignments'));
+      const snap = await getDocs(scopedQuery('hospitalDeviceAssignments', currentCompanyId, isSuperAdmin));
       const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
       return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 30 * 60 * 1000,
     gcTime: 60 * 60 * 1000,
   });
@@ -334,10 +351,11 @@ export function usePersonnelAvailability() {
   return useQuery({
     queryKey: ['personnelAvailability', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'personnelAvailability'));
+      const snap = await getDocs(scopedQuery('personnelAvailability', currentCompanyId, isSuperAdmin));
       const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
       return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
   });
@@ -353,10 +371,11 @@ export function useDeviceFaultReports() {
   return useQuery({
     queryKey: ['deviceFaultReports', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'deviceFaultReports'));
+      const snap = await getDocs(scopedQuery('deviceFaultReports', currentCompanyId, isSuperAdmin));
       const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DeviceFaultReport));
       return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 60 * 1000, // 1 minute — faults change frequently
     gcTime: 10 * 60 * 1000,
   });
@@ -370,10 +389,11 @@ export function useDeviceActionForms() {
   return useQuery({
     queryKey: ['deviceActionForms', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'deviceActionForms'));
+      const snap = await getDocs(scopedQuery('deviceActionForms', currentCompanyId, isSuperAdmin));
       const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
       return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
   });
@@ -387,10 +407,11 @@ export function useAplikasyonActionForms() {
   return useQuery({
     queryKey: ['aplikasyonActionForms', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'aplikasyonActionForms'));
+      const snap = await getDocs(scopedQuery('aplikasyonActionForms', currentCompanyId, isSuperAdmin));
       const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
       return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
   });
@@ -404,10 +425,11 @@ export function useMaintenancePlans() {
   return useQuery({
     queryKey: ['maintenancePlans', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'maintenancePlans'));
+      const snap = await getDocs(scopedQuery('maintenancePlans', currentCompanyId, isSuperAdmin));
       const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
       return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 30 * 60 * 1000,
     gcTime: 60 * 60 * 1000,
   });
@@ -421,10 +443,11 @@ export function useMaintenanceLogs() {
   return useQuery({
     queryKey: ['maintenanceLogs', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'maintenanceLogs'));
+      const snap = await getDocs(scopedQuery('maintenanceLogs', currentCompanyId, isSuperAdmin));
       const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
       return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
   });
@@ -439,11 +462,13 @@ export function useDeviceLabPools() {
   return useQuery({
     queryKey: ['deviceLabPools', 'active', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const q = query(collection(db, 'deviceLabPools'), where('active', '==', true));
-      const snap = await getDocs(q);
+      const snap = await getDocs(
+        scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin, where('active', '==', true)),
+      );
       const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
       return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 30 * 60 * 1000,
     gcTime: 60 * 60 * 1000,
   });
@@ -454,15 +479,17 @@ export function useDeviceLabPools() {
  * Static catalog — long cache.
  */
 export function useFaultDefinitions(type: 'teknik_servis' | 'aplikasyon' | null) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
-    queryKey: ['faultDefinitions', type],
+    queryKey: ['faultDefinitions', type, currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       if (!type) return [];
-      const q = query(collection(db, 'faultDefinitions'), where('type', '==', type));
-      const snap = await getDocs(q);
+      const snap = await getDocs(
+        scopedQuery('faultDefinitions', currentCompanyId, isSuperAdmin, where('type', '==', type)),
+      );
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
     },
-    enabled: !!type,
+    enabled: !!type && (!!currentCompanyId || isSuperAdmin),
     staleTime: 60 * 60 * 1000, // 1 hour
     gcTime: 2 * 60 * 60 * 1000,
   });
@@ -475,17 +502,17 @@ export function useMaintenancePlansForDevice(
   deviceId: string | null,
   planType?: 'teknik_servis' | 'aplikasyon',
 ) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
-    queryKey: ['maintenancePlans', 'forDevice', deviceId, planType ?? null],
+    queryKey: ['maintenancePlans', 'forDevice', deviceId, planType ?? null, currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       if (!deviceId) return [];
       const constraints = [where('deviceId', '==', deviceId)];
       if (planType) constraints.push(where('type', '==', planType));
-      const q = query(collection(db, 'maintenancePlans'), ...constraints);
-      const snap = await getDocs(q);
+      const snap = await getDocs(scopedQuery('maintenancePlans', currentCompanyId, isSuperAdmin, ...constraints));
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
     },
-    enabled: !!deviceId,
+    enabled: !!deviceId && (!!currentCompanyId || isSuperAdmin),
     staleTime: 10 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
   });
@@ -495,19 +522,23 @@ export function useMaintenancePlansForDevice(
  * Maintenance logs for a specific device, ordered by completedAt desc.
  */
 export function useMaintenanceLogsForDevice(deviceId: string | null) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
-    queryKey: ['maintenanceLogs', 'forDevice', deviceId],
+    queryKey: ['maintenanceLogs', 'forDevice', deviceId, currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       if (!deviceId) return [];
-      const q = query(
-        collection(db, 'maintenanceLogs'),
-        where('deviceId', '==', deviceId),
-        orderBy('completedAt', 'desc'),
+      const snap = await getDocs(
+        scopedQuery(
+          'maintenanceLogs',
+          currentCompanyId,
+          isSuperAdmin,
+          where('deviceId', '==', deviceId),
+          orderBy('completedAt', 'desc'),
+        ),
       );
-      const snap = await getDocs(q);
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
     },
-    enabled: !!deviceId,
+    enabled: !!deviceId && (!!currentCompanyId || isSuperAdmin),
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
   });
@@ -527,12 +558,13 @@ export function useDepoStokByDepot(depotId: string | null) {
     queryKey: ['depoStok', depotId, currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       if (!depotId) return [];
-      const q = query(collection(db, 'depoStok'), where('depotId', '==', depotId));
-      const snap = await getDocs(q);
+      const snap = await getDocs(
+        scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('depotId', '==', depotId)),
+      );
       const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
       return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
     },
-    enabled: !!depotId,
+    enabled: !!depotId && (!!currentCompanyId || isSuperAdmin),
     staleTime: 5 * 60 * 1000, // 5 minutes - no polling, relies on metadata listener
     gcTime: 30 * 60 * 1000,
     // No refetchInterval - cache invalidated by useStockUpdateListener
@@ -619,16 +651,19 @@ export function useUnshippedDepoStokByDepot(depotId: string | null) {
     queryKey: ['depoStok', 'unshipped', depotId, currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       if (!depotId) return [];
-      const q = query(
-        collection(db, 'depoStok'),
-        where('depotId', '==', depotId),
-        where('isShipped', '==', false),
+      const snap = await getDocs(
+        scopedQuery(
+          'depoStok',
+          currentCompanyId,
+          isSuperAdmin,
+          where('depotId', '==', depotId),
+          where('isShipped', '==', false),
+        ),
       );
-      const snap = await getDocs(q);
       const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
       return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
     },
-    enabled: !!depotId,
+    enabled: !!depotId && (!!currentCompanyId || isSuperAdmin),
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
   });
@@ -643,10 +678,11 @@ export function useDepoStok() {
   return useQuery({
     queryKey: ['depoStok', 'all', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const snap = await getDocs(collection(db, 'depoStok'));
+      const snap = await getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin));
       const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
       return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 5 * 60 * 1000, // 5 minutes
     gcTime: 30 * 60 * 1000,
     // No refetchInterval - cache invalidated by useStockUpdateListener
@@ -677,23 +713,29 @@ export function useLabStock(
       const names = labNames.slice(0, 30);
 
       // Query by hedefKurumId
-      const idQuery = query(
-        collection(db, 'depoStok'),
-        where('hedefKurumId', 'in', ids),
-        where('isShipped', '==', true)
+      const idSnap = await getDocs(
+        scopedQuery(
+          'depoStok',
+          currentCompanyId,
+          isSuperAdmin,
+          where('hedefKurumId', 'in', ids),
+          where('isShipped', '==', true),
+        ),
       );
-      const idSnap = await getDocs(idQuery);
       const idResults = idSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
 
       // Also query by hedefKurum (name) for legacy records that may not have hedefKurumId
       let legacyResults: DepoStokItem[] = [];
       if (names.length > 0) {
-        const nameQuery = query(
-          collection(db, 'depoStok'),
-          where('hedefKurum', 'in', names),
-          where('isShipped', '==', true)
+        const nameSnap = await getDocs(
+          scopedQuery(
+            'depoStok',
+            currentCompanyId,
+            isSuperAdmin,
+            where('hedefKurum', 'in', names),
+            where('isShipped', '==', true),
+          ),
         );
-        const nameSnap = await getDocs(nameQuery);
         legacyResults = nameSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
       }
 
@@ -720,17 +762,22 @@ export function useLabStock(
  * Consumption Records - Recent only (last 500)
  */
 export function useRecentConsumption(limitCount = 500) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
-    queryKey: ['tuketimKayitlari', 'recent', limitCount],
+    queryKey: ['tuketimKayitlari', 'recent', limitCount, currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const q = query(
-        collection(db, 'tuketimKayitlari'),
-        orderBy('consumptionTimestamp', 'desc'),
-        limit(limitCount)
+      const snap = await getDocs(
+        scopedQuery(
+          'tuketimKayitlari',
+          currentCompanyId,
+          isSuperAdmin,
+          orderBy('consumptionTimestamp', 'desc'),
+          limit(limitCount),
+        ),
       );
-      const snap = await getDocs(q);
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as ConsumptionRecord));
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 5 * 60 * 1000,
     gcTime: 15 * 60 * 1000,
     refetchInterval: 5 * 60 * 1000,
@@ -739,7 +786,14 @@ export function useRecentConsumption(limitCount = 500) {
 
 /**
  * Daily Consumption Stats - Aggregated daily totals for dashboard KPI
- * Fetches pre-computed daily consumption counts instead of all consumption records
+ * Fetches pre-computed daily consumption counts instead of all consumption records.
+ *
+ * NOT (Faz 4): Bu koleksiyonun docId'si sadece `dateKey` (YYYY-MM-DD). Tüm
+ * tenant'lar aynı dokümana yazıyor, dolayısıyla `where('companyId','==',X)`
+ * ile filtrelenemez. Geçici olarak scopedQuery kullanılmıyor — Faz 6
+ * Security Rules tarafında bu koleksiyon henüz kilitlenmeyecek.
+ * Yapısal refactor (per-tenant subcollection veya `${companyId}_${dateKey}`
+ * docId) için ayrı follow-up PR açılacak.
  */
 export function useDailyConsumptionStats(startDate: string, endDate: string) {
   return useQuery({
@@ -775,46 +829,57 @@ export function useConsumptionByDateRange(
   endDate: Date | null,
   enabled = false
 ) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
-    queryKey: ['tuketimKayitlari', 'dateRange', startDate?.toISOString(), endDate?.toISOString()],
+    queryKey: ['tuketimKayitlari', 'dateRange', startDate?.toISOString(), endDate?.toISOString(), currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       if (!startDate || !endDate) return [];
 
       const startTimestamp = Timestamp.fromDate(startDate);
       const endTimestamp = Timestamp.fromDate(endDate);
 
-      const q = query(
-        collection(db, 'tuketimKayitlari'),
-        where('consumptionTimestamp', '>=', startTimestamp),
-        where('consumptionTimestamp', '<=', endTimestamp),
-        orderBy('consumptionTimestamp', 'desc')
+      const snap = await getDocs(
+        scopedQuery(
+          'tuketimKayitlari',
+          currentCompanyId,
+          isSuperAdmin,
+          where('consumptionTimestamp', '>=', startTimestamp),
+          where('consumptionTimestamp', '<=', endTimestamp),
+          orderBy('consumptionTimestamp', 'desc'),
+        ),
       );
-      const snap = await getDocs(q);
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as ConsumptionRecord));
     },
-    enabled: enabled && !!startDate && !!endDate,
+    enabled: enabled && !!startDate && !!endDate && (!!currentCompanyId || isSuperAdmin),
     staleTime: 5 * 60 * 1000,
     gcTime: 15 * 60 * 1000,
   });
 }
 
 /**
- * Fetch consumption records by date range - imperative function for on-demand fetching
+ * Fetch consumption records by date range - imperative function for on-demand fetching.
+ * Caller must pass company context; this function is invoked outside React, so it can't
+ * read useAuth() — pass currentCompanyId/isSuperAdmin from the calling component.
  */
 export async function fetchConsumptionByDateRange(
   startDate: Date,
-  endDate: Date
+  endDate: Date,
+  currentCompanyId: string | null | undefined,
+  isSuperAdmin: boolean | undefined,
 ): Promise<ConsumptionRecord[]> {
   const startTimestamp = Timestamp.fromDate(startDate);
   const endTimestamp = Timestamp.fromDate(endDate);
 
-  const q = query(
-    collection(db, 'tuketimKayitlari'),
-    where('consumptionTimestamp', '>=', startTimestamp),
-    where('consumptionTimestamp', '<=', endTimestamp),
-    orderBy('consumptionTimestamp', 'desc')
+  const snap = await getDocs(
+    scopedQuery(
+      'tuketimKayitlari',
+      currentCompanyId,
+      isSuperAdmin,
+      where('consumptionTimestamp', '>=', startTimestamp),
+      where('consumptionTimestamp', '<=', endTimestamp),
+      orderBy('consumptionTimestamp', 'desc'),
+    ),
   );
-  const snap = await getDocs(q);
   return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as ConsumptionRecord));
 }
 
@@ -822,17 +887,22 @@ export async function fetchConsumptionByDateRange(
  * Shipments - Recent only
  */
 export function useRecentShipments(limitCount = 200) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
-    queryKey: ['shipments', 'recent', limitCount],
+    queryKey: ['shipments', 'recent', limitCount, currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const q = query(
-        collection(db, 'shipments'),
-        orderBy('createdAt', 'desc'),
-        limit(limitCount)
+      const snap = await getDocs(
+        scopedQuery(
+          'shipments',
+          currentCompanyId,
+          isSuperAdmin,
+          orderBy('createdAt', 'desc'),
+          limit(limitCount),
+        ),
       );
-      const snap = await getDocs(q);
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Shipment));
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 5 * 60 * 1000,
     gcTime: 15 * 60 * 1000,
     refetchInterval: 5 * 60 * 1000,
@@ -843,17 +913,22 @@ export function useRecentShipments(limitCount = 200) {
  * Efficiency History - Recent only
  */
 export function useEfficiencyHistory(limitCount = 100) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
-    queryKey: ['efficiencyHistory', 'recent', limitCount],
+    queryKey: ['efficiencyHistory', 'recent', limitCount, currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const q = query(
-        collection(db, 'efficiencyHistory'),
-        orderBy('timestamp', 'desc'),
-        limit(limitCount)
+      const snap = await getDocs(
+        scopedQuery(
+          'efficiencyHistory',
+          currentCompanyId,
+          isSuperAdmin,
+          orderBy('timestamp', 'desc'),
+          limit(limitCount),
+        ),
       );
-      const snap = await getDocs(q);
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 10 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
     refetchInterval: 10 * 60 * 1000,
@@ -1020,10 +1095,7 @@ export function useActiveDutyShifts() {
     queryFn: async () => {
       const now = new Date();
       const snap = await getDocs(
-        query(
-          collection(db, 'dutyShifts'),
-          where('status', '==', 'active')
-        )
+        scopedQuery('dutyShifts', currentCompanyId, isSuperAdmin, where('status', '==', 'active')),
       );
       // Filter to only include shifts where current datetime is within range (including startTime/endTime)
       return filterByCompanyScope(
@@ -1057,6 +1129,7 @@ export function useActiveDutyShifts() {
         isSuperAdmin
       );
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 5 * 60 * 1000, // 5 minutes
     gcTime: 30 * 60 * 1000, // 30 minutes
     refetchOnWindowFocus: true,
@@ -1080,10 +1153,7 @@ export function useUpcomingDutyShifts(labId: string | null) {
       thirtyDaysLater.setHours(23, 59, 59, 999);
 
       const snap = await getDocs(
-        query(
-          collection(db, 'dutyShifts'),
-          where('status', '==', 'active')
-        )
+        scopedQuery('dutyShifts', currentCompanyId, isSuperAdmin, where('status', '==', 'active')),
       );
       return filterByCompanyScope(
         snap.docs
@@ -1104,7 +1174,7 @@ export function useUpcomingDutyShifts(labId: string | null) {
         isSuperAdmin
       );
     },
-    enabled: !!labId,
+    enabled: !!labId && (!!currentCompanyId || isSuperAdmin),
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
     refetchOnWindowFocus: true,
@@ -1119,11 +1189,7 @@ export function useAllDutyShifts() {
   return useQuery({
     queryKey: ['dutyShifts', 'all', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const snap = await getDocs(
-        query(
-          collection(db, 'dutyShifts')
-        )
-      );
+      const snap = await getDocs(scopedQuery('dutyShifts', currentCompanyId, isSuperAdmin));
       const shifts = filterByCompanyScope(
         snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DutyShift)),
         currentCompanyId,
@@ -1137,6 +1203,7 @@ export function useAllDutyShifts() {
       });
       return shifts;
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
     refetchOnWindowFocus: true,
@@ -1152,10 +1219,7 @@ export function useDutyShiftsByStatus(status: 'active' | 'completed' | 'cancelle
     queryKey: ['dutyShifts', status, currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       const snap = await getDocs(
-        query(
-          collection(db, 'dutyShifts'),
-          where('status', '==', status)
-        )
+        scopedQuery('dutyShifts', currentCompanyId, isSuperAdmin, where('status', '==', status)),
       );
       const shifts = filterByCompanyScope(
         snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DutyShift)),
@@ -1170,6 +1234,7 @@ export function useDutyShiftsByStatus(status: 'active' | 'completed' | 'cancelle
       });
       return shifts;
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
     refetchOnWindowFocus: true,
@@ -1248,16 +1313,19 @@ export function useDepotCountSessions(depotId: string | null) {
     queryKey: ['depotCountSessions', currentCompanyId, isSuperAdmin, depotId],
     queryFn: async () => {
       if (!depotId) return [];
-      const q = query(
-        collection(db, 'depotStockCountSessions'),
-        where('depotId', '==', depotId),
-        orderBy('createdAt', 'desc')
+      const snap = await getDocs(
+        scopedQuery(
+          'depotStockCountSessions',
+          currentCompanyId,
+          isSuperAdmin,
+          where('depotId', '==', depotId),
+          orderBy('createdAt', 'desc'),
+        ),
       );
-      const snap = await getDocs(q);
       const sessions = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as unknown as DepotStockCountSession));
       return filterByCompanyScope(sessions, currentCompanyId, isSuperAdmin);
     },
-    enabled: !!depotId,
+    enabled: !!depotId && (!!currentCompanyId || isSuperAdmin),
     staleTime: 1000 * 60 * 5, // 5 minutes
   });
 }
@@ -1287,12 +1355,18 @@ export function useIrsaliyeFiles(depotId: string | null) {
     queryKey: ['irsaliyeFiles', currentCompanyId, isSuperAdmin, depotId],
     queryFn: async () => {
       if (!depotId) return [];
-      const q = query(collection(db, 'irsaliyeFiles'), where('depotId', '==', depotId));
-      const snap = await getDocs(q);
+      const snap = await getDocs(
+        scopedQuery(
+          'irsaliyeFiles',
+          currentCompanyId,
+          isSuperAdmin,
+          where('depotId', '==', depotId),
+        ),
+      );
       const files = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
       return filterByCompanyScope(files, currentCompanyId, isSuperAdmin);
     },
-    enabled: !!depotId,
+    enabled: !!depotId && (!!currentCompanyId || isSuperAdmin),
     staleTime: 1000 * 60 * 10, // 10 minutes
   });
 }
@@ -1305,11 +1379,18 @@ export function useMaliyetSayimSessions() {
   return useQuery({
     queryKey: ['maliyetSayimSessions', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const q = query(collection(db, 'maliyetSayimSessions'), orderBy('createdAt', 'desc'));
-      const snap = await getDocs(q);
+      const snap = await getDocs(
+        scopedQuery(
+          'maliyetSayimSessions',
+          currentCompanyId,
+          isSuperAdmin,
+          orderBy('createdAt', 'desc'),
+        ),
+      );
       const sessions = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as unknown as SayimSession));
       return filterByCompanyScope(sessions, currentCompanyId, isSuperAdmin);
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 1000 * 60 * 30, // 30 minutes
   });
 }

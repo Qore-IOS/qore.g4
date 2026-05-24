@@ -1,6 +1,7 @@
 
 "use client";
 import React, { useState, useMemo, useEffect, useCallback } from "react";
+import { useAuth } from "@/contexts/auth-context";
 import type { Hospital, ProductCode, ConsumptionRecord } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -127,6 +128,7 @@ export default function TuketimIstatistikleriPanel({
   urunKullanimKayitlari,
   toast,
 }: TuketimIstatistikleriPanelProps) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [selectedHospitalId, setSelectedHospitalId] = useState<string>("");
   const [filterStokKoduAdi, setFilterStokKoduAdi] = useState<string>("");
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
@@ -173,7 +175,7 @@ export default function TuketimIstatistikleriPanel({
     setIsFetching(true);
     try {
       const endOfDayDate = endOfDay(dateRange.to);
-      const data = await fetchConsumptionByDateRange(dateRange.from, endOfDayDate);
+      const data = await fetchConsumptionByDateRange(dateRange.from, endOfDayDate, currentCompanyId, isSuperAdmin);
       setFetchedData(data);
       setIsDataFetched(true);
       toast({
@@ -190,7 +192,7 @@ export default function TuketimIstatistikleriPanel({
     } finally {
       setIsFetching(false);
     }
-  }, [dateRange, toast]);
+  }, [dateRange, toast, currentCompanyId, isSuperAdmin]);
 
   // Function to toggle show all - fetches all data if not already fetched
   const handleShowAllToggle = useCallback(async () => {
@@ -207,7 +209,7 @@ export default function TuketimIstatistikleriPanel({
       setIsFetching(true);
       try {
         const endOfDayDate = endOfDay(dateRange.to);
-        const data = await fetchConsumptionByDateRange(dateRange.from, endOfDayDate);
+        const data = await fetchConsumptionByDateRange(dateRange.from, endOfDayDate, currentCompanyId, isSuperAdmin);
         setFetchedData(data);
         setIsDataFetched(true);
         toast({
