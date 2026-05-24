@@ -10,6 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "rimraf .test-dist && tsc -p tsconfig.tests.json && node --test .test-dist/tests/**/*.js",
     "test:coverage": "rimraf .test-dist .coverage && tsc -p tsconfig.tests.json && NODE_V8_COVERAGE=.coverage node --test .test-dist/tests/**/*.js",
+    "test:rules": "rimraf .test-dist && tsc -p tsconfig.tests.json && node --test .test-dist/tests/firestore-rules.test.js",
+    "test:rules:emulated": "firebase emulators:exec --only firestore \"pnpm test:rules\"",
     "push": "git add . && git commit -m \"update\" && git push origin HEAD",
     "sync": "git checkout main && git pull origin main"
   },
@@ -88,6 +90,7 @@
     "zustand": "^4.5.4"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^4.0.1",
     "@types/file-saver": "^2.0.7",
     "@types/leaflet": "^1.9.12",
     "@types/lodash.debounce": "^4.0.9",
