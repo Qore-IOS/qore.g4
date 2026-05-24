@@ -346,6 +346,24 @@
         { "fieldPath": "deviceId", "order": "ASCENDING" },
         { "fieldPath": "completedAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "pushTokens",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "companyId", "order": "ASCENDING" },
+        { "fieldPath": "membershipKeys", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "enabled", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "users",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "companyId", "order": "ASCENDING" },
+        { "fieldPath": "notificationsEnabled", "order": "ASCENDING" },
+        { "fieldPath": "notificationPreferences", "arrayConfig": "CONTAINS" }
+      ]
     }
   ],
   "fieldOverrides": []
