@@ -22,7 +22,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
 import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, addDoc, updateDoc, orderBy, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
-import { filterByCompanyScope } from '@/lib/company-scope';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { compareAsc, parse as parseDate, format as formatDate } from 'date-fns';
 import { formatMiad } from '@/lib/date';
 import { tr } from 'date-fns/locale';
@@ -700,8 +700,8 @@ export default function UrunKullanimPanel() {
     });
 
     const batch = writeBatch(db);
-    batch.set(newTuketimDocRef, newRec);
-    
+    batch.set(newTuketimDocRef, withCompanyScope(newRec, currentCompanyId));
+
     const currentAdet = itemToConsume.adet ?? 1;
     if (currentAdet > 1) {
       // OPTIMIZED: If bulk document, just decrement quantity
@@ -1573,7 +1573,7 @@ export default function UrunKullanimPanel() {
           subPointName: selectedSubPoint?.name || '',
           quantity: 1,
         };
-        batch.set(newTuketimDocRef, newRec);
+        batch.set(newTuketimDocRef, withCompanyScope(newRec, currentCompanyId));
       }
 
       // Adet-aware düşüm: tamamı düşülen doküman silinir; kısmi düşümde

@@ -10,6 +10,7 @@ import { doc, addDoc, collection, getDocs, query, where, updateDoc, writeBatch }
 import { db } from '@/lib/firebase';
 import { CostInput } from './CostInput';
 import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope } from '@/lib/company-scope';
 import TrackingModeSelect from './TrackingModeSelect';
 import { TrackingMode, resolveDefaultTrackingMode, TRACKING_MODE_LABEL } from '@/lib/tracking';
 import BarcodeFormatSelect from './BarcodeFormatSelect';
@@ -101,7 +102,7 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
   onSetActiveVersion,
 }) => {
   const { toast } = useToast();
-  const { currentUser } = useAuth();
+  const { currentUser, currentCompanyId } = useAuth();
   const isEditMode = !!initial.id;
 
   const [product, setProduct] = useState<Partial<ProductCode & { trackingMode: TrackingMode }>>({
@@ -195,7 +196,7 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
         yukseklik: product.yukseklik || null,
         derinlik: product.derinlik || null,
       };
-      const ref = await addDoc(collection(db, 'productCodes'), newVersionData);
+      const ref = await addDoc(collection(db, 'productCodes'), withCompanyScope(newVersionData, currentCompanyId));
       onSave({ id: ref.id, ...newVersionData } as ProductCode);
       toast({ title: 'Başarılı', description: 'Yeni versiyon oluşturuldu.' });
       setIsVersionModalOpen(false);
@@ -275,7 +276,7 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
           setIsSaving(false);
           return;
         }
-        const ref = await addDoc(collection(db, 'productCodes'), productData);
+        const ref = await addDoc(collection(db, 'productCodes'), withCompanyScope(productData, currentCompanyId));
         onSave({ id: ref.id, ...productData } as ProductCode);
       }
       toast({ title: 'Başarılı', description: `Ürün kaydedildi (${TRACKING_MODE_LABEL[productData.trackingMode as TrackingMode]})` });

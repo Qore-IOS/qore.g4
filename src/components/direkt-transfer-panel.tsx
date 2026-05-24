@@ -46,7 +46,7 @@ import useHidScanner from '@/hooks/useHidScanner';
 import BarcodeFormatSelect, { type FormatValue } from '@/components/BarcodeFormatSelect';
 import { cn, playFeedback, sanitizeGS1, generateId } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
-import { filterByCompanyScope, matchesCompanyScope } from '@/lib/company-scope';
+import { filterByCompanyScope, matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { Switch } from '@/components/ui/switch';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { compareAsc, parse as parseDate } from 'date-fns';
@@ -826,7 +826,7 @@ export default function DirektTransferPanel() {
                 userId: currentUser.uid ?? 'unknown',
                 userName: currentUserProfile.name ?? currentUser.email ?? 'Unknown User',
               };
-              batch.set(doc(collection(db, 'tuketimKayitlari')), consumptionRecord);
+              batch.set(doc(collection(db, 'tuketimKayitlari')), withCompanyScope(consumptionRecord, currentCompanyId));
             } else {
               batch.set(targetRef, targetData);
             }
@@ -847,7 +847,7 @@ export default function DirektTransferPanel() {
                 userId: currentUser.uid ?? 'unknown',
                 userName: currentUserProfile.name ?? currentUser.email ?? 'Unknown User',
               };
-              batch.set(doc(collection(db, 'tuketimKayitlari')), consumptionRecord);
+              batch.set(doc(collection(db, 'tuketimKayitlari')), withCompanyScope(consumptionRecord, currentCompanyId));
             } else {
               batch.set(targetRef, {
                 isShipped: true, 

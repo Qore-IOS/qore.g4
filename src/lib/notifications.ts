@@ -10,6 +10,19 @@ import {
   doc,
   arrayUnion,
 } from "firebase/firestore";
+import { getAuth } from "firebase/auth";
+
+async function readCompanyIdFromClaims(): Promise<string | undefined> {
+  try {
+    const user = getAuth().currentUser;
+    if (!user) return undefined;
+    const tokenResult = await user.getIdTokenResult();
+    const cid = tokenResult.claims.companyId;
+    return typeof cid === "string" && cid.trim() ? cid.trim() : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 export type NotificationType =
   | "order_created"
@@ -155,13 +168,17 @@ export async function createNotification(
     }) ||
     "/"; // Default to home page if no href
 
-  const docData: NotificationDoc = {
+  const payloadCompanyId = (payload as any).companyId as string | undefined;
+  const companyId = payloadCompanyId || (await readCompanyIdFromClaims());
+
+  const docData: NotificationDoc & { companyId?: string } = {
     ...payload,
     meta: cleanFirestoreData(payload.meta || {}), // Clean meta object here
     channel: payload.channel || "push",
     href,
     createdAt: serverTimestamp(),
     readBy: [],
+    ...(companyId ? { companyId } : {}),
   };
   await addDoc(collection(db, "notifications"), docData as any);
 }

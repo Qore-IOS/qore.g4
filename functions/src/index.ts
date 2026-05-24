@@ -485,8 +485,14 @@ export const faultInterventionReminder = onSchedule(
                 const labName = data.labName || '';
                 const faultId = faultDoc.id;
 
-                // Create notification for the assigned personnel
-                const notificationData = {
+                // Create notification for the assigned personnel.
+                // Propagate companyId from the source fault so the notification
+                // stays scoped to the same tenant (Faz 6 Security Rules need this).
+                const sourceCompanyId =
+                    typeof data.companyId === 'string' && data.companyId.trim()
+                        ? data.companyId.trim()
+                        : null;
+                const notificationData: Record<string, any> = {
                     type: 'fault_reminder' as const,
                     title: `Arıza Hatırlatma: ${deviceName}`,
                     message: `${labName ? labName + ' - ' : ''}${deviceName} cihazı için açılan arıza ${waitingHours} saattir "${statusLabel}" durumunda bekliyor. Lütfen arızayı kontrol ediniz.`,
@@ -507,6 +513,7 @@ export const faultInterventionReminder = onSchedule(
                     createdAt: admin.firestore.FieldValue.serverTimestamp(),
                     readBy: [] as string[],
                 };
+                if (sourceCompanyId) notificationData.companyId = sourceCompanyId;
 
                 await db.collection('notifications').add(notificationData);
 
@@ -662,7 +669,11 @@ export const maintenanceUpcomingReminder = onSchedule(
                 const dueDateStr = nextDue.toLocaleDateString('tr-TR', { timeZone: 'Europe/Istanbul' });
                 const taskName = plan.taskName || 'Periyodik bakım';
 
-                await db.collection('notifications').add({
+                const planCompanyId =
+                    typeof plan.companyId === 'string' && plan.companyId.trim()
+                        ? plan.companyId.trim()
+                        : null;
+                const maintNotification: Record<string, any> = {
                     type: 'maintenance_reminder',
                     title: `Bakım Hatırlatma: ${deviceName}`,
                     message: `${labName ? labName + ' - ' : ''}${deviceName} cihazı için "${taskName}" (${roleLabel}) görevi ${daysUntilDue} gün içinde (${dueDateStr}) planlanmış durumda. Lütfen kontrol ediniz.`,
@@ -685,7 +696,9 @@ export const maintenanceUpcomingReminder = onSchedule(
                     channel: 'push' as const,
                     createdAt: admin.firestore.FieldValue.serverTimestamp(),
                     readBy: [] as string[],
-                });
+                };
+                if (planCompanyId) maintNotification.companyId = planCompanyId;
+                await db.collection('notifications').add(maintNotification);
 
                 await planDoc.ref.update({
                     lastMaintenanceReminderAt: admin.firestore.FieldValue.serverTimestamp(),
