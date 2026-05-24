@@ -1,10 +1,29 @@
 # Multi-Tenancy Refaktöring Planı
 
+> **Durum: ✅ TAMAMLANDI** — Tüm fazlar (0-9) PR halinde gönderildi ve merge edildi.
+> Detaylı QA için bkz. [`multi-tenancy-qa.md`](./multi-tenancy-qa.md).
+>
 > **Hedef:** Client-side `filterByCompanyScope` filtrelemesinden Firestore-native server-side `where('companyId', '==', X)` izolasyonuna geçiş; Firestore Security Rules ile mühürleme.
 >
 > **Yaklaşım:** Aşamalı, faz-faz PR. Her faz mevcut sistemi bozmadan ileri taşır.
 >
 > **Tahmini Süre:** 5-8 iş günü.
+>
+> ## PR Listesi
+>
+> | Faz | PR | Konu |
+> |---|---|---|
+> | Plan | #1286 | Migration plan dokümanı |
+> | 0 — Audit | #1287 | `scripts/audit-collections.js` |
+> | 1 — Backfill | #1288 | `scripts/backfill-company-id.js` |
+> | 2 — Claims | #1289 | `onUserClaimSync` + `sync-claims.js` + auth-context |
+> | 3 — Write Hardening | #1290 | tuketim/productCodes/barcodeFormats/notifications/CF |
+> | 4 — Query Refactor | #1291 | `scopedQuery` + `useFirebaseQueries.ts` (41 hook) |
+> | 5 — Indexes | #1292 | 17 composite index |
+> | 6 — Security Rules | #1293 | `firestore.rules` (DSL) + `firebase.json` |
+> | 7 — Functions | #1294 | `onNotificationCreated` tenant filter + 2 yeni index |
+> | 8 — Tests | #1295 | Rules unit tests + QA rehberi |
+> | 9 — Cleanup | (bu PR) | CLAUDE.MD bölümü + plan finalizasyonu |
 
 ---
 
@@ -311,3 +330,48 @@ Faz 9 (Cleanup)
 ```
 
 **Not:** Faz 4 ve Faz 5 sırası **kritik** — indeksler önce, sorgu refactor sonra.
+
+---
+
+## 6. Tamamlanma sonrası — Bilinçli ertelemeler
+
+Üretim deneyimiyle birlikte ileri PR'lara bırakılan kalemler:
+
+### Yapısal
+- **`dailyConsumptionStats` redesign** — `docId = dateKey` formatı tüm tenant'ları tek doc'a yazıyor. Çözüm: `${companyId}_${dateKey}` veya alt-koleksiyon. Hook ve writer her ikisi de güncellenmeli; rules da sıkılaştırılmalı (`inCompany()`).
+
+### Loose-tier sıkılaştırması (firestore.rules)
+Aşağıdaki ~50 koleksiyon halen `isSignedIn()` ile açık; query refactor'u (Faz 4 pattern'i) ile birlikte rules de strict'e geçirilmeli:
+- orders, vehicles, assets, assetCategories, transfers
+- purchasingTaskDefinitions, purchasingWorkflows, sparePartTransferLogs
+- companies, personnel, personelGruplari, personnelHistoryLogs
+- userRequests, overtimeRequests, draftActionForms
+- ejectedKitRecords, trashBinRecords, destroyedKitsReports
+- deviceBrandModels, deviceModelDefinitions, periodicPartChanges, periodicPartChangeLogs, postClosurePartChangeLogs
+- yedekParcaDepoStok, yedekParcaDepoLog, yedekParcaSiparisler, borrowedSpareParts
+- testDefinitions, archiveRacks, routes, shiftSchedules, expensePeriods, transferTemplates, costCheckpoints
+- malKabulTransactions, depotBrandCountSessions, depotBrandCountValidationLogs, productReturns, pendingReturns
+- consumableRequests, centralOrders, kumulatifRaporlar, totalEfficiencyRecords, minMaxHistory
+- borcTransfers, bekleyenIrsaliyeler, irsaliyeDosyalari, pendingCeomedIrsaliye
+- nfcDisposalEvents, cihazUstuGecmisi, digerFirmaArizalar, teknikServisActionForms
+- actionFormHistoryLogs, actionFormPartReassignLogs
+- personalStock, poolWarehouseStock, efficiencyPools
+
+### Yazma path takip
+Faz 3'te ertelenenler (orta risk, hâlâ client-side filter altında):
+- `cihaz-yonetimi-host.tsx` personnelAvailability
+- `EfficiencyPoolModal.tsx` efficiencyPools
+- `kullanici-talep-panel.tsx` userRequests
+- `purchasing/SatinAlmaPanel.tsx`, `purchasing/WorkflowCanvasPanel.tsx`
+- `faults.ts` history entries
+- `maliyet-session.ts` maliyetSayimSessions
+- `ariza-yonetimi/[id]/page.tsx` fault history entries
+- inventory category, ejectedKitRecords, vb.
+
+### Cleanup
+- `filterByCompanyScope` çağrılarını sadeleştir veya kaldır (defense-in-depth artık Rules tarafından sağlanıyor).
+- `LEGACY_COMPANY_ID = '__legacy__'` sabitini kaldır (Faz 1 backfill sonrası tüm doc'lar gerçek companyId taşıyor).
+
+### Test infrastructure
+- CI'a `pnpm test:rules:emulated` ekle (GitHub Actions workflow).
+- E2E (Playwright vb.) çerçevesi multi-tenant izolasyonu otomatik doğrulasın.
