@@ -98,14 +98,26 @@ export const onNotificationCreated = functions
       const tokenMap = new Map<string, { token: string; uid: string | null; membershipKeys?: string[] }>();
       const notificationType = data.type || '';
 
-      // Source A: pushTokens matching targets (role-based, lab-based, depot-based, user-based)
+      // Multi-tenancy: only deliver to users in the same company as the source.
+      // If the notification has no companyId (legacy), don't filter on company.
+      const sourceCompanyId =
+        typeof (data as any).companyId === 'string' && (data as any).companyId.trim()
+          ? (data as any).companyId.trim()
+          : null;
+
+      // Source A: pushTokens matching targets (role-based, lab-based, depot-based, user-based).
+      // pushTokens may carry companyId (Faz 1 backfill); if available, prefilter by it to
+      // avoid cross-tenant token reads. We still re-check in the final filter via the user doc.
       const targetChunks = chunk(data.targets, 30);
       for (const targetChunk of targetChunks) {
-        const tokensSnap = await db
+        let pushTokensQuery = db
           .collection('pushTokens')
           .where('membershipKeys', 'array-contains-any', targetChunk)
-          .where('enabled', '==', true)
-          .get();
+          .where('enabled', '==', true) as FirebaseFirestore.Query;
+        if (sourceCompanyId) {
+          pushTokensQuery = pushTokensQuery.where('companyId', '==', sourceCompanyId);
+        }
+        const tokensSnap = await pushTokensQuery.get();
 
         for (const tokenDoc of tokensSnap.docs) {
           const td = tokenDoc.data();
@@ -122,11 +134,14 @@ export const onNotificationCreated = functions
         // First collect target UIDs to filter Source B
         const targetUids = await collectTargetUidsFromTargets(data.targets, data.actor?.uid);
 
-        const prefsSnap = await db
+        let prefsQuery = db
           .collection('users')
           .where('notificationsEnabled', '==', true)
-          .where('notificationPreferences', 'array-contains', notificationType)
-          .get();
+          .where('notificationPreferences', 'array-contains', notificationType) as FirebaseFirestore.Query;
+        if (sourceCompanyId) {
+          prefsQuery = prefsQuery.where('companyId', '==', sourceCompanyId);
+        }
+        const prefsSnap = await prefsQuery.get();
 
         // Collect UIDs of users who opted into this notification type AND match target audience
         const optedInUids: string[] = [];
@@ -203,10 +218,10 @@ export const onNotificationCreated = functions
           .filter(Boolean)
       );
 
-      // --- 2. Filter tokens by user notification preferences ---
+      // --- 2. Filter tokens by user notification preferences + companyId ---
       // Fetch user profiles for preference-based filtering
       const uniqueUids = new Set(tokens.map(t => t.uid).filter((uid): uid is string => !!uid));
-      const userPrefsMap = new Map<string, { enabled: boolean; prefs: string[]; name: string; role: string }>();
+      const userPrefsMap = new Map<string, { enabled: boolean; prefs: string[]; name: string; role: string; companyId: string | null }>();
 
       const uidArr = Array.from(uniqueUids);
       const uidBatches = chunk(uidArr, 30);
@@ -216,21 +231,36 @@ export const onNotificationCreated = functions
         for (const userDoc of docs) {
           if (userDoc.exists) {
             const ud = userDoc.data()!;
+            const userCompanyId =
+              typeof ud.companyId === 'string' && ud.companyId.trim()
+                ? ud.companyId.trim()
+                : null;
             userPrefsMap.set(userDoc.id, {
               enabled: ud.notificationsEnabled !== false,
               prefs: ud.notificationPreferences || [],
               name: ud.displayName || ud.name || ud.email || userDoc.id,
               role: ud.role || 'unknown',
+              companyId: userCompanyId,
             });
           }
         }
       }
 
-      // Filter: remove tokens for users who explicitly disabled notifications or excluded this type
+      // Filter: remove tokens for users who explicitly disabled notifications,
+      // excluded this type, or belong to a different tenant than the source.
+      let removedByCompanyFilter = 0;
       const filteredTokens = tokens.filter(t => {
         if (!t.uid) return true; // No uid = allow (anonymous token)
         const prefs = userPrefsMap.get(t.uid);
         if (!prefs) return true; // No user doc found = allow
+
+        // Multi-tenancy isolation: if both source and user carry a companyId,
+        // they must match. Either side missing → fall through (legacy compat).
+        if (sourceCompanyId && prefs.companyId && prefs.companyId !== sourceCompanyId) {
+          removedByCompanyFilter++;
+          return false;
+        }
+
         // User explicitly disabled all notifications
         if (!prefs.enabled) return false;
         // Direct user-specific notifications (user:uid target) bypass preference filtering.
@@ -244,6 +274,11 @@ export const onNotificationCreated = functions
         }
         return true;
       });
+
+      if (removedByCompanyFilter > 0) {
+        logger.info(`[fanOut] Company filter removed ${removedByCompanyFilter} tokens for ${notificationId} (sourceCompanyId=${sourceCompanyId})`);
+      }
+      (logEntry as any).tokensFilteredByCompany = removedByCompanyFilter;
 
       logEntry.tokensAfterPrefs = filteredTokens.length;
       logEntry.tokensFilteredByPrefs = tokens.length - filteredTokens.length;
