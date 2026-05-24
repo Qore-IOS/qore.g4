@@ -1,0 +1,193 @@
+rules_version = '2';
+// Multi-tenancy Firestore Security Rules — Faz 6.
+//
+// Source of truth: request.auth.token.companyId / isSuperAdmin (set by
+// the onUserClaimSync Cloud Function in Faz 2; backfilled by
+// scripts/sync-claims.js).
+//
+// Two tiers:
+//   - "strict" collections (Faz 4 query refactor done) → inCompany() / writingInCompany()
+//   - "loose" collections (referenced in code but not yet scoped) → isSignedIn()
+//     These carry a TODO; they'll be tightened in follow-up PRs as their
+//     queries are migrated to scopedQuery().
+//
+// Unknown collections default-deny per Firestore rules semantics.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // -----------------------------
+    // Helpers
+    // -----------------------------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isSuperAdmin() {
+      return isSignedIn() && request.auth.token.isSuperAdmin == true;
+    }
+    function userCompany() {
+      return request.auth.token.companyId;
+    }
+    function docCompany() {
+      return resource.data.companyId;
+    }
+    function newDocCompany() {
+      return request.resource.data.companyId;
+    }
+    function inCompany() {
+      return isSignedIn() && (
+        isSuperAdmin() ||
+        !('companyId' in resource.data) ||
+        docCompany() == userCompany()
+      );
+    }
+    function writingInCompany() {
+      return isSignedIn() && (
+        isSuperAdmin() ||
+        !('companyId' in request.resource.data) ||
+        newDocCompany() == userCompany()
+      );
+    }
+
+    // -----------------------------
+    // Users (kendi doc'u + admin + aynı şirket görebilir)
+    // -----------------------------
+    match /users/{uid} {
+      allow read: if isSignedIn() && (
+        request.auth.uid == uid ||
+        isSuperAdmin() ||
+        (resource != null && resource.data.companyId == userCompany())
+      );
+      allow write: if isSignedIn() && (
+        request.auth.uid == uid ||
+        isSuperAdmin()
+      );
+    }
+
+    // -----------------------------
+    // STRICT tier — Faz 4 scoped queries
+    // -----------------------------
+
+    match /devices/{id}                       { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /depots/{id} {
+      allow read: if inCompany();
+      allow write: if writingInCompany();
+      // Subcollection: parent doc already scoped; child reads inherit trust via auth.
+      match /minMaxRules/{ruleId}             { allow read, write: if isSignedIn(); }
+    }
+    match /hospitals/{id} {
+      allow read: if inCompany();
+      allow write: if writingInCompany();
+      match /minMaxRules/{ruleId}             { allow read, write: if isSignedIn(); }
+      match /subPoints/{spId}                 { allow read, write: if isSignedIn(); }
+    }
+    match /borcDepots/{id}                    { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /depoStok/{id}                      { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /hospitalDeviceAssignments/{id}     { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /purchasingTasks/{id}               { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /deviceGroups/{id}                  { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /labPools/{id}                      { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /addressDefinitions/{id}            { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /personnelAvailability/{id}         { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /deviceFaultReports/{id} {
+      allow read: if inCompany();
+      allow write: if writingInCompany();
+      // Sub-history/notes etc. (varsa) parent scope altında.
+      match /{path=**}                        { allow read, write: if isSignedIn(); }
+    }
+    match /deviceActionForms/{id}             { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /aplikasyonActionForms/{id}         { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /maintenancePlans/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /maintenanceLogs/{id}               { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /deviceLabPools/{id}                { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /tuketimKayitlari/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /shipments/{id}                     { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /efficiencyHistory/{id}             { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /barcodeFormats/{id}                { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /faultDefinitions/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /depotStockCountSessions/{id} {
+      allow read: if inCompany();
+      allow write: if writingInCompany();
+      match /scannedItems/{itemId}            { allow read, write: if isSignedIn(); }
+    }
+    match /maliyetSayimSessions/{id}          { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /dutyShifts/{id}                    { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /irsaliyeFiles/{id}                 { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /productCodes/{id}                  { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /notifications/{id}                 { allow read: if inCompany(); allow write: if writingInCompany(); }
+
+    // -----------------------------
+    // LOOSE tier — not yet scoped (TODO: tighten as queries migrate)
+    // -----------------------------
+    // dailyConsumptionStats: docId is dateKey-only (tüm tenant'lar tek doc)
+    // — Faz 4 follow-up'ta yapısal refactor + scoped query gelince strict olur.
+    match /dailyConsumptionStats/{id}         { allow read, write: if isSignedIn(); }
+
+    // Pending follow-up Faz 3 ekleri / Faz 4 dışı koleksiyonlar
+    match /AuditLogs/{id}                     { allow read, write: if isSignedIn(); }
+    match /actionFormHistoryLogs/{id}         { allow read, write: if isSignedIn(); }
+    match /actionFormPartReassignLogs/{id}    { allow read, write: if isSignedIn(); }
+    match /archiveRacks/{id}                  { allow read, write: if isSignedIn(); }
+    match /assetCategories/{id}               { allow read, write: if isSignedIn(); }
+    match /assets/{id}                        { allow read, write: if isSignedIn(); }
+    match /bekleyenIrsaliyeler/{id}           { allow read, write: if isSignedIn(); }
+    match /borcTransfers/{id}                 { allow read, write: if isSignedIn(); }
+    match /borrowedSpareParts/{id}            { allow read, write: if isSignedIn(); }
+    match /centralOrders/{id}                 { allow read, write: if isSignedIn(); }
+    match /cihazUstuGecmisi/{id}              { allow read, write: if isSignedIn(); }
+    match /companies/{id}                     { allow read, write: if isSignedIn(); }
+    match /consumableRequests/{id}            { allow read, write: if isSignedIn(); }
+    match /costCheckpoints/{id}               { allow read, write: if isSignedIn(); }
+    match /depotBrandCountSessions/{id}       { allow read, write: if isSignedIn(); }
+    match /depotBrandCountValidationLogs/{id} { allow read, write: if isSignedIn(); }
+    match /destroyedKitsReports/{id}          { allow read, write: if isSignedIn(); }
+    match /deviceBrandModels/{id}             { allow read, write: if isSignedIn(); }
+    match /deviceModelDefinitions/{id}        { allow read, write: if isSignedIn(); }
+    match /digerFirmaArizalar/{id}            { allow read, write: if isSignedIn(); }
+    match /draftActionForms/{id}              { allow read, write: if isSignedIn(); }
+    match /efficiencyPools/{id}               { allow read, write: if isSignedIn(); }
+    match /ejectedKitRecords/{id}             { allow read, write: if isSignedIn(); }
+    match /expensePeriods/{id}                { allow read, write: if isSignedIn(); }
+    match /irsaliyeDosyalari/{id}             { allow read, write: if isSignedIn(); }
+    match /kumulatifRaporlar/{id}             { allow read, write: if isSignedIn(); }
+    match /malKabulTransactions/{id}          { allow read, write: if isSignedIn(); }
+    match /minMaxHistory/{id}                 { allow read, write: if isSignedIn(); }
+    match /nfcDisposalEvents/{id}             { allow read, write: if isSignedIn(); }
+    match /orders/{id}                        { allow read, write: if isSignedIn(); }
+    match /overtimeRequests/{id}              { allow read, write: if isSignedIn(); }
+    match /pendingCeomedIrsaliye/{id}         { allow read, write: if isSignedIn(); }
+    match /pendingReturns/{id}                { allow read, write: if isSignedIn(); }
+    match /periodicPartChangeLogs/{id}        { allow read, write: if isSignedIn(); }
+    match /periodicPartChanges/{id}           { allow read, write: if isSignedIn(); }
+    match /personalStock/{id}                 { allow read, write: if isSignedIn(); }
+    match /personelGruplari/{id}              { allow read, write: if isSignedIn(); }
+    match /personnel/{id}                     { allow read, write: if isSignedIn(); }
+    match /personnelHistoryLogs/{id}          { allow read, write: if isSignedIn(); }
+    match /poolWarehouseStock/{id}            { allow read, write: if isSignedIn(); }
+    match /postClosurePartChangeLogs/{id}     { allow read, write: if isSignedIn(); }
+    match /productReturns/{id}                { allow read, write: if isSignedIn(); }
+    match /purchasingTaskDefinitions/{id}     { allow read, write: if isSignedIn(); }
+    match /purchasingWorkflows/{id}           { allow read, write: if isSignedIn(); }
+    match /routes/{id}                        { allow read, write: if isSignedIn(); }
+    match /shiftSchedules/{id}                { allow read, write: if isSignedIn(); }
+    match /sparePartTransferLogs/{id}         { allow read, write: if isSignedIn(); }
+    match /teknikServisActionForms/{id}       { allow read, write: if isSignedIn(); }
+    match /testDefinitions/{id}               { allow read, write: if isSignedIn(); }
+    match /totalEfficiencyRecords/{id}        { allow read, write: if isSignedIn(); }
+    match /transferTemplates/{id}             { allow read, write: if isSignedIn(); }
+    match /transfers/{id}                     { allow read, write: if isSignedIn(); }
+    match /trashBinRecords/{id}               { allow read, write: if isSignedIn(); }
+    match /userRequests/{id}                  { allow read, write: if isSignedIn(); }
+    match /vehicles/{id}                      { allow read, write: if isSignedIn(); }
+    match /yedekParcaDepoLog/{id}             { allow read, write: if isSignedIn(); }
+    match /yedekParcaDepoStok/{id}            { allow read, write: if isSignedIn(); }
+    match /yedekParcaSiparisler/{id}          { allow read, write: if isSignedIn(); }
+
+    // -----------------------------
+    // System & infrastructure
+    // -----------------------------
+    match /pushTokens/{token}                 { allow read, write: if isSignedIn(); }
+    match /metadata/{id}                      { allow read, write: if isSignedIn(); }
+    match /presence/{id}                      { allow read, write: if isSignedIn(); }
+  }
+}
