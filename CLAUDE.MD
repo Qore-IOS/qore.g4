@@ -79,6 +79,42 @@
 - **Synced Loading Hook:** `useSyncedLoading` for coordinated loading states
 - Use `useGlobalLoading` for app-wide loading indicators
 
+### 5. Multi-Tenancy (companyId isolation)
+
+Every Firestore document carries a `companyId` field. Each tenant only sees its
+own data; SuperAdmin sees everything.
+
+**Source of truth:**
+- `request.auth.token.companyId` (custom claim set by `onUserClaimSync` Cloud
+  Function on every `users/{uid}` write).
+- Client reads via `useAuth().currentCompanyId` (refreshed from token on auth
+  state change, falls back to users doc).
+
+**Three enforcement layers:**
+
+1. **Reads** — `scopedQuery()` in `src/lib/firestore-helpers.ts` injects
+   `where('companyId', '==', X)` for non-superadmin sessions. All hooks in
+   `src/hooks/useFirebaseQueries.ts` use it.
+2. **Writes** — `withCompanyScope(payload, currentCompanyId)` in
+   `src/lib/company-scope.ts` attaches companyId to every new doc.
+3. **Server enforcement** — `firestore.rules` denies cross-tenant reads/writes
+   via `inCompany()` / `writingInCompany()` helpers using token claims.
+
+**When adding a new collection:**
+1. Use `scopedQuery()` in any new read hook.
+2. Wrap writes with `withCompanyScope()`.
+3. Add a `match /<collectionName>/{id}` block to `firestore.rules` with
+   `inCompany()` / `writingInCompany()`.
+4. If the query uses orderBy or extra where clauses, add a composite index
+   to `firestore.indexes.json` starting with `companyId ASC`.
+
+**Cloud Function writes** must propagate the source doc's companyId into any
+notification or derived doc they create — see `functions/src/index.ts`
+`faultInterventionReminder` and `maintenanceUpcomingReminder` for the pattern.
+
+**Migration history:** `docs/multi-tenancy-migration.md`. QA checklist:
+`docs/multi-tenancy-qa.md`.
+
 ## Key Data Models
 
 Location: `src/lib/types.ts`
@@ -167,8 +203,10 @@ pnpm test:coverage # Test with coverage
 ### Firebase Operations
 - **Never skip hooks** in git operations
 - **Prefer client-side Firebase** for search operations (see recent PR #249)
-- **Use Firestore security rules** defined in `firestore.rules.json`
+- **Use Firestore security rules** defined in `firestore.rules` (DSL, wired in `firebase.json`)
 - **Firebase Functions** located in `/functions` directory
+- **Multi-tenancy:** see the "Multi-Tenancy" section above before adding new
+  Firestore queries or collections
 
 ### Best Practices
 
@@ -284,11 +322,15 @@ Focus on barcode utilities that power supply-chain operations:
 5. Update navigation menu
 
 ### Adding a New Data Model
-1. Define interface in `src/lib/types.ts`
+1. Define interface in `src/lib/types.ts` (include `companyId?: string`)
 2. Create Firestore collection
-3. Update security rules in `firestore.rules.json`
-4. Add CRUD operations if needed
-5. Update admin panel for management
+3. Update security rules in `firestore.rules` (add a `match` block with
+   `inCompany()` / `writingInCompany()`)
+4. Add CRUD operations using `scopedQuery()` for reads and
+   `withCompanyScope()` for writes
+5. If the query needs orderBy / extra where, add `(companyId ASC, ...)`
+   composite index to `firestore.indexes.json`
+6. Update admin panel for management
 
 ### Implementing Barcode Features
 1. Use `useScannerContext` for callback registration
