@@ -20,6 +20,7 @@ import type {
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, filterByAssignedLabs } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 const processTimestamp = (docData: any) => {
   const data = { ...docData };
@@ -78,8 +79,8 @@ export function useDashboardData() {
         getDocs(collection(db, 'depoStok')),
         getDocs(collection(db, 'tuketimKayitlari')),
         getDocs(collection(db, 'efficiencyHistory')),
-        getDocs(collection(db, 'cihazUstuGecmisi')),
-        getDocs(query(collection(db, 'kumulatifRaporlar'), orderBy('createdAt', 'desc'))),
+        getDocs(scopedQuery('cihazUstuGecmisi', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('kumulatifRaporlar', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
         getDocs(collection(db, 'shipments')),
         getDocs(collection(db, 'depots')),
         getDocs(collection(db, 'labPools')),

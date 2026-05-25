@@ -24,7 +24,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
 import { nanoid } from 'nanoid';
 import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
-import { filterByCompanyScope, filterByAssignedLabs, matchesCompanyScope } from '@/lib/company-scope';
+import { filterByCompanyScope, filterByAssignedLabs, matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { emitExternalStockUsage } from '@/lib/notifications';
 
@@ -582,7 +582,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         updatedAt: serverTimestamp(),
       });
 
-      await addDoc(collection(db, 'actionFormPartReassignLogs'), {
+      await addDoc(collection(db, 'actionFormPartReassignLogs'), withCompanyScope({
         formId: form.id,
         moduleType,
         actionIndex: selectedActionIndex,
@@ -599,7 +599,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         updatedByUid: currentUserProfile?.uid || '',
         updatedByName: currentUserProfile?.name || currentUserProfile?.email || '',
         updatedAt: serverTimestamp(),
-      });
+      }, currentCompanyId));
 
       setForm((prev) => (prev ? { ...prev, actions: updatedActions as any } : prev));
       setPartTransferModalOpen(false);
@@ -779,7 +779,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
 
       // Log in actionFormHistoryLogs for full audit trail
       const historyRef = doc(collection(db, 'actionFormHistoryLogs'));
-      batch.set(historyRef, {
+      batch.set(historyRef, withCompanyScope({
         formId: form.id,
         moduleType,
         type: 'part_usage_cancelled',
@@ -811,7 +811,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         updatedByUid: currentUserProfile?.uid || '',
         updatedByName: currentUserProfile?.name || currentUserProfile?.email || '',
         updatedAt: serverTimestamp(),
-      });
+      }, currentCompanyId));
 
       await batch.commit();
 
@@ -962,7 +962,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
       });
 
       const historyRef = doc(collection(db, 'actionFormHistoryLogs'));
-      batch.set(historyRef, {
+      batch.set(historyRef, withCompanyScope({
         formId: form.id,
         moduleType,
         type: 'part_added_after_save',
@@ -980,7 +980,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         updatedByUid: currentUserProfile?.uid || '',
         updatedByName: currentUserProfile?.name || currentUserProfile?.email || '',
         updatedAt: serverTimestamp(),
-      });
+      }, currentCompanyId));
 
       if (appendedAction.personalStockId) {
         const stockRef = doc(db, 'personalStock', appendedAction.personalStockId);

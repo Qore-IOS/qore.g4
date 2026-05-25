@@ -148,6 +148,12 @@ service cloud.firestore {
     match /costCheckpoints/{id}               { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /shiftSchedules/{id}                { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /purchasingTaskDefinitions/{id}     { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /expensePeriods/{id}                { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /cihazUstuGecmisi/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /actionFormHistoryLogs/{id}         { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /actionFormPartReassignLogs/{id}    { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /postClosurePartChangeLogs/{id}     { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /nfcDisposalEvents/{id}             { allow read: if inCompany(); allow write: if writingInCompany(); }
 
     // companies özel: id == userCompany() (her tenant kendi şirket dökümanını okur)
     // SuperAdmin tüm companies'i okur ve yazar.
@@ -165,13 +171,10 @@ service cloud.firestore {
 
     // Pending follow-up Faz 3 ekleri / Faz 4 dışı koleksiyonlar
     match /AuditLogs/{id}                     { allow read, write: if isSignedIn(); }
-    match /actionFormHistoryLogs/{id}         { allow read, write: if isSignedIn(); }
-    match /actionFormPartReassignLogs/{id}    { allow read, write: if isSignedIn(); }
     match /archiveRacks/{id}                  { allow read, write: if isSignedIn(); }
     match /bekleyenIrsaliyeler/{id}           { allow read, write: if isSignedIn(); }
     match /borcTransfers/{id}                 { allow read, write: if isSignedIn(); }
     match /centralOrders/{id}                 { allow read, write: if isSignedIn(); }
-    match /cihazUstuGecmisi/{id}              { allow read, write: if isSignedIn(); }
     match /consumableRequests/{id}            { allow read, write: if isSignedIn(); }
     match /depotBrandCountSessions/{id}       { allow read, write: if isSignedIn(); }
     match /depotBrandCountValidationLogs/{id} { allow read, write: if isSignedIn(); }
@@ -179,19 +182,16 @@ service cloud.firestore {
     match /digerFirmaArizalar/{id}            { allow read, write: if isSignedIn(); }
     match /draftActionForms/{id}              { allow read, write: if isSignedIn(); }
     match /ejectedKitRecords/{id}             { allow read, write: if isSignedIn(); }
-    match /expensePeriods/{id}                { allow read, write: if isSignedIn(); }
     match /irsaliyeDosyalari/{id}             { allow read, write: if isSignedIn(); }
     match /kumulatifRaporlar/{id}             { allow read, write: if isSignedIn(); }
     match /malKabulTransactions/{id}          { allow read, write: if isSignedIn(); }
     match /minMaxHistory/{id}                 { allow read, write: if isSignedIn(); }
-    match /nfcDisposalEvents/{id}             { allow read, write: if isSignedIn(); }
     match /overtimeRequests/{id}              { allow read, write: if isSignedIn(); }
     match /pendingCeomedIrsaliye/{id}         { allow read, write: if isSignedIn(); }
     match /pendingReturns/{id}                { allow read, write: if isSignedIn(); }
     match /periodicPartChangeLogs/{id}        { allow read, write: if isSignedIn(); }
     match /periodicPartChanges/{id}           { allow read, write: if isSignedIn(); }
     match /poolWarehouseStock/{id}            { allow read, write: if isSignedIn(); }
-    match /postClosurePartChangeLogs/{id}     { allow read, write: if isSignedIn(); }
     match /productReturns/{id}                { allow read, write: if isSignedIn(); }
     match /routes/{id}                        { allow read, write: if isSignedIn(); }
     match /teknikServisActionForms/{id}       { allow read, write: if isSignedIn(); }
