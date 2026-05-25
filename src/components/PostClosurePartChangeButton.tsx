@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDocs, query, where, writeBatch, Timestamp, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
@@ -397,7 +398,7 @@ export default function PostClosurePartChangeButton({
 
       // Log to dedicated audit collection
       const logRef = doc(collection(db, 'postClosurePartChangeLogs'));
-      batch.set(logRef, {
+      batch.set(logRef, withCompanyScope({
         formId,
         formCollection,
         formType,
@@ -419,7 +420,7 @@ export default function PostClosurePartChangeButton({
         addedByName: currentUserProfile?.name || 'Bilinmeyen',
         addedAt: Timestamp.fromDate(now),
         sourceType,
-      });
+      }, currentCompanyId));
 
       await batch.commit();
 

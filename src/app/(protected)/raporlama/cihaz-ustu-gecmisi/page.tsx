@@ -11,6 +11,8 @@ import { db } from '@/lib/firebase';
 import { exportDataToExcel } from '@/lib/utils';
 import BackButton from '@/components/BackButton';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 type HistoryItem = {
   id: string;
@@ -26,11 +28,12 @@ function CihazUstuGecmisiPanel() {
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getDocs(query(collection(db, 'cihazUstuGecmisi'), orderBy('createdAt', 'desc')));
+        const snap = await getDocs(scopedQuery('cihazUstuGecmisi', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc')));
         const list: HistoryItem[] = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
         setItems(list);
       } catch(e) {

@@ -28,6 +28,8 @@ import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { kullanimDogrulamaLogger } from '@/lib/logger';
 import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 const NFC_TAG_REGEX = /^[0-9A-F]{2}(:[0-9A-F]{2}){7}$/;
 const NFC_INPUT_ID = 'nfc-tag-input';
@@ -142,7 +144,7 @@ const uniqueStrings = (values: Array<string | undefined | null>) =>
 
 export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: KullanimDogrulamaPanelProps) {
   const { toast } = useToast();
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
 
   const [selectedLaboratoryId, setSelectedLaboratoryId] = useState<string>(initialLaboratoryId);
   const [selectedRange, setSelectedRange] = useState<DayRangeOption>('1');
@@ -410,8 +412,10 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
         }
       );
 
-      const disposalQuery = query(
-        collection(db, 'nfcDisposalEvents'),
+      const disposalQuery = scopedQuery(
+        'nfcDisposalEvents',
+        currentCompanyId,
+        isSuperAdmin,
         where('laboratoryId', '==', selectedLaboratoryId)
       );
       const unsubscribeDisposals = onSnapshot(
@@ -533,7 +537,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
         return;
       }
 
-      await setDoc(doc(db, 'nfcDisposalEvents', disposalDocId), {
+      await setDoc(doc(db, 'nfcDisposalEvents', disposalDocId), withCompanyScope({
         laboratoryId: selectedLaboratoryId,
         laboratoryName: laboratories.find((laboratory) => laboratory.id === selectedLaboratoryId)?.name || '',
         stokKodu: exactGroup.stokKodu,
@@ -549,7 +553,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
         verifiedAt: serverTimestamp(),
         verifiedByUid: currentUserProfile?.uid || '',
         verifiedByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
-      });
+      }, currentCompanyId));
 
       kullanimDogrulamaLogger.info('NFC disposal doğrulaması tamamlandı', {
         uid,

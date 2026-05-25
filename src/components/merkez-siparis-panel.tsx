@@ -27,6 +27,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useToast } from '@/hooks/use-toast';
 import { exportDataToExcel, generateId } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { 
   useDepots, 
   useHospitals, 
@@ -236,8 +237,8 @@ export default function MerkezSiparisPanel() {
     const fetchAdditional = async () => {
       try {
         const [centralOrdersSnap, cihazUstuSnap] = await Promise.all([
-          getDocs(query(collection(db, 'centralOrders'), orderBy('createdAt', 'desc'))),
-          getDocs(collection(db, 'cihazUstuGecmisi')),
+          getDocs(scopedQuery('centralOrders', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
+          getDocs(scopedQuery('cihazUstuGecmisi', currentCompanyId, isSuperAdmin)),
         ]);
 
         const cihazMap: Record<string, Record<string, number>> = {};

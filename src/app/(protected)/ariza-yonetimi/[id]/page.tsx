@@ -18,6 +18,7 @@ import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
 import { closeDeviceFaultReport, resolveEjectedKitFault, assignFaultToSelf, startIntervention, transferFaultToOtherUnit, verifyLocationForIntervention } from '@/lib/faults';
 import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope } from '@/lib/company-scope';
 import type { Device, DeviceFaultReport, DeviceFaultStatus, InterventionType, ProductCode, User, PersonalStockItem, PoolWarehouseStockItem, Depot, DeviceLabPool, YedekParcaDepoStokItem } from '@/lib/types';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -138,7 +139,7 @@ export default function FaultDetailPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toast } = useToast();
-  const { currentUser, currentUserProfile, isAdmin } = useAuth();
+  const { currentUser, currentUserProfile, isAdmin, currentCompanyId } = useAuth();
   const { theme, setTheme } = useTheme();
 
   const [fault, setFault] = useState<FaultDoc | null>(null);
@@ -1266,7 +1267,7 @@ export default function FaultDetailPage() {
       // Log post-closure part change to dedicated collection for audit trail
       if (isPostClosure) {
         const logRef = doc(collection(db, 'postClosurePartChangeLogs'));
-        batch.set(logRef, {
+        batch.set(logRef, withCompanyScope({
           faultReportId: fault.id,
           deviceId: fault.deviceId,
           model: fault.model,
@@ -1289,7 +1290,7 @@ export default function FaultDetailPage() {
           addedByName: currentUserProfile?.name || 'Bilinmeyen',
           addedAt: Timestamp.fromDate(now),
           sourceType: 'ariza_yonetimi',
-        });
+        }, currentCompanyId));
       }
 
       await batch.commit();

@@ -17,6 +17,7 @@ import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 type ExpenseCategory =
   | 'Ulaşım'
@@ -59,7 +60,7 @@ export default function MasrafYonetimiOnayPage() {
 
   useEffect(() => {
     setLoading(true);
-    const q = query(collection(db, 'expensePeriods'), orderBy('createdAt', 'desc'));
+    const q = scopedQuery('expensePeriods', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'));
     const unsubscribe = onSnapshot(q, 
       (snapshot) => {
         const data = filterByCompanyScope(
