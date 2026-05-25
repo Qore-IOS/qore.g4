@@ -589,7 +589,7 @@ export default function AplikasyonPaneliDetayPage() {
     setIsDigerFirmaSaving(true);
     try {
       // Create a record for the other company fault
-      await addDoc(collection(db, 'digerFirmaArizalar'), {
+      await addDoc(collection(db, 'digerFirmaArizalar'), withCompanyScope({
         hospitalId,
         hospitalName: hospital?.name || '',
         digerFirmaAdi: digerFirmaAdi.trim(),
@@ -599,7 +599,7 @@ export default function AplikasyonPaneliDetayPage() {
         createdByUid: currentUser?.uid || '',
         createdByName: currentUserProfile?.name || currentUserProfile?.displayName || '',
         formType: 'aplikasyon',
-      });
+      }, currentCompanyId));
 
       toast({ title: 'Başarılı', description: 'Diğer firma arıza kaydı oluşturuldu.' });
 

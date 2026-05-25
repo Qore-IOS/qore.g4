@@ -9,6 +9,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { PlusCircle, Trash2, Save, Loader2, Clock, History, FileText } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, serverTimestamp, query, where, getDocs, writeBatch, doc, onSnapshot, orderBy, Timestamp, updateDoc } from 'firebase/firestore';
 import BackButton from '@/components/BackButton';
@@ -61,7 +63,7 @@ function sanitizeForPdfFont(str: string | null | undefined): string {
 
 export default function EkMesaiBildirimPage() {
   const { toast } = useToast();
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState<number>(CURRENT_YEAR);
   const [entries, setEntries] = useState<OvertimeEntry[]>([]);
@@ -167,8 +169,10 @@ export default function EkMesaiBildirimPage() {
     try {
       const period = `${String(selectedMonth + 1).padStart(2, '0')}/${selectedYear}`;
       const requestsRef = collection(db, 'overtimeRequests');
-      const q = query(
-        requestsRef,
+      const q = scopedQuery(
+        'overtimeRequests',
+        currentCompanyId,
+        isSuperAdmin,
         where('userId', '==', currentUser.uid),
         where('period', '==', period),
         where('status', '==', 'pending')
@@ -200,7 +204,7 @@ export default function EkMesaiBildirimPage() {
 
         toast({ title: 'Güncellendi', description: 'Mevcut ek mesai talebinize yeni girişler eklendi.' });
       } else {
-        await addDoc(requestsRef, {
+        await addDoc(requestsRef, withCompanyScope({
           userId: currentUser.uid,
           userName: currentUserProfile.name,
           period: period,
@@ -208,7 +212,7 @@ export default function EkMesaiBildirimPage() {
           totalMinutes: totalMinutes,
           status: 'pending',
           createdAt: serverTimestamp(),
-        });
+        }, currentCompanyId));
         toast({ title: 'Başarılı', description: 'Ek mesai talebiniz yönetici onayına gönderildi.' });
       }
       
@@ -226,7 +230,7 @@ export default function EkMesaiBildirimPage() {
     setHistoryLoading(true);
     setIsHistoryOpen(true);
     try {
-        const q = query(collection(db, 'overtimeRequests'), where('userId', '==', currentUser.uid));
+        const q = scopedQuery('overtimeRequests', currentCompanyId, isSuperAdmin, where('userId', '==', currentUser.uid));
         const snap = await getDocs(q);
         const data = snap.docs.map(d => ({id: d.id, ...d.data()} as OvertimeRequest));
         // Sort client-side

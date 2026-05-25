@@ -17,6 +17,7 @@ import {
   deleteDoc,
 } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import type { BekleyenIrsaliye, BekleyenIrsaliyeItem } from '@/lib/types';
 import { touchStockMetadata, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
@@ -52,7 +53,7 @@ export default function BekleyenIrsaliyelerPanel({
       return;
     }
     setLoading(true);
-    const q = query(collection(db, 'bekleyenIrsaliyeler'), orderBy('scannedAt', 'desc'));
+    const q = scopedQuery('bekleyenIrsaliyeler', currentCompanyId, isSuperAdmin, orderBy('scannedAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const list: BekleyenIrsaliye[] = [];
       snapshot.forEach((docSnap) => {

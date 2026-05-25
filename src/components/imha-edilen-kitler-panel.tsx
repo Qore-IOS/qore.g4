@@ -20,7 +20,7 @@ import { useBarcodeParser } from '@/hooks/useBarcodeParser';
 import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import { useAuth } from '@/contexts/auth-context';
-import { filterByCompanyScope } from '@/lib/company-scope';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import * as XLSX from 'xlsx';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
@@ -551,7 +551,7 @@ export default function ImhaEdilenKitlerPanel() {
                     });
 
                     const destroyedKitRef = doc(collection(db, 'destroyedKitsReports'));
-                    currentBatch.set(destroyedKitRef, {
+                    currentBatch.set(destroyedKitRef, withCompanyScope({
                         id: destroyedKitRef.id,
                         ejectedKitRecordId: null,
                         faultReportId: null,
@@ -573,7 +573,7 @@ export default function ImhaEdilenKitlerPanel() {
                         resolvedByUid: currentUser?.uid || '',
                         resolvedByName: currentUserProfile?.name || '',
                         sourceType: item.sourceType,
-                    });
+                    }, currentCompanyId));
                     operationCount++;
                 }
             }

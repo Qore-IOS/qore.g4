@@ -154,6 +154,16 @@ service cloud.firestore {
     match /actionFormPartReassignLogs/{id}    { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /postClosurePartChangeLogs/{id}     { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /nfcDisposalEvents/{id}             { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /minMaxHistory/{id}                 { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /trashBinRecords/{id}               { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /borcTransfers/{id}                 { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /ejectedKitRecords/{id}             { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /destroyedKitsReports/{id}          { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /digerFirmaArizalar/{id}            { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /productReturns/{id}                { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /overtimeRequests/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /kumulatifRaporlar/{id}             { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /bekleyenIrsaliyeler/{id}           { allow read: if inCompany(); allow write: if writingInCompany(); }
 
     // companies özel: id == userCompany() (her tenant kendi şirket dökümanını okur)
     // SuperAdmin tüm companies'i okur ve yazar.
@@ -172,31 +182,21 @@ service cloud.firestore {
     // Pending follow-up Faz 3 ekleri / Faz 4 dışı koleksiyonlar
     match /AuditLogs/{id}                     { allow read, write: if isSignedIn(); }
     match /archiveRacks/{id}                  { allow read, write: if isSignedIn(); }
-    match /bekleyenIrsaliyeler/{id}           { allow read, write: if isSignedIn(); }
-    match /borcTransfers/{id}                 { allow read, write: if isSignedIn(); }
     match /centralOrders/{id}                 { allow read, write: if isSignedIn(); }
     match /consumableRequests/{id}            { allow read, write: if isSignedIn(); }
     match /depotBrandCountSessions/{id}       { allow read, write: if isSignedIn(); }
     match /depotBrandCountValidationLogs/{id} { allow read, write: if isSignedIn(); }
-    match /destroyedKitsReports/{id}          { allow read, write: if isSignedIn(); }
-    match /digerFirmaArizalar/{id}            { allow read, write: if isSignedIn(); }
     match /draftActionForms/{id}              { allow read, write: if isSignedIn(); }
-    match /ejectedKitRecords/{id}             { allow read, write: if isSignedIn(); }
     match /irsaliyeDosyalari/{id}             { allow read, write: if isSignedIn(); }
-    match /kumulatifRaporlar/{id}             { allow read, write: if isSignedIn(); }
     match /malKabulTransactions/{id}          { allow read, write: if isSignedIn(); }
-    match /minMaxHistory/{id}                 { allow read, write: if isSignedIn(); }
-    match /overtimeRequests/{id}              { allow read, write: if isSignedIn(); }
     match /pendingCeomedIrsaliye/{id}         { allow read, write: if isSignedIn(); }
     match /pendingReturns/{id}                { allow read, write: if isSignedIn(); }
     match /periodicPartChangeLogs/{id}        { allow read, write: if isSignedIn(); }
     match /periodicPartChanges/{id}           { allow read, write: if isSignedIn(); }
     match /poolWarehouseStock/{id}            { allow read, write: if isSignedIn(); }
-    match /productReturns/{id}                { allow read, write: if isSignedIn(); }
     match /routes/{id}                        { allow read, write: if isSignedIn(); }
     match /teknikServisActionForms/{id}       { allow read, write: if isSignedIn(); }
     match /totalEfficiencyRecords/{id}        { allow read, write: if isSignedIn(); }
-    match /trashBinRecords/{id}               { allow read, write: if isSignedIn(); }
 
     // -----------------------------
     // System & infrastructure
