@@ -81,6 +81,7 @@ import { collection, getDocs, query, orderBy, doc, setDoc, getDoc, Timestamp, wh
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { totalVerimlilikLogger } from '@/lib/logger';
 import { exportDataToExcel } from '@/lib/utils';
 import { getExchangeRates } from '@/lib/exchange-rates';
@@ -640,7 +641,7 @@ export default function TotalVerimlilikPanel({
 }: TotalVerimlilikPanelProps) {
   const REQUIRED_VISIBLE_COLS = useMemo(() => new Set(['stokAdi', 'testAdi', 'ambalajDegeri']), []);
   const { toast } = useToast();
-  const { currentUser } = useAuth();
+  const { currentUser, currentCompanyId, isSuperAdmin } = useAuth();
 
   const [selectedPoolId, setSelectedPoolId] = useState<string>('');
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth());
@@ -1469,8 +1470,10 @@ export default function TotalVerimlilikPanel({
       // sourceDepotId + mode='lab' + tarih aralığı ile filtrele; lab filtrelemesi client-side
       const startTimestamp = Timestamp.fromDate(startDate);
       const endTimestamp = Timestamp.fromDate(new Date(endDateExclusive.getTime() - 1));
-      const transfersQuery = query(
-        collection(db, 'transfers'),
+      const transfersQuery = scopedQuery(
+        'transfers',
+        currentCompanyId,
+        isSuperAdmin,
         where('sourceDepotId', '==', selectedDepotForSevkiyat),
         where('mode', '==', 'lab'),
         where('timestamp', '>=', startTimestamp),

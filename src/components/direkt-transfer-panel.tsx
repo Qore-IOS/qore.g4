@@ -890,13 +890,13 @@ export default function DirektTransferPanel() {
           });
         });
 
-        batch.set(transferRef, {
+        batch.set(transferRef, withCompanyScope({
           id: transferRef.id, timestamp: serverTimestamp(), sourceDepotId: selectedDepotId,
           sourceDepotName: depotName, targetName, targetHospitalId: targetId || null,
           mode: isBorcMode ? 'borc' : 'lab', company: isBorcMode ? selectedCompany : null,
           itemCount: totalShippedAdet, createdByUid: currentUser.uid ?? '',
           createdByName: currentUserProfile.name ?? currentUser.email ?? '',
-        });
+        }, currentCompanyId));
 
         await batch.commit();
 

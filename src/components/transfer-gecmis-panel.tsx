@@ -34,6 +34,8 @@ import { format as formatDate } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import type { Transfer, Depot, Hospital } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import BackButton from '@/components/BackButton';
 import { transferGecmisLogger } from '@/lib/logger';
 import {
@@ -54,6 +56,7 @@ export default function TransferGecmisPanel() {
   const depotIdFromUrl = searchParams.get('depotId') || '';
   const labIdFromUrl = searchParams.get('labId') || 'all';
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   const [depots, setDepots] = useState<Depot[]>([]);
   const [labs, setLabs] = useState<Hospital[]>([]);
@@ -106,7 +109,7 @@ export default function TransferGecmisPanel() {
       if (labId && labId !== 'all') {
         filters.push(where('targetHospitalId', '==', labId));
       }
-      const countQuery = query(collection(db, 'transfers'), ...filters);
+      const countQuery = scopedQuery('transfers', currentCompanyId, isSuperAdmin, ...filters);
       const snapshot = await getCountFromServer(countQuery);
       setTotalCount(snapshot.data().count);
     } catch (error) {
@@ -144,12 +147,14 @@ export default function TransferGecmisPanel() {
       if (labId && labId !== 'all') {
         filters.push(where('targetHospitalId', '==', labId));
       }
-      let q = query(collection(db, 'transfers'), ...filters, orderBy('timestamp', 'desc'), limit(pageSize));
+      let q = scopedQuery('transfers', currentCompanyId, isSuperAdmin, ...filters, orderBy('timestamp', 'desc'), limit(pageSize));
 
       // If not first page, use cursor from previous page
       if (pageNum > 1 && cursors[pageNum - 2]) {
-        q = query(
-          collection(db, 'transfers'),
+        q = scopedQuery(
+          'transfers',
+          currentCompanyId,
+          isSuperAdmin,
           ...filters,
           orderBy('timestamp', 'desc'),
           startAfter(cursors[pageNum - 2]),

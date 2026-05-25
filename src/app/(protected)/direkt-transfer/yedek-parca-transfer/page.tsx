@@ -345,7 +345,7 @@ export default function YedekParcaTransferPage() {
 
   const loadRecentTransferLogs = useCallback(async () => {
     const [transferLogsSnap, depotLogsSnap, depotStockSnap, personalStockSnap, poolStockSnap] = await Promise.all([
-      getDocs(collection(db, 'sparePartTransferLogs')),
+      getDocs(scopedQuery('sparePartTransferLogs', currentCompanyId, isSuperAdmin)),
       getDocs(scopedQuery('yedekParcaDepoLog', currentCompanyId, isSuperAdmin)),
       getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin)),
       getDocs(scopedQuery('personalStock', currentCompanyId, isSuperAdmin, where('status', '==', 'in_stock'))),
@@ -436,7 +436,7 @@ export default function YedekParcaTransferPage() {
         setBrandOptions(brands);
 
         // Fetch depot stock - only products in the depot
-        const stokSnap = await getDocs(collection(db, 'yedekParcaDepoStok'));
+        const stokSnap = await getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
         const stokItems = filterByCompanyScope(stokSnap.docs.map(d => {
           const data = d.data();
           return {
@@ -565,7 +565,7 @@ export default function YedekParcaTransferPage() {
   const fetchDepoStok = useCallback(async () => {
     setDepoStokLoading(true);
     try {
-      const stokSnap = await getDocs(collection(db, 'yedekParcaDepoStok'));
+      const stokSnap = await getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
       const stokItems = filterByCompanyScope(stokSnap.docs.map(d => {
         const data = d.data();
         return {
@@ -1151,7 +1151,7 @@ export default function YedekParcaTransferPage() {
       const now = new Date();
 
       // Read fresh depot stock from Firestore to avoid stale state issues
-      const freshStokSnap = await getDocs(collection(db, 'yedekParcaDepoStok'));
+      const freshStokSnap = await getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
       const freshDepoStok = filterByCompanyScope(freshStokSnap.docs.map(d => {
         const data = d.data();
         return { id: d.id, ...data, createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date() } as YedekParcaDepoStokItem;
@@ -2081,7 +2081,7 @@ export default function YedekParcaTransferPage() {
         }, currentCompanyId));
 
         // Depo log for return
-        await addDoc(collection(db, 'yedekParcaDepoLog'), {
+        await addDoc(collection(db, 'yedekParcaDepoLog'), withCompanyScope({
           action: 'iade_giris',
           productCodeId: pendingReturn.productCodeId,
           stokKodu: pendingReturn.stokKodu,
@@ -2097,7 +2097,7 @@ export default function YedekParcaTransferPage() {
           createdAt: Timestamp.fromDate(now),
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || '',
-        });
+        }, currentCompanyId));
       }
 
       // Create log entry

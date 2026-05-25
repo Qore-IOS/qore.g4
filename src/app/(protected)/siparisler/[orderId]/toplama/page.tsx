@@ -31,7 +31,7 @@ import { collection, doc, getDoc, writeBatch, serverTimestamp, query, where, get
 import { useToast } from '@/hooks/use-toast';
 import useHidScanner from '@/hooks/useHidScanner';
 import { useAuth } from '@/contexts/auth-context';
-import { filterByCompanyScope, matchesCompanyScope } from '@/lib/company-scope';
+import { filterByCompanyScope, matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { useLoading } from '@/contexts/loading-context';
 import { parse as parseDate, compareAsc } from 'date-fns';
 import { useBarcodeParser } from '@/hooks/useBarcodeParser';
@@ -722,7 +722,7 @@ export default function ToplamaPage() {
       batch.set(shipmentDocRef, { ...newShipment, timestamp: Timestamp.fromDate(newShipment.timestamp as Date) });
 
       // Create transfers record (like direkt-transfer-panel for consistency)
-      batch.set(transferRef, {
+      batch.set(transferRef, withCompanyScope({
         id: transferRef.id,
         timestamp: serverTimestamp(),
         sourceDepotId: order.depotId,
@@ -734,7 +734,7 @@ export default function ToplamaPage() {
         itemCount: totalShippedAdet,
         createdByUid: currentUser.uid ?? '',
         createdByName: currentUserProfile.name ?? currentUser?.email ?? '',
-      });
+      }, currentCompanyId));
 
       // Update depoStok items: full documents are marked shipped; partial lot/qty picks
       // decrement the source document and create a shipped target document for the picked quantity.
