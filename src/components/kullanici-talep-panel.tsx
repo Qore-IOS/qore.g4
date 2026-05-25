@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useAuth } from "@/contexts/auth-context";
+import { withCompanyScope } from "@/lib/company-scope";
+import { scopedQuery } from "@/lib/firestore-helpers";
 import { db, storage } from "@/lib/firebase";
 import {
   collection,
@@ -304,6 +306,7 @@ function MyRequestsList({
   onOpenDetail: (r: UserRequest) => void;
   onCreateNew: () => void;
 }) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [requests, setRequests] = useState<UserRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "open" | "reviewing" | "done">("all");
@@ -311,8 +314,10 @@ function MyRequestsList({
 
   useEffect(() => {
     if (!uid) return;
-    const q = query(
-      collection(db, "userRequests"),
+    const q = scopedQuery(
+      "userRequests",
+      currentCompanyId,
+      isSuperAdmin,
       where("createdBy", "==", uid),
       orderBy("createdAt", "desc")
     );
@@ -429,6 +434,7 @@ function AllRequestsList({
   onOpenDetail: (r: UserRequest) => void;
   isAdminDeveloper: boolean;
 }) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [requests, setRequests] = useState<UserRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "open" | "reviewing" | "done">("all");
@@ -438,8 +444,10 @@ function AllRequestsList({
   const [priorityFilter, setPriorityFilter] = useState<UserRequestPriority | "all">("all");
 
   useEffect(() => {
-    const q = query(
-      collection(db, "userRequests"),
+    const q = scopedQuery(
+      "userRequests",
+      currentCompanyId,
+      isSuperAdmin,
       orderBy("createdAt", "desc")
     );
     const unsub = onSnapshot(q, (snap) => {
@@ -1477,6 +1485,7 @@ function CreateRequestModal({
   isDark: boolean;
 }) {
   const { toast } = useToast();
+  const { currentCompanyId } = useAuth();
   const [mode, setMode] = useState<"quick" | "detail">("quick");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -1579,7 +1588,7 @@ function CreateRequestModal({
         imageUrls.push(url);
       }
 
-      const docRef = await addDoc(collection(db, "userRequests"), {
+      const docRef = await addDoc(collection(db, "userRequests"), withCompanyScope({
         title: title.trim(),
         description: description.trim(),
         images: imageUrls,
@@ -1594,7 +1603,7 @@ function CreateRequestModal({
         updatedAt: serverTimestamp(),
         unreadByUser: false,
         comments: [],
-      });
+      }, currentCompanyId));
 
       // Notify assigned admin if one was selected
       if (assignedTo) {

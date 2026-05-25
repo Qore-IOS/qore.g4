@@ -13,6 +13,7 @@ import { collection, getDocs, addDoc, doc, setDoc, deleteDoc, orderBy, query, wr
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { readExcelDataSmart, exportDataToExcel } from '@/lib/utils';
 import * as XLSX from 'xlsx';
@@ -88,11 +89,11 @@ export default function EnvanterYonetimiPage() {
     setLoading(true);
     try {
       const [categoriesSnap, assetsSnap, hospitalsSnap, depotsSnap, vehiclesSnap] = await Promise.all([
-        getDocs(query(collection(db, 'assetCategories'), orderBy('name'))),
-        getDocs(collection(db, 'assets')),
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'depots')),
-        getDocs(collection(db, 'vehicles')),
+        getDocs(scopedQuery('assetCategories', currentCompanyId, isSuperAdmin, orderBy('name'))),
+        getDocs(scopedQuery('assets', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('vehicles', currentCompanyId, isSuperAdmin)),
       ]);
       setCategories(categoriesSnap.docs.map(doc => ({ id: doc.id, name: doc.data().name, iconSvg: doc.data().iconSvg } as AssetCategory)));
       setAssets(filterByCompanyScope(

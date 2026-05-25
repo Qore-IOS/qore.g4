@@ -3,6 +3,8 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -30,7 +32,7 @@ import {
 
 export default function TransferSablonlariPage() {
   const router = useRouter();
-  const { currentUserProfile, isAdmin } = useAuth();
+  const { currentUserProfile, isAdmin, currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
 
   const [loading, setLoading] = useState(true);
@@ -68,8 +70,8 @@ export default function TransferSablonlariPage() {
     const fetchData = async () => {
       try {
         const [templateSnap, productSnap] = await Promise.all([
-          getDocs(collection(db, 'transferTemplates')),
-          getDocs(collection(db, 'productCodes')),
+          getDocs(scopedQuery('transferTemplates', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
         ]);
 
         const templateList = templateSnap.docs.map(d => ({
@@ -192,13 +194,13 @@ export default function TransferSablonlariPage() {
         toast({ title: 'Guncellendi', description: 'Sablon guncellendi.' });
       } else {
         // Create new template
-        const docRef = await addDoc(collection(db, 'transferTemplates'), {
+        const docRef = await addDoc(collection(db, 'transferTemplates'), withCompanyScope({
           name: templateName.trim(),
           items: templateItems,
           createdAt: Timestamp.now(),
           createdByUid: currentUserProfile?.uid,
           createdByName: currentUserProfile?.name || 'Bilinmeyen',
-        });
+        }, currentCompanyId));
 
         const newTemplate: TransferTemplate = {
           id: docRef.id,

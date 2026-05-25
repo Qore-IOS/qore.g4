@@ -2,6 +2,7 @@
 
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { db } from '@/lib/firebase';
 import {
   collection,
@@ -567,7 +568,7 @@ function parseNaturalTaskInputForPlanning(
 // ==========================================
 
 export default function SatinAlmaPanel() {
-  const { currentUserProfile, isAdmin, isSuperAdmin } = useAuth();
+  const { currentUserProfile, isAdmin, isSuperAdmin, currentCompanyId } = useAuth();
   const userName = currentUserProfile?.name || 'Kullanıcı';
 
   // State
@@ -763,7 +764,7 @@ export default function SatinAlmaPanel() {
   }, []);
 
   useEffect(() => {
-    const q = query(collection(db, 'purchasingWorkflows'), orderBy('updatedAt', 'desc'));
+    const q = scopedQuery('purchasingWorkflows', currentCompanyId, isSuperAdmin, orderBy('updatedAt', 'desc'));
     const unsub = onSnapshot(
       q,
       (snap) => {

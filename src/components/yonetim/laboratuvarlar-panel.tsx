@@ -25,6 +25,7 @@ import ProductOrderModal from '@/components/ProductOrderModal';
 import { exportDataToExcel, readExcelData } from '@/lib/utils';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 
 
@@ -115,13 +116,13 @@ export default function LaboratuvarPanel() {
     setIsLoading(true);
     try {
       const [hSnap, pSnap, addrSnap, poolsSnap, stokSnap, effPoolsSnap, dSnap] = await Promise.all([
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'productCodes')),
-        getDocs(collection(db, 'addressDefinitions')),
-        getDocs(query(collection(db, 'labPools'), orderBy('createdAt', 'desc'))),
-        getDocs(collection(db, 'depoStok')),
-        getDocs(query(collection(db, 'efficiencyPools'), orderBy('createdAt', 'desc'))),
-        getDocs(collection(db, 'depots')),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('addressDefinitions', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('labPools', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
+        getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('efficiencyPools', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
+        getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
       ]);
       setHospitals(filterByCompanyScope(hSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)), currentCompanyId, isSuperAdmin));
       setProductCodes(pSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));

@@ -338,7 +338,7 @@ export default function DirektTransferPanel() {
     if (templates.length > 0) return; // Already loaded
     setTemplatesLoading(true);
     try {
-      const snap = await getDocs(collection(db, 'transferTemplates'));
+      const snap = await getDocs(scopedQuery('transferTemplates', currentCompanyId, isSuperAdmin));
       const templateList = snap.docs.map(d => ({
         id: d.id,
         ...d.data(),
