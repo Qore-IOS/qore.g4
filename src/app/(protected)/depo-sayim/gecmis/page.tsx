@@ -12,16 +12,19 @@ import { Loader2, History } from 'lucide-react';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import BackButton from '@/components/BackButton';
 
 export default function DepoSayimGecmisPage() {
   const router = useRouter();
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [sessions, setSessions] = useState<DepotStockCountSession[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const q = query(collection(db, 'depotBrandCountSessions'), orderBy('closedAt', 'desc'));
+    const q = scopedQuery('depotBrandCountSessions', currentCompanyId, isSuperAdmin, orderBy('closedAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const sessionList = snapshot.docs.map(doc => {
         const data = doc.data();
