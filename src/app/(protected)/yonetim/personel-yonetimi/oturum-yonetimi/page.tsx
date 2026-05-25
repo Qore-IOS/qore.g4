@@ -24,6 +24,7 @@ import {
 import BackButton from '@/components/BackButton';
 import Link from 'next/link';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 type AppUser = {
   id: string;
@@ -68,7 +69,7 @@ export default function OturumYonetimiPage() {
 
   // Fetch existing groups
   useEffect(() => {
-    const q = query(collection(db, 'personelGruplari'), orderBy('createdAt', 'desc'));
+    const q = scopedQuery('personelGruplari', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'));
     const unsub = onSnapshot(q, (snap) => {
       const list = filterByCompanyScope(
         snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) } as PersonnelGroup)),

@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope } from '@/lib/company-scope';
 import { db } from '@/lib/firebase';
 import {
   collection,
@@ -562,7 +563,7 @@ function UrgencyDialog({ open, onOpenChange, totalItems, totalAdet, loading, onC
 export default function UrunTalepPanel() {
   const router = useRouter();
   const { toast } = useToast();
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
   const [loading, setLoading] = useState(true);
 
   // Master Data
@@ -826,7 +827,7 @@ export default function UrunTalepPanel() {
         if (note && note.length > 0) newOrder.note = note;
       }
 
-      await setDoc(doc(db, 'orders', orderId), newOrder);
+      await setDoc(doc(db, 'orders', orderId), withCompanyScope(newOrder, currentCompanyId));
 
       // Bildirim için kısa ürün özeti: ilk 3 ürünü "Ad x adet" formatıyla, fazlasını "+N kalem" olarak göster.
       const totalAdetForNotif = orderItems.reduce((s, it) => s + (Number(it.adet) || 0), 0);

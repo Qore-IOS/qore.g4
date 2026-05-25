@@ -15,6 +15,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 import type { Order, Hospital, ProductCode, DepoStokItem, PeripheralFulfillmentItem, Depot } from '@/lib/types';
 import { format as formatDate, compareAsc, parse as parseDate } from 'date-fns';
@@ -97,7 +98,7 @@ function safeParseMiad(value: unknown): Date | null {
 export default function LojistikSiparisView() {
   const router = useRouter();
   const { toast } = useToast();
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const [peripheralOrders, setPeripheralOrders] = useState<Order[]>([]);
   const [completedOrders, setCompletedOrders] = useState<Order[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
@@ -200,7 +201,7 @@ export default function LojistikSiparisView() {
 
   // Listen peripheral orders
   useEffect(() => {
-    const q = query(collection(db, 'orders'), where('isPeripheral', '==', true));
+    const q = scopedQuery('orders', currentCompanyId, isSuperAdmin, where('isPeripheral', '==', true));
     const unsub = onSnapshot(q, (snap) => {
       const rowsData = snap.docs.map((d) => {
         const data = d.data();
