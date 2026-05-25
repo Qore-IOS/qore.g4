@@ -116,6 +116,17 @@ service cloud.firestore {
     match /productCodes/{id}                  { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /notifications/{id}                 { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /orders/{id}                        { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /personnel/{id}                     { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /personnelHistoryLogs/{id}          { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /personelGruplari/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /personalStock/{id}                 { allow read: if inCompany(); allow write: if writingInCompany(); }
+
+    // companies özel: id == userCompany() (her tenant kendi şirket dökümanını okur)
+    // SuperAdmin tüm companies'i okur ve yazar.
+    match /companies/{id} {
+      allow read: if isSignedIn() && (isSuperAdmin() || id == userCompany());
+      allow write: if isSuperAdmin();
+    }
 
     // -----------------------------
     // LOOSE tier — not yet scoped (TODO: tighten as queries migrate)
@@ -136,7 +147,6 @@ service cloud.firestore {
     match /borrowedSpareParts/{id}            { allow read, write: if isSignedIn(); }
     match /centralOrders/{id}                 { allow read, write: if isSignedIn(); }
     match /cihazUstuGecmisi/{id}              { allow read, write: if isSignedIn(); }
-    match /companies/{id}                     { allow read, write: if isSignedIn(); }
     match /consumableRequests/{id}            { allow read, write: if isSignedIn(); }
     match /costCheckpoints/{id}               { allow read, write: if isSignedIn(); }
     match /depotBrandCountSessions/{id}       { allow read, write: if isSignedIn(); }
@@ -159,10 +169,6 @@ service cloud.firestore {
     match /pendingReturns/{id}                { allow read, write: if isSignedIn(); }
     match /periodicPartChangeLogs/{id}        { allow read, write: if isSignedIn(); }
     match /periodicPartChanges/{id}           { allow read, write: if isSignedIn(); }
-    match /personalStock/{id}                 { allow read, write: if isSignedIn(); }
-    match /personelGruplari/{id}              { allow read, write: if isSignedIn(); }
-    match /personnel/{id}                     { allow read, write: if isSignedIn(); }
-    match /personnelHistoryLogs/{id}          { allow read, write: if isSignedIn(); }
     match /poolWarehouseStock/{id}            { allow read, write: if isSignedIn(); }
     match /postClosurePartChangeLogs/{id}     { allow read, write: if isSignedIn(); }
     match /productReturns/{id}                { allow read, write: if isSignedIn(); }

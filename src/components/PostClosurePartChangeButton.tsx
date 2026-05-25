@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDocs, query, where, writeBatch, Timestamp, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -63,7 +64,7 @@ export default function PostClosurePartChangeButton({
   formCollection,
   createdByUid,
 }: PostClosurePartChangeButtonProps) {
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
 
   const [isOpen, setIsOpen] = useState(false);
@@ -98,8 +99,10 @@ export default function PostClosurePartChangeButton({
     (async () => {
       try {
         const stockSnap = await getDocs(
-          query(
-            collection(db, 'personalStock'),
+          scopedQuery(
+            'personalStock',
+            currentCompanyId,
+            isSuperAdmin,
             where('ownerUid', '==', currentUser.uid),
             where('status', '==', 'in_stock')
           )

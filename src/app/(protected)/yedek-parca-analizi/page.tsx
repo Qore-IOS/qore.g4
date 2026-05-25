@@ -19,6 +19,7 @@ import { useRouter } from 'next/navigation';
 import type { Hospital } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 interface TransferLog {
   id: string;
@@ -253,8 +254,8 @@ export default function YedekParcaAnaliziPage() {
       }).sort((a, b) => b.date.getTime() - a.date.getTime());
 
       const [depoSnap, personalSnap] = await Promise.all([
-        getDocs(query(collection(db, 'yedekParcaDepoStok'), where('stokKodu', '==', part.stokKodu))),
-        getDocs(query(collection(db, 'personalStock'), where('stokKodu', '==', part.stokKodu), where('status', '==', 'in_stock'))),
+        getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin, where('stokKodu', '==', part.stokKodu))),
+        getDocs(scopedQuery('personalStock', currentCompanyId, isSuperAdmin, where('stokKodu', '==', part.stokKodu), where('status', '==', 'in_stock'))),
       ]);
 
       let depoStokCount = 0;

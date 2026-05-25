@@ -25,6 +25,7 @@ import { useToast } from '@/hooks/use-toast';
 import { nanoid } from 'nanoid';
 import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
 import { filterByCompanyScope, filterByAssignedLabs, matchesCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { emitExternalStockUsage } from '@/lib/notifications';
 
 type ModuleType = 'teknik-servis' | 'aplikasyon-paneli';
@@ -417,8 +418,10 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
     if (!currentUserProfile?.uid) return;
     (async () => {
       try {
-        const q = query(
-          collection(db, 'personalStock'),
+        const q = scopedQuery(
+          'personalStock',
+          currentCompanyId,
+          isSuperAdmin,
           where('ownerUid', '==', currentUserProfile.uid),
           where('status', '==', 'in_stock')
         );
