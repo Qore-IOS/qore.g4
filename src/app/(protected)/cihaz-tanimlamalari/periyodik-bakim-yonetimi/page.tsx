@@ -2,6 +2,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, getDocs, deleteDoc, doc, query, where, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import type { MaintenancePlan, MaintenanceLog, PeriodicPartChange, PeriodicPartChangeLog, Device, Hospital } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import BackButton from '@/components/BackButton';
@@ -51,6 +53,7 @@ const PERIOD_UNIT_LABELS: Record<string, string> = {
 
 export default function PeriyodikBakimYonetimiPage() {
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedLabFilter, setSelectedLabFilter] = useState<string>('all');
@@ -70,12 +73,12 @@ export default function PeriyodikBakimYonetimiPage() {
     setLoading(true);
     try {
       const [plansSnap, logsSnap, partsSnap, partLogsSnap, devicesSnap, hospitalsSnap] = await Promise.all([
-        getDocs(collection(db, 'maintenancePlans')),
-        getDocs(query(collection(db, 'maintenanceLogs'), orderBy('completedAt', 'desc'))),
-        getDocs(collection(db, 'periodicPartChanges')),
-        getDocs(query(collection(db, 'periodicPartChangeLogs'), orderBy('completedAt', 'desc'))),
-        getDocs(collection(db, 'devices')),
-        getDocs(collection(db, 'hospitals')),
+        getDocs(scopedQuery('maintenancePlans', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('maintenanceLogs', currentCompanyId, isSuperAdmin, orderBy('completedAt', 'desc'))),
+        getDocs(scopedQuery('periodicPartChanges', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('periodicPartChangeLogs', currentCompanyId, isSuperAdmin, orderBy('completedAt', 'desc'))),
+        getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
       ]);
 
       setMaintenancePlans(plansSnap.docs.map(d => ({ id: d.id, ...d.data() }) as MaintenancePlan));

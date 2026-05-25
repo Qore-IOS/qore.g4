@@ -581,8 +581,10 @@ export default function IslemFormuPage() {
     (async () => {
       try {
         // Fetch periodic part changes for teknik_servis or both
-        const partsQuery = query(
-          collection(db, 'periodicPartChanges'),
+        const partsQuery = scopedQuery(
+          'periodicPartChanges',
+          currentCompanyId,
+          isSuperAdmin,
           where('deviceId', '==', deviceId)
         );
         const partsSnap = await getDocs(partsQuery);
@@ -592,8 +594,10 @@ export default function IslemFormuPage() {
         setPeriodicPartChanges(filteredParts);
 
         // Fetch periodic part change logs for this device
-        const logsQuery = query(
-          collection(db, 'periodicPartChangeLogs'),
+        const logsQuery = scopedQuery(
+          'periodicPartChangeLogs',
+          currentCompanyId,
+          isSuperAdmin,
           where('deviceId', '==', deviceId)
         );
         const logsSnap = await getDocs(logsQuery);
