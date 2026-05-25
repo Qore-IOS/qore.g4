@@ -486,7 +486,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getDocs(collection(db, 'yedekParcaDepoStok'));
+        const snap = await getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
         setDepotStockItems(
           snap.docs.map((d) => {
             const data = d.data();
@@ -832,8 +832,10 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         }
       }
       if (action.isDepotSelection) {
-        const restoredDepotSnap = await getDocs(query(
-          collection(db, 'yedekParcaDepoStok'),
+        const restoredDepotSnap = await getDocs(scopedQuery(
+          'yedekParcaDepoStok',
+          currentCompanyId,
+          isSuperAdmin,
           where('stokKodu', '==', action.stokKodu || ''),
           where('stokAdi', '==', action.stokAdi || '')
         ));

@@ -37,7 +37,7 @@ import {
 import { exportDataToExcel } from '@/lib/utils';
 import { differenceInDays, parse, isValid, compareAsc } from 'date-fns';
 import { useAuth } from '@/contexts/auth-context';
-import { filterByCompanyScope } from '@/lib/company-scope';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { Badge } from './ui/badge';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
@@ -1462,7 +1462,7 @@ export default function StokYonetimiPanel() {
         });
       }
 
-      batch.set(transferRef, {
+      batch.set(transferRef, withCompanyScope({
         id: transferRef.id,
         timestamp: serverTimestamp(),
         sourceDepotId: selectedDepotId,
@@ -1475,7 +1475,7 @@ export default function StokYonetimiPanel() {
         createdByUid: currentUserProfile.uid ?? '',
         createdByName: currentUserProfile.name ?? '',
         rescueTransfer: true,
-      });
+      }, currentCompanyId));
 
       await batch.commit();
       await touchStockMetadata();

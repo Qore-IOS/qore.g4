@@ -154,7 +154,7 @@ export function useLabCountMissingStock(params: {
 
       // Create transfer record for traceability
       const transferRef = doc(collection(db, 'transfers'));
-      batch.set(transferRef, {
+      batch.set(transferRef, withCompanyScope({
         id: transferRef.id,
         timestamp: serverTimestamp(),
         sourceDepotId: sourceDepotId,
@@ -165,7 +165,7 @@ export function useLabCountMissingStock(params: {
         itemCount: 1,
         createdByUid: 'system',
         createdByName: 'Sayım Otomatik Transfer',
-      });
+      }, currentCompanyId));
 
       // Add item to transfer subcollection
       const transferItemRef = doc(collection(db, 'transfers', transferRef.id, 'items'), depotSource.id);
@@ -276,7 +276,7 @@ export function useLabCountMissingStock(params: {
 
       // Create inter-lab transfer record
       const transferRef = doc(collection(db, 'transfers'));
-      batch.set(transferRef, {
+      batch.set(transferRef, withCompanyScope({
         id: transferRef.id,
         timestamp: serverTimestamp(),
         sourceLabId: sourceLabId,
@@ -287,7 +287,7 @@ export function useLabCountMissingStock(params: {
         itemCount: 1,
         createdByUid: 'system',
         createdByName: 'Sayım Otomatik Transfer',
-      });
+      }, currentCompanyId));
 
       // Add item to transfer subcollection
       const transferItemRef = doc(collection(db, 'transfers', transferRef.id, 'items'), (poolSource as any).id);
