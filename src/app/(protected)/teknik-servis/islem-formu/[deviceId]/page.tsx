@@ -6,6 +6,7 @@ import { db } from '@/lib/firebase';
 import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where, orderBy, updateDoc, Timestamp, writeBatch, setDoc, deleteDoc } from 'firebase/firestore';
 import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog, PersonalStockItem, PeriodicPartChange, PeriodicPartChangeLog, MaintenancePeriodUnit, FaultDefinition, DraftActionLog, PoolWarehouseStockItem, Depot, DeviceLabPool, YedekParcaDepoStokItem } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope } from '@/lib/company-scope';
 import { useToast } from '@/hooks/use-toast';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -1511,7 +1512,7 @@ export default function IslemFormuPage() {
         draftData.createdByName = currentUserProfile?.name || '';
       }
 
-      await setDoc(doc(db, 'draftActionForms', draftId), draftData, { merge: true });
+      await setDoc(doc(db, 'draftActionForms', draftId), withCompanyScope(draftData, currentCompanyId), { merge: true });
       setCurrentDraftId(draftId);
       setDraftActionLogs(updatedLogs);
 
