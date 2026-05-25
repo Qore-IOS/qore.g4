@@ -2,6 +2,7 @@
 
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { db } from '@/lib/firebase';
 import {
@@ -751,7 +752,7 @@ export default function SatinAlmaPanel() {
   }, [isOffline, syncOfflineMutations]);
 
   useEffect(() => {
-    const q = query(collection(db, 'purchasingTaskDefinitions'), orderBy('name', 'asc'));
+    const q = scopedQuery('purchasingTaskDefinitions', currentCompanyId, isSuperAdmin, orderBy('name', 'asc'));
     const unsub = onSnapshot(
       q,
       (snap) => {
@@ -2434,12 +2435,12 @@ export default function SatinAlmaPanel() {
               toast.error('Bu görev tanımı zaten mevcut');
               return;
             }
-            await addDoc(collection(db, 'purchasingTaskDefinitions'), {
+            await addDoc(collection(db, 'purchasingTaskDefinitions'), withCompanyScope({
               name: trimmed,
               requiresLaboratory,
               active: true,
               createdAt: Timestamp.now(),
-            });
+            }, currentCompanyId));
             toast.success('Görev tanımı eklendi');
           }}
           onDelete={async (id) => {

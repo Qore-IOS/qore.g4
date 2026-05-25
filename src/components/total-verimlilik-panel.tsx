@@ -870,7 +870,7 @@ export default function TotalVerimlilikPanel({
     const fetchCostCheckpoints = async () => {
       try {
         const checkpointsSnap = await getDocs(
-          query(collection(db, 'costCheckpoints'), orderBy('year', 'desc'), orderBy('month', 'desc'))
+          scopedQuery('costCheckpoints', currentCompanyId, isSuperAdmin, orderBy('year', 'desc'), orderBy('month', 'desc'))
         );
         const checkpointsList = checkpointsSnap.docs.map(d => {
           const data = d.data();

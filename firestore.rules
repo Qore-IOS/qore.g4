@@ -142,6 +142,12 @@ service cloud.firestore {
     match /userRequests/{id}                  { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /transferTemplates/{id}             { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /vehicles/{id}                      { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /testDefinitions/{id}               { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /deviceBrandModels/{id}             { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /deviceModelDefinitions/{id}        { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /costCheckpoints/{id}               { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /shiftSchedules/{id}                { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /purchasingTaskDefinitions/{id}     { allow read: if inCompany(); allow write: if writingInCompany(); }
 
     // companies özel: id == userCompany() (her tenant kendi şirket dökümanını okur)
     // SuperAdmin tüm companies'i okur ve yazar.
@@ -167,12 +173,9 @@ service cloud.firestore {
     match /centralOrders/{id}                 { allow read, write: if isSignedIn(); }
     match /cihazUstuGecmisi/{id}              { allow read, write: if isSignedIn(); }
     match /consumableRequests/{id}            { allow read, write: if isSignedIn(); }
-    match /costCheckpoints/{id}               { allow read, write: if isSignedIn(); }
     match /depotBrandCountSessions/{id}       { allow read, write: if isSignedIn(); }
     match /depotBrandCountValidationLogs/{id} { allow read, write: if isSignedIn(); }
     match /destroyedKitsReports/{id}          { allow read, write: if isSignedIn(); }
-    match /deviceBrandModels/{id}             { allow read, write: if isSignedIn(); }
-    match /deviceModelDefinitions/{id}        { allow read, write: if isSignedIn(); }
     match /digerFirmaArizalar/{id}            { allow read, write: if isSignedIn(); }
     match /draftActionForms/{id}              { allow read, write: if isSignedIn(); }
     match /ejectedKitRecords/{id}             { allow read, write: if isSignedIn(); }
@@ -190,11 +193,8 @@ service cloud.firestore {
     match /poolWarehouseStock/{id}            { allow read, write: if isSignedIn(); }
     match /postClosurePartChangeLogs/{id}     { allow read, write: if isSignedIn(); }
     match /productReturns/{id}                { allow read, write: if isSignedIn(); }
-    match /purchasingTaskDefinitions/{id}     { allow read, write: if isSignedIn(); }
     match /routes/{id}                        { allow read, write: if isSignedIn(); }
-    match /shiftSchedules/{id}                { allow read, write: if isSignedIn(); }
     match /teknikServisActionForms/{id}       { allow read, write: if isSignedIn(); }
-    match /testDefinitions/{id}               { allow read, write: if isSignedIn(); }
     match /totalEfficiencyRecords/{id}        { allow read, write: if isSignedIn(); }
     match /trashBinRecords/{id}               { allow read, write: if isSignedIn(); }
 
