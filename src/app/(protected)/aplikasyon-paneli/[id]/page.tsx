@@ -289,16 +289,20 @@ export default function AplikasyonPaneliDetayPage() {
         }
 
         // Fetch periodic part changes for this device
-        const partsQ = query(
-          collection(db, 'periodicPartChanges'),
+        const partsQ = scopedQuery(
+          'periodicPartChanges',
+          currentCompanyId,
+          isSuperAdmin,
           where('deviceId', '==', device.id)
         );
         const partsSnap = await getDocs(partsQ);
         const parts = partsSnap.docs.map(d => ({ id: d.id, ...d.data() } as PeriodicPartChange));
 
         // Fetch periodic part change logs for this device
-        const partLogsQ = query(
-          collection(db, 'periodicPartChangeLogs'),
+        const partLogsQ = scopedQuery(
+          'periodicPartChangeLogs',
+          currentCompanyId,
+          isSuperAdmin,
           where('deviceId', '==', device.id)
         );
         const partLogsSnap = await getDocs(partLogsQ);

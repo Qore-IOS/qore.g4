@@ -293,8 +293,10 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       setExistingPlans(plans);
 
       // Periyodik parça değişimlerini getir
-      const partsQuery = query(
-        collection(db, 'periodicPartChanges'),
+      const partsQuery = scopedQuery(
+        'periodicPartChanges',
+        currentCompanyId,
+        isSuperAdmin,
         where('deviceId', '==', device.id)
       );
       const partsSnap = await getDocs(partsQuery);
@@ -702,8 +704,8 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     try {
       // Fetch all maintenance plans and periodic parts for all devices
       const [allPlansSnap, allPartsSnap] = await Promise.all([
-        getDocs(collection(db, 'maintenancePlans')),
-        getDocs(collection(db, 'periodicPartChanges')),
+        getDocs(scopedQuery('maintenancePlans', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('periodicPartChanges', currentCompanyId, isSuperAdmin)),
       ]);
       const allPlans = filterByCompanyScope(
         allPlansSnap.docs.map(d => ({ id: d.id, ...d.data() }) as MaintenancePlan),
@@ -762,8 +764,8 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     setExportExcelLoading(true);
     try {
       const [allPlansSnap, allPartsSnap] = await Promise.all([
-        getDocs(collection(db, 'maintenancePlans')),
-        getDocs(collection(db, 'periodicPartChanges')),
+        getDocs(scopedQuery('maintenancePlans', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('periodicPartChanges', currentCompanyId, isSuperAdmin)),
       ]);
       const allPlans = filterByCompanyScope(
         allPlansSnap.docs.map(d => ({ id: d.id, ...d.data() }) as MaintenancePlan),

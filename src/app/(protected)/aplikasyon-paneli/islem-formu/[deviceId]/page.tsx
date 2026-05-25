@@ -546,8 +546,10 @@ export default function AplikasyonIslemFormuPage() {
     (async () => {
       try {
         // Fetch periodic part changes for aplikasyon or both
-        const partsQuery = query(
-          collection(db, 'periodicPartChanges'),
+        const partsQuery = scopedQuery(
+          'periodicPartChanges',
+          currentCompanyId,
+          isSuperAdmin,
           where('deviceId', '==', deviceId)
         );
         const partsSnap = await getDocs(partsQuery);
@@ -557,8 +559,10 @@ export default function AplikasyonIslemFormuPage() {
         setPeriodicPartChanges(filteredParts);
 
         // Fetch periodic part change logs for this device
-        const logsQuery = query(
-          collection(db, 'periodicPartChangeLogs'),
+        const logsQuery = scopedQuery(
+          'periodicPartChangeLogs',
+          currentCompanyId,
+          isSuperAdmin,
           where('deviceId', '==', deviceId)
         );
         const logsSnap = await getDocs(logsQuery);

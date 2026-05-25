@@ -174,6 +174,8 @@ service cloud.firestore {
     match /poolWarehouseStock/{id}            { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /routes/{id}                        { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /draftActionForms/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /periodicPartChanges/{id}           { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /periodicPartChangeLogs/{id}        { allow read: if inCompany(); allow write: if writingInCompany(); }
 
     // companies özel: id == userCompany() (her tenant kendi şirket dökümanını okur)
     // SuperAdmin tüm companies'i okur ve yazar.
@@ -197,8 +199,6 @@ service cloud.firestore {
     match /irsaliyeDosyalari/{id}             { allow read, write: if isSignedIn(); }
     match /pendingCeomedIrsaliye/{id}         { allow read, write: if isSignedIn(); }
     match /pendingReturns/{id}                { allow read, write: if isSignedIn(); }
-    match /periodicPartChangeLogs/{id}        { allow read, write: if isSignedIn(); }
-    match /periodicPartChanges/{id}           { allow read, write: if isSignedIn(); }
     match /teknikServisActionForms/{id}       { allow read, write: if isSignedIn(); }
     match /totalEfficiencyRecords/{id}        { allow read, write: if isSignedIn(); }
 
