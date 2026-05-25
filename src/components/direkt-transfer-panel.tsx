@@ -863,13 +863,13 @@ export default function DirektTransferPanel() {
 
           if (isBorcMode) {
             const borcRef = doc(collection(db, 'borcTransfers'));
-            batch.set(borcRef, {
+            batch.set(borcRef, withCompanyScope({
               fromDepotId: selectedDepotId, toBorcDepotId: selectedBorcDepotId,
               company: selectedCompany, stokKodu: item.stokKodu, stokAdi: item.stokAdi,
               lot: item.lotNumarasi, miad: item.miad, seriNumarasi: item.seriNumarasi,
               isReturned: false, timestamp: Timestamp.now(),
               adet: transferQty
-            });
+            }, currentCompanyId));
           }
 
           if (item.seriNumarasi) {

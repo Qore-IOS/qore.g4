@@ -27,7 +27,7 @@ import useHidScanner from '@/hooks/useHidScanner';
 import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
 import BackButton from '@/components/BackButton';
 import { useAuth } from '@/contexts/auth-context';
-import { filterByCompanyScope } from '@/lib/company-scope';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { resolveDefaultTrackingMode, TrackingMode } from '@/lib/tracking';
 
 
@@ -228,7 +228,7 @@ export default function UrunIadePanel() {
     }
 
     const returnRecordRef = doc(collection(db, 'productReturns'));
-    batch.set(returnRecordRef, {
+    batch.set(returnRecordRef, withCompanyScope({
         returnId: returnRecordRef.id,
         itemCount: itemsToProcess.length,
         returnedToDepotId: selectedDepotId,
@@ -243,7 +243,7 @@ export default function UrunIadePanel() {
             lotNumarasi: item.lotNumarasi,
             returnedFrom: item.hedefKurum || 'Bilinmeyen'
         }))
-    });
+    }, currentCompanyId));
 
     itemsToProcess.filter(item => item.id).forEach(item => {
       const itemRef = doc(db, 'depoStok', item.id!);

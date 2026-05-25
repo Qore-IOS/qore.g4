@@ -58,6 +58,7 @@ import {
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope } from '@/lib/company-scope';
 import { db } from '@/lib/firebase';
 import {
     collection,
@@ -88,7 +89,7 @@ export default function EjectedKitPanel() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const { toast } = useToast();
-    const { currentUser, currentUserProfile } = useAuth();
+    const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
 
     const initialTab = searchParams.get('tab') || 'kayit';
     const [activeTab, setActiveTab] = useState(initialTab);
@@ -336,7 +337,7 @@ export default function EjectedKitPanel() {
                 faultReportId,
             };
 
-            await addDoc(collection(db, 'ejectedKitRecords'), ejectedKitRecord);
+            await addDoc(collection(db, 'ejectedKitRecords'), withCompanyScope(ejectedKitRecord, currentCompanyId));
 
             toast({
                 title: 'Kayıt Oluşturuldu',

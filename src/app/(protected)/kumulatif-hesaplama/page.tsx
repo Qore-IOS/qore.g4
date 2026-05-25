@@ -45,6 +45,8 @@ import {
   Download,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope } from '@/lib/company-scope';
 import { db } from '@/lib/firebase';
 import {
   addDoc,
@@ -111,6 +113,7 @@ function parseLocaleInt(val: any): number {
 export default function KumulatifHesaplamaPage() {
   const router = useRouter();
   const { toast } = useToast();
+  const { currentCompanyId } = useAuth();
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -434,14 +437,14 @@ export default function KumulatifHesaplamaPage() {
         return acc;
       }, {} as Record<string, Omit<SummaryRow, 'stokKodu'>>);
 
-      await addDoc(collection(db, 'kumulatifRaporlar'), {
+      await addDoc(collection(db, 'kumulatifRaporlar'), withCompanyScope({
         hospitalId: selectedHospitalId,
         hospitalName: selectedHospitalName,
         month: selectedMonth,
         year: selectedYear,
         summary,
         createdAt: serverTimestamp(),
-      });
+      }, currentCompanyId));
 
       toast({
         title: 'Geçmişe kaydedildi',

@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
 import { collection, writeBatch, doc, getDocs, Timestamp } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope } from '@/lib/company-scope';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
 import { Label } from '@/components/ui/label';
@@ -18,7 +19,7 @@ import { useLightDashboardData } from './dashboard/useDashboardData';
 import { useMinMaxRules, useDevices } from '@/hooks/useFirebaseQueries';
 
 export default function CopKutusuPanel() {
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
   const { toast } = useToast();
   const router = useRouter();
   const params = useParams();
@@ -148,7 +149,7 @@ export default function CopKutusuPanel() {
           sourceType: 'manual',
         };
 
-        batch.set(trashBinRef, trashBinRecord);
+        batch.set(trashBinRef, withCompanyScope(trashBinRecord, currentCompanyId));
       });
 
       await batch.commit();

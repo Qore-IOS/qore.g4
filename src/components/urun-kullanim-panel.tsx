@@ -1705,7 +1705,7 @@ export default function UrunKullanimPanel() {
           sourceType: 'manual',
         };
 
-        batch.set(trashBinRef, trashBinRecord);
+        batch.set(trashBinRef, withCompanyScope(trashBinRecord, currentCompanyId));
       });
 
       await batch.commit();

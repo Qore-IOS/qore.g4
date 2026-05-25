@@ -4,6 +4,8 @@ import React, { useState, useEffect, useMemo, ChangeEvent } from 'react';
 import type { Depot, Hospital, ProductCode, MinMaxRule } from '@/lib/types';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDocs, writeBatch, addDoc, serverTimestamp } from 'firebase/firestore';
+import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope } from '@/lib/company-scope';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Upload, Download, Loader2, Save, Trash2, SlidersHorizontal, Clock, Search, X, Plus } from 'lucide-react';
@@ -34,6 +36,7 @@ interface RuleState {
 type PanelTab = 'selected' | 'unselected';
 
 export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetType, productCodes, toast }: MinMaxSettingsPanelProps) {
+  const { currentCompanyId } = useAuth();
   const [rules, setRules] = useState<RuleState>({});
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -233,14 +236,14 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
         currentBatch.set(ruleRef, dataToSet);
         commitOp();
         
-        currentBatch.set(historyRef, { ...dataToSet, locationId: targetId, locationType: targetType, timestamp: serverTimestamp() });
+        currentBatch.set(historyRef, withCompanyScope({ ...dataToSet, locationId: targetId, locationType: targetType, timestamp: serverTimestamp() }, currentCompanyId));
         commitOp();
       } else {
         if (existingRuleIds.has(stockCode)) {
           currentBatch.delete(ruleRef);
           commitOp();
           
-          currentBatch.set(historyRef, { stokKodu: stockCode, min: null, max: null, maxGun: null, aylikTuketimLimiti: null, locationId: targetId, locationType: targetType, timestamp: serverTimestamp(), action: 'deleted' });
+          currentBatch.set(historyRef, withCompanyScope({ stokKodu: stockCode, min: null, max: null, maxGun: null, aylikTuketimLimiti: null, locationId: targetId, locationType: targetType, timestamp: serverTimestamp(), action: 'deleted' }, currentCompanyId));
           commitOp();
         }
       }
