@@ -2,6 +2,7 @@
 
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { db } from '@/lib/firebase';
 import { useDepots, useHospitals } from '@/hooks/useFirebaseQueries';
 import { matchesCompanyScope, normalizeCompanyId } from '@/lib/company-scope';
@@ -90,8 +91,10 @@ export default function DosyaYonetimiPage() {
 
   // Listen to irsaliye files in real-time
   useEffect(() => {
-    const q = query(
-      collection(db, 'irsaliyeDosyalari'),
+    const q = scopedQuery(
+      'irsaliyeDosyalari',
+      currentCompanyId,
+      isSuperAdmin,
       orderBy('uploadedAt', 'desc')
     );
 
@@ -224,8 +227,10 @@ export default function DosyaYonetimiPage() {
     const cleanupExpired = async () => {
       try {
         const now = Timestamp.now();
-        const expiredQuery = query(
-          collection(db, 'irsaliyeDosyalari'),
+        const expiredQuery = scopedQuery(
+          'irsaliyeDosyalari',
+          currentCompanyId,
+          isSuperAdmin,
           where('expiresAt', '<=', now)
         );
         const snapshot = await getDocs(expiredQuery);

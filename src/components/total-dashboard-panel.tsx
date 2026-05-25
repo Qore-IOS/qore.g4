@@ -620,7 +620,7 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
         setEfficiencyPools(pools);
 
         // Fetch all efficiency records (without compound index - sort in JS)
-        const recordsSnap = await getDocs(collection(db, 'totalEfficiencyRecords'));
+        const recordsSnap = await getDocs(scopedQuery('totalEfficiencyRecords', currentCompanyId, isSuperAdmin));
         const records = recordsSnap.docs
           .map(d => {
             const data = d.data();

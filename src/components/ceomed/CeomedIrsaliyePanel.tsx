@@ -16,6 +16,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { withCompanyScope } from '@/lib/company-scope';
 import { useDepots, useHospitals, useProductCodes } from '@/hooks/useFirebaseQueries';
 import { Button } from '@/components/ui/button';
@@ -88,7 +89,7 @@ function parseTarih(s: string): Date | null {
 }
 
 export default function CeomedIrsaliyePanel() {
-  const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { data: hospitals = [] } = useHospitals();
   const { data: depots = [] } = useDepots();
   const { data: productCodes = [] } = useProductCodes();
@@ -109,7 +110,7 @@ export default function CeomedIrsaliyePanel() {
   const [targetDepotId, setTargetDepotId] = useState<string>('');
 
   useEffect(() => {
-    const q = query(collection(db, 'pendingCeomedIrsaliye'));
+    const q = scopedQuery('pendingCeomedIrsaliye', currentCompanyId, isSuperAdmin);
     const unsub = onSnapshot(
       q,
       (snap) => {

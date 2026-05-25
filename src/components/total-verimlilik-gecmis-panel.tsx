@@ -24,6 +24,8 @@ import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, orderBy, query } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { totalVerimlilikLogger } from '@/lib/logger';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -73,6 +75,7 @@ const MONTHS = [
 
 export default function TotalVerimlilikGecmisPanel() {
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [records, setRecords] = useState<TotalEfficiencyRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -80,8 +83,10 @@ export default function TotalVerimlilikGecmisPanel() {
   useEffect(() => {
     const fetchRecords = async () => {
       try {
-        const recordsQuery = query(
-          collection(db, 'totalEfficiencyRecords'),
+        const recordsQuery = scopedQuery(
+          'totalEfficiencyRecords',
+          currentCompanyId,
+          isSuperAdmin,
           orderBy('createdAt', 'desc')
         );
         const snapshot = await getDocs(recordsQuery);

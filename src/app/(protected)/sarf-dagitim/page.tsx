@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { compareAsc, parse } from 'date-fns';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { filterByCompanyScope } from '@/lib/company-scope';
 
 
@@ -66,13 +67,13 @@ export default function SarfDagilimPage() {
     };
     
     const unsubRequests = onSnapshot(
-      query(collection(db, 'consumableRequests'), where('status', '==', 'pending'), orderBy('createdAt', 'desc')),
+      scopedQuery('consumableRequests', currentCompanyId, isSuperAdmin, where('status', '==', 'pending'), orderBy('createdAt', 'desc')),
       (snapshot) => {
         setPendingRequests(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Order)));
       },
       (error) => {
         console.warn('Could not listen to pending consumableRequests with ordering, trying without: ', error.message);
-        const fallbackQuery = query(collection(db, 'consumableRequests'), where('status', '==', 'pending'));
+        const fallbackQuery = scopedQuery('consumableRequests', currentCompanyId, isSuperAdmin, where('status', '==', 'pending'));
         onSnapshot(fallbackQuery, (snapshot) => {
              setPendingRequests(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Order)));
         });
