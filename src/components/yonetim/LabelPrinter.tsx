@@ -10,6 +10,8 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Loader2, QrCode, Printer } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { generateLabelsPdf } from '@/lib/pdf/LabelGenerator';
 import type { Asset } from '@/lib/pdf/LabelGenerator';
 
@@ -30,6 +32,7 @@ export default function LabelPrinter({
   logoPath = '/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG',
 }: LabelPrinterProps) {
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [assetsByLocation, setAssetsByLocation] = useState<Grouped>({});
   const [expanded, setExpanded] = useState<string[]>([]);
@@ -40,7 +43,7 @@ export default function LabelPrinter({
     setIsLoading(true);
     try {
       // only locations that actually have assets (konum not empty)
-      const qAssets = query(collection(db, 'assets'), where('konum', '!=', ''));
+      const qAssets = scopedQuery('assets', currentCompanyId, isSuperAdmin, where('konum', '!=', ''));
       const snap = await getDocs(qAssets);
       const items: Asset[] = snap.docs.map((d) => {
         const dt = d.data() as any;

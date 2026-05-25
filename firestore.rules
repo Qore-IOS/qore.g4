@@ -130,6 +130,18 @@ service cloud.firestore {
     match /yedekParcaDepoLog/{id}             { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /yedekParcaSiparisler/{id}          { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /borrowedSpareParts/{id}            { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /assets/{id} {
+      allow read: if inCompany();
+      allow write: if writingInCompany();
+      match /assetHistory/{logId}             { allow read, write: if isSignedIn(); }
+      match /custodyHistory/{logId}           { allow read, write: if isSignedIn(); }
+    }
+    match /assetCategories/{id}               { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /efficiencyPools/{id}               { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /purchasingWorkflows/{id}           { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /userRequests/{id}                  { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /transferTemplates/{id}             { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /vehicles/{id}                      { allow read: if inCompany(); allow write: if writingInCompany(); }
 
     // companies özel: id == userCompany() (her tenant kendi şirket dökümanını okur)
     // SuperAdmin tüm companies'i okur ve yazar.
@@ -150,8 +162,6 @@ service cloud.firestore {
     match /actionFormHistoryLogs/{id}         { allow read, write: if isSignedIn(); }
     match /actionFormPartReassignLogs/{id}    { allow read, write: if isSignedIn(); }
     match /archiveRacks/{id}                  { allow read, write: if isSignedIn(); }
-    match /assetCategories/{id}               { allow read, write: if isSignedIn(); }
-    match /assets/{id}                        { allow read, write: if isSignedIn(); }
     match /bekleyenIrsaliyeler/{id}           { allow read, write: if isSignedIn(); }
     match /borcTransfers/{id}                 { allow read, write: if isSignedIn(); }
     match /centralOrders/{id}                 { allow read, write: if isSignedIn(); }
@@ -165,7 +175,6 @@ service cloud.firestore {
     match /deviceModelDefinitions/{id}        { allow read, write: if isSignedIn(); }
     match /digerFirmaArizalar/{id}            { allow read, write: if isSignedIn(); }
     match /draftActionForms/{id}              { allow read, write: if isSignedIn(); }
-    match /efficiencyPools/{id}               { allow read, write: if isSignedIn(); }
     match /ejectedKitRecords/{id}             { allow read, write: if isSignedIn(); }
     match /expensePeriods/{id}                { allow read, write: if isSignedIn(); }
     match /irsaliyeDosyalari/{id}             { allow read, write: if isSignedIn(); }
@@ -182,16 +191,12 @@ service cloud.firestore {
     match /postClosurePartChangeLogs/{id}     { allow read, write: if isSignedIn(); }
     match /productReturns/{id}                { allow read, write: if isSignedIn(); }
     match /purchasingTaskDefinitions/{id}     { allow read, write: if isSignedIn(); }
-    match /purchasingWorkflows/{id}           { allow read, write: if isSignedIn(); }
     match /routes/{id}                        { allow read, write: if isSignedIn(); }
     match /shiftSchedules/{id}                { allow read, write: if isSignedIn(); }
     match /teknikServisActionForms/{id}       { allow read, write: if isSignedIn(); }
     match /testDefinitions/{id}               { allow read, write: if isSignedIn(); }
     match /totalEfficiencyRecords/{id}        { allow read, write: if isSignedIn(); }
-    match /transferTemplates/{id}             { allow read, write: if isSignedIn(); }
     match /trashBinRecords/{id}               { allow read, write: if isSignedIn(); }
-    match /userRequests/{id}                  { allow read, write: if isSignedIn(); }
-    match /vehicles/{id}                      { allow read, write: if isSignedIn(); }
 
     // -----------------------------
     // System & infrastructure

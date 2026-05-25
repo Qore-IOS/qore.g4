@@ -12,6 +12,7 @@ import { collection, getDocs, query, where, deleteDoc, doc } from 'firebase/fire
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { useIconMappings, getIconSrc } from '@/hooks/useIconMappings';
 
 interface Asset {
@@ -48,7 +49,7 @@ export default function AssetLocationPage() {
     if (!locationName) return;
     setLoading(true);
     try {
-      const assetsSnap = await getDocs(query(collection(db, 'assets'), where('konum', '==', locationName)));
+      const assetsSnap = await getDocs(scopedQuery('assets', currentCompanyId, isSuperAdmin, where('konum', '==', locationName)));
       setAssets(
         filterByCompanyScope(
           assetsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Asset)),

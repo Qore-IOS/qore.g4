@@ -14,6 +14,7 @@ import { collection, getDocs, addDoc, deleteDoc, doc, query, where, setDoc } fro
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import type { Hospital, Depot, Asset } from '@/lib/types';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -130,7 +131,7 @@ export default function AssetCategoryPage() {
       ).map(({ value, label }) => ({ value, label }));
       setLocations([...labLocations, ...depotLocations, { value: 'Diğer', label: 'Diğer (Manuel Giriş)' }].sort((a, b) => a.label.localeCompare(b.label)));
 
-      const assetsSnap = await getDocs(query(collection(db, 'assets'), where('category', '==', categoryName)));
+      const assetsSnap = await getDocs(scopedQuery('assets', currentCompanyId, isSuperAdmin, where('category', '==', categoryName)));
       setAssets(filterByCompanyScope(
         assetsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Asset)),
         currentCompanyId, isSuperAdmin

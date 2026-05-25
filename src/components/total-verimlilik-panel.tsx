@@ -834,9 +834,9 @@ export default function TotalVerimlilikPanel({
       setIsLoading(true);
       try {
         const [effPoolsSnap, labPoolsSnap, depotsSnap] = await Promise.all([
-          getDocs(query(collection(db, 'efficiencyPools'), orderBy('createdAt', 'desc'))),
-          getDocs(collection(db, 'labPools')),
-          getDocs(collection(db, 'depots')),
+          getDocs(scopedQuery('efficiencyPools', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
+          getDocs(scopedQuery('labPools', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
         ]);
         setEfficiencyPools(effPoolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as EfficiencyPool)));
         setLabPools(labPoolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as LabPool)));

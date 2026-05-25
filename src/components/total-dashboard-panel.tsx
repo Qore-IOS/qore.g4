@@ -29,6 +29,8 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { collection, getDocs, query, orderBy, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { totalVerimlilikLogger } from '@/lib/logger';
 import type { Hospital, EfficiencyPool, DeviceFaultReport } from '@/lib/types';
 import BackButton from '@/components/BackButton';
@@ -571,6 +573,7 @@ const PoolRankCard = ({
 
 export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelProps) {
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   // State
   const [isLoading, setIsLoading] = useState(true);
@@ -611,7 +614,7 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
       try {
         // Fetch efficiency pools
         const poolsSnap = await getDocs(
-          query(collection(db, 'efficiencyPools'), orderBy('createdAt', 'desc'))
+          scopedQuery('efficiencyPools', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))
         );
         const pools = poolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as EfficiencyPool));
         setEfficiencyPools(pools);
