@@ -780,8 +780,10 @@ export default function YedekParcaTransferPage() {
       );
       // Havuz depo stoğu - bu sayede ilgili ürünü depoya / havuza transfer eden
       // lojistik personeli de görebiliyor.
-      const poolQuery = query(
-        collection(db, 'poolWarehouseStock'),
+      const poolQuery = scopedQuery(
+        'poolWarehouseStock',
+        currentCompanyId,
+        isSuperAdmin,
         where('status', '==', 'in_stock')
       );
 
@@ -825,8 +827,10 @@ export default function YedekParcaTransferPage() {
     setPoolStockPage(0);
     setPoolStockFilter('all');
     try {
-      const stockQuery = query(
-        collection(db, 'poolWarehouseStock'),
+      const stockQuery = scopedQuery(
+        'poolWarehouseStock',
+        currentCompanyId,
+        isSuperAdmin,
         where('poolWarehouseId', '==', poolWarehouseId)
       );
       const stockSnap = await getDocs(stockQuery);

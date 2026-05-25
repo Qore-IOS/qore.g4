@@ -470,7 +470,7 @@ export default function HavuzStokGirisPage() {
 
       for (const row of rows) {
         const stockRef = doc(collection(db, 'poolWarehouseStock'));
-        batch.set(stockRef, {
+        batch.set(stockRef, withCompanyScope({
           poolWarehouseId,
           poolWarehouseName: poolWarehouse.name,
           productCodeId: row.productCodeId,
@@ -484,7 +484,7 @@ export default function HavuzStokGirisPage() {
           createdAt: Timestamp.fromDate(now),
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || '',
-        });
+        }, currentCompanyId));
       }
 
       await batch.commit();

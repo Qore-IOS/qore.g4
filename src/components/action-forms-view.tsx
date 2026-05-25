@@ -463,8 +463,10 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
 
         const allPoolStock: PoolWarehouseStockItem[] = [];
         for (const warehouseId of poolWarehouseIds) {
-          const stockQ = query(
-            collection(db, 'poolWarehouseStock'),
+          const stockQ = scopedQuery(
+            'poolWarehouseStock',
+            currentCompanyId,
+            isSuperAdmin,
             where('poolWarehouseId', '==', warehouseId),
             where('status', '==', 'in_stock')
           );

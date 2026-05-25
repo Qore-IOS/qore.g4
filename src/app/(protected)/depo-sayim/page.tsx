@@ -624,7 +624,7 @@ Devam edilsin mi?`;
                 brands: [...new Set(newFoundItems.map(() => brandForCount))],
                 mode: 'unverified',
             };
-            operations.push((batch) => batch.set(malKabulRef, malKabulHeader));
+            operations.push((batch) => batch.set(malKabulRef, withCompanyScope(malKabulHeader, currentCompanyId)));
 
             for (const group of newFoundItems) {
                 const adet = group.trackingMode === 'serial' ? group.scannedSerials.size : group.scannedAdet;
@@ -708,7 +708,7 @@ Devam edilsin mi?`;
             extraCount,
             newFoundCount,
         };
-        operations.push((batch) => batch.set(sessionRef, sessionData));
+        operations.push((batch) => batch.set(sessionRef, withCompanyScope(sessionData, currentCompanyId)));
 
         try {
             const chunkSize = 450;
@@ -748,7 +748,7 @@ Devam edilsin mi?`;
                 .map(([key, expected]) => ({ key, expected, actual: actualByGroup.get(key) || 0 }))
                 .filter(m => m.expected !== m.actual);
 
-            await addDoc(collection(db, 'depotBrandCountValidationLogs'), {
+            await addDoc(collection(db, 'depotBrandCountValidationLogs'), withCompanyScope({
                 sessionId: sessionRef.id,
                 depotId: selectedDepotId,
                 brand: brandForCount,
@@ -760,7 +760,7 @@ Devam edilsin mi?`;
                 operationCount: operations.length,
                 createdAt: serverTimestamp(),
                 createdBy: currentUserProfile.uid,
-            });
+            }, currentCompanyId));
 
             if (mismatches.length > 0) {
                 toast({ title: 'Uyarı', description: `Sayım kaydedildi fakat ${mismatches.length} satırda doğrulama farkı var. Loglara işlendi.`, variant: 'destructive' });
