@@ -22,6 +22,7 @@ import {
 import type { ProductCode, User, PendingReturn, SparePartTransferRow, PersonalStockItem, YedekParcaDepoStokItem, Device, Hospital, Depot, DeviceLabPool, PoolWarehouseStockItem } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope, filterByCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import {
@@ -345,10 +346,10 @@ export default function YedekParcaTransferPage() {
   const loadRecentTransferLogs = useCallback(async () => {
     const [transferLogsSnap, depotLogsSnap, depotStockSnap, personalStockSnap, poolStockSnap] = await Promise.all([
       getDocs(collection(db, 'sparePartTransferLogs')),
-      getDocs(collection(db, 'yedekParcaDepoLog')),
-      getDocs(collection(db, 'yedekParcaDepoStok')),
-      getDocs(query(collection(db, 'personalStock'), where('status', '==', 'in_stock'))),
-      getDocs(query(collection(db, 'poolWarehouseStock'), where('status', '==', 'in_stock'))),
+      getDocs(scopedQuery('yedekParcaDepoLog', currentCompanyId, isSuperAdmin)),
+      getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin)),
+      getDocs(scopedQuery('personalStock', currentCompanyId, isSuperAdmin, where('status', '==', 'in_stock'))),
+      getDocs(scopedQuery('poolWarehouseStock', currentCompanyId, isSuperAdmin, where('status', '==', 'in_stock'))),
     ]);
 
     const transferLogsData = filterByCompanyScope(transferLogsSnap.docs.map(d => {

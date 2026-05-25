@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import BackButton from '@/components/BackButton';
 import { toDateValue } from '@/lib/personnel-availability';
 
@@ -19,6 +21,7 @@ interface HistoryRecord {
 export default function PersonelGecmis7Page() {
   const params = useParams<{ personelId: string }>();
   const personelId = params?.personelId;
+  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState('Personel');
@@ -31,7 +34,7 @@ export default function PersonelGecmis7Page() {
       try {
         const [userDoc, historySnap] = await Promise.all([
           getDoc(doc(db, 'users', personelId)),
-          getDocs(query(collection(db, 'personnelHistoryLogs'), where('uid', '==', personelId))),
+          getDocs(scopedQuery('personnelHistoryLogs', currentCompanyId, isSuperAdmin, where('uid', '==', personelId))),
         ]);
 
         const user = userDoc.exists() ? userDoc.data() : null;
