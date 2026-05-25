@@ -8,6 +8,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Loader2 } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, orderBy, query, limit } from 'firebase/firestore';
+import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import BackButton from '@/components/BackButton';
@@ -23,13 +25,14 @@ type Row = {
 };
 
 export default function RouteHistoryPage() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
-  
+
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const qy = query(collection(db, 'routes'), orderBy('completedAt', 'desc'), limit(1000));
+      const qy = scopedQuery('routes', currentCompanyId, isSuperAdmin, orderBy('completedAt', 'desc'), limit(1000));
       try {
         const snap = await getDocs(qy);
         const all = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as Row[];

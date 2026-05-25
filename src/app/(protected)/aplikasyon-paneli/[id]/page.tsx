@@ -27,6 +27,7 @@ import type { Hospital, Device, PersonalStockItem, MaintenancePlan, MaintenanceL
 import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
 import { withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { classifyStopFault } from '@/lib/stop-fault';
 import { useAuth } from '@/contexts/auth-context';
 import {
@@ -51,7 +52,7 @@ export default function AplikasyonPaneliDetayPage() {
   const hospitalId = Array.isArray(params?.id) ? params.id[0] : (params?.id as string);
   const router = useRouter();
   const { toast } = useToast();
-  const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
 
   const [hospital, setHospital] = useState<Hospital | null>(null);
   const [devicesByHospital, setDevicesByHospital] = useState<Device[]>([]);
@@ -361,8 +362,10 @@ export default function AplikasyonPaneliDetayPage() {
   const handleDeviceClick = async (device: Device) => {
     // Check for existing drafts for this device
     try {
-      const draftQuery = query(
-        collection(db, 'draftActionForms'),
+      const draftQuery = scopedQuery(
+        'draftActionForms',
+        currentCompanyId,
+        isSuperAdmin,
         where('deviceId', '==', device.id),
         where('formType', '==', 'aplikasyon')
       );

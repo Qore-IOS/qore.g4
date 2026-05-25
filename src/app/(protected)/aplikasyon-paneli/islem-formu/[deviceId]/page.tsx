@@ -6,6 +6,7 @@ import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog, PersonalStockItem, PeriodicPartChange, PeriodicPartChangeLog, MaintenancePeriodUnit, FaultDefinition, DraftActionLog, PoolWarehouseStockItem, Depot, DeviceLabPool, YedekParcaDepoStokItem } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -1479,7 +1480,7 @@ export default function AplikasyonIslemFormuPage() {
         draftData.createdByName = currentUserProfile?.name || '';
       }
 
-      await setDoc(doc(db, 'draftActionForms', draftId), draftData, { merge: true });
+      await setDoc(doc(db, 'draftActionForms', draftId), withCompanyScope(draftData, currentCompanyId), { merge: true });
       setCurrentDraftId(draftId);
       setDraftActionLogs(updatedLogs);
 
