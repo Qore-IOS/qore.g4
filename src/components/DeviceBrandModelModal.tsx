@@ -16,6 +16,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { cn, readExcelData, exportDataToExcel } from '@/lib/utils';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 // ============================================================================
 // TYPES
@@ -74,7 +75,7 @@ export default function DeviceBrandModelModal({ open, onOpenChange }: DeviceBran
   const fetchItems = useCallback(async () => {
     setIsLoading(true);
     try {
-      const snap = await getDocs(collection(db, 'deviceBrandModels'));
+      const snap = await getDocs(scopedQuery('deviceBrandModels', currentCompanyId, isSuperAdmin));
       const all = snap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceBrandModel));
       setItems(filterByCompanyScope(all, currentCompanyId, isSuperAdmin));
     } catch (err) {

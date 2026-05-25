@@ -36,6 +36,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/contexts/auth-context';
 import DeviceLabPoolModal from '@/components/DeviceLabPoolModal';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 // Periyot birimi etiketleri
 const PERIOD_UNIT_LABELS: Record<MaintenancePeriodUnit, string> = {
@@ -182,7 +183,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   useEffect(() => { fetchDevices(); }, [currentCompanyId, isSuperAdmin]);
 
   const fetchModelDefinitions = async () => {
-    const snap = await getDocs(collection(db, 'deviceModelDefinitions'));
+    const snap = await getDocs(scopedQuery('deviceModelDefinitions', currentCompanyId, isSuperAdmin));
     const rows = filterByCompanyScope(
       snap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceModelDefinition)),
       currentCompanyId,

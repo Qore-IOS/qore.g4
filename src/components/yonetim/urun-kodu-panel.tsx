@@ -23,6 +23,7 @@ import { cn } from '@/lib/utils';
 import debounce from 'lodash.debounce';
 import { Badge } from '../ui/badge';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Checkbox } from '../ui/checkbox';
@@ -319,7 +320,7 @@ const ProductCard: React.FC<{
 export default function UrunKoduPanel() {
   const { toast } = useToast();
   const router = useRouter();
-  const { currentUser } = useAuth();
+  const { currentUser, currentCompanyId, isSuperAdmin } = useAuth();
   const { formats: barcodeFormats } = useSafeBarcodeFormats();
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
 
@@ -393,7 +394,7 @@ export default function UrunKoduPanel() {
     const fetchCostCheckpoints = async () => {
       try {
         const checkpointsSnap = await getDocs(
-          query(collection(db, 'costCheckpoints'), orderBy('year', 'desc'), orderBy('month', 'desc'))
+          scopedQuery('costCheckpoints', currentCompanyId, isSuperAdmin, orderBy('year', 'desc'), orderBy('month', 'desc'))
         );
         const checkpointsList = checkpointsSnap.docs.map(d => {
           const data = d.data();

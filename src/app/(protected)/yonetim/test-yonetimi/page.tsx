@@ -31,6 +31,7 @@ import { cn } from '@/lib/utils';
 import * as XLSX from 'xlsx';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { filterByCompanyScope, normalizeCompanyId } from '@/lib/company-scope';
 import { getExchangeRates } from '@/lib/exchange-rates';
 
@@ -98,7 +99,7 @@ export default function HakEdisPage() {
   // Global testDefinitions
   useEffect(() => {
     setLoading((p) => ({ ...p, defs: true }));
-    const q = query(collection(db, COLLECTION), orderBy('sutKodu', 'asc'));
+    const q = scopedQuery(COLLECTION, currentCompanyId, isSuperAdmin, orderBy('sutKodu', 'asc'));
     const unsub = onSnapshot(
       q,
       (snap) => {

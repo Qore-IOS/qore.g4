@@ -17,6 +17,7 @@ import { tr } from 'date-fns/locale';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope } from '@/lib/company-scope';
 import { useToast } from '@/hooks/use-toast';
 import MultiDateRangePicker from './MultiDateRangePicker';
 import type { Hospital, User as UserType, ShiftScheduleRow, ShiftDateRange, ShiftPersonnelType } from '@/lib/types';
@@ -52,7 +53,7 @@ export default function CreateShiftPanel({
   onBack,
   onSuccess
 }: CreateShiftPanelProps) {
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId } = useAuth();
   const { toast } = useToast();
 
   // Separate rows for each type
@@ -269,7 +270,7 @@ export default function CreateShiftPanel({
 
       for (const row of allRows) {
         // Ana personel için vardiya oluştur
-        await addDoc(shiftsCollection, {
+        await addDoc(shiftsCollection, withCompanyScope({
           personnelUid: row.personnelUid,
           personnelName: row.personnelName,
           personnelType: row.type,
@@ -280,12 +281,12 @@ export default function CreateShiftPanel({
           createdByUid: currentUserProfile.uid,
           createdByName: currentUserProfile.name || currentUserProfile.email || 'Bilinmeyen',
           isActive: true
-        });
+        }, currentCompanyId));
         totalCreated++;
 
         // Eşlik eden personeller için vardiya oluştur
         for (const companion of row.companions) {
-          await addDoc(shiftsCollection, {
+          await addDoc(shiftsCollection, withCompanyScope({
             personnelUid: companion.uid,
             personnelName: companion.name,
             personnelType: companion.type,
@@ -296,7 +297,7 @@ export default function CreateShiftPanel({
             createdByUid: currentUserProfile.uid,
             createdByName: currentUserProfile.name || currentUserProfile.email || 'Bilinmeyen',
             isActive: true
-          });
+          }, currentCompanyId));
           totalCreated++;
         }
       }
