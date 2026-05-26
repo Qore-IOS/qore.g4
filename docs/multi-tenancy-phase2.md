@@ -1,8 +1,29 @@
 # Multi-Tenancy Phase 2 — Loose-Tier Sıkılaştırma
 
+> **Durum: ✅ TAMAMLANDI** — Tüm Phase 2 fazları (A-N) merge edildi. ~85 koleksiyon strict tier'da, dailyConsumptionStats yapısal refactor + service-level kod + CI tamamlandı.
+>
 > **Phase 2** = Phase 1'de (PR #1286-#1296) tamamlanmamış kalan ~50 koleksiyonu strict tier'a taşımak + dailyConsumptionStats yapısal refactor + cleanup.
 >
-> Phase 1 sonrası durum: 28 koleksiyon strict, ~50 koleksiyon loose. Bu doküman Phase 2'nin sınırını ve PR planını çizer.
+> Phase 1 sonrası durum: 28 koleksiyon strict, ~50 koleksiyon loose.
+>
+> ## Phase 2 PR Listesi
+>
+> | PR | Faz | Konu |
+> |---|---|---|
+> | #1297 | 2-A | Audit + plan |
+> | #1298 | 2-B | orders strict |
+> | #1299 | 2-C | personnel/personalStock/companies özel rule |
+> | #1300 | 2-D | yedek parça grubu (6 koleksiyon) |
+> | #1301 | 2-E | assets/efficiencyPools/userRequests + 4 (7) |
+> | #1302 | 2-F | testDefinitions/brandModels/costCheckpoints/shifts (6) |
+> | #1303 | 2-G | expensePeriods/cihazUstuGecmisi/action-form logs (6) |
+> | #1304 | 2-H | log/audit + mal kabul + ejected + irsaliye (11) |
+> | #1305 | 2-I | depo-sayim + poolWarehouseStock (4) |
+> | #1306 | 2-J | routes + draftActionForms (2) |
+> | #1307 | 2-K | periodicPartChanges + periodicPartChangeLogs |
+> | #1308 | 2-L | kalan read-only (6) |
+> | #1309 | 2-M | dailyConsumptionStats yapısal redesign |
+> | (bu PR) | 2-N | cleanup + service-level + CI |
 
 ---
 

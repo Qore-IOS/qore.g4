@@ -55,7 +55,7 @@ interface LastScannedInfo {
 }
 
 export default function NumuneArsiviPage() {
-  const { currentUserProfile, isAdmin } = useAuth();
+  const { currentUserProfile, isAdmin, currentCompanyId } = useAuth();
   const { toast } = useToast();
   const router = useRouter();
   const [laboratories, setLaboratories] = useState<Laboratory[]>([]);
@@ -170,7 +170,7 @@ export default function NumuneArsiviPage() {
             sealedBy: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
         };
         
-        const rackId = await sealRack(rackData);
+        const rackId = await sealRack(rackData, currentCompanyId);
         
         toast({
             title: 'Raf Kaydedildi',

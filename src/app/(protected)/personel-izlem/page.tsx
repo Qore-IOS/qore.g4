@@ -865,7 +865,7 @@ export default function PersonelIzlemPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const isMineMode = searchParams?.get('mine') === '1';
-  const { currentUserProfile, isAdmin } = useAuth();
+  const { currentUserProfile, isAdmin, currentCompanyId, isSuperAdmin } = useAuth();
   const myUid = currentUserProfile?.uid;
   const { toast } = useToast();
   const [loading, setLoading] = useState(true);
@@ -918,7 +918,7 @@ export default function PersonelIzlemPage() {
   const loadPerformanceData = async (filters?: PerformanceFilters) => {
     setLoading(true);
     try {
-      const data = await calculateAllPerformances(filters);
+      const data = await calculateAllPerformances({ ...filters, companyId: currentCompanyId, isSuperAdmin });
       setPerformances(data);
     } catch (err) {
       console.error('Error loading performance data:', err);

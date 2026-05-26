@@ -10,6 +10,7 @@ import {
 } from 'firebase/firestore';
 import type { DepoStokItem, Shipment, ConsumptionRecord, Depot, ProductCode, Transfer } from '@/lib/types';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 // İşlem tipi
 export type IslemTipi =
@@ -238,11 +239,11 @@ export async function searchProductLedger(
     return { ledgerRows: [], stockSummary: [], searchType };
   }
 
-  // Fetch shipments, transfers, and destroyedKits
+  // Fetch shipments, transfers, and destroyedKits (tenant-scoped)
   const [shipmentsSnap, transfersSnap, destroyedKitsSnap] = await Promise.all([
-    getDocs(collection(db, 'shipments')),
-    getDocs(collection(db, 'transfers')),
-    getDocs(collection(db, 'destroyedKitsReports')),
+    getDocs(scopedQuery('shipments', companyId, isSuperAdmin)),
+    getDocs(scopedQuery('transfers', companyId, isSuperAdmin)),
+    getDocs(scopedQuery('destroyedKitsReports', companyId, isSuperAdmin)),
   ]);
 
   // Process fetched data
