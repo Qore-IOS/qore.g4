@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { collection, getDocs, query, orderBy, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import type { Order } from '@/lib/types';
 import { Loader2, History, CheckCircle } from 'lucide-react';
 import { format } from 'date-fns';
@@ -17,6 +19,7 @@ type ConsumableRequest = Order & { totalQuantity?: number };
 
 export default function SarfTalepGecmisPage() {
   const router = useRouter();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [requests, setRequests] = useState<ConsumableRequest[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -24,7 +27,7 @@ export default function SarfTalepGecmisPage() {
     const fetchRequests = async () => {
       setLoading(true);
       try {
-        const q = query(collection(db, 'consumableRequests'), orderBy('createdAt', 'desc'));
+        const q = scopedQuery('consumableRequests', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'));
         const snap = await getDocs(q);
         const reqs = snap.docs.map(d => ({
           id: d.id,

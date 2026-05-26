@@ -22,6 +22,7 @@ import { useRouter } from 'next/navigation';
 import type { Hospital, LabPool, User } from '@/lib/types';
 import type { DateRange } from 'react-day-picker';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { filterByCompanyScope } from '@/lib/company-scope';
 
 interface ActionForm {
@@ -282,12 +283,12 @@ export default function KurumZiyaretAnaliziPage() {
       setLoading(true);
       try {
         const [teknikSnap, appSnap, faultSnap, usersSnap, hospitalsSnap, deviceLabPoolsSnap] = await Promise.all([
-          getDocs(query(collection(db, 'teknikServisActionForms'), orderBy('createdAt', 'desc'))),
-          getDocs(query(collection(db, 'aplikasyonActionForms'), orderBy('createdAt', 'desc'))),
-          getDocs(query(collection(db, 'deviceFaultReports'), orderBy('openedAt', 'desc'))),
-          getDocs(collection(db, 'users')),
-          getDocs(collection(db, 'hospitals')),
-          getDocs(collection(db, 'deviceLabPools')),
+          getDocs(scopedQuery('teknikServisActionForms', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
+          getDocs(scopedQuery('aplikasyonActionForms', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
+          getDocs(scopedQuery('deviceFaultReports', currentCompanyId, isSuperAdmin, orderBy('openedAt', 'desc'))),
+          getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin)),
         ]);
 
         const uMap = new Map<string, User>();

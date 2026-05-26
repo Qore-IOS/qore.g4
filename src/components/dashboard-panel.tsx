@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
 import ConsumptionTrendModal from '@/components/ConsumptionTrendModal';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { toDateFromAny } from '@/lib/time';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -450,7 +451,7 @@ export default function DashboardPanel({
   useEffect(() => {
     (async () => {
       try {
-        const effSnap = await getDocs(collection(db, 'totalEfficiencyRecords'));
+        const effSnap = await getDocs(scopedQuery('totalEfficiencyRecords', currentCompanyId, isSuperAdmin));
         if (!effSnap) return;
         const efficiencies: number[] = [];
         effSnap.docs.forEach(d => {

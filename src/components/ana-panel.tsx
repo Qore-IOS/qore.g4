@@ -27,6 +27,7 @@ import { useDepots, useProductCodes, useAddressDefinitions, useBarcodeFormatsQue
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import useHidScanner from '@/hooks/useHidScanner';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 // UI Components
 import { Button } from '@/components/ui/button';
@@ -679,7 +680,7 @@ export default function AnaPanel(props: AnaPanelProps) {
       setPendingCeomedIrsaliye([]);
       return;
     }
-    const q = query(collection(db, 'pendingCeomedIrsaliye'), where('status', '==', 'pending'));
+    const q = scopedQuery('pendingCeomedIrsaliye', currentCompanyId, isSuperAdmin, where('status', '==', 'pending'));
     const unsub = onSnapshot(q, (snap) => {
       const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as PendingCeomedIrsaliye[];
       const filtered = rows.filter((r) =>

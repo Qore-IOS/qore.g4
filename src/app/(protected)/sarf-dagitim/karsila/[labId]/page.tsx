@@ -11,6 +11,7 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
@@ -64,7 +65,7 @@ export default function SarfDagilimPage() {
     };
     
     const unsubRequests = onSnapshot(
-      query(collection(db, 'consumableRequests'), where('status', '==', 'pending')),
+      scopedQuery('consumableRequests', currentCompanyId, isSuperAdmin, where('status', '==', 'pending')),
       (snapshot) => {
         setPendingRequests(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Order)));
       }
