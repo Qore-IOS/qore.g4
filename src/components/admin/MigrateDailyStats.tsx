@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Progress } from '@/components/ui/progress';
 import { Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 import { migrateHistoricalData } from '@/lib/dailyConsumptionStats';
+import { useAuth } from '@/contexts/auth-context';
 import { subDays } from 'date-fns';
 
 interface MigrationStatus {
@@ -19,6 +20,7 @@ interface MigrationStatus {
 }
 
 export default function MigrateDailyStats() {
+  const { currentCompanyId } = useAuth();
   const [status, setStatus] = useState<MigrationStatus>({
     isRunning: false,
     progress: 0,
@@ -45,6 +47,7 @@ export default function MigrateDailyStats() {
       const result = await migrateHistoricalData(
         startDate,
         endDate,
+        currentCompanyId,
         (current, total, date) => {
           setStatus(prev => ({
             ...prev,
