@@ -876,6 +876,14 @@
         { "fieldPath": "companyId", "order": "ASCENDING" },
         { "fieldPath": "sealedAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "pendingReturns",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "companyId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
