@@ -1,0 +1,40 @@
+name: Firestore Rules Tests
+
+on:
+  pull_request:
+    paths:
+      - 'firestore.rules'
+      - 'tests/firestore-rules.test.ts'
+      - '.github/workflows/firestore-rules-tests.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'firestore.rules'
+      - 'tests/firestore-rules.test.ts'
+
+jobs:
+  rules:
+    name: Run @firebase/rules-unit-testing
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Firebase CLI
+        run: npm install -g firebase-tools
+
+      - name: Run rules tests (with emulator)
+        env:
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8080
+        run: pnpm test:rules:emulated

@@ -176,6 +176,7 @@ service cloud.firestore {
     match /draftActionForms/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /periodicPartChanges/{id}           { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /periodicPartChangeLogs/{id}        { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /archiveRacks/{id}                  { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /pendingCeomedIrsaliye/{id}         { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /totalEfficiencyRecords/{id}        { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /irsaliyeDosyalari/{id}             { allow read: if inCompany(); allow write: if writingInCompany(); }
@@ -203,7 +204,6 @@ service cloud.firestore {
 
     // Pending follow-up Faz 3 ekleri / Faz 4 dışı koleksiyonlar
     match /AuditLogs/{id}                     { allow read, write: if isSignedIn(); }
-    match /archiveRacks/{id}                  { allow read, write: if isSignedIn(); }
     match /pendingReturns/{id}                { allow read, write: if isSignedIn(); }
 
     // -----------------------------
