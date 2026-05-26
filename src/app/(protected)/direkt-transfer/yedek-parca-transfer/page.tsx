@@ -456,8 +456,10 @@ export default function YedekParcaTransferPage() {
         setUsers(allUsers.filter(u => u.role === 'teknik_servis' || u.role === 'aplikasyon'));
 
         // Fetch pending returns (status === 'pending')
-        const pendingQuery = query(
-          collection(db, 'pendingReturns'),
+        const pendingQuery = scopedQuery(
+          'pendingReturns',
+          currentCompanyId,
+          isSuperAdmin,
           where('status', '==', 'pending')
         );
         const pendingSnap = await getDocs(pendingQuery);

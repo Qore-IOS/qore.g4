@@ -202,9 +202,11 @@ service cloud.firestore {
     // `${companyId}_${dateKey}` — companyId field doc'ta var, normal pattern.
     match /dailyConsumptionStats/{id}         { allow read: if inCompany(); allow write: if writingInCompany(); }
 
-    // Pending follow-up Faz 3 ekleri / Faz 4 dışı koleksiyonlar
-    match /AuditLogs/{id}                     { allow read, write: if isSignedIn(); }
-    match /pendingReturns/{id}                { allow read, write: if isSignedIn(); }
+    match /pendingReturns/{id}                { allow read: if inCompany(); allow write: if writingInCompany(); }
+    // AuditLogs: server-side `restore.ts` admin operation; SuperAdmin only.
+    match /AuditLogs/{id} {
+      allow read, write: if isSuperAdmin();
+    }
 
     // -----------------------------
     // System & infrastructure
