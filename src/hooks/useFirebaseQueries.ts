@@ -785,27 +785,25 @@ export function useRecentConsumption(limitCount = 500) {
 }
 
 /**
- * Daily Consumption Stats - Aggregated daily totals for dashboard KPI
- * Fetches pre-computed daily consumption counts instead of all consumption records.
- *
- * NOT (Faz 4): Bu koleksiyonun docId'si sadece `dateKey` (YYYY-MM-DD). Tüm
- * tenant'lar aynı dokümana yazıyor, dolayısıyla `where('companyId','==',X)`
- * ile filtrelenemez. Geçici olarak scopedQuery kullanılmıyor — Faz 6
- * Security Rules tarafında bu koleksiyon henüz kilitlenmeyecek.
- * Yapısal refactor (per-tenant subcollection veya `${companyId}_${dateKey}`
- * docId) için ayrı follow-up PR açılacak.
+ * Daily Consumption Stats - Aggregated daily totals for dashboard KPI.
+ * Phase 2-M: docId is `${companyId}_${dateKey}` per-tenant. Query filters
+ * by `companyId` so each tenant only sees its own aggregates.
  */
 export function useDailyConsumptionStats(startDate: string, endDate: string) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
-    queryKey: ['dailyConsumptionStats', startDate, endDate],
+    queryKey: ['dailyConsumptionStats', startDate, endDate, currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const q = query(
-        collection(db, 'dailyConsumptionStats'),
-        where('date', '>=', startDate),
-        where('date', '<=', endDate),
-        orderBy('date', 'asc')
+      const snap = await getDocs(
+        scopedQuery(
+          'dailyConsumptionStats',
+          currentCompanyId,
+          isSuperAdmin,
+          where('date', '>=', startDate),
+          where('date', '<=', endDate),
+          orderBy('date', 'asc'),
+        ),
       );
-      const snap = await getDocs(q);
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) })) as Array<{
         id: string;
         date: string;
@@ -813,6 +811,7 @@ export function useDailyConsumptionStats(startDate: string, endDate: string) {
         byLab: Record<string, number>;
       }>;
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
     refetchOnWindowFocus: true,

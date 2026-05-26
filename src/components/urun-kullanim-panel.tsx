@@ -781,7 +781,7 @@ export default function UrunKullanimPanel() {
         invalidateConsumption();
 
         // Stats update
-        incrementTodayStats(selectedLab.id).catch(() => undefined);
+        incrementTodayStats(selectedLab.id, currentCompanyId).catch(() => undefined);
         
         // Serial history
         logSerialHistory(itemToConsume.seriNumarasi || '', 'consumption', {
@@ -1667,7 +1667,7 @@ export default function UrunKullanimPanel() {
       invalidateDepoStok();
       invalidateConsumption();
       for (let i = 0; i < quantityToDeduct; i++) {
-        incrementTodayStats(selectedLab.id).catch(() => undefined);
+        incrementTodayStats(selectedLab.id, currentCompanyId).catch(() => undefined);
       }
       toast({
         title: 'Başarılı',

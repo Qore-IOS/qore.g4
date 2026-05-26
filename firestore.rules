@@ -197,9 +197,9 @@ service cloud.firestore {
     // -----------------------------
     // LOOSE tier — not yet scoped (TODO: tighten as queries migrate)
     // -----------------------------
-    // dailyConsumptionStats: docId is dateKey-only (tüm tenant'lar tek doc)
-    // — Faz 4 follow-up'ta yapısal refactor + scoped query gelince strict olur.
-    match /dailyConsumptionStats/{id}         { allow read, write: if isSignedIn(); }
+    // dailyConsumptionStats: Phase 2-M sonrası docId formatı
+    // `${companyId}_${dateKey}` — companyId field doc'ta var, normal pattern.
+    match /dailyConsumptionStats/{id}         { allow read: if inCompany(); allow write: if writingInCompany(); }
 
     // Pending follow-up Faz 3 ekleri / Faz 4 dışı koleksiyonlar
     match /AuditLogs/{id}                     { allow read, write: if isSignedIn(); }
