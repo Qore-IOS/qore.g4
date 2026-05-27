@@ -2,8 +2,10 @@
 'use client';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, Timestamp, query, where, writeBatch, doc } from 'firebase/firestore';
+import { collection, getDocs, Timestamp, query, where, writeBatch, doc, orderBy } from 'firebase/firestore';
 import { format, subMonths, isValid } from 'date-fns';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
 import { tr } from 'date-fns/locale';
 import { exportDataToExcel } from '@/lib/utils';
 import {
@@ -30,83 +32,88 @@ interface ReportRow {
   lastMovementLocation?: string;
 }
 
+/**
+ * Hareketsiz stok raporu — son N aydır hareket görmemiş ürünler.
+ *
+ * Optimizasyon (Faz 1): Tüm geçmişi indirmek yerine sadece eşik tarihinden
+ * SONRAKİ hareketleri çekiyoruz. Eşikten sonra herhangi bir hareketi olan
+ * ürünler "aktif" sayılıp listeden çıkarılıyor; geri kalanlar hareketsiz.
+ *
+ * Önceki yaklaşım: depoStok + shipments + tuketimKayitlari → milyon kayıt
+ * Yeni yaklaşım: sadece son N aylık hareket → genelde <%5'i
+ *
+ * Composite index: (companyId ASC, <timestampField> DESC) — mevcut.
+ */
 export default function HareketsizStokRaporuPanel() {
   const { toast } = useToast();
   const { currentCompanyId, isSuperAdmin } = useAuth();
   const [rows, setRows] = useState<ReportRow[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [selectedStockCodes, setSelectedStockCodes] = useState<Set<string>>(new Set());
+  const [inactivityMonths, setInactivityMonths] = useState<number>(3);
 
   const fetchReport = useCallback(async () => {
     setIsLoading(true);
     try {
-      // 1) Fetch all transaction data and product master data
+      const thresholdDate = subMonths(new Date(), inactivityMonths);
+      const thresholdTs = Timestamp.fromDate(thresholdDate);
+
+      // Sadece eşikten SONRA hareket olanları çek — büyük optimizasyon.
       const [depSnap, shipSnap, consSnap, prodSnap] = await Promise.all([
-        getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('shipments', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('tuketimKayitlari', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin,
+          where('eklenmeTarihi', '>=', thresholdTs))),
+        getDocs(scopedQuery('shipments', currentCompanyId, isSuperAdmin,
+          where('timestamp', '>=', thresholdTs))),
+        getDocs(scopedQuery('tuketimKayitlari', currentCompanyId, isSuperAdmin,
+          where('consumptionTimestamp', '>=', thresholdTs))),
         getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
       ]);
 
-      type Tx = { stokKodu: string; date: Date; location: string };
-      const transactions: Tx[] = [];
       const productCodes = prodSnap.docs.map(doc => doc.data() as ProductCode);
 
-      // a) Process Receipts from depoStok
+      // Eşikten sonra hareketi olan stokKodu'ları topla (set membership).
+      const activeStokKodu = new Map<string, { date: Date; location: string }>();
+
+      const upsertActive = (stokKodu: string | undefined, date: Date, location: string) => {
+        if (!stokKodu || !isValid(date)) return;
+        const existing = activeStokKodu.get(stokKodu);
+        if (!existing || date > existing.date) {
+          activeStokKodu.set(stokKodu, { date, location });
+        }
+      };
+
       depSnap.docs.forEach(doc => {
         const d = doc.data() as DepoStokItem;
-        if (!matchesCompanyScope(d as any, currentCompanyId, isSuperAdmin)) return;
-        const date = (d.eklenmeTarihi as any)?.toDate ? (d.eklenmeTarihi as any).toDate() : new Date();
-        if(isValid(date)) {
-            transactions.push({ stokKodu: d.stokKodu, date, location: d.depotName || 'Depo' });
-        }
+        const date = (d.eklenmeTarihi as any)?.toDate?.() ?? new Date();
+        upsertActive(d.stokKodu, date, d.depotName || 'Depo');
       });
 
-      // b) Process Shipments
       shipSnap.docs.forEach(doc => {
         const d = doc.data() as Shipment;
-        const date = (d.timestamp as any)?.toDate ? (d.timestamp as any).toDate() : new Date();
-         if(isValid(date)) {
-            (d.items || []).forEach((it) => {
-              transactions.push({ stokKodu: it.stokKodu, date, location: `Sevk: ${d.recipientHospital}` });
-            });
-         }
+        const date = (d.timestamp as any)?.toDate?.() ?? new Date();
+        (d.items || []).forEach((it) => {
+          upsertActive(it.stokKodu, date, `Sevk: ${d.recipientHospital}`);
+        });
       });
 
-      // c) Process Consumptions
       consSnap.docs.forEach(doc => {
         const d = doc.data() as ConsumptionRecord;
-        const date = (d.consumptionTimestamp as any)?.toDate ? (d.consumptionTimestamp as any).toDate() : new Date();
-        if(isValid(date)) {
-            transactions.push({ stokKodu: d.stokKodu, date, location: `Tüketim: ${d.laboratoryName}` });
-        }
+        const date = (d.consumptionTimestamp as any)?.toDate?.() ?? new Date();
+        upsertActive(d.stokKodu, date, `Tüketim: ${d.laboratoryName}`);
       });
 
-      // 2) Determine last movement for each product
-      const lastMovementMap = new Map<string, Tx>();
-      transactions.forEach(tx => {
-        if (!tx.stokKodu) return;
-        const existing = lastMovementMap.get(tx.stokKodu);
-        if (!existing || tx.date > existing.date) {
-          lastMovementMap.set(tx.stokKodu, tx);
-        }
-      });
-
-      // 3) Define inactivity threshold
-      const thresholdDate = subMonths(new Date(), 3);
-
-      // 4) Build the final report
-      const report: ReportRow[] = productCodes.map(p => {
-        const lastMovement = lastMovementMap.get(p.stokKodu);
-        return {
+      // Eşikten sonra hareketi OLMAYAN ürünler hareketsiz.
+      const report: ReportRow[] = productCodes
+        .filter(p => p.stokKodu && !activeStokKodu.has(p.stokKodu))
+        .map(p => ({
           stokKodu: p.stokKodu,
           stokAdi: p.stokAdi,
-          lastMovementDate: lastMovement?.date,
-          lastMovementLocation: lastMovement?.location,
-        };
-      }).filter(r => r.stokKodu && (!r.lastMovementDate || r.lastMovementDate < thresholdDate));
+          // lastMovementDate yok — eşikten önce kalmış (≥N ay önce).
+          lastMovementDate: undefined,
+          lastMovementLocation: undefined,
+        }));
 
-      setRows(report.sort((a,b) => (a.lastMovementDate?.getTime() || 0) - (b.lastMovementDate?.getTime() || 0)));
+      setRows(report.sort((a, b) => a.stokAdi.localeCompare(b.stokAdi, 'tr')));
       setSelectedStockCodes(new Set());
     } catch (err: any) {
       console.error("Inactive stock report error:", err);
@@ -114,7 +121,7 @@ export default function HareketsizStokRaporuPanel() {
     } finally {
       setIsLoading(false);
     }
-  }, [toast, currentCompanyId, isSuperAdmin]);
+  }, [toast, currentCompanyId, isSuperAdmin, inactivityMonths]);
 
   useEffect(() => {
     fetchReport();
@@ -128,10 +135,7 @@ export default function HareketsizStokRaporuPanel() {
     const dataToExport = rows.map(r => ({
       'Stok Kodu': r.stokKodu,
       'Stok Adı': r.stokAdi,
-      'Son Hareket Tarihi': r.lastMovementDate
-        ? format(r.lastMovementDate, 'dd.MM.yyyy HH:mm', { locale: tr })
-        : 'Hareket Yok',
-      'Son Hareket Yeri': r.lastMovementLocation || '-',
+      'Durum': `Son ${inactivityMonths} aydır hareket yok`,
     }));
     exportDataToExcel(dataToExport, 'Hareketsiz_Stok_Raporu', 'HareketsizStok', toast);
   };
@@ -202,10 +206,30 @@ export default function HareketsizStokRaporuPanel() {
             Hareketsiz Stok Raporu
           </CardTitle>
           <CardDescription>
-            Son 3 ay içinde mal kabulü, sevkiyat veya tüketim işlemi görmemiş tüm stok kartlarını listeler.
+            Seçilen süre içinde mal kabulü, sevkiyat veya tüketim işlemi görmemiş tüm stok kartlarını listeler.
           </CardDescription>
         </CardHeader>
         <CardContent>
+          <div className="flex flex-wrap items-end gap-3 mb-4">
+            <div className="min-w-[180px]">
+              <Label htmlFor="inactivity-window" className="text-xs">Hareketsizlik eşiği</Label>
+              <Select
+                value={String(inactivityMonths)}
+                onValueChange={(v) => setInactivityMonths(Number(v))}
+              >
+                <SelectTrigger id="inactivity-window">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1">Son 1 aydır hareketsiz</SelectItem>
+                  <SelectItem value="3">Son 3 aydır hareketsiz</SelectItem>
+                  <SelectItem value="6">Son 6 aydır hareketsiz</SelectItem>
+                  <SelectItem value="12">Son 12 aydır hareketsiz</SelectItem>
+                  <SelectItem value="24">Son 24 aydır hareketsiz</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
           <div className="flex justify-end items-center gap-2 mb-4">
             {selectedStockCodes.size > 0 && (
                 <AlertDialog>
@@ -245,21 +269,20 @@ export default function HareketsizStokRaporuPanel() {
                   </TableHead>
                   <TableHead>Stok Kodu</TableHead>
                   <TableHead>Stok Adı</TableHead>
-                  <TableHead>Son Hareket Tarihi</TableHead>
-                  <TableHead>Son Hareket Yeri</TableHead>
+                  <TableHead>Durum</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center py-8">
+                    <TableCell colSpan={4} className="text-center py-8">
                        <Loader2 className="mx-auto h-8 w-8 animate-spin" />
                        <p className="mt-2">Rapor oluşturuluyor...</p>
                     </TableCell>
                   </TableRow>
                 ) : rows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
                       Hareketsiz stok bulunamadı.
                     </TableCell>
                   </TableRow>
@@ -276,11 +299,10 @@ export default function HareketsizStokRaporuPanel() {
                       <TableCell className="font-mono text-sm">{r.stokKodu}</TableCell>
                       <TableCell>{r.stokAdi}</TableCell>
                       <TableCell>
-                        {r.lastMovementDate
-                          ? format(r.lastMovementDate, 'dd.MM.yyyy HH:mm', { locale: tr })
-                          : <span className="text-muted-foreground">-</span>}
+                        <span className="text-muted-foreground text-sm">
+                          {`Son ${inactivityMonths} aydır hareket yok`}
+                        </span>
                       </TableCell>
-                      <TableCell>{r.lastMovementLocation || <span className="text-muted-foreground">-</span>}</TableCell>
                     </TableRow>
                   ))
                 )}

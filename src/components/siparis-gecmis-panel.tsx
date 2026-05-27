@@ -27,9 +27,11 @@ import { Accordion, AccordionItem, AccordionTrigger } from '@/components/ui/acco
 import { Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
-import { collection, query, where, getDocs, orderBy, Timestamp, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, getDocs, orderBy, Timestamp, onSnapshot, limit } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
+import { useDateRangeFilter } from '@/hooks/useDateRangeFilter';
+import { DateRangeFilterBar } from '@/components/common/DateRangeFilterBar';
 import { format as formatDate } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import type { Shipment, Order, Depot } from '@/lib/types';
@@ -56,6 +58,11 @@ export default function SiparisGecmisPanel(): JSX.Element {
   const [selectedDepotId, setSelectedDepotId] = useState<string>(depotIdFromUrl);
   const [loading, setLoading] = useState(true);
 
+  const dateFilter = useDateRangeFilter({
+    defaultDays: 90,
+    storageKey: 'siparis-gecmis:range',
+  });
+
   // Pagination State
   const [rowsPerPage, setRowsPerPage] = useState<number>(20);
   const [page, setPage] = useState<number>(1);
@@ -77,10 +84,17 @@ export default function SiparisGecmisPanel(): JSX.Element {
     return () => unsub();
   }, [selectedDepotId, currentCompanyId, isSuperAdmin]);
 
-  // Fetch ALL shipments and orders once
+  // Fetch shipments + ilgili siparişler — tarih penceresi + hard cap
   useEffect(() => {
     setLoading(true);
-    const shipmentsQuery = scopedQuery('shipments', currentCompanyId, isSuperAdmin, orderBy('timestamp', 'desc'));
+    const shipmentsQuery = scopedQuery(
+      'shipments',
+      currentCompanyId,
+      isSuperAdmin,
+      ...dateFilter.constraints('timestamp'),
+      orderBy('timestamp', 'desc'),
+      limit(1000),
+    );
     
     const unsubscribe = onSnapshot(shipmentsQuery, async (shipmentSnap) => {
         const shipmentList = shipmentSnap.docs.map(d => ({ id: d.id, ...d.data(), timestamp: (d.data().timestamp as Timestamp)?.toDate() } as Shipment));
@@ -116,7 +130,7 @@ export default function SiparisGecmisPanel(): JSX.Element {
     });
 
     return () => unsubscribe();
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin, dateFilter.range]);
 
   const filteredShipments = useMemo(() => {
     if (!selectedDepotId) return [];
@@ -145,6 +159,12 @@ export default function SiparisGecmisPanel(): JSX.Element {
           <CardDescription>Depo bazlı tamamlanmış sipariş ve sevkiyatları görüntüleyin.</CardDescription>
         </CardHeader>
         <CardContent>
+          <DateRangeFilterBar
+            range={dateFilter.range}
+            setRange={dateFilter.setRange}
+            label="Sevkiyat tarihi"
+            className="mb-4"
+          />
           <div className="max-w-md mb-4">
             <Label htmlFor="depot-filter" className="text-sm font-medium">Depo</Label>
             <Select value={selectedDepotId} onValueChange={v => { router.push(`/siparis-gecmis?depotId=${v}`); setSelectedDepotId(v); }}>
