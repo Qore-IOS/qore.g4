@@ -18,6 +18,14 @@ export { onPeripheralOrderCreatedSendMail } from './orderCreatedPeripheralEmail'
 export { onPeripheralOrderCreatedSendWhatsApp } from './peripheralOrderWhatsApp';
 export { onDepoStokAccepted } from './peripheralOrderReconcile';
 export { onUserClaimSync } from './userClaimSync';
+export {
+  onDepoStokWritten,
+  onTuketimWritten,
+  onShipmentWritten,
+  onFaultWritten,
+  dailyStatsRollover,
+  backfillCompanyStats,
+} from './companyStatsAggregation';
 
 function chunk<T>(arr: T[], size = 500): T[][] {
   const out: T[][] = [];

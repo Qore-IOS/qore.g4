@@ -15,15 +15,35 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.emitFaultClosed = exports.emitFaultOpened = exports.emitLabCountCompleted = exports.emitDepotCountCompleted = exports.emitTransferToLab = exports.emitOrderCreated = exports.emitOrderCreatedFromRequest = exports.emitFefoOverride = exports.markAsRead = exports.createNotification = exports.buildHrefForResource = void 0;
+exports.buildHrefForResource = buildHrefForResource;
+exports.createNotification = createNotification;
+exports.markAsRead = markAsRead;
+exports.emitFefoOverride = emitFefoOverride;
+exports.emitOrderCreatedFromRequest = emitOrderCreatedFromRequest;
+exports.emitOrderCreated = emitOrderCreated;
+exports.emitTransferToLab = emitTransferToLab;
+exports.emitDepotCountCompleted = emitDepotCountCompleted;
+exports.emitLabCountCompleted = emitLabCountCompleted;
+exports.emitFaultOpened = emitFaultOpened;
+exports.emitFaultClosed = emitFaultClosed;
 const admin = __importStar(require("firebase-admin"));
 const db = admin.firestore();
 /**
@@ -84,7 +104,6 @@ function buildHrefForResource(resource, context) {
             return undefined;
     }
 }
-exports.buildHrefForResource = buildHrefForResource;
 /**
  * Creates the notification document in Firestore. The cloud function will handle the fan-out.
  */
@@ -99,14 +118,12 @@ async function createNotification(payload) {
         href, createdAt: admin.firestore.FieldValue.serverTimestamp(), readBy: [] });
     await admin.firestore().collection('notifications').add(docData);
 }
-exports.createNotification = createNotification;
 async function markAsRead(notificationId, uid) {
     const ref = db.collection('notifications').doc(notificationId);
     await ref.update({
         readBy: admin.firestore.FieldValue.arrayUnion(uid)
     });
 }
-exports.markAsRead = markAsRead;
 async function emitFefoOverride(params) {
     const title = params.action === 'product_usage'
         ? 'FEFO Uyarısı Yoksayıldı (Kullanım)'
@@ -122,7 +139,6 @@ async function emitFefoOverride(params) {
         meta: Object.assign(Object.assign({}, params.product), { action: params.action, labId: params.labId, depotId: params.depotId }),
     });
 }
-exports.emitFefoOverride = emitFefoOverride;
 async function emitOrderCreatedFromRequest(params) {
     await createNotification({
         type: 'order_created_from_request',
@@ -134,7 +150,6 @@ async function emitOrderCreatedFromRequest(params) {
         meta: { orderId: params.orderId, labId: params.labId, depotId: params.depotId },
     });
 }
-exports.emitOrderCreatedFromRequest = emitOrderCreatedFromRequest;
 async function emitOrderCreated(params) {
     await createNotification({
         type: 'order_created',
@@ -146,7 +161,6 @@ async function emitOrderCreated(params) {
         meta: { orderId: params.orderId, labId: params.labId, depotId: params.depotId },
     });
 }
-exports.emitOrderCreated = emitOrderCreated;
 async function emitTransferToLab(params) {
     await createNotification({
         type: 'transfer_to_lab',
@@ -158,7 +172,6 @@ async function emitTransferToLab(params) {
         meta: { shipmentId: params.shipmentId, labId: params.labId, tab: 'direkt-transfer' },
     });
 }
-exports.emitTransferToLab = emitTransferToLab;
 async function emitDepotCountCompleted(params) {
     await createNotification({
         type: 'depot_count_completed',
@@ -170,7 +183,6 @@ async function emitDepotCountCompleted(params) {
         meta: { depotId: params.depotId, depotName: params.depotName },
     });
 }
-exports.emitDepotCountCompleted = emitDepotCountCompleted;
 async function emitLabCountCompleted(params) {
     await createNotification({
         type: 'lab_count_completed',
@@ -182,7 +194,6 @@ async function emitLabCountCompleted(params) {
         meta: { labId: params.labId, labName: params.labName },
     });
 }
-exports.emitLabCountCompleted = emitLabCountCompleted;
 async function emitFaultOpened(params) {
     const targetRole = `role:${params.faultType}`;
     const faultTypeLabel = params.faultType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon';
@@ -196,7 +207,7 @@ async function emitFaultOpened(params) {
         href: `/ariza-yonetimi/${params.faultReportId}`,
         resource: { type: 'device', id: params.assignedDeviceId },
         actor: params.actor,
-        targets: [targetRole],
+        targets: [targetRole], // Target only the related fault unit
         meta: {
             hospitalId: params.hospitalId,
             deviceName: params.deviceName,
@@ -207,7 +218,6 @@ async function emitFaultOpened(params) {
         },
     });
 }
-exports.emitFaultOpened = emitFaultOpened;
 async function emitFaultClosed(params) {
     await createNotification({
         type: 'fault_closed',
@@ -218,5 +228,4 @@ async function emitFaultClosed(params) {
         targets: [`user:${params.openerId}`], // Notify only the user who opened the fault
     });
 }
-exports.emitFaultClosed = emitFaultClosed;
 //# sourceMappingURL=notifications.js.map

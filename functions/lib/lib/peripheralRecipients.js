@@ -15,15 +15,30 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.resolveUserGroupNames = exports.filterItemsForUserGroups = exports.loadLojistikUsers = exports.loadLabGroupNamesByDocId = exports.groupMapFromInfo = exports.buildItemInfoMap = void 0;
+exports.buildItemInfoMap = buildItemInfoMap;
+exports.groupMapFromInfo = groupMapFromInfo;
+exports.loadLabGroupNamesByDocId = loadLabGroupNamesByDocId;
+exports.loadLojistikUsers = loadLojistikUsers;
+exports.filterItemsForUserGroups = filterItemsForUserGroups;
+exports.resolveUserGroupNames = resolveUserGroupNames;
 const admin = __importStar(require("firebase-admin"));
 const firebase_functions_1 = require("firebase-functions");
 const db = admin.firestore();
@@ -90,14 +105,12 @@ async function buildItemInfoMap(items) {
     }
     return infoMap;
 }
-exports.buildItemInfoMap = buildItemInfoMap;
 function groupMapFromInfo(info) {
     const out = new Map();
     info.forEach((v, k) => { if (v.group)
         out.set(k, v.group); });
     return out;
 }
-exports.groupMapFromInfo = groupMapFromInfo;
 /** Load def_labGroups → Map<docId, name>. */
 async function loadLabGroupNamesByDocId() {
     const map = new Map();
@@ -115,7 +128,6 @@ async function loadLabGroupNamesByDocId() {
     }
     return map;
 }
-exports.loadLabGroupNamesByDocId = loadLabGroupNamesByDocId;
 /** Fetch all users with role=lojistik_sorumlusu, normalized. */
 async function loadLojistikUsers() {
     const out = [];
@@ -141,7 +153,6 @@ async function loadLojistikUsers() {
     }
     return out;
 }
-exports.loadLojistikUsers = loadLojistikUsers;
 /** Return items whose resolved laboratuvarGrubu is in the user's assigned group name set. */
 function filterItemsForUserGroups(items, itemGroupMap, userGroupNames) {
     if (userGroupNames.size === 0)
@@ -156,7 +167,6 @@ function filterItemsForUserGroups(items, itemGroupMap, userGroupNames) {
         return userGroupNames.has(group);
     });
 }
-exports.filterItemsForUserGroups = filterItemsForUserGroups;
 /** Resolve a lojistik user's assigned group IDs or names to group names via def_labGroups. */
 function resolveUserGroupNames(user, labGroupNamesById) {
     const out = new Set();
@@ -177,5 +187,4 @@ function resolveUserGroupNames(user, labGroupNamesById) {
     }
     return out;
 }
-exports.resolveUserGroupNames = resolveUserGroupNames;
 //# sourceMappingURL=peripheralRecipients.js.map

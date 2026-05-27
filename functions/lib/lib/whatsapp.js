@@ -3,7 +3,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.sendWhatsAppDocument = exports.sendWhatsAppText = void 0;
+exports.sendWhatsAppText = sendWhatsAppText;
+exports.sendWhatsAppDocument = sendWhatsAppDocument;
 const node_fetch_1 = __importDefault(require("node-fetch"));
 const firebase_functions_1 = require("firebase-functions");
 /**
@@ -36,7 +37,6 @@ async function sendWhatsAppText(to, body, instanceId, token) {
         return { success: false, error: error.message || String(error) };
     }
 }
-exports.sendWhatsAppText = sendWhatsAppText;
 /**
  * Sends a PDF document to a WhatsApp recipient via URL using UltraMsg API.
  *
@@ -76,5 +76,4 @@ async function sendWhatsAppDocument(documentUrl, fileName, caption, to, instance
         return { success: false, error: error.message || String(error) };
     }
 }
-exports.sendWhatsAppDocument = sendWhatsAppDocument;
 //# sourceMappingURL=whatsapp.js.map
