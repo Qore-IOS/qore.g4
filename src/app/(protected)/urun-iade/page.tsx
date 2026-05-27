@@ -85,7 +85,14 @@ export default function UrunIadePanel() {
   useEffect(() => {
     fetchData();
 
-    const q = scopedQuery('depoStok', currentCompanyId, isSuperAdmin);
+    // Sadece sevk edilmiş stoğu izle — iade için aday sadece bunlar.
+    // Composite index: (companyId, isShipped, miad).
+    const q = scopedQuery(
+      'depoStok',
+      currentCompanyId,
+      isSuperAdmin,
+      where('isShipped', '==', true),
+    );
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
         const stockItems = filterByCompanyScope(
           querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DepoStokItem)),
