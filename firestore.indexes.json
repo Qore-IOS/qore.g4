@@ -227,6 +227,15 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "companyId", "order": "ASCENDING" },
+        { "fieldPath": "depotId", "order": "ASCENDING" },
+        { "fieldPath": "eklenmeTarihi", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "depoStok",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "companyId", "order": "ASCENDING" },
         { "fieldPath": "isShipped", "order": "ASCENDING" },
         { "fieldPath": "hedefKurumId", "order": "ASCENDING" }
       ]
@@ -824,6 +833,15 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "companyId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "centralOrders",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "companyId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]
     },

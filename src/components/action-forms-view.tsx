@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { Timestamp, addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, updateDoc, where, writeBatch } from 'firebase/firestore';
+import { Timestamp, addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, updateDoc, where, writeBatch, orderBy, limit as fsLimit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { cn } from '@/lib/utils';
 import { resolveImageSrc } from '@/lib/image-utils';
@@ -26,6 +26,8 @@ import { nanoid } from 'nanoid';
 import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
 import { filterByCompanyScope, filterByAssignedLabs, matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
+import { useDateRangeFilter } from '@/hooks/useDateRangeFilter';
+import { DateRangeFilterBar } from '@/components/common/DateRangeFilterBar';
 import { emitExternalStockUsage } from '@/lib/notifications';
 
 type ModuleType = 'teknik-servis' | 'aplikasyon-paneli';
@@ -118,14 +120,36 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
   const [filterPersonnel, setFilterPersonnel] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Tarih penceresi — varsayılan son 180 gün. Tutanaklar zamanla birikir.
+  const dateFilter = useDateRangeFilter({
+    defaultDays: 180,
+    storageKey: `action-forms:${moduleType}:range`,
+  });
+
   const FORMS_PER_PAGE = 20;
 
   useEffect(() => {
     const fetchForms = async () => {
       setLoading(true);
+      // Tarih penceresi + hard cap. Önceki sürüm tüm tutanakları indiriyordu.
+      const dateConstraints = dateFilter.constraints('createdAt');
       const [teknikSnap, aplikasyonSnap] = await Promise.all([
-        getDocs(scopedQuery(getCollectionName('teknik-servis'), currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery(getCollectionName('aplikasyon-paneli'), currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery(
+          getCollectionName('teknik-servis'),
+          currentCompanyId,
+          isSuperAdmin,
+          ...dateConstraints,
+          orderBy('createdAt', 'desc'),
+          fsLimit(2000),
+        )),
+        getDocs(scopedQuery(
+          getCollectionName('aplikasyon-paneli'),
+          currentCompanyId,
+          isSuperAdmin,
+          ...dateConstraints,
+          orderBy('createdAt', 'desc'),
+          fsLimit(2000),
+        )),
       ]);
       const merged = [
         ...teknikSnap.docs.map((d) => ({ id: d.id, ...d.data(), moduleType: 'teknik-servis' } as ActionRecord)),
@@ -144,7 +168,7 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
       console.error('Form list fetch error', error);
       setLoading(false);
     });
-  }, [moduleType, currentCompanyId, isSuperAdmin, currentUserProfile?.assignedLaboratories, currentUserProfile?.role]);
+  }, [moduleType, currentCompanyId, isSuperAdmin, currentUserProfile?.assignedLaboratories, currentUserProfile?.role, dateFilter.range]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -194,6 +218,14 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
               <p className="text-xs sm:text-sm text-[var(--dashboard-muted)]">Firma kapsamındaki tüm teknik servis ve aplikasyon işlem formları</p>
             </div>
           </div>
+        </div>
+
+        <div className="cihaz-card-strong p-3">
+          <DateRangeFilterBar
+            range={dateFilter.range}
+            setRange={dateFilter.setRange}
+            label="Tutanak penceresi"
+          />
         </div>
 
         <div className="cihaz-card-strong p-2 sm:p-3">

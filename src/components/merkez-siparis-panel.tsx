@@ -11,8 +11,12 @@ import {
   orderBy,
   query,
   serverTimestamp,
-  setDoc
+  setDoc,
+  where,
+  limit,
+  Timestamp,
 } from 'firebase/firestore';
+import { subDays } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -236,8 +240,28 @@ export default function MerkezSiparisPanel() {
   useEffect(() => {
     const fetchAdditional = async () => {
       try {
-        const [centralOrdersSnap, cihazUstuSnap] = await Promise.all([
-          getDocs(scopedQuery('centralOrders', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
+        // Açık siparişler genelde az (<200), tamamlananlar zamanla birikir.
+        // Açıkları tam çek, tamamlananları son 90 gün + limit(500) ile sınırla.
+        const completedSinceTs = Timestamp.fromDate(subDays(new Date(), 90));
+        const [openOrdersSnap, completedOrdersSnap, cihazUstuSnap] = await Promise.all([
+          getDocs(scopedQuery(
+            'centralOrders',
+            currentCompanyId,
+            isSuperAdmin,
+            where('status', '!=', 'completed'),
+            orderBy('status'),
+            orderBy('createdAt', 'desc'),
+            limit(500),
+          )),
+          getDocs(scopedQuery(
+            'centralOrders',
+            currentCompanyId,
+            isSuperAdmin,
+            where('status', '==', 'completed'),
+            where('createdAt', '>=', completedSinceTs),
+            orderBy('createdAt', 'desc'),
+            limit(500),
+          )),
           getDocs(scopedQuery('cihazUstuGecmisi', currentCompanyId, isSuperAdmin)),
         ]);
 
@@ -262,23 +286,23 @@ export default function MerkezSiparisPanel() {
         });
         setCihazUstuMap(cihazMap);
 
-        const orders = centralOrdersSnap.docs.map(d => {
+        const toOrder = (d: any): CentralOrder => {
           const data = d.data() as Record<string, unknown>;
           return {
             ...(data as CentralOrder),
             id: d.id,
             createdAt: toDate(data.createdAt),
           } as CentralOrder;
-        });
+        };
 
-        setOpenOrders(orders.filter(o => o.status !== 'completed'));
-        setCompletedOrders(orders.filter(o => o.status === 'completed'));
+        setOpenOrders(openOrdersSnap.docs.map(toOrder));
+        setCompletedOrders(completedOrdersSnap.docs.map(toOrder));
       } catch (error) {
         console.error(error);
       }
     };
     fetchAdditional();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   const productByStockCode = useMemo(() => {
     return productCodes.reduce<Record<string, ProductCode>>((acc, product) => {
