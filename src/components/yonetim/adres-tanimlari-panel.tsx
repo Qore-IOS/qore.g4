@@ -10,6 +10,7 @@ import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import type { AddressDefinition } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { YonetimShell, YonetimHeader, YonetimCard } from '@/components/yonetim-ui/YonetimHub';
 
@@ -24,7 +25,7 @@ export default function AdresTanimlariPanel() {
   const fetchAddresses = useCallback(async () => {
     setIsLoading(true);
     try {
-      const snap = await getDocs(collection(db, 'addressDefinitions'));
+      const snap = await getDocs(scopedQuery('addressDefinitions', currentCompanyId, isSuperAdmin));
       setAddresses(filterByCompanyScope(
         snap.docs.map(d => ({ id: d.id, ...d.data() } as AddressDefinition)),
         currentCompanyId,

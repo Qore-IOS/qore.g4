@@ -10,6 +10,7 @@ import { db } from '@/lib/firebase';
 import { collection, writeBatch, doc, getDocs, Timestamp } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
 import { Label } from '@/components/ui/label';
@@ -19,7 +20,7 @@ import { useLightDashboardData } from './dashboard/useDashboardData';
 import { useMinMaxRules, useDevices } from '@/hooks/useFirebaseQueries';
 
 export default function CopKutusuPanel() {
-  const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
   const router = useRouter();
   const params = useParams();
@@ -61,14 +62,14 @@ export default function CopKutusuPanel() {
   useEffect(() => {
     const fetchDeviceGroups = async () => {
       try {
-        const dgsnap = await getDocs(collection(db, 'def_deviceGroups'));
+        const dgsnap = await getDocs(scopedQuery('def_deviceGroups', currentCompanyId, isSuperAdmin));
         setDeviceGroups(dgsnap.docs.map(d => ({id: d.id, ...d.data()} as DeviceGroup)));
       } catch (e) {
         toast({title: 'Hata', description: 'Cihaz grupları yüklenemedi.', variant: 'destructive'});
       }
     };
     fetchDeviceGroups();
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   const selectedLab = useMemo(() => laboratories.find(l => l.id === selectedLabId) || null, [laboratories, selectedLabId]);
 

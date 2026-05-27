@@ -1485,7 +1485,7 @@ function CreateRequestModal({
   isDark: boolean;
 }) {
   const { toast } = useToast();
-  const { currentCompanyId } = useAuth();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [mode, setMode] = useState<"quick" | "detail">("quick");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -1500,13 +1500,13 @@ function CreateRequestModal({
 
   // Fetch admin users
   useEffect(() => {
-    getDocs(collection(db, "users")).then((snap) => {
+    getDocs(scopedQuery("users", currentCompanyId, isSuperAdmin)).then((snap) => {
       const admins = snap.docs
         .map((d) => ({ ...d.data(), uid: d.id } as AppUser))
         .filter((u) => u.role === "admin" || u.role === "admin_developer");
       setAdminUsers(admins);
     });
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   // Reset form when modal opens
   useEffect(() => {

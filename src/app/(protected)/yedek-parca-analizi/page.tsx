@@ -109,11 +109,11 @@ export default function YedekParcaAnaliziPage() {
       setLoading(true);
       try {
         const [useOnDeviceSnap, borrowedPartSnap, hospitalsSnap, assignmentsSnap, devicesSnap] = await Promise.all([
-          getDocs(query(collection(db, 'sparePartTransferLogs'), where('action', '==', 'use_on_device'))),
-          getDocs(query(collection(db, 'sparePartTransferLogs'), where('action', '==', 'borrowed_part'))),
-          getDocs(collection(db, 'hospitals')),
-          getDocs(collection(db, 'hospitalDeviceAssignments')),
-          getDocs(collection(db, 'devices')),
+          getDocs(scopedQuery('sparePartTransferLogs', currentCompanyId, isSuperAdmin, where('action', '==', 'use_on_device'))),
+          getDocs(scopedQuery('sparePartTransferLogs', currentCompanyId, isSuperAdmin, where('action', '==', 'borrowed_part'))),
+          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('hospitalDeviceAssignments', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
         ]);
 
         const scopedHospitals = filterByCompanyScope(

@@ -21,6 +21,7 @@ import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import * as XLSX from 'xlsx';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
@@ -121,10 +122,10 @@ export default function ImhaEdilenKitlerPanel() {
             setLoading(true);
             try {
                 const [hospitalsSnap, depotsSnap, productsSnap, recentSnap] = await Promise.all([
-                    getDocs(collection(db, 'hospitals')),
-                    getDocs(collection(db, 'depots')),
-                    getDocs(collection(db, 'productCodes')),
-                    getDocs(query(collection(db, 'destroyedKitsReports'), orderBy('resolvedAt', 'desc'), limit(5))),
+                    getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+                    getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+                    getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+                    getDocs(scopedQuery('destroyedKitsReports', currentCompanyId, isSuperAdmin, orderBy('resolvedAt', 'desc'), limit(5))),
                 ]);
 
                 setHospitals(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));

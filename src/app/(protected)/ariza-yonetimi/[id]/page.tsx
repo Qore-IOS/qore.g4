@@ -18,7 +18,8 @@ import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
 import { closeDeviceFaultReport, resolveEjectedKitFault, assignFaultToSelf, startIntervention, transferFaultToOtherUnit, verifyLocationForIntervention } from '@/lib/faults';
 import { useAuth } from '@/contexts/auth-context';
-import { withCompanyScope } from '@/lib/company-scope';
+import { withCompanyScope, filterByCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import type { Device, DeviceFaultReport, DeviceFaultStatus, InterventionType, ProductCode, User, PersonalStockItem, PoolWarehouseStockItem, Depot, DeviceLabPool, YedekParcaDepoStokItem } from '@/lib/types';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -139,7 +140,7 @@ export default function FaultDetailPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toast } = useToast();
-  const { currentUser, currentUserProfile, isAdmin, currentCompanyId } = useAuth();
+  const { currentUser, currentUserProfile, isAdmin, currentCompanyId, isSuperAdmin } = useAuth();
   const { theme, setTheme } = useTheme();
 
   const [fault, setFault] = useState<FaultDoc | null>(null);
@@ -337,7 +338,7 @@ export default function FaultDetailPage() {
         }
 
         // ProductCodes'dan testAdi'leri al
-        const productCodesSnap = await getDocs(collection(db, 'productCodes'));
+        const productCodesSnap = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin));
         const testNames = new Set<string>();
 
         productCodesSnap.docs.forEach(d => {
@@ -367,7 +368,7 @@ export default function FaultDetailPage() {
       try {
         // ProductCodes'dan stokKodu ile eşleşen ürünü bul
         const productCodesSnap = await getDocs(
-          query(collection(db, 'productCodes'), where('stokKodu', '==', fault.productStokKodu))
+          scopedQuery('productCodes', currentCompanyId, isSuperAdmin, where('stokKodu', '==', fault.productStokKodu))
         );
 
         if (!productCodesSnap.empty) {
@@ -393,7 +394,7 @@ export default function FaultDetailPage() {
   useEffect(() => {
     (async () => {
       try {
-        const usersSnap = await getDocs(collection(db, 'users'));
+        const usersSnap = await getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin));
         const users = usersSnap.docs.map(d => ({ uid: d.id, ...d.data() } as User));
         // Filter to teknik_servis and aplikasyon roles
         const personnel = users.filter(u => u.role === 'teknik_servis' || u.role === 'aplikasyon');
@@ -402,7 +403,7 @@ export default function FaultDetailPage() {
         console.error('Personel listesi alınamadı:', e);
       }
     })();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   // Şahsi stok verilerini çek
   useEffect(() => {
@@ -427,7 +428,7 @@ export default function FaultDetailPage() {
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getDocs(collection(db, 'yedekParcaDepoStok'));
+        const snap = await getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
         const items = snap.docs.map((d) => {
           const data = d.data();
           return {
@@ -436,12 +437,12 @@ export default function FaultDetailPage() {
             createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
           } as YedekParcaDepoStokItem;
         });
-        setDepotStockItems(items);
+        setDepotStockItems(filterByCompanyScope(items, currentCompanyId, isSuperAdmin));
       } catch (err) {
         console.error('Depo stok alınamadı:', err);
       }
     })();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   // Havuz stok verilerini çek
   useEffect(() => {
@@ -454,7 +455,7 @@ export default function FaultDetailPage() {
         const hospitalId = deviceData.hospitalId;
         if (!hospitalId) return;
 
-        const poolsSnap = await getDocs(collection(db, 'deviceLabPools'));
+        const poolsSnap = await getDocs(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin));
         const matchingPoolIds: string[] = [];
         poolsSnap.docs.forEach(d => {
           const pool = d.data() as DeviceLabPool;
@@ -464,7 +465,7 @@ export default function FaultDetailPage() {
         });
         if (matchingPoolIds.length === 0) return;
 
-        const depotsSnap = await getDocs(collection(db, 'depots'));
+        const depotsSnap = await getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin));
         const poolWarehouseIds: string[] = [];
         depotsSnap.docs.forEach(d => {
           const depot = d.data() as Depot;
@@ -476,8 +477,10 @@ export default function FaultDetailPage() {
 
         const allPoolStock: PoolWarehouseStockItem[] = [];
         for (const pwId of poolWarehouseIds) {
-          const stockQ = query(
-            collection(db, 'poolWarehouseStock'),
+          const stockQ = scopedQuery(
+            'poolWarehouseStock',
+            currentCompanyId,
+            isSuperAdmin,
             where('poolWarehouseId', '==', pwId),
             where('status', '==', 'in_stock')
           );
@@ -491,12 +494,12 @@ export default function FaultDetailPage() {
             } as PoolWarehouseStockItem);
           });
         }
-        setPoolStockItems(allPoolStock);
+        setPoolStockItems(filterByCompanyScope(allPoolStock, currentCompanyId, isSuperAdmin));
       } catch (err) {
         console.error("Error fetching pool stock:", err);
       }
     })();
-  }, [fault?.deviceId]);
+  }, [fault?.deviceId, currentCompanyId, isSuperAdmin]);
 
   // Arızaya eklenen parça değişimlerini çek
   useEffect(() => {
@@ -1346,9 +1349,9 @@ export default function FaultDetailPage() {
     // Fire ALL independent async operations in parallel
     const [assets, labDisplayName, qrDataUrl, formNo] = await Promise.all([
       prefetchPdfAssets(),
-      resolveLabDisplayName(hospitalId, fault.labName || ''),
+      resolveLabDisplayName(hospitalId, fault.labName || '', currentCompanyId, isSuperAdmin),
       QRCode.toDataURL(recordUrl, { errorCorrectionLevel: 'M', margin: 0, scale: 4 }),
-      computeFormNo('deviceFaultReports', 'openedByUid', fault.openedByUid, fault.id, fault.openedByName || '', typeChar, 'openedAt', [where('faultType', '==', fault.faultType)]),
+      computeFormNo('deviceFaultReports', 'openedByUid', fault.openedByUid, fault.id, fault.openedByName || '', typeChar, currentCompanyId, isSuperAdmin, 'openedAt', [where('faultType', '==', fault.faultType)]),
     ]);
 
     const pdfDoc = new jsPDF({ unit: 'pt', format: 'a4' });

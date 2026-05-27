@@ -163,8 +163,8 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   const fetchDevices = async () => {
     setLoading(true);
     const [deviceSnap, planSnap] = await Promise.all([
-      getDocs(collection(db, 'devices')),
-      getDocs(collection(db, 'maintenancePlans')),
+      getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
+      getDocs(scopedQuery('maintenancePlans', currentCompanyId, isSuperAdmin)),
     ]);
     const scopedDevices = filterByCompanyScope(
       deviceSnap.docs.map(d => ({ id: d.id, ...d.data() } as Device)),
@@ -202,7 +202,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     const fetchProductCodes = async () => {
       try {
         // Fetch all products and filter for yedek_parca client-side
-        const snap = await getDocs(collection(db, 'productCodes'));
+        const snap = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin));
         const allProducts = snap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
         // Filter for yedek_parca products - only show products that are explicitly marked as spare parts
         const spareParts = allProducts.filter(p => p.urunGrubu === 'yedek_parca');
@@ -852,7 +852,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
         }, currentUserProfile?.companyId));
       }
       if (selectedDefinitionImageUrl) {
-        const deviceSnap = await getDocs(collection(db, 'devices'));
+        const deviceSnap = await getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin));
         const scopedDevices = filterByCompanyScope(
           deviceSnap.docs.map(d => ({ id: d.id, ...d.data() } as Device)),
           currentCompanyId,

@@ -187,8 +187,8 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
       setIsLabsLoading(true);
       try {
         const [laboratoriesSnap, productsSnap] = await Promise.all([
-          getDocs(collection(db, 'hospitals')),
-          getDocs(collection(db, 'productCodes')),
+          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
         ]);
 
         setLaboratories(
@@ -385,7 +385,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
         consumptionConstraints.push(where('consumptionTimestamp', '>=', Timestamp.fromDate(sinceDate)));
       }
 
-      const consumptionQuery = query(collection(db, 'tuketimKayitlari'), ...consumptionConstraints);
+      const consumptionQuery = scopedQuery('tuketimKayitlari', currentCompanyId, isSuperAdmin, ...consumptionConstraints);
       const unsubscribeConsumption = onSnapshot(
         consumptionQuery,
         async (snapshot) => {

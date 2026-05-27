@@ -19,6 +19,7 @@ import { collection, doc, getDocs, onSnapshot, updateDoc, query, orderBy } from 
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 import type { ProductCode, Hospital, Device, AssignedDevice, MinMaxRule } from '@/lib/types';
 import { useIsMobile } from '@/components/maliyet-gozlem/useIsMobile';
@@ -190,9 +191,9 @@ export default function CihazTestDagilimiPage() {
       setLoading(true);
       try {
         const [labsSnap, productsSnap, devicesSnap] = await Promise.all([
-          getDocs(query(collection(db, 'hospitals'), orderBy('name', 'asc'))),
-          getDocs(query(collection(db, 'productCodes'), orderBy('stokAdi', 'asc'))),
-          getDocs(collection(db, 'devices')),
+          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin, orderBy('name', 'asc'))),
+          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin, orderBy('stokAdi', 'asc'))),
+          getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
         ]);
         if (cancelled) return;
         setLabs(

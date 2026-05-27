@@ -15,6 +15,7 @@ import { collection, getDocs, addDoc, deleteDoc, doc, setDoc, query, where } fro
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import BackButton from '@/components/BackButton';
 import type { User as AppUser } from '@/lib/types';
 import Image from 'next/image';
@@ -52,8 +53,8 @@ export default function AraclarPage() {
     setLoading(true);
     try {
       const [vehiclesSnap, usersSnap] = await Promise.all([
-        getDocs(collection(db, 'vehicles')),
-        getDocs(collection(db, 'users')),
+        getDocs(scopedQuery('vehicles', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin)),
       ]);
 
       setVehicles(

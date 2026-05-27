@@ -28,6 +28,7 @@ import { parseAnyBarcode, resolveProductFromParsed, parseAndResolveBarcode } fro
 import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
 import BackButton from '@/components/BackButton';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { withCompanyScope } from '@/lib/company-scope';
 
 type ScanRow = ScannedItem & {
@@ -37,7 +38,7 @@ type ScanRow = ScannedItem & {
 
 export default function IstisnaUrunlerPanel() {
   const { toast } = useToast();
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   
   const [barcodeFormats, setBarcodeFormats] = useState<BarcodeFormat[]>([]);
   const [selectedDepotId, setSelectedDepotId] = useState<string>('');
@@ -57,9 +58,9 @@ export default function IstisnaUrunlerPanel() {
     setIsLoading(true);
     try {
       const [depotsSnap, productsSnap, formatsSnap] = await Promise.all([
-        getDocs(collection(db, 'depots')),
-        getDocs(collection(db, 'productCodes')),
-        getDocs(collection(db, 'barcodeFormats')),
+        getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('barcodeFormats', currentCompanyId, isSuperAdmin)),
       ]);
       const depotList = depotsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Depot));
       setDepots(depotList);

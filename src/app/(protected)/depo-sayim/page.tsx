@@ -26,6 +26,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 
 import { TrackingMode, resolveDefaultTrackingMode } from '@/lib/tracking';
@@ -150,9 +151,9 @@ export default function DepoSayimPage() {
         setIsLoading(true);
         try {
             const [depotsSnap, productsSnap, stockSnap] = await Promise.all([
-                getDocs(collection(db, 'depots')),
-                getDocs(collection(db, 'productCodes')),
-                getDocs(collection(db, 'depoStok')),
+                getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+                getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+                getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin)),
             ]);
             const depotList = depotsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Depot));
             const filteredDepots = filterOperationalSourceDepots(depotList, currentUserProfile);

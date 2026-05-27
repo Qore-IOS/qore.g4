@@ -9,6 +9,7 @@ import {
 import { createNotification, emitFaultOpened, emitFaultTransferred } from '@/lib/notifications';
 import type { DeviceFaultStatus, InterventionType } from '@/lib/types';
 import { withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 export type DeviceFaultEventType = 'opened' | 'note' | 'status_change' | 'closed' | 'assigned' | 'intervention_started' | 'location_verified';
 
@@ -44,7 +45,7 @@ export async function openDeviceFaultReport(input: OpenFaultInput): Promise<stri
   let resolvedAffectedDeviceIds = affectedDeviceIds.filter(Boolean);
   if (affectsAllDevices && resolvedAffectedDeviceIds.length === 0 && hospitalId) {
     const allLabDevicesSnap = await getDocs(
-      query(collection(db, 'devices'), where('hospitalId', '==', hospitalId))
+      scopedQuery('devices', companyId ?? null, false, where('hospitalId', '==', hospitalId))
     );
     resolvedAffectedDeviceIds = allLabDevicesSnap.docs.map((d) => d.id);
   }

@@ -14,6 +14,7 @@ import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import type { User as AppUser, Hospital, Depot, AppView, ProductCode } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { VIEWS } from '@/lib/constants';
 import { Checkbox } from '@/components/ui/checkbox';
 import BackButton from '@/components/BackButton';
@@ -68,7 +69,7 @@ function cleanFirestoreData<T extends Record<string, any>>(data: T): Partial<T> 
 
 export default function KullaniciPanel() {
   const { toast } = useToast();
-  const { signup, currentUserProfile, isSuperAdmin } = useAuth();
+  const { signup, currentUserProfile, isSuperAdmin, currentCompanyId } = useAuth();
   const [users, setUsers] = useState<AppUser[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [depots, setDepots] = useState<Depot[]>([]);
@@ -83,11 +84,11 @@ export default function KullaniciPanel() {
     setIsLoading(true);
     try {
       const [uSnap, hSnap, dSnap, pSnap, lgSnap] = await Promise.all([
-        getDocs(collection(db, 'users')),
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'depots')),
-        getDocs(collection(db, 'productCodes')),
-        getDocs(collection(db, 'def_labGroups'))
+        getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('def_labGroups', currentCompanyId, isSuperAdmin))
       ]);
       setUsers(uSnap.docs.map(d => ({ id: d.id, ...d.data() } as AppUser)));
       setHospitals(hSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));

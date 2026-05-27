@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { exportDataToExcel } from '@/lib/utils';
+import { useAuth } from '@/contexts/auth-context';
 import {
   Card, CardHeader, CardTitle, CardDescription, CardContent
 } from '@/components/ui/card';
@@ -84,6 +85,7 @@ const URUN_GRUBU_LABELS: Record<string, string> = {
 
 export default function TransferRaporuPanel() {
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   // Filter options from API
   const [filterOptions, setFilterOptions] = useState<FilterOptions | null>(null);
@@ -182,6 +184,8 @@ export default function TransferRaporuPanel() {
           marka: selectedMarka === '__all__' ? undefined : selectedMarka,
           urunGrubu: selectedUrunGrubu === '__all__' ? undefined : selectedUrunGrubu,
           stokKodu: selectedStokKodu === '__all__' ? undefined : selectedStokKodu,
+          companyId: currentCompanyId,
+          isSuperAdmin,
         }),
       });
 

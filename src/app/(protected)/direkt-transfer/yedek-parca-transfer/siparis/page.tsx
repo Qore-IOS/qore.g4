@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 import { withCompanyScope, filterByCompanyScope } from '@/lib/company-scope';
 import type { MinMaxRule, ProductCode, YedekParcaDepoStokItem } from '@/lib/types';
@@ -34,7 +35,7 @@ const canonicalCode = (value?: string | null) => {
 export default function YedekParcaSiparisPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const { currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -66,8 +67,8 @@ export default function YedekParcaSiparisPage() {
     try {
       const [rulesSnap, depoStockSnap, productsSnap] = await Promise.all([
         getDocs(collection(db, 'yedekParcaDepoMinMax', currentCompanyId, 'minMaxRules')),
-        getDocs(collection(db, 'yedekParcaDepoStok')),
-        getDocs(collection(db, 'productCodes')),
+        getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
       ]);
 
       const fetchedRules = rulesSnap.docs

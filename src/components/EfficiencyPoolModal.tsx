@@ -15,6 +15,7 @@ import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import type { Hospital, LabPool, EfficiencyPool } from '@/lib/types';
 
 interface EfficiencyPoolModalProps {
@@ -25,7 +26,7 @@ interface EfficiencyPoolModalProps {
 
 export default function EfficiencyPoolModal({ open, onOpenChange, onPoolCreated }: EfficiencyPoolModalProps) {
   const { toast } = useToast();
-  const { currentUser, currentCompanyId } = useAuth();
+  const { currentUser, currentCompanyId, isSuperAdmin } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -45,8 +46,8 @@ export default function EfficiencyPoolModal({ open, onOpenChange, onPoolCreated 
     setIsLoading(true);
     try {
       const [hospitalsSnap, poolsSnap] = await Promise.all([
-        getDocs(query(collection(db, 'hospitals'), orderBy('name', 'asc'))),
-        getDocs(collection(db, 'labPools')),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin, orderBy('name', 'asc'))),
+        getDocs(scopedQuery('labPools', currentCompanyId, isSuperAdmin)),
       ]);
 
       setHospitals(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));

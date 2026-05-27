@@ -14,6 +14,7 @@ import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import type { User as AppUser, Hospital, Depot, AppView, ProductCode, Company } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { VIEWS } from '@/lib/constants';
 import { Checkbox } from '@/components/ui/checkbox';
 import BackButton from '@/components/BackButton';
@@ -97,12 +98,13 @@ export default function KullaniciPanel() {
     setIsLoading(true);
     try {
       const [uSnap, hSnap, dSnap, pSnap, cSnap, lgSnap] = await Promise.all([
-        getDocs(collection(db, 'users')),
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'depots')),
-        getDocs(collection(db, 'productCodes')),
-        getDocs(collection(db, 'companies')),
-        getDocs(collection(db, 'def_labGroups')),
+        getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+        // companies — SuperAdmin all, normal user own doc only (special rule)
+        isSuperAdmin ? getDocs(collection(db, 'companies')) : Promise.resolve({ docs: [] } as any),
+        getDocs(scopedQuery('def_labGroups', currentCompanyId, isSuperAdmin)),
       ]);
       setUsers(filterByCompanyScope(
         uSnap.docs.map(d => ({ id: d.id, ...d.data() } as AppUser)),

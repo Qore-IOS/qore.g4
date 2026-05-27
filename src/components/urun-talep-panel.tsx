@@ -33,6 +33,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { db } from '@/lib/firebase';
 import {
   collection,
@@ -563,7 +564,7 @@ function UrgencyDialog({ open, onOpenChange, totalItems, totalAdet, loading, onC
 export default function UrunTalepPanel() {
   const router = useRouter();
   const { toast } = useToast();
-  const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const [loading, setLoading] = useState(true);
 
   // Master Data
@@ -684,9 +685,9 @@ export default function UrunTalepPanel() {
     setLoading(true);
     try {
       const [depotSnap, hospitalSnap, productSnap] = await Promise.all([
-        getDocs(collection(db, 'depots')),
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'productCodes')),
+        getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
       ]);
       setDepots(depotSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)));
       setAllHospitals(hospitalSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));

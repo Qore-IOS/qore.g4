@@ -7,6 +7,8 @@ import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { ChevronLeft, History, Loader2 } from 'lucide-react';
 import { db } from '@/lib/firebase';
+import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 interface DepoLogRow {
   id: string;
@@ -23,13 +25,14 @@ interface DepoLogRow {
 
 export default function StokGecmisPage() {
   const router = useRouter();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<DepoLogRow[]>([]);
 
   useEffect(() => {
     const load = async () => {
       try {
-        const snap = await getDocs(collection(db, 'yedekParcaDepoLog'));
+        const snap = await getDocs(scopedQuery('yedekParcaDepoLog', currentCompanyId, isSuperAdmin));
         const logs = snap.docs.map(d => {
           const data = d.data();
           return {

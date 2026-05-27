@@ -14,6 +14,10 @@ interface TransferReportRequest {
   marka?: string;
   urunGrubu?: 'kit' | 'sarf' | 'yedek_parca';
   stokKodu?: string;
+  /** Caller's company id — server-side filter for cross-tenant isolation. */
+  companyId?: string | null;
+  /** Caller's super-admin flag — bypasses company filter. */
+  isSuperAdmin?: boolean;
 }
 
 interface ProductTransferSummary {
@@ -65,7 +69,7 @@ function getLastNMonths(n: number): string[] {
 export async function POST(request: NextRequest) {
   try {
     const body: TransferReportRequest = await request.json();
-    const { sourceDepotId, targetLabIds, startDate, endDate, marka, urunGrubu, stokKodu } = body;
+    const { sourceDepotId, targetLabIds, startDate, endDate, marka, urunGrubu, stokKodu, companyId, isSuperAdmin } = body;
 
     // Validation
     if (!sourceDepotId) {
@@ -82,10 +86,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Build query for transfers
+    // Build query for transfers — company-scoped (cross-tenant isolation)
     let query = adminDb.collection('transfers')
       .where('sourceDepotId', '==', sourceDepotId)
-      .where('mode', '==', 'lab');
+      .where('mode', '==', 'lab') as FirebaseFirestore.Query;
+    if (!isSuperAdmin) {
+      const normalizedCompanyId = (companyId && companyId.trim()) || '__legacy__';
+      query = query.where('companyId', '==', normalizedCompanyId);
+    }
 
     // Get all transfers and filter by target labs (Firestore doesn't support array-contains-any with other filters)
     const transfersSnapshot = await query.get();

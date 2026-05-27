@@ -17,6 +17,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { exportDataToExcel, readExcelData } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, filterByAssignedLabs, withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -71,9 +72,9 @@ export default function CihazUstuEklePanel() {
       setLoading(true);
       try {
         const [hSnap, pSnap, poolSnap] = await Promise.all([
-          getDocs(collection(db, 'hospitals')),
-          getDocs(collection(db, 'productCodes')),
-          getDocs(collection(db, 'labPools')),
+          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('labPools', currentCompanyId, isSuperAdmin)),
         ]);
         
         const allHospitals = hSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital));
@@ -128,7 +129,7 @@ export default function CihazUstuEklePanel() {
         // --- END NEW LOGIC ---
 
         const period = `${String(selectedMonth + 1).padStart(2, '0')}-${selectedYear}`;
-        const dataSnap = await getDocs(query(collection(db, 'cihazUstuGecmisi'), where('hospitalId', '==', selectedHospitalId), where('period', '==', period)));
+        const dataSnap = await getDocs(scopedQuery('cihazUstuGecmisi', currentCompanyId, isSuperAdmin, where('hospitalId', '==', selectedHospitalId), where('period', '==', period)));
         
         const existingData: Record<string, number> = {};
         if (!dataSnap.empty) {

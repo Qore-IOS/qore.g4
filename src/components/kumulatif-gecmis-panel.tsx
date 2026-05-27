@@ -11,6 +11,8 @@ import { collection, deleteDoc, doc, getDocs, orderBy, query } from 'firebase/fi
 import { db } from '@/lib/firebase';
 import { exportDataToExcel } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -36,6 +38,7 @@ type HistoryItem = {
 };
 
 export default function KumulatifGecmisPanel() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
@@ -43,7 +46,7 @@ export default function KumulatifGecmisPanel() {
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getDocs(query(collection(db, 'kumulatifRaporlar'), orderBy('createdAt', 'desc')));
+        const snap = await getDocs(scopedQuery('kumulatifRaporlar', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc')));
         const list: HistoryItem[] = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
         setItems(list);
       } catch(e) {

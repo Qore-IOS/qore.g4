@@ -8,6 +8,7 @@ import { db } from '@/lib/firebase';
 import { useProductCodes } from '@/hooks/useFirebaseQueries';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import type { Currency, ProductCode } from '@/lib/types';
 import { getProductCostInCurrency, getSessionDate, type SayimSession } from '@/lib/cost-analytics';
 import TrendChart from '@/components/cost-observation/TrendChart';
@@ -30,7 +31,7 @@ export default function BrandObservationPage() {
 
   useEffect(() => {
     const run = async () => {
-      const snap = await getDocs(query(collection(db, 'maliyetSayimSessions'), orderBy('createdAt', 'desc')));
+      const snap = await getDocs(scopedQuery('maliyetSayimSessions', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc')));
       const all = snap.docs.map((d) => ({ id: d.id, ...d.data() } as SayimSession));
       setSessions(filterByCompanyScope(all, currentCompanyId, isSuperAdmin));
       setLoading(false);

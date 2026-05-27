@@ -38,6 +38,7 @@ import { exportDataToExcel } from '@/lib/utils';
 import { differenceInDays, parse, isValid, compareAsc } from 'date-fns';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { Badge } from './ui/badge';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
@@ -1273,7 +1274,7 @@ export default function StokYonetimiPanel() {
     }
     const labNames = hospitals.filter(h => h.id && selectedLabsForReport.includes(h.id)).map(h => h.name).filter((n): n is string => !!n);
     try {
-      const shippedQuery = query(collection(db, 'depoStok'), where('isShipped', '==', true));
+      const shippedQuery = scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true));
       const shippedSnap = await getDocs(shippedQuery);
       const stockForSelectedLabs = filterByCompanyScope(
         shippedSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),

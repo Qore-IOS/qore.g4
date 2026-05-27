@@ -59,6 +59,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { db } from '@/lib/firebase';
 import {
     collection,
@@ -89,7 +90,7 @@ export default function EjectedKitPanel() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const { toast } = useToast();
-    const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
+    const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
 
     const initialTab = searchParams.get('tab') || 'kayit';
     const [activeTab, setActiveTab] = useState(initialTab);
@@ -163,9 +164,9 @@ export default function EjectedKitPanel() {
         setLoading(true);
         try {
             const [hospitalSnap, deviceSnap, productSnap] = await Promise.all([
-                getDocs(collection(db, 'hospitals')),
-                getDocs(collection(db, 'devices')),
-                getDocs(collection(db, 'productCodes')),
+                getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+                getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
+                getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
             ]);
 
             setAllHospitals(

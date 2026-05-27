@@ -23,6 +23,7 @@ import { db } from '@/lib/firebase';
 import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, addDoc, updateDoc, orderBy, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { compareAsc, parse as parseDate, format as formatDate } from 'date-fns';
 import { formatMiad } from '@/lib/date';
 import { tr } from 'date-fns/locale';
@@ -512,7 +513,7 @@ export default function UrunKullanimPanel() {
   useEffect(() => {
     const fetchMainUnitModels = async () => {
       try {
-        const snap = await getDocs(collection(db, 'def_mainUnits'));
+        const snap = await getDocs(scopedQuery('def_mainUnits', currentCompanyId, isSuperAdmin));
         const modelMap: Record<string, string> = {};
         snap.docs.forEach((d) => {
           const data = d.data() as any;
@@ -526,14 +527,14 @@ export default function UrunKullanimPanel() {
       }
     };
     fetchMainUnitModels();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
 
   // Fetch device groups (small collection, rarely changes)
   useEffect(() => {
     const fetchDeviceGroups = async () => {
       try {
-        const dgsnap = await getDocs(collection(db, 'def_deviceGroups'));
+        const dgsnap = await getDocs(scopedQuery('def_deviceGroups', currentCompanyId, isSuperAdmin));
         setDeviceGroups(dgsnap.docs.map(d => ({id: d.id, ...d.data()} as DeviceGroup)));
         urunKullanimLogger.debug('Cihaz grupları yüklendi', { count: dgsnap.docs.length });
       } catch (e) {
@@ -542,13 +543,13 @@ export default function UrunKullanimPanel() {
       }
     };
     fetchDeviceGroups();
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   // Fetch fault definitions for fault modal
   useEffect(() => {
     const fetchFaultDefinitions = async () => {
       try {
-        const snap = await getDocs(collection(db, 'faultDefinitions'));
+        const snap = await getDocs(scopedQuery('faultDefinitions', currentCompanyId, isSuperAdmin));
         const definitions = snap.docs.map(d => ({
           id: d.id,
           ...d.data(),
@@ -1226,7 +1227,7 @@ export default function UrunKullanimPanel() {
   const handleFaultOpened = useCallback(async (faultType: 'teknik_servis' | 'aplikasyon') => {
     if (selectedLab?.perifer && selectedLabId) {
       try {
-        const q = query(collection(db, 'users'), where('primaryLaboratories', 'array-contains', selectedLabId));
+        const q = scopedQuery('users', currentCompanyId, isSuperAdmin, where('primaryLaboratories', 'array-contains', selectedLabId));
         const snap = await getDocs(q);
         const allResponsible = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
         const filtered = allResponsible.filter((u: any) => u.role === faultType);

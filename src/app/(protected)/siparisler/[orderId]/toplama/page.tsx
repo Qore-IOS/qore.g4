@@ -32,6 +32,7 @@ import { useToast } from '@/hooks/use-toast';
 import useHidScanner from '@/hooks/useHidScanner';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { useLoading } from '@/contexts/loading-context';
 import { parse as parseDate, compareAsc } from 'date-fns';
 import { useBarcodeParser } from '@/hooks/useBarcodeParser';
@@ -191,10 +192,10 @@ export default function ToplamaPage() {
 
         // 2. Fetch Dependent Data (Depot specific stock, etc.)
         const [productsSnap, depoStokSnap, deviceGroupsSnap, hospitalsSnap, depotSnap] = await Promise.all([
-          getDocs(collection(db, 'productCodes')),
-          getDocs(query(collection(db, 'depoStok'), where('depotId', '==', orderData.depotId), where('isShipped', '==', false))),
-          getDocs(collection(db, 'def_deviceGroups')),
-          getDocs(collection(db, 'hospitals')),
+          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('depotId', '==', orderData.depotId), where('isShipped', '==', false))),
+          getDocs(scopedQuery('def_deviceGroups', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
           getDoc(doc(db, 'depots', orderData.depotId)),
         ]);
 
@@ -924,7 +925,7 @@ export default function ToplamaPage() {
       await Promise.all(verifySourcePromises);
 
       // Step 1b: Verify target stock/consumption reflection
-      const transferDocItemsSnap = await getDocs(query(collection(db, 'depoStok'), where('transferId', '==', transferRef.id)));
+      const transferDocItemsSnap = await getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('transferId', '==', transferRef.id)));
       if (!trackingDisabled) {
         const matchedTargetStockCount = sumStockItemQuantities(transferDocItemsSnap.docs
           .filter(d => matchesCompanyScope(d.data() as any, currentCompanyId, isSuperAdmin))

@@ -17,6 +17,7 @@ import MapDefinitionModal from '@/components/MapDefinitionModal';
 import MinMaxSettingsPanel from '@/components/MinMaxSettingsPanel';
 import dynamic from 'next/dynamic';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 
 const LocationPicker = dynamic(() => import('@/components/LocationPicker'), {
@@ -47,11 +48,11 @@ export default function DepoYonetimPanel() {
     setIsLoading(true);
     try {
       const [depotsSnap, productsSnap, hospitalsSnap, addressesSnap, poolsSnap] = await Promise.all([
-        getDocs(collection(db, 'depots')),
-        getDocs(collection(db, 'productCodes')),
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'addressDefinitions')),
-        getDocs(query(collection(db, 'deviceLabPools'), orderBy('createdAt', 'desc'))),
+        getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('addressDefinitions', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
       ]);
       setDepots(filterByCompanyScope(depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)), currentCompanyId, isSuperAdmin));
       setProductCodes(productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));

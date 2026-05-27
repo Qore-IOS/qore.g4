@@ -51,7 +51,7 @@ export default function OturumYonetimiPage() {
 
   // Fetch users
   useEffect(() => {
-    const q = query(collection(db, 'users'), orderBy('name'));
+    const q = scopedQuery('users', currentCompanyId, isSuperAdmin, orderBy('name'));
     const unsub = onSnapshot(q, (snap) => {
       const list = filterByCompanyScope(
         snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) } as AppUser)),

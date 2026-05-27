@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { collection, getDocs, orderBy, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import type { BarcodeFormat } from '@/lib/barcode';
 
 type State = {
@@ -18,6 +20,7 @@ type State = {
  * 3) Ensure legacy Roche is present as a fallback entry
  */
 export function useSafeBarcodeFormats(): State {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [state, setState] = useState<State>({ formats: [], loading: true });
 
   useEffect(() => {
@@ -26,9 +29,11 @@ export function useSafeBarcodeFormats(): State {
     async function load() {
       setState(prev => ({ ...prev, loading: true, error: undefined }));
       try {
-        // Preferred query (might require composite index on your project)
-        const q = query(
-          collection(db, 'barcodeFormats'),
+        // Preferred query — tenant-scoped
+        const q = scopedQuery(
+          'barcodeFormats',
+          currentCompanyId,
+          isSuperAdmin,
           where('active', '==', true)
         );
         const snap = await getDocs(q);
@@ -39,9 +44,9 @@ export function useSafeBarcodeFormats(): State {
           setState({ formats: withLegacy(sorted), loading: false });
         }
       } catch (err: any) {
-        // Fallback: fetch full collection, filter/sort locally
+        // Fallback: fetch tenant collection, filter/sort locally
         try {
-          const snapAll = await getDocs(collection(db, 'barcodeFormats'));
+          const snapAll = await getDocs(scopedQuery('barcodeFormats', currentCompanyId, isSuperAdmin));
           const all = snapAll.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as BarcodeFormat[];
           const activeOnly = all.filter((f: any) => f.active !== false);
           // Sort by priority (ascending - lower priority number = higher precedence)
@@ -66,7 +71,7 @@ export function useSafeBarcodeFormats(): State {
     return () => {
       canceled = true;
     };
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   return state;
 }

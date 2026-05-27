@@ -119,7 +119,7 @@ export default function DosyaYonetimiPage() {
   // Track which uploaded files already have a pending scanned invoice waiting
   // for transfer — so we can show a "Onaylandı, lab stoğa gönderildi" badge.
   useEffect(() => {
-    const q = query(collection(db, 'bekleyenIrsaliyeler'));
+    const q = scopedQuery('bekleyenIrsaliyeler', currentCompanyId, isSuperAdmin);
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const ids = new Set<string>();
       snapshot.forEach((docSnap) => {

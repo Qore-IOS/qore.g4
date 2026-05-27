@@ -190,7 +190,7 @@ export default function CeomedIrsaliyePanel() {
       let removedStock = 0;
       if (wasApproved) {
         const stockSnap = await getDocs(
-          query(collection(db, 'depoStok'), where('ceomedIrsaliyeId', '==', irs.ceomedId))
+          scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('ceomedIrsaliyeId', '==', irs.ceomedId))
         );
         removedStock = stockSnap.size;
         for (let i = 0; i < stockSnap.docs.length; i += 400) {

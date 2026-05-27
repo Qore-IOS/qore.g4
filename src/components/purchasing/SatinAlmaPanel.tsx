@@ -636,7 +636,7 @@ export default function SatinAlmaPanel() {
 
   // Firestore listener
   useEffect(() => {
-    const q = query(collection(db, 'purchasingTasks'), orderBy('date', 'asc'));
+    const q = scopedQuery('purchasingTasks', currentCompanyId, isSuperAdmin, orderBy('date', 'asc'));
     const unsub = onSnapshot(
       q,
       (snap) => {
@@ -666,7 +666,7 @@ export default function SatinAlmaPanel() {
   }, []);
 
   useEffect(() => {
-    const q = query(collection(db, 'deviceFaultReports'));
+    const q = scopedQuery('deviceFaultReports', currentCompanyId, isSuperAdmin);
     const unsub = onSnapshot(
       q,
       (snap) => {
@@ -783,9 +783,9 @@ export default function SatinAlmaPanel() {
     async function fetchReferenceData() {
       try {
         const [hospSnap, poolSnap, usersSnap] = await Promise.all([
-          getDocs(collection(db, 'hospitals')),
-          getDocs(collection(db, 'labPools')),
-          getDocs(query(collection(db, 'users'), where('role', 'in', ['admin', 'satin_alma']))),
+          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('labPools', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin, where('role', 'in', ['admin', 'satin_alma']))),
         ]);
         if (cancelled) return;
         setLaboratories(hospSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Hospital)));

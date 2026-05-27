@@ -11,6 +11,7 @@ import { filterByCompanyScope, withCompanyScope, matchesCompanyScope } from '@/l
 import QRCode from 'qrcode';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -118,8 +119,8 @@ export default function AssetDetailPage() {
       try {
         const [snap, labsSnap, depotsSnap] = await Promise.all([
           getDoc(doc(db, 'assets', assetId)),
-          getDocs(collection(db, 'hospitals')),
-          getDocs(collection(db, 'depots')),
+          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
         ]);
         if (snap.exists()) {
           const data = { id: snap.id, ...snap.data() } as Asset;

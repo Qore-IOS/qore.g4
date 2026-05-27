@@ -73,18 +73,18 @@ export function useDashboardData() {
         labPoolsSnap,
         assignmentsSnap,
       ] = await Promise.all([
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'devices')),
-        getDocs(collection(db, 'productCodes')),
-        getDocs(collection(db, 'depoStok')),
-        getDocs(collection(db, 'tuketimKayitlari')),
-        getDocs(collection(db, 'efficiencyHistory')),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('tuketimKayitlari', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('efficiencyHistory', currentCompanyId, isSuperAdmin)),
         getDocs(scopedQuery('cihazUstuGecmisi', currentCompanyId, isSuperAdmin)),
         getDocs(scopedQuery('kumulatifRaporlar', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
-        getDocs(collection(db, 'shipments')),
-        getDocs(collection(db, 'depots')),
-        getDocs(collection(db, 'labPools')),
-        getDocs(collection(db, 'hospitalDeviceAssignments')),
+        getDocs(scopedQuery('shipments', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('labPools', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('hospitalDeviceAssignments', currentCompanyId, isSuperAdmin)),
       ]);
 
       const hospitalsData = hospitalsSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Hospital));

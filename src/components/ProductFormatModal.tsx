@@ -11,6 +11,7 @@ import { db } from '@/lib/firebase';
 import { CostInput } from './CostInput';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import TrackingModeSelect from './TrackingModeSelect';
 import { TrackingMode, resolveDefaultTrackingMode, TRACKING_MODE_LABEL } from '@/lib/tracking';
 import BarcodeFormatSelect from './BarcodeFormatSelect';
@@ -102,7 +103,7 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
   onSetActiveVersion,
 }) => {
   const { toast } = useToast();
-  const { currentUser, currentCompanyId } = useAuth();
+  const { currentUser, currentCompanyId, isSuperAdmin } = useAuth();
   const isEditMode = !!initial.id;
 
   const [product, setProduct] = useState<Partial<ProductCode & { trackingMode: TrackingMode }>>({
@@ -269,7 +270,7 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
         await updateDoc(doc(db, 'productCodes', product.id), productData);
         onSave({ ...product, ...productData } as ProductCode);
       } else {
-        const q = query(collection(db, "productCodes"), where("stokKodu", "==", productData.stokKodu));
+        const q = scopedQuery("productCodes", currentCompanyId, isSuperAdmin, where("stokKodu", "==", productData.stokKodu));
         const querySnapshot = await getDocs(q);
         if (!querySnapshot.empty) {
           toast({ title: "Hata", description: "Bu stok kodu zaten mevcut.", variant: "destructive" });

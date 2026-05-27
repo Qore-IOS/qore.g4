@@ -162,12 +162,12 @@ export default function DashboardPanel({
         let stockDocs: any[] = [];
         let depotDocs: any[] = [];
 
-        try { const s = await getDocs(collection(db, 'productCodes')); productDocs = s.docs; } catch (e) { console.warn('[Dashboard] productCodes fetch failed:', e); }
+        try { const s = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)); productDocs = s.docs; } catch (e) { console.warn('[Dashboard] productCodes fetch failed:', e); }
         try {
-          const s = await getDocs(collection(db, 'depoStok'));
-          stockDocs = s.docs.filter((d) => matchesCompanyScope(d.data() as any, currentCompanyId, isSuperAdmin));
+          const s = await getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin));
+          stockDocs = s.docs;
         } catch (e) { console.warn('[Dashboard] depoStok fetch failed:', e); }
-        try { const s = await getDocs(collection(db, 'depots')); depotDocs = s.docs; } catch (e) { console.warn('[Dashboard] depots fetch failed:', e); }
+        try { const s = await getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)); depotDocs = s.docs; } catch (e) { console.warn('[Dashboard] depots fetch failed:', e); }
 
         const depotNameMap = new Map<string, string>();
         depotDocs.forEach((d) => {
@@ -417,7 +417,7 @@ export default function DashboardPanel({
         let productDocs2: any[] = [];
         let consumptionDocs: any[] = [];
 
-        try { const s = await getDocs(collection(db, 'productCodes')); productDocs2 = s.docs; } catch (e) { console.warn('[Dashboard] yesterday productCodes fetch failed:', e); }
+        try { const s = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)); productDocs2 = s.docs; } catch (e) { console.warn('[Dashboard] yesterday productCodes fetch failed:', e); }
         try {
           const s = await getDocs(query(
             collection(db, 'tuketimKayitlari'),

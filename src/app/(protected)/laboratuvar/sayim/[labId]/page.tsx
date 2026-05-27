@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 import {
   Check,
@@ -368,7 +369,7 @@ export default function LaboratuvarSayimPage() {
         const labRef = doc(db, 'hospitals', labId as string);
         const [labSnap, productsSnap, rulesSnap] = await Promise.all([
           getDoc(labRef),
-          getDocs(collection(db, 'productCodes')),
+          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
           getDocs(collection(db, 'hospitals', labId as string, 'minMaxRules')),
         ]);
 
@@ -385,10 +386,9 @@ export default function LaboratuvarSayimPage() {
         }
 
         // Load lab stock — match by hedefKurumId, plus legacy by name
-        const stockRef = collection(db, 'depoStok');
         const [byIdSnap, legacySnap] = await Promise.all([
-          getDocs(query(stockRef, where('isShipped', '==', true), where('hedefKurumId', '==', labId))),
-          getDocs(query(stockRef, where('isShipped', '==', true), where('hedefKurum', '==', name))),
+          getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true), where('hedefKurumId', '==', labId))),
+          getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true), where('hedefKurum', '==', name))),
         ]);
 
         const byId = byIdSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));

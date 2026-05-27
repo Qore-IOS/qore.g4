@@ -86,8 +86,8 @@ export default function LojistikSiparisGecmisPanel() {
   useEffect(() => {
     (async () => {
       const [pSnap, hSnap] = await Promise.all([
-        getDocs(collection(db, 'productCodes')),
-        getDocs(collection(db, 'hospitals')),
+        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
       ]);
       setProductCodes(
         pSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) } as ProductCode))

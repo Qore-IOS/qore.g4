@@ -28,6 +28,7 @@ import { Loader2, AlertTriangle, CheckCircle, Server, Clock, ShieldCheck, Rotate
 import { differenceInMinutes, subMonths, format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { filterByCompanyScope } from '@/lib/company-scope';
@@ -100,9 +101,9 @@ export default function ArizaIstatistikleriPage() {
   const TARGET_RESOLUTION_TIME = 480; // 8 hours in minutes
 
   useEffect(() => {
-    const reportsQuery = query(collection(db, 'deviceFaultReports'), orderBy('openedAt', 'desc'));
-    const devicesQuery = query(collection(db, 'devices'));
-    const hospitalsQuery = query(collection(db, 'hospitals'), orderBy('name', 'asc'));
+    const reportsQuery = scopedQuery('deviceFaultReports', currentCompanyId, isSuperAdmin, orderBy('openedAt', 'desc'));
+    const devicesQuery = scopedQuery('devices', currentCompanyId, isSuperAdmin);
+    const hospitalsQuery = scopedQuery('hospitals', currentCompanyId, isSuperAdmin, orderBy('name', 'asc'));
 
     const unsubReports = onSnapshot(reportsQuery,
         (snapshot) => {
@@ -153,14 +154,14 @@ export default function ArizaIstatistikleriPage() {
     );
 
     // Fetch product codes
-    getDocs(collection(db, 'productCodes')).then(snapshot => {
+    getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)).then(snapshot => {
       setProductCodes(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
     }).catch(err => {
       console.error('Error fetching product codes:', err);
     });
 
     // Fetch fault definitions
-    getDocs(collection(db, 'faultDefinitions')).then(snapshot => {
+    getDocs(scopedQuery('faultDefinitions', currentCompanyId, isSuperAdmin)).then(snapshot => {
       setFaultDefinitions(filterByCompanyScope(
         snapshot.docs.map(d => ({ id: d.id, ...d.data() } as FaultDefinition)),
         currentCompanyId,

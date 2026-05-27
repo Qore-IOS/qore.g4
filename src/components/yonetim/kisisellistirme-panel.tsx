@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { Palette, Image, Layout, Settings2, MousePointer2, Droplets, Check, Sun, Moon, X, ImageIcon, Monitor, Smartphone, Package, Loader2, Trash2 } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { cn } from '@/lib/utils';
 import NextImage from 'next/image';
 import { resolveImageSrc } from '@/lib/image-utils';
@@ -30,7 +31,7 @@ const PUBLIC_IMAGES = [
 type IconTab = 'dock' | 'mobile' | 'envanter';
 
 export default function KisisellistirmePanel() {
-  const { isAdmin, dockStyle, setDockStyle, wallpaper, setWallpaper } = useAuth();
+  const { isAdmin, dockStyle, setDockStyle, wallpaper, setWallpaper, currentCompanyId, isSuperAdmin } = useAuth();
   const { mappings, loading: mappingsLoading, updateMapping } = useIconMappings();
 
   const [iconFiles, setIconFiles] = useState<string[]>([]);
@@ -52,7 +53,7 @@ export default function KisisellistirmePanel() {
 
   // Fetch envanter categories
   useEffect(() => {
-    getDocs(query(collection(db, 'assetCategories'), orderBy('name')))
+    getDocs(scopedQuery('assetCategories', currentCompanyId, isSuperAdmin, orderBy('name')))
       .then(snap => {
         setEnvanterCategories(snap.docs.map(d => ({ id: d.id, name: d.data().name })));
       })
