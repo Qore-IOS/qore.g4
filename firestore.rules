@@ -82,6 +82,16 @@ service cloud.firestore {
       match /subPoints/{spId}                 { allow read, write: if isSignedIn(); }
     }
     match /borcDepots/{id}                    { allow read: if inCompany(); allow write: if writingInCompany(); }
+
+    // companyStats — Faz 5 pre-aggregated dashboard özet doc'u. Doc ID
+    // companyId'ye eşittir. Yazma sadece Cloud Functions üzerinden
+    // (admin SDK security rules'ı bypass eder).
+    match /companyStats/{companyId} {
+      allow read: if isSignedIn() && (
+        isSuperAdmin() || companyId == userCompany()
+      );
+      allow write: if false;
+    }
     match /depoStok/{id}                      { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /hospitalDeviceAssignments/{id}     { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /purchasingTasks/{id}               { allow read: if inCompany(); allow write: if writingInCompany(); }

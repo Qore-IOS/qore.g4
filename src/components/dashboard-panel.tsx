@@ -32,11 +32,12 @@ import { VIEWS } from '@/lib/constants';
 import { getExchangeRates } from '@/lib/exchange-rates';
 import { calculateEfficiencyMetrics } from '@/lib/verimlilik/validation';
 import { matchesCompanyScope } from '@/lib/company-scope';
-import { 
-  useDeviceFaultReports, 
-  usePurchasingTasks, 
-  useExpiringProductsCount 
+import {
+  useDeviceFaultReports,
+  usePurchasingTasks,
+  useExpiringProductsCount
 } from '@/hooks/useFirebaseQueries';
+import { useCompanyStats } from '@/hooks/useCompanyStats';
 import { Skeleton } from '@/components/ui/skeleton';
 
 const motionProps = {
@@ -114,6 +115,10 @@ export default function DashboardPanel({
   const { data: faultReports = [], isLoading: faultsLoading } = useDeviceFaultReports();
   const { data: purchasingTasks = [], isLoading: tasksLoading } = usePurchasingTasks();
   const { data: expiringCountServer = 0, isLoading: expiringLoading } = useExpiringProductsCount();
+
+  // Faz 5: Pre-aggregated özet — anlık KPI değerleri (Cloud Function tarafından
+  // realtime güncellenir). Full koleksiyon scan'i tamamlanmadan önce gözükür.
+  const { data: companyStats } = useCompanyStats();
 
   const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>('weekly');
   const [trendDate, setTrendDate] = useState(new Date());

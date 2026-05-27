@@ -15,13 +15,23 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.onPeripheralOrderCreatedSendMail = void 0;
 const admin = __importStar(require("firebase-admin"));
@@ -52,12 +62,12 @@ const MEDIUM_BORDER = {
 };
 // Each column gets its own dedicated colour palette (header + body tint)
 const COLUMN_PALETTE = [
-    { header: 'FF334155', body: 'FFF1F5F9', text: 'FF0F172A' },
-    { header: 'FF0EA5E9', body: 'FFE0F2FE', text: 'FF0C4A6E' },
-    { header: 'FF6366F1', body: 'FFE0E7FF', text: 'FF312E81' },
-    { header: 'FF14B8A6', body: 'FFCCFBF1', text: 'FF134E4A' },
-    { header: 'FFF59E0B', body: 'FFFEF3C7', text: 'FF78350F' },
-    { header: 'FFEF4444', body: 'FFFEE2E2', text: 'FF7F1D1D' },
+    { header: 'FF334155', body: 'FFF1F5F9', text: 'FF0F172A' }, // # — slate
+    { header: 'FF0EA5E9', body: 'FFE0F2FE', text: 'FF0C4A6E' }, // Stok Kodu — sky
+    { header: 'FF6366F1', body: 'FFE0E7FF', text: 'FF312E81' }, // Stok Adı — indigo
+    { header: 'FF14B8A6', body: 'FFCCFBF1', text: 'FF134E4A' }, // Lab Stok — teal
+    { header: 'FFF59E0B', body: 'FFFEF3C7', text: 'FF78350F' }, // 30 Günlük Max — amber
+    { header: 'FFEF4444', body: 'FFFEE2E2', text: 'FF7F1D1D' }, // Yakın Miad — red
     { header: 'FF16A34A', body: 'FFDCFCE7', text: 'FF14532D' }, // Talep Adedi — green
 ];
 function getTransporter() {
