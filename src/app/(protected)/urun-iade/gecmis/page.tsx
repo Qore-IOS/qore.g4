@@ -1,22 +1,18 @@
 
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import React, { useState, useCallback } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Loader2, History } from 'lucide-react';
-import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
 import BackButton from '@/components/BackButton';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { useCursorPagination } from '@/hooks/useCursorPagination';
+import { CursorPaginationFooter } from '@/components/common/CursorPaginationFooter';
 
 interface ReturnItemDetail {
   stokKodu: string;
@@ -35,34 +31,31 @@ interface ReturnRecord {
   items: ReturnItemDetail[];
 }
 
+/**
+ * Ürün iade geçmişi — server-side cursor pagination.
+ *
+ * Önceki sürüm tüm `productReturns` koleksiyonunu indirip client'ta sayfalıyordu.
+ * Yeni sürüm: her sayfa için Firestore'dan sadece N kayıt çeker.
+ */
 export default function UrunIadeGecmisPage() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
-  const [history, setHistory] = useState<ReturnRecord[]>([]);
-  const [loading, setLoading] = useState(true);
   const [selectedRecord, setSelectedRecord] = useState<ReturnRecord | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  
-  const [page, setPage] = useState(1);
-  const [rowsPerPage, setRowsPerPage] = useState(20);
 
-  useEffect(() => {
-    const q = scopedQuery('productReturns', currentCompanyId, isSuperAdmin, orderBy('returnedAt', 'desc'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const records = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ReturnRecord));
-      setHistory(records);
-      setLoading(false);
-    }, (error) => {
-      console.error("Failed to fetch return history:", error);
-      setLoading(false);
-    });
-    return () => unsubscribe();
-  }, []);
+  const mapper = useCallback((d: any): ReturnRecord => ({
+    id: d.id,
+    ...(d.data() as Omit<ReturnRecord, 'id'>),
+  }), []);
 
-  const totalPages = Math.ceil(history.length / rowsPerPage);
-  const paginatedHistory = useMemo(() => {
-    const start = (page - 1) * rowsPerPage;
-    return history.slice(start, start + rowsPerPage);
-  }, [history, page, rowsPerPage]);
+  const pagination = useCursorPagination<ReturnRecord>({
+    collectionName: 'productReturns',
+    orderByField: 'returnedAt',
+    orderDirection: 'desc',
+    pageSize: 20,
+    companyId: currentCompanyId,
+    isSuperAdmin,
+    mapper,
+  });
 
   const openDetails = (record: ReturnRecord) => {
     setSelectedRecord(record);
@@ -82,9 +75,9 @@ export default function UrunIadeGecmisPage() {
             <CardDescription>Depolara yapılan tüm ürün iade işlemlerinin kaydı.</CardDescription>
           </CardHeader>
           <CardContent>
-            {loading ? (
+            {pagination.loading ? (
               <div className="flex justify-center p-8"><Loader2 className="h-8 w-8 animate-spin" /></div>
-            ) : paginatedHistory.length === 0 ? (
+            ) : pagination.items.length === 0 ? (
               <p className="text-center text-muted-foreground">İade geçmişi bulunamadı.</p>
             ) : (
               <ScrollArea className="h-[60vh] border rounded-md">
@@ -99,7 +92,7 @@ export default function UrunIadeGecmisPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {paginatedHistory.map(record => (
+                    {pagination.items.map(record => (
                       <TableRow key={record.id} className="cursor-pointer hover:bg-muted/50" onClick={() => openDetails(record)}>
                         <TableCell className="font-mono text-xs">{record.id.substring(0, 10)}...</TableCell>
                         <TableCell>{format(record.returnedAt.toDate(), 'dd.MM.yyyy HH:mm', { locale: tr })}</TableCell>
@@ -113,24 +106,21 @@ export default function UrunIadeGecmisPage() {
               </ScrollArea>
             )}
           </CardContent>
-           {totalPages > 1 && (
-            <CardFooter className="flex items-center justify-between mt-4 pt-4 border-t">
-                 <div className="flex items-center space-x-2 text-sm">
-                    <span>Satır/sayfa:</span>
-                    <Select value={String(rowsPerPage)} onValueChange={val => { setRowsPerPage(Number(val)); setPage(1); }}>
-                    <SelectTrigger className="w-20"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                        {[20, 50, 100].map(n => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}
-                    </SelectContent>
-                    </Select>
-                </div>
-                <div className="flex items-center space-x-2">
-                    <Button size="sm" variant="outline" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page <= 1}>Önceki</Button>
-                    <span className="text-sm">Sayfa {page} / {totalPages}</span>
-                    <Button size="sm" variant="outline" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page >= totalPages}>Sonraki</Button>
-                </div>
-            </CardFooter>
-        )}
+          <CardFooter className="border-t">
+            <CursorPaginationFooter
+              page={pagination.page}
+              pageSize={pagination.pageSize}
+              totalCount={pagination.totalCount}
+              totalPages={pagination.totalPages}
+              hasNext={pagination.hasNext}
+              hasPrev={pagination.hasPrev}
+              loading={pagination.loading}
+              onNext={pagination.nextPage}
+              onPrev={pagination.prevPage}
+              onPageSizeChange={pagination.setPageSize}
+              className="w-full"
+            />
+          </CardFooter>
         </Card>
       </div>
 
