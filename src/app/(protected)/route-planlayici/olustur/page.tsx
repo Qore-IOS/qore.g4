@@ -131,9 +131,9 @@ export default function RotaOlusturPage() {
     (async () => {
       try {
         const [hSnap, uSnap, dSnap] = await Promise.all([
-          getDocs(collection(db, 'hospitals')),
-          getDocs(collection(db, 'users')),
-          getDocs(collection(db, 'depots')),
+          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
         ]);
         setHospitals(hSnap.docs.map(d => ({ id: d.id, ...d.data() })) as Hospital[]);
         setDepots(dSnap.docs.map(d => ({ id: d.id, ...d.data() })) as Depot[]);
@@ -146,7 +146,7 @@ export default function RotaOlusturPage() {
         toast({ title: 'Veri Hatası', description: 'Veriler alınamadı.', variant: 'destructive' });
       }
     })();
-  }, [toast, planDriverId]);
+  }, [toast, planDriverId, currentCompanyId, isSuperAdmin]);
 
   // Tüm açık rotaları dinle
   useEffect(() => {

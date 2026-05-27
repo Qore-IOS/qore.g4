@@ -126,7 +126,7 @@ export default function PostClosurePartChangeButton({
         const hId = hospitalId || deviceData.hospitalId;
         if (!hId) return;
 
-        const poolsSnap = await getDocs(collection(db, 'deviceLabPools'));
+        const poolsSnap = await getDocs(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin));
         const matchingPoolIds: string[] = [];
         poolsSnap.docs.forEach(d => {
           const pool = d.data() as DeviceLabPool;
@@ -136,7 +136,7 @@ export default function PostClosurePartChangeButton({
         });
         if (matchingPoolIds.length === 0) return;
 
-        const depotsSnap = await getDocs(collection(db, 'depots'));
+        const depotsSnap = await getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin));
         const poolWarehouseIds: string[] = [];
         depotsSnap.docs.forEach(d => {
           const depot = d.data() as Depot;

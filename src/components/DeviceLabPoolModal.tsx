@@ -13,6 +13,7 @@ import { collection, getDocs, addDoc, deleteDoc, updateDoc, doc, Timestamp, quer
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import type { Hospital, Device, DeviceLabPool } from '@/lib/types';
 
 interface DeviceLabPoolModalProps {
@@ -26,7 +27,7 @@ type ModalView = 'list' | 'create' | 'edit' | 'details';
 
 export default function DeviceLabPoolModal({ open, onOpenChange, hospitals, devices }: DeviceLabPoolModalProps) {
   const { toast } = useToast();
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [pools, setPools] = useState<DeviceLabPool[]>([]);
@@ -46,7 +47,7 @@ export default function DeviceLabPoolModal({ open, onOpenChange, hospitals, devi
   const fetchPools = useCallback(async () => {
     setIsLoading(true);
     try {
-      const snap = await getDocs(query(collection(db, 'deviceLabPools'), orderBy('createdAt', 'desc')));
+      const snap = await getDocs(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc')));
       setPools(snap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceLabPool)));
     } catch (error) {
       console.error('Error fetching device lab pools:', error);

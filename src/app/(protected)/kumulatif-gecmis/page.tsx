@@ -12,6 +12,8 @@ import { db } from '@/lib/firebase';
 import { exportDataToExcel } from '@/lib/utils';
 import BackButton from '@/components/BackButton';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 type Row = { test: string; routine: number; rerun: number; calib: number; control: number; total: number; };
 
@@ -26,6 +28,7 @@ type HistoryItem = {
 };
 
 export default function KumulatifGecmisPanel() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [items, setItems] = useState<HistoryItem[]>([]);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
@@ -34,7 +37,7 @@ export default function KumulatifGecmisPanel() {
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getDocs(query(collection(db, 'kumulatifRaporlar'), orderBy('createdAt', 'desc')));
+        const snap = await getDocs(scopedQuery('kumulatifRaporlar', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc')));
         const list: HistoryItem[] = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
         setItems(list);
       } catch(e) {

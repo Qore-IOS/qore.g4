@@ -40,6 +40,7 @@ import {
   Bell,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
 import useHidScanner from '@/hooks/useHidScanner';
 import { parseAndResolveBarcode } from '@/lib/barcode';
@@ -773,8 +774,10 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
         if (locationType === 'depot') {
           // Depot: unshipped items in this depot
           const snap = await getDocs(
-            query(
-              collection(db, 'depoStok'),
+            scopedQuery(
+              'depoStok',
+              currentCompanyId,
+              isSuperAdmin,
               where('depotId', '==', selectedLocationId),
               where('isShipped', '==', false)
             )
@@ -785,8 +788,10 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
           // Lab: shipped items targeted to this lab
           const labName = hospitals.find(h => h.id === selectedLocationId)?.name;
           const snap = await getDocs(
-            query(
-              collection(db, 'depoStok'),
+            scopedQuery(
+              'depoStok',
+              currentCompanyId,
+              isSuperAdmin,
               where('isShipped', '==', true)
             )
           );
@@ -1488,7 +1493,7 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
     setShowParticipantSelection(true);
     setIsLoadingUsers(true);
     try {
-      const users = await getUsersForLocation(type, id);
+      const users = await getUsersForLocation(type, id, currentCompanyId, isSuperAdmin);
       // Exclude current user from the list
       setLocationUsers(users.filter(u => u.uid !== currentUserProfile?.uid));
     } catch (err) {

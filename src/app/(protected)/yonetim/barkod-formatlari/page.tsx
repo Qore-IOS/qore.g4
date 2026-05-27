@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDocs, orderBy, query, setDoc, deleteDoc, writeBatch, deleteField } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import type { BarcodeFormat, ExpiryPattern } from '@/lib/barcode';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -81,7 +82,7 @@ function cleanExpiry(p?: any) {
 
 export default function BarkodFormatlariPage() {
   const { toast } = useToast();
-  const { currentCompanyId } = useAuth();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
   const [formats, setFormats] = useState<BarcodeFormat[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -89,11 +90,11 @@ export default function BarkodFormatlariPage() {
 
   const fetchFormats = useCallback(async () => {
     setIsLoading(true);
-    const snap = await getDocs(query(collection(db, 'barcodeFormats'), orderBy('name', 'asc')));
+    const snap = await getDocs(scopedQuery('barcodeFormats', currentCompanyId, isSuperAdmin, orderBy('name', 'asc')));
     const rawFormats = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as BarcodeFormat[];
     setFormats(rawFormats.map(f => normalizeFormat(f) as BarcodeFormat));
     setIsLoading(false);
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   useEffect(() => { fetchFormats(); }, [fetchFormats]);
 

@@ -84,7 +84,7 @@ export default function HakEdisPage() {
     const run = async () => {
       setLoading((p) => ({ ...p, products: true }));
       try {
-        const snap = await getDocs(query(collection(db, 'productCodes'), orderBy('stokAdi', 'asc')));
+        const snap = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin, orderBy('stokAdi', 'asc')));
         setProductCodes(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ProductCode)));
       } catch (e) {
         console.error('productCodes fetch error', e);

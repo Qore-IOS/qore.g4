@@ -22,6 +22,7 @@ import { Loader2, Search, ChevronUp, ChevronDown, ListChecks, History, PackageX,
 import { useMinMaxRules, touchStockMetadata } from '@/hooks/useFirebaseQueries';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 import LabIrsaliyeOcrModal, { type LabOcrResult } from '@/components/lab/LabIrsaliyeOcrModal';
 import { reconcileIrsaliyeAcceptance } from '@/lib/lojistik/reconcile-irsaliye';
@@ -190,9 +191,9 @@ export default function LaboratuvarYonetimiPanel() {
     async function fetchData() {
       setIsLoading(true);
       const [labsSnap, stokSnap, productsSnap] = await Promise.all([
-        getDocs(collection(db, 'hospitals')),
-        getDocs(query(collection(db, 'depoStok'), where('isShipped', '==', true))),
-        getDocs(collection(db, 'productCodes'))
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true))),
+        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin))
       ]);
       setLaboratories(labsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Laboratory)));
       setDepoStok(filterByCompanyScope(
@@ -591,7 +592,7 @@ export default function LaboratuvarYonetimiPanel() {
       });
 
       // Refresh local stock data
-      const stokSnap = await getDocs(query(collection(db, 'depoStok'), where('isShipped', '==', true)));
+      const stokSnap = await getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true)));
       setDepoStok(filterByCompanyScope(
         stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
         currentCompanyId,

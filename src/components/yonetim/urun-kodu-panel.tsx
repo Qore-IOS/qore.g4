@@ -363,13 +363,13 @@ export default function UrunKoduPanel() {
     setIsLoading(true);
     try {
       const [productsSnap, brandsSnap, labGroupsSnap, testGroupsSnap, deviceGroupsSnap, productGroupsSnap, mainUnitsSnap] = await Promise.all([
-        getDocs(collection(db, 'productCodes')),
-        getDocs(collection(db, 'def_brands')),
-        getDocs(collection(db, 'def_labGroups')),
-        getDocs(collection(db, 'def_testGroups')),
-        getDocs(collection(db, 'def_deviceGroups')),
-        getDocs(collection(db, 'def_productGroups')),
-        getDocs(collection(db, 'def_mainUnits')),
+        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('def_brands', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('def_labGroups', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('def_testGroups', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('def_deviceGroups', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('def_productGroups', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('def_mainUnits', currentCompanyId, isSuperAdmin)),
       ]);
       setProductCodes(productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
       setDefinitions({

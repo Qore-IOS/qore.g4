@@ -11,6 +11,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Loader2, History } from 'lucide-react';
 import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import BackButton from '@/components/BackButton';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -34,6 +36,7 @@ interface ReturnRecord {
 }
 
 export default function UrunIadeGecmisPage() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [history, setHistory] = useState<ReturnRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedRecord, setSelectedRecord] = useState<ReturnRecord | null>(null);
@@ -43,7 +46,7 @@ export default function UrunIadeGecmisPage() {
   const [rowsPerPage, setRowsPerPage] = useState(20);
 
   useEffect(() => {
-    const q = query(collection(db, 'productReturns'), orderBy('returnedAt', 'desc'));
+    const q = scopedQuery('productReturns', currentCompanyId, isSuperAdmin, orderBy('returnedAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const records = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ReturnRecord));
       setHistory(records);

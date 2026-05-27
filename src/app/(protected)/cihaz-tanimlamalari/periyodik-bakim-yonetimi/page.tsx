@@ -228,7 +228,7 @@ export default function PeriyodikBakimYonetimiPage() {
       // Also delete related logs
       const logCollection = itemToDelete.type === 'plan' ? 'maintenanceLogs' : 'periodicPartChangeLogs';
       const logField = itemToDelete.type === 'plan' ? 'planId' : 'periodicPartChangeId';
-      const logsQuery = query(collection(db, logCollection), where(logField, '==', itemToDelete.id));
+      const logsQuery = scopedQuery(logCollection, currentCompanyId, isSuperAdmin, where(logField, '==', itemToDelete.id));
       const logsSnap = await getDocs(logsQuery);
       for (const logDoc of logsSnap.docs) {
         await deleteDoc(doc(db, logCollection, logDoc.id));

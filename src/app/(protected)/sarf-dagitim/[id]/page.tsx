@@ -16,6 +16,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHeader, TableRow, TableHead } from '@/components/ui/table';
 import BackButton from '@/components/BackButton';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { generateId } from '@/lib/utils';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -66,7 +67,7 @@ export default function SarfDagilimDetayPage() {
   const router = useRouter();
   const params = useParams();
   const hospitalId = (params?.id as string) ?? '';
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
 
   const [hospital, setHospital] = useState<Hospital | null>(null);
   const [minMaxRules, setMinMaxRules] = useState<MinMaxRule[]>([]);
@@ -85,9 +86,9 @@ export default function SarfDagilimDetayPage() {
       try {
         const [hospitalSnap, productsQuery, rulesSnap, deviceGroupsSnap] = await Promise.all([
           getDoc(doc(db, 'hospitals', hospitalId)),
-          getDocs(collection(db, 'productCodes')),
+          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
           getDocs(collection(db, 'hospitals', hospitalId, 'minMaxRules')),
-          getDocs(collection(db, 'def_deviceGroups'))
+          getDocs(scopedQuery('def_deviceGroups', currentCompanyId, isSuperAdmin))
         ]);
         
         if (hospitalSnap.exists()) {

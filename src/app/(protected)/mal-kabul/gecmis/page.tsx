@@ -24,6 +24,8 @@ import {
   type DocumentData,
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
+import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 // UI Components
 import {
@@ -97,6 +99,7 @@ const MAX_RECORDS = 1000;
 
 export default function MalKabulGecmisPage() {
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const sp = useSearchParams();
   const openId = sp?.get('open') ?? null;
 
@@ -116,8 +119,10 @@ export default function MalKabulGecmisPage() {
     setIsLoading(true);
     malKabulLogger.debug('Initializing transaction history listener');
 
-    const q = query(
-      collection(db, COLLECTION_NAME),
+    const q = scopedQuery(
+      COLLECTION_NAME,
+      currentCompanyId,
+      isSuperAdmin,
       orderBy(ORDER_FIELD, 'desc'),
       limit(MAX_RECORDS)
     );
@@ -156,7 +161,7 @@ export default function MalKabulGecmisPage() {
       malKabulLogger.debug('Cleaning up transaction history listener');
       unsubscribe();
     };
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   /**
    * Open transaction details modal

@@ -6,6 +6,7 @@ import type { Depot, DepoStokItem, ConsumptionRecord } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -70,8 +71,8 @@ export default function StokYonetimiGecmisPanel() {
     setLoading(true);
     try {
       const [depotsSnap, stockSnap] = await Promise.all([
-        getDocs(collection(db, 'depots')),
-        getDocs(collection(db, 'depoStok')),
+        getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin)),
       ]);
       setDepots(depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)));
       

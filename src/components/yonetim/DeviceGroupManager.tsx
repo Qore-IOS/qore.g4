@@ -6,6 +6,9 @@ import { Input } from '@/components/ui/input';
 import { Plus, Edit, Trash2, Loader2, Server } from 'lucide-react';
 import { collection, getDocs, addDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
@@ -22,6 +25,7 @@ interface DeviceGroup {
 
 export default function DeviceGroupManager() {
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [items, setItems] = useState<DeviceGroup[]>([]);
   const [availableImages, setAvailableImages] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,7 +36,7 @@ export default function DeviceGroupManager() {
     setLoading(true);
     try {
       const [snap, images] = await Promise.all([
-          getDocs(collection(db, 'def_deviceGroups')),
+          getDocs(scopedQuery('def_deviceGroups', currentCompanyId, isSuperAdmin)),
           getDeviceImages()
       ]);
       setItems(snap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceGroup)).sort((a, b) => a.name.localeCompare(b.name)));
@@ -42,7 +46,7 @@ export default function DeviceGroupManager() {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
     fetchData();
@@ -65,9 +69,9 @@ export default function DeviceGroupManager() {
         imageUrl: currentItem.imageUrl || null,
       };
       if (currentItem.id) {
-        await setDoc(doc(db, 'def_deviceGroups', currentItem.id), dataToSave, { merge: true });
+        await setDoc(doc(db, 'def_deviceGroups', currentItem.id), withCompanyScope(dataToSave as Record<string, any>, currentCompanyId), { merge: true });
       } else {
-        await addDoc(collection(db, 'def_deviceGroups'), dataToSave);
+        await addDoc(collection(db, 'def_deviceGroups'), withCompanyScope(dataToSave as Record<string, any>, currentCompanyId));
       }
       toast({ title: 'Başarılı', description: 'Cihaz grubu kaydedildi.' });
       setNewItemName('');

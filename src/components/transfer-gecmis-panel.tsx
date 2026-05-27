@@ -77,7 +77,7 @@ export default function TransferGecmisPanel() {
 
   // Fetch depots once
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'depots'), snap => {
+    const unsub = onSnapshot(scopedQuery('depots', currentCompanyId, isSuperAdmin), snap => {
       const depotList = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
       setDepots(depotList);
       if (!selectedDepotId && depotList.length > 0) {
@@ -85,11 +85,11 @@ export default function TransferGecmisPanel() {
       }
     });
     return () => unsub();
-  }, [selectedDepotId]);
+  }, [selectedDepotId, currentCompanyId, isSuperAdmin]);
 
   // Fetch labs once for target laboratory filter
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'hospitals'), snap => {
+    const unsub = onSnapshot(scopedQuery('hospitals', currentCompanyId, isSuperAdmin), snap => {
       const labList = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
       setLabs(labList);
     });

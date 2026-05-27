@@ -127,7 +127,7 @@ export default function SoforIzlemPage() {
   useEffect(() => {
     const fetchHospitals = async () => {
       try {
-        const hospitalsSnap = await getDocs(collection(db, 'hospitals'));
+        const hospitalsSnap = await getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin));
         const hospitalsList = hospitalsSnap.docs
           .map(d => ({ id: d.id, ...d.data() } as Hospital))
           .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'tr'));
@@ -137,7 +137,7 @@ export default function SoforIzlemPage() {
       }
     };
     fetchHospitals();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   // Şoförleri ve aktif rotalarını getir
   useEffect(() => {
@@ -145,8 +145,8 @@ export default function SoforIzlemPage() {
       try {
         // Tüm şoförleri ve araçları getir
         const [usersSnap, vehiclesSnap] = await Promise.all([
-          getDocs(collection(db, 'users')),
-          getDocs(collection(db, 'vehicles')),
+          getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('vehicles', currentCompanyId, isSuperAdmin)),
         ]);
 
         // Debug: Tüm kullanıcıları ve rollerini logla

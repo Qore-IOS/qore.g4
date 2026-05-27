@@ -15,6 +15,7 @@ import {
 } from 'firebase/firestore';
 import type { ProductCode } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { withCompanyScope, filterByCompanyScope } from '@/lib/company-scope';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
@@ -72,7 +73,7 @@ interface SavedSparePartOrder {
 
 export default function YedekParcaStokGirisPage() {
   const router = useRouter();
-  const { currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -117,9 +118,9 @@ export default function YedekParcaStokGirisPage() {
     const fetchData = async () => {
       try {
         const [productsSnap, brandsSnap, ordersSnap] = await Promise.all([
-          getDocs(collection(db, 'productCodes')),
-          getDocs(collection(db, 'def_brands')),
-          getDocs(collection(db, 'yedekParcaSiparisler')),
+          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('def_brands', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('yedekParcaSiparisler', currentCompanyId, isSuperAdmin)),
         ]);
         const allProducts = productsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
         const sparePartProducts = allProducts.filter(p => p.urunGrubu === 'yedek_parca');
@@ -711,7 +712,7 @@ export default function YedekParcaStokGirisPage() {
         await createMissingSparePartCards(missing, selectedBrandForCards);
         toast({ title: 'Stok Kartları Açıldı', description: `${missing.length} ürün için yedek parça stok kartı oluşturuldu.` });
 
-        const refreshedSnap = await getDocs(collection(db, 'productCodes'));
+        const refreshedSnap = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin));
         const refreshed = refreshedSnap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
         setAllProductCodes(refreshed);
         setSpareParts(refreshed.filter(p => p.urunGrubu === 'yedek_parca'));

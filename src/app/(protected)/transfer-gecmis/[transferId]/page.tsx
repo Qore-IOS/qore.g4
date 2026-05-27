@@ -16,6 +16,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
+import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { Loader2, FileText, FileSpreadsheet } from 'lucide-react';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -52,6 +54,7 @@ export default function Page() {
   const transferId = Array.isArray(params?.transferId) ? params.transferId[0] : params?.transferId;
   const router = useRouter();
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   const [root, setRoot] = useState<TransferRoot | null>(null);
   const [items, setItems] = useState<TransferItem[]>([]);
@@ -80,7 +83,7 @@ export default function Page() {
           const chunkSize = 30;
           for (let i = 0; i < stokKodlari.length; i += chunkSize) {
             const chunk = stokKodlari.slice(i, i + chunkSize);
-            const q = query(collection(db, 'productCodes'), where('stokKodu', 'in', chunk));
+            const q = scopedQuery('productCodes', currentCompanyId, isSuperAdmin, where('stokKodu', 'in', chunk));
             const pSnap = await getDocs(q);
             pSnap.docs.forEach((d) => {
               const data = d.data() as ProductCode;

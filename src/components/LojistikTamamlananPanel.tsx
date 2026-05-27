@@ -14,6 +14,7 @@ import { format as formatDate } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import type { Order, ProductCode } from '@/lib/types';
 import {
   ArrowLeft,
@@ -34,7 +35,7 @@ import { cn } from '@/lib/utils';
 
 export default function LojistikTamamlananPanel() {
   const router = useRouter();
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
@@ -53,12 +54,12 @@ export default function LojistikTamamlananPanel() {
   // Product codes for name lookup
   useEffect(() => {
     (async () => {
-      const snap = await getDocs(collection(db, 'productCodes'));
+      const snap = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin));
       setProductCodes(
         snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) } as ProductCode))
       );
     })();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   // Listen to completed peripheral orders
   useEffect(() => {

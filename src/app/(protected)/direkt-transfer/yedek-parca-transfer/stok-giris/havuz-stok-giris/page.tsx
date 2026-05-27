@@ -18,6 +18,7 @@ import {
 import type { ProductCode, Depot } from '@/lib/types';
 import { withCompanyScope } from '@/lib/company-scope';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import {
@@ -60,7 +61,7 @@ export default function HavuzStokGirisPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const poolWarehouseId = searchParams.get('poolWarehouseId') || '';
-  const { currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -105,8 +106,8 @@ export default function HavuzStokGirisPage() {
     const fetchData = async () => {
       try {
         const [productsSnap, brandsSnap, depotSnap] = await Promise.all([
-          getDocs(collection(db, 'productCodes')),
-          getDocs(collection(db, 'def_brands')),
+          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('def_brands', currentCompanyId, isSuperAdmin)),
           getDoc(doc(db, 'depots', poolWarehouseId)),
         ]);
         const allProducts = productsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
@@ -549,7 +550,7 @@ export default function HavuzStokGirisPage() {
         await createMissingSparePartCards(missing, selectedBrandForCards);
         toast({ title: 'Stok Kartları Açıldı', description: `${missing.length} ürün için yedek parça stok kartı oluşturuldu.` });
 
-        const refreshedSnap = await getDocs(collection(db, 'productCodes'));
+        const refreshedSnap = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin));
         const refreshed = refreshedSnap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
         setAllProductCodes(refreshed);
         setSpareParts(refreshed.filter(p => p.urunGrubu === 'yedek_parca'));

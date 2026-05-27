@@ -67,7 +67,7 @@ export default function SiparisGecmisPanel(): JSX.Element {
 
   // Fetch depots once
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'depots'), snap => {
+    const unsub = onSnapshot(scopedQuery('depots', currentCompanyId, isSuperAdmin), snap => {
       const depotList = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
       setDepots(depotList);
       if (!selectedDepotId && depotList.length > 0) {
@@ -75,12 +75,12 @@ export default function SiparisGecmisPanel(): JSX.Element {
       }
     });
     return () => unsub();
-  }, [selectedDepotId]);
-  
+  }, [selectedDepotId, currentCompanyId, isSuperAdmin]);
+
   // Fetch ALL shipments and orders once
   useEffect(() => {
     setLoading(true);
-    const shipmentsQuery = query(collection(db, 'shipments'), orderBy('timestamp', 'desc'));
+    const shipmentsQuery = scopedQuery('shipments', currentCompanyId, isSuperAdmin, orderBy('timestamp', 'desc'));
     
     const unsubscribe = onSnapshot(shipmentsQuery, async (shipmentSnap) => {
         const shipmentList = shipmentSnap.docs.map(d => ({ id: d.id, ...d.data(), timestamp: (d.data().timestamp as Timestamp)?.toDate() } as Shipment));

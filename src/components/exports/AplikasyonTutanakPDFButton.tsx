@@ -10,6 +10,7 @@ import QRCode from 'qrcode';
 import { format } from 'date-fns';
 import type { Device, Hospital } from '@/lib/types';
 import { prefetchPdfAssets, resolveLabDisplayName, computeFormNo } from '@/lib/pdf-assets';
+import { useAuth } from '@/contexts/auth-context';
 
 function setupTurkishFont(doc: jsPDF, fontBase64: string): boolean {
   try {
@@ -144,7 +145,9 @@ export async function generateAplikasyonTutanakPDF(
   device: Device,
   hospital: Hospital | null,
   actionRecord: ActionFormRecord,
-  openInNewWindow: boolean = false
+  openInNewWindow: boolean = false,
+  companyId: string | null = null,
+  isSuperAdmin: boolean = false,
 ) {
   try {
     const hospitalId = hospital?.id || device.hospitalId;
@@ -153,11 +156,11 @@ export async function generateAplikasyonTutanakPDF(
     // Fire ALL independent async operations in parallel
     const [assets, labDisplayName, qrDataUrl, formNo] = await Promise.all([
       prefetchPdfAssets(),
-      resolveLabDisplayName(hospitalId, hospital?.name || ''),
+      resolveLabDisplayName(hospitalId, hospital?.name || '', companyId, isSuperAdmin),
       QRCode.toDataURL(recordUrl, { errorCorrectionLevel: 'M', margin: 0, scale: 4 }),
       actionRecord.formNo
         ? Promise.resolve(actionRecord.formNo)
-        : computeFormNo('aplikasyonActionForms', 'createdByUid', actionRecord.createdByUid, actionRecord.id, actionRecord.createdByName, 'A'),
+        : computeFormNo('aplikasyonActionForms', 'createdByUid', actionRecord.createdByUid, actionRecord.id, actionRecord.createdByName, 'A', companyId, isSuperAdmin),
     ]);
 
     const pdfDoc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -495,10 +498,11 @@ export async function generateAplikasyonTutanakPDF(
 
 export default function AplikasyonTutanakPDFButton({ device, hospital, actionRecord, className }: AplikasyonTutanakPDFButtonProps) {
   const [busy, setBusy] = React.useState(false);
+  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   const onExport = async () => {
     setBusy(true);
-    await generateAplikasyonTutanakPDF(device, hospital, actionRecord, false);
+    await generateAplikasyonTutanakPDF(device, hospital, actionRecord, false, currentCompanyId, isSuperAdmin);
     hapticDouble();
     setBusy(false);
   };

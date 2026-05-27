@@ -182,10 +182,10 @@ export default function LojistikSiparisView() {
   useEffect(() => {
     (async () => {
       const [hSnap, pSnap, dSnap, lgSnap] = await Promise.all([
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'productCodes')),
-        getDocs(collection(db, 'depots')),
-        getDocs(collection(db, 'def_labGroups')),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('def_labGroups', currentCompanyId, isSuperAdmin)),
       ]);
       setHospitals(hSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Hospital)));
       setProductCodes(pSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ProductCode)));
@@ -303,16 +303,16 @@ export default function LojistikSiparisView() {
         // applied client-side so no composite index is required.
         const queryPromises: Array<Promise<FirebaseFirestore.QuerySnapshot> | null> = [];
         queryPromises.push(
-          getDocs(query(collection(db, 'depoStok'), where('hedefKurumId', '==', hospital.id))) as any
+          getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('hedefKurumId', '==', hospital.id))) as any
         );
         if (hospital.name) {
           queryPromises.push(
-            getDocs(query(collection(db, 'depoStok'), where('hedefKurum', '==', hospital.name))) as any
+            getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('hedefKurum', '==', hospital.name))) as any
           );
         }
         if (hospital.ad && hospital.ad !== hospital.name) {
           queryPromises.push(
-            getDocs(query(collection(db, 'depoStok'), where('hedefKurum', '==', hospital.ad))) as any
+            getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('hedefKurum', '==', hospital.ad))) as any
           );
         }
         const snaps = await Promise.all(queryPromises as any[]);

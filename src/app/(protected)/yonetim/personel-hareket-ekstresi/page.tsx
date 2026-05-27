@@ -7,6 +7,8 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import {
   Card, CardHeader, CardTitle, CardDescription, CardContent
 } from '@/components/ui/card';
@@ -196,21 +198,26 @@ function normalizeLogToActivity(d: (LogDoc & { id: string })): ActivityItem {
   };
 }
 
-async function fetchAllLogsForUserFromCollection(collName: string, uid: string, batchSize = 500) {
-  const coll = collection(db, collName);
+async function fetchAllLogsForUserFromCollection(
+  collName: string,
+  uid: string,
+  currentCompanyId: string | null,
+  isSuperAdmin: boolean,
+  batchSize = 500,
+) {
   const items: (LogDoc & { id: string })[] = [];
 
   try {
     let last: QueryDocumentSnapshot<DocumentData> | undefined;
     while (true) {
-      const constraints: QueryConstraint[] = [
+      const extra: QueryConstraint[] = [
         where('userId', '==', uid),
         orderBy('ts', 'desc'),
         orderBy('__name__', 'desc'),
         limit(batchSize),
       ];
-      if (last) constraints.push(startAfter(last));
-      const qy = query(coll, ...constraints);
+      if (last) extra.push(startAfter(last));
+      const qy = scopedQuery(collName, currentCompanyId, isSuperAdmin, ...extra);
       const snap = await getDocs(qy);
       if (snap.empty) break;
       snap.docs.forEach(d => items.push({ id: d.id, ...(d.data() as any) }));
@@ -222,12 +229,12 @@ async function fetchAllLogsForUserFromCollection(collName: string, uid: string, 
     console.warn(`Ordered query for ${collName} failed, falling back to unordered scan.`, err);
     let last: QueryDocumentSnapshot<DocumentData> | undefined;
     while (true) {
-      const constraints: QueryConstraint[] = [
+      const extra: QueryConstraint[] = [
         where('userId', '==', uid),
         limit(batchSize),
       ];
-      if (last) constraints.push(startAfter(last));
-      const qy = query(coll, ...constraints);
+      if (last) extra.push(startAfter(last));
+      const qy = scopedQuery(collName, currentCompanyId, isSuperAdmin, ...extra);
       const snap = await getDocs(qy);
       if (snap.empty) break;
       snap.docs.forEach(d => items.push({ id: d.id, ...(d.data() as any) }));
@@ -240,6 +247,7 @@ async function fetchAllLogsForUserFromCollection(collName: string, uid: string, 
 
 export default function PersonelHareketEkstresiPage() {
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   const [users, setUsers] = useState<AppUser[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
@@ -257,7 +265,7 @@ export default function PersonelHareketEkstresiPage() {
     (async () => {
       setLoadingUsers(true);
       try {
-        const snap = await getDocs(collection(db, 'users'));
+        const snap = await getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin));
         const items = snap.docs.map(d => ({ uid: d.id, ...d.data() } as AppUser))
           .sort((a, b) => (a.name || a.email || '').localeCompare(b.name || b.email || ''));
         setUsers(items);
@@ -267,7 +275,7 @@ export default function PersonelHareketEkstresiPage() {
         setLoadingUsers(false);
       }
     })();
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
     setSelectedUser(selectedUid ? users.find(u => u.uid === selectedUid) || null : null);
@@ -315,7 +323,7 @@ export default function PersonelHareketEkstresiPage() {
 
       for (const name of LOG_COLLECTION_CANDIDATES) {
         try {
-          const part = await fetchAllLogsForUserFromCollection(name, uid, 500);
+          const part = await fetchAllLogsForUserFromCollection(name, uid, currentCompanyId, isSuperAdmin, 500);
           if (part.length > 0) {
             all = all.concat(part.map(x => ({ ...x, _collName: name } as any)));
           }

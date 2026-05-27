@@ -14,6 +14,7 @@ import { Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 // Types from your app schema
 import type {
@@ -42,15 +43,15 @@ export default function UrunKullanimIstatistikPage() {
         hospitalStockSnap,
         consumptionSnap
       ] = await Promise.all([
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'productCodes')),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
         // Hospitals' on-hand stock (items shipped to hospitals)
-        getDocs(query(collection(db, 'depoStok'), where('isShipped', '==', true))),
-        getDocs(collection(db, 'tuketimKayitlari'))
+        getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true))),
+        getDocs(scopedQuery('tuketimKayitlari', currentCompanyId, isSuperAdmin))
       ]);
 
-      setHospitals(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
-      setProductCodes(productCodesSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
+      setHospitals(filterByCompanyScope(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)), currentCompanyId, isSuperAdmin));
+      setProductCodes(filterByCompanyScope(productCodesSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)), currentCompanyId, isSuperAdmin));
 
       setHospitalStockItems(
         filterByCompanyScope(
@@ -68,7 +69,7 @@ export default function UrunKullanimIstatistikPage() {
         }
         return { id: d.id, ...raw } as ConsumptionRecord;
       });
-      setTuketimKayitlari(normalizedConsumption);
+      setTuketimKayitlari(filterByCompanyScope(normalizedConsumption, currentCompanyId, isSuperAdmin));
     } catch (err) {
       console.error('UrunKullanimIstatistikPage fetch error:', err);
       toast({

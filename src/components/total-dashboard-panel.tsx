@@ -642,7 +642,7 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
 
         // Fetch device fault reports
         const faultsSnap = await getDocs(
-          query(collection(db, 'deviceFaultReports'), orderBy('openedAt', 'desc'))
+          scopedQuery('deviceFaultReports', currentCompanyId, isSuperAdmin, orderBy('openedAt', 'desc'))
         );
         const faults = faultsSnap.docs.map(d => {
           const data = d.data();

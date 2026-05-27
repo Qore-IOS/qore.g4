@@ -14,6 +14,7 @@ import { useToast } from '@/hooks/use-toast';
 import { ArrowLeft, CheckCircle2, Edit3, Loader2, LogOut, Save, Users, Search, Clock } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import {
   collection,
   doc,
@@ -100,7 +101,7 @@ function usePresenceMap(uids: string[]) {
 const FUNCTIONS_REGION = 'europe-west1'; // ⬅️ must match functions code
 
 export default function GroupDetailPage() {
-  const { isAdmin, currentUserProfile } = useAuth();
+  const { isAdmin, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const router = useRouter();
   const params = useParams();
   const groupId = Array.isArray(params?.id) ? params.id[0] : params?.id as string;
@@ -157,7 +158,7 @@ export default function GroupDetailPage() {
 
   // Load users realtime
   useEffect(() => {
-    const qUsers = query(collection(db, 'users'), orderBy('name'));
+    const qUsers = scopedQuery('users', currentCompanyId, isSuperAdmin, orderBy('name'));
     const unsub = onSnapshot(
       qUsers,
       (snap) => {

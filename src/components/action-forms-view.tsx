@@ -124,8 +124,8 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
     const fetchForms = async () => {
       setLoading(true);
       const [teknikSnap, aplikasyonSnap] = await Promise.all([
-        getDocs(collection(db, getCollectionName('teknik-servis'))),
-        getDocs(collection(db, getCollectionName('aplikasyon-paneli'))),
+        getDocs(scopedQuery(getCollectionName('teknik-servis'), currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery(getCollectionName('aplikasyon-paneli'), currentCompanyId, isSuperAdmin)),
       ]);
       const merged = [
         ...teknikSnap.docs.map((d) => ({ id: d.id, ...d.data(), moduleType: 'teknik-servis' } as ActionRecord)),
@@ -382,7 +382,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
       }
 
       if (nextForm?.hospitalId) {
-        const q = query(collection(db, 'devices'), where('hospitalId', '==', nextForm.hospitalId));
+        const q = scopedQuery('devices', currentCompanyId, isSuperAdmin, where('hospitalId', '==', nextForm.hospitalId));
         const devicesSnap = await getDocs(q);
         const candidates = devicesSnap.docs
           .map((item) => ({ id: item.id, ...item.data() } as Device))
@@ -437,7 +437,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
     if (!form?.hospitalId) return;
     (async () => {
       try {
-        const poolsSnap = await getDocs(collection(db, 'deviceLabPools'));
+        const poolsSnap = await getDocs(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin));
         const allPools = poolsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as DeviceLabPool));
         const scopedPools = filterByCompanyScope(allPools, currentCompanyId, isSuperAdmin);
         const matchingPoolIds = scopedPools
@@ -449,7 +449,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
           return;
         }
 
-        const depotsSnap = await getDocs(collection(db, 'depots'));
+        const depotsSnap = await getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin));
         const allDepots = depotsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Depot));
         const scopedDepots = filterByCompanyScope(allDepots, currentCompanyId, isSuperAdmin);
         const poolWarehouseIds = scopedDepots

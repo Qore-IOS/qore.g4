@@ -4,6 +4,8 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, orderBy, query, Timestamp } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { Loader2, FileSpreadsheet, FileText, Search, X, History, User, ArrowUpDown, ArrowUp, ArrowDown, Filter, Check } from 'lucide-react';
 import { DatePickerWithRange } from '@/components/ui/date-range-picker';
 import type { DateRange } from 'react-day-picker';
@@ -27,6 +29,7 @@ type ColumnFiltersState = Record<ColumnFilterKey, Set<string>>;
 
 export default function ImhaEdilenKitlerListePanel() {
     const { toast } = useToast();
+    const { currentCompanyId, isSuperAdmin } = useAuth();
     const [records, setRecords] = useState<DestroyedKitRecord[]>([]);
     const [hospitals, setHospitals] = useState<Hospital[]>([]);
     const [loading, setLoading] = useState(true);
@@ -51,8 +54,8 @@ export default function ImhaEdilenKitlerListePanel() {
             setLoading(true);
             try {
                 const [recordsSnap, labsSnap] = await Promise.all([
-                    getDocs(query(collection(db, 'destroyedKitsReports'), orderBy('resolvedAt', 'desc'))),
-                    getDocs(collection(db, 'hospitals'))
+                    getDocs(scopedQuery('destroyedKitsReports', currentCompanyId, isSuperAdmin, orderBy('resolvedAt', 'desc'))),
+                    getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin))
                 ]);
 
                 setRecords(recordsSnap.docs.map(doc => {

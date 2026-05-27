@@ -28,6 +28,7 @@ import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
 import BackButton from '@/components/BackButton';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { resolveDefaultTrackingMode, TrackingMode } from '@/lib/tracking';
 
 
@@ -62,9 +63,9 @@ export default function UrunIadePanel() {
     setIsLoading(true);
     try {
       const [depotsSnap, hospitalsSnap, productsSnap] = await Promise.all([
-        getDocs(collection(db, 'depots')),
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'productCodes')),
+        getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
       ]);
       const depotList = depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
       setDepots(depotList);
@@ -84,7 +85,7 @@ export default function UrunIadePanel() {
   useEffect(() => {
     fetchData();
 
-    const q = query(collection(db, 'depoStok'));
+    const q = scopedQuery('depoStok', currentCompanyId, isSuperAdmin);
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
         const stockItems = filterByCompanyScope(
           querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DepoStokItem)),

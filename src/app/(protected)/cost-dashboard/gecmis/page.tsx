@@ -16,6 +16,7 @@ import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 // ============================================================================
 // TYPES
@@ -292,7 +293,7 @@ export default function MaliyetSayimGecmisPage() {
     const load = async () => {
       setLoading(true);
       try {
-        const snap = await getDocs(query(collection(db, 'maliyetSayimSessions'), orderBy('createdAt', 'desc')));
+        const snap = await getDocs(scopedQuery('maliyetSayimSessions', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc')));
         const allSessions = snap.docs.map(d => ({ id: d.id, ...d.data() } as SayimSession));
         const companyScoped = filterByCompanyScope(allSessions, currentCompanyId, isSuperAdmin);
         // Lab sessions are restricted to the user's assigned labs; depot

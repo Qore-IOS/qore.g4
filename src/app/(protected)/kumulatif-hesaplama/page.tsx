@@ -47,6 +47,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { db } from '@/lib/firebase';
 import {
   addDoc,
@@ -113,7 +114,7 @@ function parseLocaleInt(val: any): number {
 export default function KumulatifHesaplamaPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const { currentCompanyId } = useAuth();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -151,9 +152,9 @@ export default function KumulatifHesaplamaPage() {
       setIsLoading(true);
       try {
         const [hSnap, pSnap, poolSnap] = await Promise.all([
-          getDocs(query(collection(db, 'hospitals'), orderBy('name'))),
-          getDocs(collection(db, 'productCodes')),
-          getDocs(collection(db, 'labPools')),
+          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin, orderBy('name'))),
+          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('labPools', currentCompanyId, isSuperAdmin)),
         ]);
 
         const fetchedHospitals = hSnap.docs.map(

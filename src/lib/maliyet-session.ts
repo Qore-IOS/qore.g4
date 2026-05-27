@@ -9,6 +9,7 @@ import {
 } from 'firebase/firestore';
 import type { User } from '@/lib/types';
 import { normalizeCompanyId } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 // ============================================================================
 // TYPES
@@ -350,10 +351,12 @@ export function subscribeToUserSessions(
 /** Get users assigned to a location (lab or depot) */
 export async function getUsersForLocation(
   locationType: 'lab' | 'depot',
-  locationId: string
+  locationId: string,
+  companyId: string | null,
+  isSuperAdmin: boolean,
 ): Promise<{ uid: string; name: string; email: string; role: string }[]> {
   const field = locationType === 'lab' ? 'assignedLaboratories' : 'assignedDepots';
-  const usersSnap = await getDocs(collection(db, 'users'));
+  const usersSnap = await getDocs(scopedQuery('users', companyId, isSuperAdmin));
 
   const users: { uid: string; name: string; email: string; role: string }[] = [];
 

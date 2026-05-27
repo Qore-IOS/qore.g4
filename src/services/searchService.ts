@@ -137,8 +137,8 @@ export async function searchProductLedger(
 
   if (isPotentiallySerial) {
     const serialQueries = await Promise.all([
-      getDocs(query(collection(db, 'depoStok'), where('seriNumarasi', '==', needleOriginal), limit(1))),
-      getDocs(query(collection(db, 'tuketimKayitlari'), where('seriNumarasi', '==', needleOriginal), limit(1))),
+      getDocs(scopedQuery('depoStok', companyId, isSuperAdmin, where('seriNumarasi', '==', needleOriginal), limit(1))),
+      getDocs(scopedQuery('tuketimKayitlari', companyId, isSuperAdmin, where('seriNumarasi', '==', needleOriginal), limit(1))),
     ]);
     if (serialQueries.some(snap => !snap.empty)) {
       searchType = 'serial';
@@ -147,7 +147,7 @@ export async function searchProductLedger(
 
   // Check for lot number if not serial
   if (searchType === 'product') {
-    const lotSnap = await getDocs(query(collection(db, 'depoStok'), where('lotNumarasi', '==', needleOriginal), limit(1)));
+    const lotSnap = await getDocs(scopedQuery('depoStok', companyId, isSuperAdmin, where('lotNumarasi', '==', needleOriginal), limit(1)));
     if (!lotSnap.empty) searchType = 'lot';
   }
 
@@ -158,7 +158,7 @@ export async function searchProductLedger(
   if (searchType === 'serial') {
     // Try to find product info from depoStok first
     const productFromSerialSnap = await getDocs(
-      query(collection(db, 'depoStok'), where('seriNumarasi', '==', needleOriginal), limit(1))
+      scopedQuery('depoStok', companyId, isSuperAdmin, where('seriNumarasi', '==', needleOriginal), limit(1))
     );
     if (!productFromSerialSnap.empty) {
       const data = productFromSerialSnap.docs[0].data();
@@ -167,7 +167,7 @@ export async function searchProductLedger(
     } else {
       // If not found in depoStok, try tuketimKayitlari (for consumed items)
       const productFromConsumptionSnap = await getDocs(
-        query(collection(db, 'tuketimKayitlari'), where('seriNumarasi', '==', needleOriginal), limit(1))
+        scopedQuery('tuketimKayitlari', companyId, isSuperAdmin, where('seriNumarasi', '==', needleOriginal), limit(1))
       );
       if (!productFromConsumptionSnap.empty) {
         const data = productFromConsumptionSnap.docs[0].data();
@@ -178,7 +178,7 @@ export async function searchProductLedger(
   } else if (searchType === 'lot') {
     targetLotNumarasi = needleOriginal;
     const productsFromLotSnap = await getDocs(
-      query(collection(db, 'depoStok'), where('lotNumarasi', '==', needleOriginal))
+      scopedQuery('depoStok', companyId, isSuperAdmin, where('lotNumarasi', '==', needleOriginal))
     );
     productsFromLotSnap.forEach(doc => stockCodesToSearch.push(doc.data().stokKodu));
   } else {
@@ -203,8 +203,8 @@ export async function searchProductLedger(
   if (searchType === 'serial') {
     // First, get consumption records and depoStok by serial
     const [depoStokBySerial, consumptionBySerial] = await Promise.all([
-      getDocs(query(collection(db, 'depoStok'), where('seriNumarasi', '==', needleOriginal))),
-      getDocs(query(collection(db, 'tuketimKayitlari'), where('seriNumarasi', '==', needleOriginal))),
+      getDocs(scopedQuery('depoStok', companyId, isSuperAdmin, where('seriNumarasi', '==', needleOriginal))),
+      getDocs(scopedQuery('tuketimKayitlari', companyId, isSuperAdmin, where('seriNumarasi', '==', needleOriginal))),
     ]);
 
     consumptionSnap = consumptionBySerial;
@@ -227,13 +227,13 @@ export async function searchProductLedger(
     }
   } else if (searchType === 'lot') {
     [depoStokSnap, consumptionSnap] = await Promise.all([
-      getDocs(query(collection(db, 'depoStok'), where('lotNumarasi', '==', needleOriginal))),
-      getDocs(query(collection(db, 'tuketimKayitlari'), where('lotNumarasi', '==', needleOriginal))),
+      getDocs(scopedQuery('depoStok', companyId, isSuperAdmin, where('lotNumarasi', '==', needleOriginal))),
+      getDocs(scopedQuery('tuketimKayitlari', companyId, isSuperAdmin, where('lotNumarasi', '==', needleOriginal))),
     ]);
   } else if (uniqueStockCodes.length > 0 && uniqueStockCodes.length <= 30) {
     [depoStokSnap, consumptionSnap] = await Promise.all([
-      getDocs(query(collection(db, 'depoStok'), where('stokKodu', 'in', uniqueStockCodes))),
-      getDocs(query(collection(db, 'tuketimKayitlari'), where('stokKodu', 'in', uniqueStockCodes))),
+      getDocs(scopedQuery('depoStok', companyId, isSuperAdmin, where('stokKodu', 'in', uniqueStockCodes))),
+      getDocs(scopedQuery('tuketimKayitlari', companyId, isSuperAdmin, where('stokKodu', 'in', uniqueStockCodes))),
     ]);
   } else {
     return { ledgerRows: [], stockSummary: [], searchType };

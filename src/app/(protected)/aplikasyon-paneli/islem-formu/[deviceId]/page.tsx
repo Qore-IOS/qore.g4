@@ -327,7 +327,7 @@ export default function AplikasyonIslemFormuPage() {
       try {
         if (isLabMode && hospitalIdFromLab) {
           // Lab Mode: Fetch all devices for this hospital
-          const q = query(collection(db, 'devices'), where('hospitalId', '==', hospitalIdFromLab));
+          const q = scopedQuery('devices', currentCompanyId, isSuperAdmin, where('hospitalId', '==', hospitalIdFromLab));
           const snap = await getDocs(q);
           const devices = snap.docs.map(d => ({ id: d.id, ...d.data() } as Device));
           setDevicesByLab(devices);
@@ -433,7 +433,7 @@ export default function AplikasyonIslemFormuPage() {
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getDocs(collection(db, 'yedekParcaDepoStok'));
+        const snap = await getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
         const items = snap.docs.map((d) => {
           const data = d.data();
           return {
@@ -458,7 +458,7 @@ export default function AplikasyonIslemFormuPage() {
         const hospitalId = isLabMode ? hospitalIdFromLab : deviceSnap?.data()?.hospitalId;
         if (!hospitalId) return;
 
-        const poolsSnap = await getDocs(collection(db, 'deviceLabPools'));
+        const poolsSnap = await getDocs(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin));
         const matchingPoolIds: string[] = [];
         const companyScopedPools = filterByCompanyScope(
           poolsSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as DeviceLabPool),
@@ -472,7 +472,7 @@ export default function AplikasyonIslemFormuPage() {
         });
         if (matchingPoolIds.length === 0) return;
 
-        const depotsSnap = await getDocs(collection(db, 'depots'));
+        const depotsSnap = await getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin));
         const poolWarehouseIds: string[] = [];
         const companyScopedDepots = filterByCompanyScope(
           depotsSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as Depot),
@@ -1134,7 +1134,7 @@ export default function AplikasyonIslemFormuPage() {
   };
 
   const refreshDepotStock = async () => {
-    const snap = await getDocs(collection(db, 'yedekParcaDepoStok'));
+    const snap = await getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
     const items = snap.docs.map((d) => {
       const data = d.data();
       return {
@@ -1143,7 +1143,7 @@ export default function AplikasyonIslemFormuPage() {
         createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
       } as YedekParcaDepoStokItem;
     });
-    setDepotStockItems(items);
+    setDepotStockItems(filterByCompanyScope(items, currentCompanyId, isSuperAdmin));
   };
 
   // Handle removed part image selection
@@ -2099,8 +2099,8 @@ export default function AplikasyonIslemFormuPage() {
         const dbPromise = batch.commit();
         
         // Start PDF generation immediately
-        const pdfPromises = createdFormsData.map(data => 
-            generateAplikasyonTutanakPDF(data.device, data.hospital, data.actionRecord as any, true)
+        const pdfPromises = createdFormsData.map(data =>
+            generateAplikasyonTutanakPDF(data.device, data.hospital, data.actionRecord as any, true, currentCompanyId, isSuperAdmin)
         );
 
         // Show WhatsApp button as soon as PDF is ready, don't wait for DB commit if it's slow

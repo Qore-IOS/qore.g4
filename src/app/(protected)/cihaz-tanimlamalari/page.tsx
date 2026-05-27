@@ -8,6 +8,7 @@ import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Hospital } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { filterByCompanyScope } from '@/lib/company-scope';
 
 export default function CihazTanimlamalariPage() {
@@ -22,7 +23,7 @@ export default function CihazTanimlamalariPage() {
       try {
         const [images, hospitalsSnap] = await Promise.all([
           getDeviceImages(),
-          getDocs(collection(db, 'hospitals'))
+          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin))
         ]);
         setImageFiles(images);
         setHospitals(filterByCompanyScope(

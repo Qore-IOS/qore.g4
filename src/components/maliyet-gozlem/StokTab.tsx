@@ -13,6 +13,7 @@ import { collection, getDocs, orderBy, query } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { getExchangeRates } from '@/lib/exchange-rates';
 import type { ProductCode, Currency } from '@/lib/types';
 import {
@@ -48,8 +49,8 @@ export function StokTab({ currency }: StokTabProps) {
       setLoading(true);
       try {
         const [sessionsSnap, productsSnap, ratesValue] = await Promise.all([
-          getDocs(query(collection(db, 'maliyetSayimSessions'), orderBy('createdAt', 'desc'))),
-          getDocs(query(collection(db, 'productCodes'), orderBy('stokAdi', 'asc'))),
+          getDocs(scopedQuery('maliyetSayimSessions', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
+          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin, orderBy('stokAdi', 'asc'))),
           getExchangeRates().catch(() => ({ EUR: 1, USD: 1.08, TRY: 38.5 })),
         ]);
         if (cancelled) return;

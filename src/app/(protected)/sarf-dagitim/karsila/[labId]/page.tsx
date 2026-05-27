@@ -42,8 +42,8 @@ export default function SarfDagilimPage() {
       setLoading(true);
       try {
         const [hospitalsQuery, depotsQuery] = await Promise.all([
-            getDocs(query(collection(db, 'hospitals'), where('isConsumablesHospital', '==', true))),
-            getDocs(collection(db, 'depots'))
+            getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin, where('isConsumablesHospital', '==', true))),
+            getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin))
         ]);
         
         const labs = hospitalsQuery.docs.map(doc => ({ id: doc.id, ...doc.data() } as Hospital));
@@ -80,7 +80,7 @@ export default function SarfDagilimPage() {
       setDepotStock([]);
       return;
     }
-    const q = query(collection(db, 'depoStok'), where('depotId', '==', selectedDepotId), where('isShipped', '==', false));
+    const q = scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('depotId', '==', selectedDepotId), where('isShipped', '==', false));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setDepotStock(filterByCompanyScope(
         snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),

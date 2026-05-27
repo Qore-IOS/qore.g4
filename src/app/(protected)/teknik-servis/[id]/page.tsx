@@ -122,7 +122,7 @@ export default function TeknikServisDetayPage() {
       return;
     }
     setLoading(true);
-    const qDevices = query(collection(db, 'devices'), where('hospitalId', '==', hospitalId));
+    const qDevices = scopedQuery('devices', currentCompanyId, isSuperAdmin, where('hospitalId', '==', hospitalId));
     const unsub = onSnapshot(
       qDevices,
       (snap) => {
@@ -213,7 +213,7 @@ export default function TeknikServisDetayPage() {
 
   useEffect(() => {
     if (!hospitalId) return;
-    const q = query(collection(db, 'deviceFaultReports'), where('hospitalId', '==', hospitalId));
+    const q = scopedQuery('deviceFaultReports', currentCompanyId, isSuperAdmin, where('hospitalId', '==', hospitalId));
     const unsub = onSnapshot(q, (snap) => {
       const counts: Record<string, { e: number; s: number; n: number }> = {};
       snap.docs.forEach((d) => {
@@ -644,8 +644,8 @@ export default function TeknikServisDetayPage() {
 
   const fetchTemplateOptions = async () => {
     const [hospitalsSnap, devicesSnap] = await Promise.all([
-      getDocs(collection(db, 'hospitals')),
-      getDocs(collection(db, 'devices')),
+      getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+      getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
     ]);
 
     const hospitals = hospitalsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Hospital[];
@@ -750,8 +750,8 @@ export default function TeknikServisDetayPage() {
       }
 
       const [hospitalsSnap, devicesSnap] = await Promise.all([
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'devices')),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
       ]);
       const hospitals = hospitalsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Hospital[];
       const devices = devicesSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Device[];

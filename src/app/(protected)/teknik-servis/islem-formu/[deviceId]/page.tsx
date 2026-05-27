@@ -6,7 +6,8 @@ import { db } from '@/lib/firebase';
 import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where, orderBy, updateDoc, Timestamp, writeBatch, setDoc, deleteDoc } from 'firebase/firestore';
 import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog, PersonalStockItem, PeriodicPartChange, PeriodicPartChangeLog, MaintenancePeriodUnit, FaultDefinition, DraftActionLog, PoolWarehouseStockItem, Depot, DeviceLabPool, YedekParcaDepoStokItem } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
-import { withCompanyScope } from '@/lib/company-scope';
+import { withCompanyScope, filterByCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -342,7 +343,7 @@ export default function IslemFormuPage() {
           }
 
           // Fetch all devices for this hospital
-          const qDevices = query(collection(db, 'devices'), where('hospitalId', '==', labHospitalId));
+          const qDevices = scopedQuery('devices', currentCompanyId, isSuperAdmin, where('hospitalId', '==', labHospitalId));
           const devicesSnap = await getDocs(qDevices);
           const list = devicesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Device));
           const sortedList = list.sort((a, b) => (String(a.order ?? 99)).localeCompare(String(b.order ?? 99)));
@@ -449,7 +450,7 @@ export default function IslemFormuPage() {
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getDocs(collection(db, 'yedekParcaDepoStok'));
+        const snap = await getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
         const items = snap.docs.map((d) => {
           const data = d.data();
           return {
@@ -475,7 +476,7 @@ export default function IslemFormuPage() {
         if (!hospitalId) return;
 
         // 2. Get all device lab pools that include this hospital
-        const poolsSnap = await getDocs(collection(db, 'deviceLabPools'));
+        const poolsSnap = await getDocs(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin));
         const matchingPoolIds: string[] = [];
         const companyScopedPools = filterByCompanyScope(
           poolsSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as DeviceLabPool),
@@ -490,7 +491,7 @@ export default function IslemFormuPage() {
         if (matchingPoolIds.length === 0) return;
 
         // 3. Get pool warehouses linked to these lab groups
-        const depotsSnap = await getDocs(collection(db, 'depots'));
+        const depotsSnap = await getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin));
         const poolWarehouseIds: string[] = [];
         const companyScopedDepots = filterByCompanyScope(
           depotsSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as Depot),
@@ -507,8 +508,10 @@ export default function IslemFormuPage() {
         // 4. Fetch pool stock from these warehouses
         const allPoolStock: PoolWarehouseStockItem[] = [];
         for (const pwId of poolWarehouseIds) {
-          const stockQ = query(
-            collection(db, 'poolWarehouseStock'),
+          const stockQ = scopedQuery(
+            'poolWarehouseStock',
+            currentCompanyId,
+            isSuperAdmin,
             where('poolWarehouseId', '==', pwId),
             where('status', '==', 'in_stock')
           );
@@ -1176,7 +1179,7 @@ export default function IslemFormuPage() {
   };
 
   const refreshDepotStock = async () => {
-    const snap = await getDocs(collection(db, 'yedekParcaDepoStok'));
+    const snap = await getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
     const items = snap.docs.map((d) => {
       const data = d.data();
       return {
@@ -1185,7 +1188,7 @@ export default function IslemFormuPage() {
         createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
       } as YedekParcaDepoStokItem;
     });
-    setDepotStockItems(items);
+    setDepotStockItems(filterByCompanyScope(items, currentCompanyId, isSuperAdmin));
   };
 
   // Handle removed part image selection
@@ -2154,8 +2157,8 @@ export default function IslemFormuPage() {
         const dbPromise = batch.commit();
         
         // Start PDF generation immediately
-        const pdfPromises = createdFormsData.map(data => 
-           generateTeknikServisTutanakPDF(data.device, data.hospital, data.actionRecord as any, true)
+        const pdfPromises = createdFormsData.map(data =>
+           generateTeknikServisTutanakPDF(data.device, data.hospital, data.actionRecord as any, true, currentCompanyId, isSuperAdmin)
         );
 
         // Show WhatsApp button as soon as PDF is ready

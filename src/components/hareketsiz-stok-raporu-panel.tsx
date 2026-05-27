@@ -20,6 +20,7 @@ import type { DepoStokItem, Shipment, ConsumptionRecord, ProductCode } from '@/l
 import { Checkbox } from '@/components/ui/checkbox';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { matchesCompanyScope } from '@/lib/company-scope';
 
 interface ReportRow {
@@ -41,10 +42,10 @@ export default function HareketsizStokRaporuPanel() {
     try {
       // 1) Fetch all transaction data and product master data
       const [depSnap, shipSnap, consSnap, prodSnap] = await Promise.all([
-        getDocs(collection(db, 'depoStok')),
-        getDocs(collection(db, 'shipments')),
-        getDocs(collection(db, 'tuketimKayitlari')),
-        getDocs(collection(db, 'productCodes')),
+        getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('shipments', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('tuketimKayitlari', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
       ]);
 
       type Tx = { stokKodu: string; date: Date; location: string };
@@ -166,7 +167,7 @@ export default function HareketsizStokRaporuPanel() {
         const docsToDelete: string[] = [];
 
         for (const chunk of codeChunks) {
-            const q = query(collection(db, 'productCodes'), where('stokKodu', 'in', chunk));
+            const q = scopedQuery('productCodes', currentCompanyId, isSuperAdmin, where('stokKodu', 'in', chunk));
             const snap = await getDocs(q);
             snap.forEach(doc => docsToDelete.push(doc.id));
         }

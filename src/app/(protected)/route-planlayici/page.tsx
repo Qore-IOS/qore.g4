@@ -151,14 +151,14 @@ export default function RoutePlanlayiciPage() {
 
     (async () => {
       try {
-        const uSnap = await getDocs(collection(db, 'users'));
+        const uSnap = await getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin));
         const ds = uSnap.docs.map(d => ({ id: d.id, ...d.data() } as AppUser)).filter(u => (u as any).role === 'driver');
         setDrivers(ds);
       } catch {
         toast({ title: 'Veri Hatası', description: 'Sürücüler alınamadı.', variant: 'destructive' });
       }
     })();
-  }, [toast, canManageRoutes]);
+  }, [toast, canManageRoutes, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
     if (!activeRouteId) {

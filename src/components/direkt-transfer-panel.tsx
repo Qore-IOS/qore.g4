@@ -47,6 +47,7 @@ import BarcodeFormatSelect, { type FormatValue } from '@/components/BarcodeForma
 import { cn, playFeedback, sanitizeGS1, generateId } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { Switch } from '@/components/ui/switch';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { compareAsc, parse as parseDate } from 'date-fns';
@@ -1036,7 +1037,7 @@ export default function DirektTransferPanel() {
   
   const handleAddAllStock = async () => {
     if (!selectedDepotId) return;
-    const q = query(collection(db, 'depoStok'), where('depotId', '==', selectedDepotId), where('isShipped', '==', false));
+    const q = scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('depotId', '==', selectedDepotId), where('isShipped', '==', false));
     const snap = await getDocs(q);
     // Lot/adet takipli ürünler `adet: N` taşıyan tek bir doküman; seri takipli
     // ürünler doküman başına `adet: 1`. Her ikisinde de dokümandaki gerçek

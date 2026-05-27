@@ -424,8 +424,8 @@ export default function YedekParcaTransferPage() {
       try {
         // Fetch product codes for cihazGrubu reference
         const [productsSnap, brandsSnap] = await Promise.all([
-          getDocs(query(collection(db, 'productCodes'), where('urunGrubu', '==', 'yedek_parca'))),
-          getDocs(collection(db, 'def_brands')),
+          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin, where('urunGrubu', '==', 'yedek_parca'))),
+          getDocs(scopedQuery('def_brands', currentCompanyId, isSuperAdmin)),
         ]);
         const sparePartProducts = productsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
         const brands = brandsSnap.docs
@@ -448,7 +448,7 @@ export default function YedekParcaTransferPage() {
         setDepoStok(stokItems);
 
         // Fetch technicians and application specialists
-        const usersSnap = await getDocs(collection(db, 'users'));
+        const usersSnap = await getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin));
         const allUsers = filterByCompanyScope(
           usersSnap.docs.map(d => ({ uid: d.id, ...d.data() }) as User),
           currentCompanyId, isSuperAdmin
@@ -492,7 +492,7 @@ export default function YedekParcaTransferPage() {
         setBorrowedParts(borrowed);
 
         // Fetch pool warehouses (depots with isPoolWarehouse = true)
-        const depotsSnap = await getDocs(collection(db, 'depots'));
+        const depotsSnap = await getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin));
         const allDepots = filterByCompanyScope(
           depotsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as Depot),
           currentCompanyId, isSuperAdmin
@@ -1503,7 +1503,7 @@ export default function YedekParcaTransferPage() {
       setTransferRows([]);
 
       // Refresh depot stock
-      const stokSnap = await getDocs(collection(db, 'yedekParcaDepoStok'));
+      const stokSnap = await getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
       const stokItems = filterByCompanyScope(stokSnap.docs.map(d => {
         const data = d.data();
         return { id: d.id, ...data, createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date() } as YedekParcaDepoStokItem;
@@ -2548,20 +2548,20 @@ export default function YedekParcaTransferPage() {
       };
 
       const transferQueries = [
-        query(collection(db, 'sparePartTransferLogs'), where(idField, '==', params.id)),
+        scopedQuery('sparePartTransferLogs', currentCompanyId, isSuperAdmin, where(idField, '==', params.id)),
       ];
       if (params.scope === 'personal') {
-        transferQueries.push(query(collection(db, 'sparePartTransferLogs'), where('personalStockDocIds', 'array-contains', params.id)));
+        transferQueries.push(scopedQuery('sparePartTransferLogs', currentCompanyId, isSuperAdmin, where('personalStockDocIds', 'array-contains', params.id)));
       }
-      if (traceId) transferQueries.push(query(collection(db, 'sparePartTransferLogs'), where('traceId', '==', traceId)));
-      if (serialNumber) transferQueries.push(query(collection(db, 'sparePartTransferLogs'), where('serialNumber', '==', serialNumber)));
-      if (hucreNumarasi) transferQueries.push(query(collection(db, 'sparePartTransferLogs'), where('hucreNumarasi', '==', hucreNumarasi)));
+      if (traceId) transferQueries.push(scopedQuery('sparePartTransferLogs', currentCompanyId, isSuperAdmin, where('traceId', '==', traceId)));
+      if (serialNumber) transferQueries.push(scopedQuery('sparePartTransferLogs', currentCompanyId, isSuperAdmin, where('serialNumber', '==', serialNumber)));
+      if (hucreNumarasi) transferQueries.push(scopedQuery('sparePartTransferLogs', currentCompanyId, isSuperAdmin, where('hucreNumarasi', '==', hucreNumarasi)));
 
       const depoQueries = [
-        query(collection(db, 'yedekParcaDepoLog'), where('traceId', '==', traceId)),
+        scopedQuery('yedekParcaDepoLog', currentCompanyId, isSuperAdmin, where('traceId', '==', traceId)),
       ];
-      if (serialNumber) depoQueries.push(query(collection(db, 'yedekParcaDepoLog'), where('serialNumber', '==', serialNumber)));
-      if (hucreNumarasi) depoQueries.push(query(collection(db, 'yedekParcaDepoLog'), where('hucreNumarasi', '==', hucreNumarasi)));
+      if (serialNumber) depoQueries.push(scopedQuery('yedekParcaDepoLog', currentCompanyId, isSuperAdmin, where('serialNumber', '==', serialNumber)));
+      if (hucreNumarasi) depoQueries.push(scopedQuery('yedekParcaDepoLog', currentCompanyId, isSuperAdmin, where('hucreNumarasi', '==', hucreNumarasi)));
 
       for (const qRef of transferQueries) {
         const snap = await getDocs(qRef);
@@ -3384,7 +3384,7 @@ export default function YedekParcaTransferPage() {
         }, { merge: true });
       }
 
-      const refreshedProducts = await getDocs(query(collection(db, 'productCodes'), where('urunGrubu', '==', 'yedek_parca')));
+      const refreshedProducts = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin, where('urunGrubu', '==', 'yedek_parca')));
       setProductCodes(refreshedProducts.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode));
 
       toast({ title: 'Başarılı', description: `${stockCardSyncMissing.length} ürün için stok kartı açıldı.` });

@@ -118,8 +118,8 @@ export default function AssetCategoryPage() {
     setLoading(true);
     try {
       const [labsSnap, depotsSnap] = await Promise.all([
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'depots')),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
       ]);
       const labLocations = filterByCompanyScope(
         labsSnap.docs.map(doc => ({ value: (doc.data() as Hospital).name, label: `Lab: ${(doc.data() as Hospital).name}`, companyId: (doc.data() as any).companyId })),
