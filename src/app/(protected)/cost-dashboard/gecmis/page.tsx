@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, orderBy } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Loader2, History, Search, ChevronRight, ArrowLeft,
@@ -17,6 +17,8 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
+import { useDateRangeFilter } from '@/hooks/useDateRangeFilter';
+import { DateRangeFilterBar } from '@/components/common/DateRangeFilterBar';
 
 // ============================================================================
 // TYPES
@@ -279,6 +281,12 @@ export default function MaliyetSayimGecmisPage() {
   const [sessions, setSessions] = useState<SayimSession[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Maliyet sayım geçmişi penceresi — varsayılan son 180 gün.
+  const dateFilter = useDateRangeFilter({
+    defaultDays: 180,
+    storageKey: 'maliyet-gecmis:range',
+  });
+
   // Filter states
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedLocations, setSelectedLocations] = useState<string[]>([]);
@@ -293,7 +301,14 @@ export default function MaliyetSayimGecmisPage() {
     const load = async () => {
       setLoading(true);
       try {
-        const snap = await getDocs(scopedQuery('maliyetSayimSessions', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc')));
+        const snap = await getDocs(scopedQuery(
+          'maliyetSayimSessions',
+          currentCompanyId,
+          isSuperAdmin,
+          ...dateFilter.constraints('createdAt'),
+          orderBy('createdAt', 'desc'),
+          limit(1000),
+        ));
         const allSessions = snap.docs.map(d => ({ id: d.id, ...d.data() } as SayimSession));
         const companyScoped = filterByCompanyScope(allSessions, currentCompanyId, isSuperAdmin);
         // Lab sessions are restricted to the user's assigned labs; depot
@@ -311,7 +326,7 @@ export default function MaliyetSayimGecmisPage() {
       }
     };
     load();
-  }, [currentCompanyId, isSuperAdmin, isAdminRole, assignedLabs]);
+  }, [currentCompanyId, isSuperAdmin, isAdminRole, assignedLabs, dateFilter.range]);
 
   // Extract unique filter options
   const filterOptions = useMemo(() => {
@@ -433,6 +448,14 @@ export default function MaliyetSayimGecmisPage() {
               </p>
             </div>
           </div>
+        </div>
+
+        <div className="mb-4">
+          <DateRangeFilterBar
+            range={dateFilter.range}
+            setRange={dateFilter.setRange}
+            label="Sayım tarihi"
+          />
         </div>
 
         {/* Search Bar */}

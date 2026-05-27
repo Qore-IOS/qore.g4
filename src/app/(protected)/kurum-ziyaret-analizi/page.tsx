@@ -11,7 +11,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Checkbox } from '@/components/ui/checkbox';
 import { DatePickerWithRange } from '@/components/ui/date-range-picker';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { collection, doc, getDoc, getDocs, orderBy, query, serverTimestamp, setDoc, Timestamp } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, orderBy, query, serverTimestamp, setDoc, Timestamp, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Loader2, Building2, Users, Wrench, FlaskConical, Search, X, ChevronsUpDown, ArrowLeft, Settings2, CalendarDays } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell } from 'recharts';
@@ -23,6 +23,8 @@ import type { Hospital, LabPool, User } from '@/lib/types';
 import type { DateRange } from 'react-day-picker';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
+import { useDateRangeFilter } from '@/hooks/useDateRangeFilter';
+import { DateRangeFilterBar } from '@/components/common/DateRangeFilterBar';
 import { filterByCompanyScope } from '@/lib/company-scope';
 
 interface ActionForm {
@@ -119,6 +121,12 @@ function logFirestoreIndexHint(error: unknown, context: string) {
 export default function KurumZiyaretAnaliziPage() {
   const router = useRouter();
   const { currentCompanyId, isSuperAdmin } = useAuth();
+
+  // Ziyaret analizi penceresi — varsayılan son 365 gün.
+  const dateFilter = useDateRangeFilter({
+    defaultDays: 365,
+    storageKey: 'kurum-ziyaret-analizi:range',
+  });
   const [loading, setLoading] = useState(true);
   const [teknikForms, setTeknikForms] = useState<ActionForm[]>([]);
   const [aplikasyonForms, setAplikasyonForms] = useState<ActionForm[]>([]);
@@ -283,9 +291,12 @@ export default function KurumZiyaretAnaliziPage() {
       setLoading(true);
       try {
         const [teknikSnap, appSnap, faultSnap, usersSnap, hospitalsSnap, deviceLabPoolsSnap] = await Promise.all([
-          getDocs(scopedQuery('teknikServisActionForms', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
-          getDocs(scopedQuery('aplikasyonActionForms', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
-          getDocs(scopedQuery('deviceFaultReports', currentCompanyId, isSuperAdmin, orderBy('openedAt', 'desc'))),
+          getDocs(scopedQuery('teknikServisActionForms', currentCompanyId, isSuperAdmin,
+            ...dateFilter.constraints('createdAt'), orderBy('createdAt', 'desc'), limit(5000))),
+          getDocs(scopedQuery('aplikasyonActionForms', currentCompanyId, isSuperAdmin,
+            ...dateFilter.constraints('createdAt'), orderBy('createdAt', 'desc'), limit(5000))),
+          getDocs(scopedQuery('deviceFaultReports', currentCompanyId, isSuperAdmin,
+            ...dateFilter.constraints('openedAt'), orderBy('openedAt', 'desc'), limit(5000))),
           getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin)),
           getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
           getDocs(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin)),
@@ -386,7 +397,7 @@ export default function KurumZiyaretAnaliziPage() {
     };
 
     fetchData();
-  }, [currentCompanyId, isSuperAdmin]);
+  }, [currentCompanyId, isSuperAdmin, dateFilter.range]);
 
   const selectedLabIdsFull = useMemo(() => {
     if (selectedLabIds.size === 0) return null;
@@ -610,6 +621,12 @@ export default function KurumZiyaretAnaliziPage() {
           <p className="text-sm text-muted-foreground">Teknik servis ve aplikasyon personellerinin kurum ziyaret analizi</p>
         </div>
       </div>
+
+      <DateRangeFilterBar
+        range={dateFilter.range}
+        setRange={dateFilter.setRange}
+        label="Analiz penceresi"
+      />
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3">

@@ -2,7 +2,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, onSnapshot, orderBy, query, Timestamp, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, orderBy, query, Timestamp, getDocs, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Device, Hospital, ProductCode } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
@@ -29,6 +29,8 @@ import { differenceInMinutes, subMonths, format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
+import { useDateRangeFilter } from '@/hooks/useDateRangeFilter';
+import { DateRangeFilterBar } from '@/components/common/DateRangeFilterBar';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { filterByCompanyScope } from '@/lib/company-scope';
@@ -82,6 +84,12 @@ export default function ArizaIstatistikleriPage() {
   const { toast } = useToast();
   const { isAdmin, currentCompanyId, isSuperAdmin } = useAuth();
 
+  // Arıza istatistik penceresi — varsayılan son 365 gün (yıllık trend için).
+  const dateFilter = useDateRangeFilter({
+    defaultDays: 365,
+    storageKey: 'ariza-istatistik:range',
+  });
+
   const [selectedLabId, setSelectedLabId] = useState<string>('all');
   const [isLabPopoverOpen, setIsLabPopoverOpen] = useState(false);
 
@@ -101,7 +109,15 @@ export default function ArizaIstatistikleriPage() {
   const TARGET_RESOLUTION_TIME = 480; // 8 hours in minutes
 
   useEffect(() => {
-    const reportsQuery = scopedQuery('deviceFaultReports', currentCompanyId, isSuperAdmin, orderBy('openedAt', 'desc'));
+    // Tarih penceresi + hard cap — yoksa firma 5 yıllık veriyi tek seferde indirir.
+    const reportsQuery = scopedQuery(
+      'deviceFaultReports',
+      currentCompanyId,
+      isSuperAdmin,
+      ...dateFilter.constraints('openedAt'),
+      orderBy('openedAt', 'desc'),
+      limit(5000),
+    );
     const devicesQuery = scopedQuery('devices', currentCompanyId, isSuperAdmin);
     const hospitalsQuery = scopedQuery('hospitals', currentCompanyId, isSuperAdmin, orderBy('name', 'asc'));
 
@@ -176,7 +192,7 @@ export default function ArizaIstatistikleriPage() {
         unsubDevices();
         unsubHospitals();
     };
-  }, [toast, currentCompanyId, isSuperAdmin]);
+  }, [toast, currentCompanyId, isSuperAdmin, dateFilter.range]);
 
   // Fetch minMaxRules for all hospitals
   useEffect(() => {
@@ -649,6 +665,11 @@ export default function ArizaIstatistikleriPage() {
 
   return (
     <div className="device-module-page p-4 space-y-6">
+      <DateRangeFilterBar
+        range={dateFilter.range}
+        setRange={dateFilter.setRange}
+        label="İstatistik penceresi"
+      />
       {/* Header with filters */}
       <div className="flex justify-end items-center flex-wrap gap-4">
         <div className="flex items-center gap-2 flex-wrap">
