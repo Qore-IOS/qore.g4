@@ -29,7 +29,7 @@ import type {
 } from '../../lib/types';
 import { ActivitiesPanel, InsightsCard, MiniStat, SectionHeader, Card } from './primitives';
 import { useIsMobile } from './useIsMobile';
-import { collection, getDocs, query, orderBy } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
@@ -1042,7 +1042,8 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
           getDocs(scopedQuery('hospitalDeviceAssignments', currentCompanyId, isSuperAdmin)),
           getDocs(scopedQuery('assets', currentCompanyId, isSuperAdmin)),
           getDocs(scopedQuery('personnel', currentCompanyId, isSuperAdmin)),
-          getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin)),
+          // Sadece sevk edilmiş stok; server-side filter.
+          getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true))),
           getDocs(scopedQuery('testDefinitions', currentCompanyId, isSuperAdmin, orderBy('sutKodu', 'asc'))),
           getExchangeRates().catch(() => ({ EUR: 1, USD: 1.08, TRY: 38.5 })),
         ]);
@@ -1081,7 +1082,8 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
             isSuperAdmin,
           ),
         );
-        const stok = stokSnap.docs.map((d) => ({ id: d.id, ...d.data() } as DepoStokItem)).filter((s) => s.isShipped === true);
+        // Server zaten isShipped=true filtreliyor; ek client filtresi gerekmez.
+        const stok = stokSnap.docs.map((d) => ({ id: d.id, ...d.data() } as DepoStokItem));
         setDepoStok(stok);
 
         setTestDefs(

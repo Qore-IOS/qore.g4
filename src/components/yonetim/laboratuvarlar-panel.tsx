@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import type { Depot, Hospital, ProductCode, AddressDefinition, LabPool, DepoStokItem, EfficiencyPool } from '@/lib/types';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, addDoc, setDoc, deleteDoc, doc, writeBatch, Timestamp, query, orderBy, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, addDoc, setDoc, deleteDoc, doc, writeBatch, Timestamp, query, orderBy, updateDoc, where } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -120,7 +120,8 @@ export default function LaboratuvarPanel() {
         getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
         getDocs(scopedQuery('addressDefinitions', currentCompanyId, isSuperAdmin)),
         getDocs(scopedQuery('labPools', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
-        getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin)),
+        // Sadece sevk edilmiş stoğu çek — lab dağıtımı analizi için yeterli.
+        getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true))),
         getDocs(scopedQuery('efficiencyPools', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
         getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
       ]);

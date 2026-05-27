@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Loader2, AlertCircle, TrendingDown, TrendingUp, Minus } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { collection, getDocs, query, orderBy } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import {
   calculateTestCost,
@@ -72,7 +72,8 @@ export default function TestCostDetailModal({ open, onOpenChange, testDef, allTe
             getDocs(scopedQuery('hospitalDeviceAssignments', currentCompanyId, isSuperAdmin)),
             getDocs(scopedQuery('assets', currentCompanyId, isSuperAdmin)),
             getDocs(scopedQuery('personnel', currentCompanyId, isSuperAdmin)),
-            getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin)),
+            // Sadece sevk edilmiş stok (lab'lardaki); server-side filter.
+            getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true))),
             getExchangeRates().catch(() => ({ EUR: 1, USD: 1.08, TRY: 38.5 })),
           ]);
 

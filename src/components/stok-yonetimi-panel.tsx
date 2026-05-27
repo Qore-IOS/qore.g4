@@ -1274,13 +1274,49 @@ export default function StokYonetimiPanel() {
     }
     const labNames = hospitals.filter(h => h.id && selectedLabsForReport.includes(h.id)).map(h => h.name).filter((n): n is string => !!n);
     try {
-      const shippedQuery = scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true));
-      const shippedSnap = await getDocs(shippedQuery);
-      const stockForSelectedLabs = filterByCompanyScope(
-        shippedSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
-        currentCompanyId,
-        isSuperAdmin,
-      ).filter(item => item.hedefKurum && labNames.includes(item.hedefKurum));
+      // Sadece seçili labların stoğunu çek — Firestore `in` query (max 30 lab/seferinde).
+      // Composite index: (companyId, isShipped, hedefKurumId).
+      const labIdChunks: string[][] = [];
+      for (let i = 0; i < selectedLabsForReport.length; i += 30) {
+        labIdChunks.push(selectedLabsForReport.slice(i, i + 30));
+      }
+      const stockForSelectedLabsRaw: DepoStokItem[] = [];
+      for (const chunk of labIdChunks) {
+        const q = scopedQuery(
+          'depoStok',
+          currentCompanyId,
+          isSuperAdmin,
+          where('isShipped', '==', true),
+          where('hedefKurumId', 'in', chunk),
+        );
+        const snap = await getDocs(q);
+        snap.docs.forEach(d => stockForSelectedLabsRaw.push({ id: d.id, ...d.data() } as DepoStokItem));
+      }
+      // Legacy (hedefKurumId yoksa hedefKurum adı ile eşleşenler).
+      if (labNames.length > 0) {
+        const nameChunks: string[][] = [];
+        for (let i = 0; i < labNames.length; i += 30) {
+          nameChunks.push(labNames.slice(i, i + 30));
+        }
+        for (const chunk of nameChunks) {
+          const q = scopedQuery(
+            'depoStok',
+            currentCompanyId,
+            isSuperAdmin,
+            where('isShipped', '==', true),
+            where('hedefKurum', 'in', chunk),
+          );
+          const snap = await getDocs(q);
+          snap.docs.forEach(d => {
+            const data = d.data() as DepoStokItem;
+            // hedefKurumId varsa zaten ilk chunk'tan geldi; sadece legacy doc'ları dahil et.
+            if (!data.hedefKurumId) {
+              stockForSelectedLabsRaw.push({ id: d.id, ...data });
+            }
+          });
+        }
+      }
+      const stockForSelectedLabs = filterByCompanyScope(stockForSelectedLabsRaw, currentCompanyId, isSuperAdmin);
       const stockSummary: Record<string, { stokAdi: string; quantity: number }> = {};
       stockForSelectedLabs.forEach(item => {
         if (!item.stokKodu) return;
