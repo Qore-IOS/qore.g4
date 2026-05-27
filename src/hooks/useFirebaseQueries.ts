@@ -26,6 +26,7 @@ import {
   serverTimestamp
 } from 'firebase/firestore';
 import { useEffect, useRef } from 'react';
+import { subDays } from 'date-fns';
 import { useAuth } from '@/contexts/auth-context';
 import type {
   Hospital,
@@ -167,7 +168,17 @@ export function usePurchasingTasks() {
   return useQuery({
     queryKey: ['purchasingTasks', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const snap = await getDocs(scopedQuery('purchasingTasks', currentCompanyId, isSuperAdmin));
+      // Faz 4 güvenlik şapkası: son 365 gün + max 5k kayıt.
+      // Tarih bazlı liste için useRecentPurchasingTasks kullanın.
+      const sinceTs = Timestamp.fromDate(subDays(new Date(), 365));
+      const snap = await getDocs(scopedQuery(
+        'purchasingTasks',
+        currentCompanyId,
+        isSuperAdmin,
+        where('date', '>=', sinceTs),
+        orderBy('date', 'desc'),
+        limit(5000),
+      ));
       const tasks = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as PurchasingTask));
       return filterByCompanyScope(tasks, currentCompanyId, isSuperAdmin);
     },
@@ -371,7 +382,18 @@ export function useDeviceFaultReports() {
   return useQuery({
     queryKey: ['deviceFaultReports', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const snap = await getDocs(scopedQuery('deviceFaultReports', currentCompanyId, isSuperAdmin));
+      // Faz 4 güvenlik şapkası: son 2 yıl + max 10k kayıt. Daha eski/büyük
+      // veri için useOpenDeviceFaultReports veya useRecentDeviceFaultReports
+      // variant'larını kullanın.
+      const sinceTs = Timestamp.fromDate(subDays(new Date(), 730));
+      const snap = await getDocs(scopedQuery(
+        'deviceFaultReports',
+        currentCompanyId,
+        isSuperAdmin,
+        where('openedAt', '>=', sinceTs),
+        orderBy('openedAt', 'desc'),
+        limit(10000),
+      ));
       const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DeviceFaultReport));
       return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
     },
@@ -389,7 +411,16 @@ export function useDeviceActionForms() {
   return useQuery({
     queryKey: ['deviceActionForms', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const snap = await getDocs(scopedQuery('deviceActionForms', currentCompanyId, isSuperAdmin));
+      // Faz 4 güvenlik şapkası: son 365 gün + max 5k kayıt.
+      const sinceTs = Timestamp.fromDate(subDays(new Date(), 365));
+      const snap = await getDocs(scopedQuery(
+        'deviceActionForms',
+        currentCompanyId,
+        isSuperAdmin,
+        where('createdAt', '>=', sinceTs),
+        orderBy('createdAt', 'desc'),
+        limit(5000),
+      ));
       const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
       return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
     },
@@ -407,13 +438,213 @@ export function useAplikasyonActionForms() {
   return useQuery({
     queryKey: ['aplikasyonActionForms', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const snap = await getDocs(scopedQuery('aplikasyonActionForms', currentCompanyId, isSuperAdmin));
+      // Faz 4 güvenlik şapkası: son 365 gün + max 5k kayıt.
+      const sinceTs = Timestamp.fromDate(subDays(new Date(), 365));
+      const snap = await getDocs(scopedQuery(
+        'aplikasyonActionForms',
+        currentCompanyId,
+        isSuperAdmin,
+        where('createdAt', '>=', sinceTs),
+        orderBy('createdAt', 'desc'),
+        limit(5000),
+      ));
       const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
       return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
     },
     enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
+  });
+}
+
+// ============================================================================
+// Faz 4: Recent / Active variant'lar — büyüyen koleksiyonlar için
+// dashboard/özet panellerde kullanılmak üzere tarih penceresi ya da
+// hard limit ile sınırlandırılmış sürümler.
+// ============================================================================
+
+/**
+ * Son N günün arıza kayıtları. Dashboard widget'ları için.
+ * Varsayılan: 90 gün.
+ * Composite index: (companyId, openedAt DESC).
+ */
+export function useRecentDeviceFaultReports(daysWindow: number = 90) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['deviceFaultReports', 'recent', daysWindow, currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const sinceTs = Timestamp.fromDate(subDays(new Date(), daysWindow));
+      const snap = await getDocs(scopedQuery(
+        'deviceFaultReports',
+        currentCompanyId,
+        isSuperAdmin,
+        where('openedAt', '>=', sinceTs),
+        orderBy('openedAt', 'desc'),
+        limit(2000),
+      ));
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DeviceFaultReport));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+    },
+    enabled: !!currentCompanyId || isSuperAdmin,
+    staleTime: 60 * 1000,
+    gcTime: 10 * 60 * 1000,
+  });
+}
+
+/**
+ * Sadece açık (closed olmayan) arıza kayıtları. Arıza yönetimi anasayfası
+ * için. Composite index: (companyId, status, openedAt DESC).
+ */
+export function useOpenDeviceFaultReports() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['deviceFaultReports', 'open', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const snap = await getDocs(scopedQuery(
+        'deviceFaultReports',
+        currentCompanyId,
+        isSuperAdmin,
+        where('status', '!=', 'closed'),
+        orderBy('status'),
+        orderBy('openedAt', 'desc'),
+        limit(1000),
+      ));
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DeviceFaultReport));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+    },
+    enabled: !!currentCompanyId || isSuperAdmin,
+    staleTime: 30 * 1000,
+    gcTime: 5 * 60 * 1000,
+  });
+}
+
+/**
+ * Son N günün satın alma görevleri. Dashboard widget'ları için.
+ * Composite index: (companyId, date DESC).
+ */
+export function useRecentPurchasingTasks(daysWindow: number = 90) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['purchasingTasks', 'recent', daysWindow, currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const sinceTs = Timestamp.fromDate(subDays(new Date(), daysWindow));
+      const snap = await getDocs(scopedQuery(
+        'purchasingTasks',
+        currentCompanyId,
+        isSuperAdmin,
+        where('date', '>=', sinceTs),
+        orderBy('date', 'desc'),
+        limit(1000),
+      ));
+      const tasks = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as PurchasingTask));
+      return filterByCompanyScope(tasks, currentCompanyId, isSuperAdmin);
+    },
+    enabled: !!currentCompanyId || isSuperAdmin,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+}
+
+/**
+ * Sadece mevcut (sevk edilmemiş) depo stoğu. Dashboard maliyet özetleri
+ * ve sipariş hesapları için en sık kullanım. Sevk edilmiş kayıtlar
+ * zamanla birikir ama özet için gerekmez.
+ * Composite index: (companyId, isShipped, miad ASC).
+ */
+export function useActiveDepoStok() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['depoStok', 'active', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const snap = await getDocs(scopedQuery(
+        'depoStok',
+        currentCompanyId,
+        isSuperAdmin,
+        where('isShipped', '==', false),
+      ));
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+    },
+    enabled: !!currentCompanyId || isSuperAdmin,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+}
+
+/**
+ * Sadece sevk edilmiş depo stoğu (lab'lardaki). İade panelleri,
+ * tüketim doğrulama, lab stok raporları için.
+ * Composite index: (companyId, isShipped, hedefKurumId).
+ */
+export function useShippedDepoStok() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['depoStok', 'shipped', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const snap = await getDocs(scopedQuery(
+        'depoStok',
+        currentCompanyId,
+        isSuperAdmin,
+        where('isShipped', '==', true),
+      ));
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+    },
+    enabled: !!currentCompanyId || isSuperAdmin,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+}
+
+/**
+ * Son N günün sevkiyatları. Dashboard ve raporlama için.
+ * Varsayılan: 180 gün.
+ */
+export function useRecentShipments(daysWindow: number = 180) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['shipments', 'recent', daysWindow, currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const sinceTs = Timestamp.fromDate(subDays(new Date(), daysWindow));
+      const snap = await getDocs(scopedQuery(
+        'shipments',
+        currentCompanyId,
+        isSuperAdmin,
+        where('timestamp', '>=', sinceTs),
+        orderBy('timestamp', 'desc'),
+        limit(2000),
+      ));
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Shipment));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+    },
+    enabled: !!currentCompanyId || isSuperAdmin,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+}
+
+/**
+ * Son N günün tüketim kayıtları. Tüketim trend grafikleri için.
+ * Varsayılan: 90 gün.
+ */
+export function useRecentConsumptionRecords(daysWindow: number = 90) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['tuketimKayitlari', 'recent', daysWindow, currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const sinceTs = Timestamp.fromDate(subDays(new Date(), daysWindow));
+      const snap = await getDocs(scopedQuery(
+        'tuketimKayitlari',
+        currentCompanyId,
+        isSuperAdmin,
+        where('consumptionTimestamp', '>=', sinceTs),
+      ));
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as ConsumptionRecord));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+    },
+    enabled: !!currentCompanyId || isSuperAdmin,
+    staleTime: 2 * 60 * 1000,
+    gcTime: 10 * 60 * 1000,
   });
 }
 

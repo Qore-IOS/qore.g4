@@ -7,7 +7,10 @@ import {
   where,
   getDocs,
   limit,
+  orderBy,
+  Timestamp,
 } from 'firebase/firestore';
+import { subDays } from 'date-fns';
 import type { DepoStokItem, Shipment, ConsumptionRecord, Depot, ProductCode, Transfer } from '@/lib/types';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
@@ -239,10 +242,18 @@ export async function searchProductLedger(
     return { ledgerRows: [], stockSummary: [], searchType };
   }
 
-  // Fetch shipments, transfers, and destroyedKits (tenant-scoped)
+  // Faz 4: Son 2 yılla sınırla — arama büyük çoğunlukla yakın geçmişi
+  // hedefler; daha eski kayıtlar manuel arşivden alınır.
+  const searchSinceTs = Timestamp.fromDate(subDays(new Date(), 730));
   const [shipmentsSnap, transfersSnap, destroyedKitsSnap] = await Promise.all([
-    getDocs(scopedQuery('shipments', companyId, isSuperAdmin)),
-    getDocs(scopedQuery('transfers', companyId, isSuperAdmin)),
+    getDocs(scopedQuery('shipments', companyId, isSuperAdmin,
+      where('timestamp', '>=', searchSinceTs),
+      orderBy('timestamp', 'desc'),
+      limit(5000))),
+    getDocs(scopedQuery('transfers', companyId, isSuperAdmin,
+      where('timestamp', '>=', searchSinceTs),
+      orderBy('timestamp', 'desc'),
+      limit(5000))),
     getDocs(scopedQuery('destroyedKitsReports', companyId, isSuperAdmin)),
   ]);
 

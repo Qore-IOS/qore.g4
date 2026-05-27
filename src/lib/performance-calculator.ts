@@ -1,6 +1,7 @@
 'use client';
 
-import { getDocs } from 'firebase/firestore';
+import { getDocs, where, orderBy, limit, Timestamp } from 'firebase/firestore';
+import { subDays } from 'date-fns';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import type { User, MaintenancePlan, MaintenanceLog, PeriodicPartChange, PeriodicPartChangeLog, Device } from '@/lib/types';
 import { isUnavailableAt, toDateValue, type PersonnelAvailabilityRecord } from '@/lib/personnel-availability';
@@ -98,6 +99,13 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
   const { dateRange, selectedLaboratoryId, companyId, isSuperAdmin } = filters || {};
   const hasDateFilter = dateRange?.start || dateRange?.end;
   const hasLabFilter = !!selectedLaboratoryId;
+
+  // Faz 4: Server-side tarih penceresi. Caller dateRange vermediyse son 365 gün.
+  const effectiveStart = dateRange?.start ?? subDays(new Date(), 365);
+  const effectiveEnd = dateRange?.end ?? new Date();
+  const startTs = Timestamp.fromDate(effectiveStart);
+  const endTs = Timestamp.fromDate(effectiveEnd);
+
   // Fetch all required data
   const [
     usersSnap,
@@ -112,14 +120,24 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
     availabilitySnap,
   ] = await Promise.all([
     getDocs(scopedQuery('users', companyId, isSuperAdmin)),
-    getDocs(scopedQuery('deviceFaultReports', companyId, isSuperAdmin)),
-    getDocs(scopedQuery('deviceActionForms', companyId, isSuperAdmin)),
-    getDocs(scopedQuery('aplikasyonActionForms', companyId, isSuperAdmin)),
+    getDocs(scopedQuery('deviceFaultReports', companyId, isSuperAdmin,
+      where('openedAt', '>=', startTs), where('openedAt', '<=', endTs),
+      orderBy('openedAt', 'desc'), limit(10000))),
+    getDocs(scopedQuery('deviceActionForms', companyId, isSuperAdmin,
+      where('createdAt', '>=', startTs), where('createdAt', '<=', endTs),
+      orderBy('createdAt', 'desc'), limit(10000))),
+    getDocs(scopedQuery('aplikasyonActionForms', companyId, isSuperAdmin,
+      where('createdAt', '>=', startTs), where('createdAt', '<=', endTs),
+      orderBy('createdAt', 'desc'), limit(10000))),
     getDocs(scopedQuery('devices', companyId, isSuperAdmin)),
     getDocs(scopedQuery('maintenancePlans', companyId, isSuperAdmin)),
-    getDocs(scopedQuery('maintenanceLogs', companyId, isSuperAdmin)),
+    getDocs(scopedQuery('maintenanceLogs', companyId, isSuperAdmin,
+      where('completedAt', '>=', startTs), where('completedAt', '<=', endTs),
+      orderBy('completedAt', 'desc'), limit(10000))),
     getDocs(scopedQuery('periodicPartChanges', companyId, isSuperAdmin)),
-    getDocs(scopedQuery('periodicPartChangeLogs', companyId, isSuperAdmin)),
+    getDocs(scopedQuery('periodicPartChangeLogs', companyId, isSuperAdmin,
+      where('changedAt', '>=', startTs), where('changedAt', '<=', endTs),
+      orderBy('changedAt', 'desc'), limit(10000))),
     getDocs(scopedQuery('personnelAvailability', companyId, isSuperAdmin)),
   ]);
 
