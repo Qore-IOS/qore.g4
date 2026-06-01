@@ -126,20 +126,41 @@ export default function PushNotificationsClient() {
       }
     };
 
-    initMessaging();
+    // PERF (Faz 1): FCM/SW init'i (getMessaging, Notification.requestPermission,
+    // getToken, SW kaydı) ağır ve ilk boyama / INP-kritik pencerede yarışıyordu.
+    // Artık ilk boyamadan sonra boş zamana (requestIdleCallback) erteleniyor.
+    let unsubscribe: (() => void) | undefined;
+    let cancelled = false;
 
-    // Foreground listener
-    const messaging = getMessaging(app);
-    const unsubscribe = onMessage(messaging, (payload) => {
+    const start = () => {
+      if (cancelled) return;
+      initMessaging();
+      const messaging = getMessaging(app);
+      unsubscribe = onMessage(messaging, (payload) => {
         console.log("🔔 [Push Notifications] Foreground message:", payload);
         const d = payload.data as Record<string, string> | undefined;
         toast({
-            title: d?.title || payload.notification?.title || "Yeni Bildirim",
-            description: d?.body || payload.notification?.body || "",
+          title: d?.title || payload.notification?.title || "Yeni Bildirim",
+          description: d?.body || payload.notification?.body || "",
         });
-    });
+      });
+    };
 
-    return () => unsubscribe();
+    const w = window as any;
+    const idleId: number =
+      typeof w.requestIdleCallback === "function"
+        ? w.requestIdleCallback(start, { timeout: 3000 })
+        : (window.setTimeout(start, 2000) as unknown as number);
+
+    return () => {
+      cancelled = true;
+      if (typeof w.cancelIdleCallback === "function") {
+        w.cancelIdleCallback(idleId);
+      } else {
+        window.clearTimeout(idleId);
+      }
+      if (unsubscribe) unsubscribe();
+    };
   }, [currentUserProfile, toast]);
 
   return null;

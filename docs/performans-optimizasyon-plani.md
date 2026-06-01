@@ -196,8 +196,19 @@ Sağlıklı hedef ~130–170 kB; ağır paneller 3–5× üzerinde. Runtime base
 | Faz | LCP (kötü panel) | INP (Siparişler) | Paylaşılan JS | `/siparisler` İlk-Yük | Not |
 |---|---|---|---|---|---|
 | Baseline | 6,79 sn | 7.416 ms | 89,2 kB | 547 kB | build düzeltildi |
-| Faz 1 sonrası | _ölç_ | _ölç_ | _ölç_ | _ölç_ | |
+| Faz 1 sonrası | `?vitals=1` ile ölç | `?vitals=1` ile ölç | 89,1 kB | 547 kB | bundle ~sabit; **runtime** kazanımları |
 | Faz 2 sonrası | _ölç_ | _ölç_ | _ölç_ | _ölç_ | |
+
+**🔎 Faz 1 öğrenimi — bundle vs runtime:** Faz 1'in İlk-Yük JS etkisi ~0. Çünkü
+(a) Next 14.2 `lucide-react`/`date-fns`/`recharts`/`framer-motion`'ı **zaten** varsayılan
+`optimizePackageImports` ile tree-shake ediyor — bizim eklememiz no-op; (b) `removeConsole`
+bundle **boyutunu** değil **runtime ana-thread işini** azaltır. Faz 1'in gerçek kazanımları
+ölçülebilir ama **runtime**: ① auth de-blocking (her açılıştan 2 seri network round-trip kalktı
+→ LCP); ② `console.log` 727→40 (kalan kütüphane kodu) — ekran görüntüsündeki FCM/SW log seli
+built çıktıda 0; ③ FCM/SW init idle'a ertelendi (INP); ④ AuthContext memoizasyonu (re-render).
+Bunlar prod'da `?vitals=1` ile ölçülecek. **500–640 kB'lık ağır panel bundle'ları config ile
+değil, code-split ile düşer** (monolit panellerin `next/dynamic`'i + recharts'ın dashboard'larda
+lazy yüklenmesi) → ayrı bir code-split adımı olarak Faz 5'e eklendi.
 
 ### Faz 1 — First-paint hızlı kazanımlar (config + auth + ölü kod) — ~1 gün, risk: düşük
 Her rotaya dokunur, izole değişiklikler.
@@ -249,7 +260,10 @@ Her rotaya dokunur, izole değişiklikler.
   siparişler `:1101`, toplama grup kartları).
 - Always-mounted yüzeylerde `backdrop-filter`'ı azalt.
 - Barkod-tarama state'ini böl → tarama 2.900 satırı değil küçük bir alt ağacı güncellesin.
-- **Beklenen etki:** Tarama/yazma anında hissedilir.
+- **Bundle code-split (Faz 1 öğreniminden):** 500–640 kB'lık ağır panellerin İlk-Yük JS'ini
+  düşürmek için ağır bloklar `next/dynamic` ile bölünmeli — recharts dashboard'larda, ağır
+  modal/sekme içerikleri ve büyük panel alt-bölümleri talep üzerine yüklenmeli.
+- **Beklenen etki:** Tarama/yazma anında hissedilir; ağır panel İlk-Yük JS'i düşer.
 
 ### Faz 6 — Cihaz Yönetimi derin düzeltmeler — ~2–3 gün, risk: orta
 - Detay sayfaları (`teknik-servis/[id]`, `aplikasyon-paneli/[id]`): N+1'i (cihaz başına arıza

@@ -1,6 +1,8 @@
 
 'use client';
-import Tesseract from 'tesseract.js';
+// PERF (Faz 1): tesseract.js (devasa OCR kütüphanesi) artık statik import değil;
+// yalnızca OCR gerçekten çalıştığında (ocrBlob) lazy yüklenir. Bu modülü import
+// eden hiçbir rota tesseract'ı kritik bundle'a sokmaz.
 
 const PDF_JS_VERSION = '4.5.136';
 const PDF_JS_CDN = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDF_JS_VERSION}`;
@@ -182,6 +184,7 @@ export async function blobToBase64(blob: Blob): Promise<string> {
 }
 
 export async function ocrBlob(imageBlob: Blob): Promise<string> {
+    const Tesseract = (await import('tesseract.js')).default;
     const worker = await Tesseract.createWorker('tur');
     const { data: { text } } = await worker.recognize(imageBlob as File);
     await worker.terminate();
