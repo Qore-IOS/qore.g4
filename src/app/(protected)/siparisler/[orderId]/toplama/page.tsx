@@ -1099,19 +1099,39 @@ export default function ToplamaPage() {
   const totalScanned = useMemo(() => Object.values(scannedSerials).flat().length, [scannedSerials]);
   const overallPct = totalNeeded > 0 ? Math.round((totalScanned / totalNeeded) * 100) : 0;
 
+  // PERF (Faz 4b): enrichedList her taramada (scannedSerials değişince) çalışıyor ve her
+  // picking satırı için tüm depoStok'u 2 kez .filter ediyordu → O(pickingList×|depoStok|)
+  // tarama-başı yük. Stok, taramadan BAĞIMSIZ ([depoStok, order?.depotId]) bir kez Map'lere
+  // indekslenir; enrichedList artık satır başına O(1) Map.get yapar. Lot eşleşmesi nested
+  // Map ile birebir korunur (undefined ↔ '' ayrımı; Map SameValueZero, === ile eşdeğer).
+  const depotStockQtyMaps = useMemo(() => {
+    const byStok = new Map<string, number>();
+    const byStokLot = new Map<string, Map<unknown, number>>();
+    const depotId = order?.depotId;
+    for (const s of depoStok) {
+      if (s.isShipped || !s.stokKodu || s.depotId !== depotId) continue;
+      const qty = getStockItemQuantity(s);
+      byStok.set(s.stokKodu, (byStok.get(s.stokKodu) ?? 0) + qty);
+      let lotMap = byStokLot.get(s.stokKodu);
+      if (!lotMap) { lotMap = new Map<unknown, number>(); byStokLot.set(s.stokKodu, lotMap); }
+      lotMap.set(s.lotNumarasi, (lotMap.get(s.lotNumarasi) ?? 0) + qty);
+    }
+    return { byStok, byStokLot };
+  }, [depoStok, order?.depotId]);
+
   const enrichedList = useMemo(() => pickingList.map(item => {
     const scannedForProduct = scannedSerials[item.stokKodu] || [];
     const scannedCount = scannedForProduct.length;
     const needed = item.adetIstenen ?? 0;
     const isComplete = scannedCount >= needed;
     const isOutOfStock = item.lotNumarasi === 'STOK YOK';
-    const availableInLot = sumStockItemQuantities(depoStok.filter(s => s.depotId === order?.depotId && !s.isShipped && s.stokKodu === item.stokKodu && s.lotNumarasi === item.lotNumarasi));
-    const totalInDepot = sumStockItemQuantities(depoStok.filter(s => s.depotId === order?.depotId && !s.isShipped && s.stokKodu === item.stokKodu));
+    const availableInLot = depotStockQtyMaps.byStokLot.get(item.stokKodu)?.get(item.lotNumarasi) ?? 0;
+    const totalInDepot = depotStockQtyMaps.byStok.get(item.stokKodu) ?? 0;
     const isInsufficient = !isOutOfStock && availableInLot < needed;
     const status: 'done' | 'blocked' | 'active' | 'idle' = isComplete ? 'done' : isOutOfStock ? 'blocked' : scannedCount > 0 ? 'active' : 'idle';
     const pct = needed > 0 ? Math.round((scannedCount / needed) * 100) : 0;
     return { ...item, scannedCount, needed, isComplete, isOutOfStock, availableInLot, totalInDepot, isInsufficient, status, pct, cihazGrubu: (item as any).cihazGrubu, cihazGrubuImageUrl: (item as any).cihazGrubuImageUrl };
-  }), [pickingList, scannedSerials, depoStok, order?.depotId]);
+  }), [pickingList, scannedSerials, depotStockQtyMaps]);
 
   const filteredList = useMemo(() => {
     if (groupFilter === 'remaining') return enrichedList.filter(i => !i.isComplete);

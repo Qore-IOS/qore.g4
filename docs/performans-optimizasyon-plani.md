@@ -267,11 +267,16 @@ Her rotaya dokunur, izole değişiklikler.
   senkron döngüler `O(|depoStok|)` bir kez + `O(1)` lookup'lara indi. Sonuçlar orijinal
   `.filter()` + `sumStockItemQuantities` ile **birebir aynı**. `/siparisler`'in ölçülen
   7416 ms INP'sini doğrudan hedefler.
-- ⏳ **Faz 4b (sıradaki, aynı pattern):**
-  - Toplama `enrichedList` (`toplama/page.tsx:1102`): `depoStok`'u seri & stokKodu ile bir kez
-    indeksle; her taramada 2 tam `.filter` yerine `Map.get` → tarama-başı INP düşer.
-  - Ürün kullanım `listDeductionItems`: ürün lookup `Map`'i önceden kur; döngüden `products.find`.
-  - Gerçekten ağır toplu üretimi tık yolundan çıkar (chunk/`requestIdleCallback`).
+- ✅ **Faz 4b uygulandı (aynı pattern):**
+  - Toplama `enrichedList` (`toplama/page.tsx`): `depoStok` artık taramadan BAĞIMSIZ
+    (`[depoStok, order?.depotId]`) Map'lere indeksleniyor (`byStok` + nested `byStokLot`);
+    her taramada 2 tam `.filter` yerine satır-başı `O(1)` `Map.get` → `O(pickingList×|depoStok|)`
+    tarama-başı yük `O(pickingList)`'e indi. Lot eşleşmesi nested Map ile birebir korunur.
+  - Ürün kullanım `listDeductionItems`: `products.find` döngüden çıkarıldı → `productByStokKodu`
+    Map'i (`O(labStock×|products|)` → `O(labStock)`). first-match semantiği `find` ile aynı.
+    _(İkinci `.map`'teki `liveCount` recompute'u loop-1 `count`'uyla özdeş ama tüketim sayımı
+    hassas olduğu için dokunulmadı — ayrıca ele alınabilir.)_
+- ⏳ **Kalan:** ağır toplu üretimi tık yolundan çıkar (chunk/`requestIdleCallback`).
 - **Beklenen etki:** Bu akışlarda INP saniyelerden **on ms**'lere.
 
 ### Faz 5 — INP: render disiplini + sanallaştırma — ~2 gün, risk: orta
