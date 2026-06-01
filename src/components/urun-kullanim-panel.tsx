@@ -1420,6 +1420,18 @@ export default function UrunKullanimPanel() {
     return Array.from(lots.entries()).map(([key, data]) => ({ key, label: `${key.split('|')[0]} / ${data.miad}`, count: data.count }));
   }, [labStock, manualProductCode]);
 
+  // PERF (Faz 4b): Önceden listDeductionItems döngüsünde her labStock satırı için
+  // products.find çalışıyordu → O(labStock × |products|), her tüketimde yeniden. Ürün
+  // kataloğu stokKodu→ürün Map'ine bir kez (yalnızca products değişince) indekslenir;
+  // first-match semantiği products.find ile aynı (aynı stokKodu'da ilk kayıt korunur).
+  const productByStokKodu = useMemo(() => {
+    const m = new Map<string, (typeof products)[number]>();
+    for (const p of products) {
+      if (p.stokKodu && !m.has(p.stokKodu)) m.set(p.stokKodu, p);
+    }
+    return m;
+  }, [products]);
+
   const listDeductionItems = useMemo(() => {
     if (!selectedLab?.visualDeductionEnabled) return [];
     const grouped = new Map<string, {
@@ -1436,7 +1448,7 @@ export default function UrunKullanimPanel() {
     }>();
 
     labStock.forEach((item) => {
-      const product = products.find((p) => p.stokKodu === item.stokKodu);
+      const product = productByStokKodu.get(item.stokKodu);
       const anaBirim = String(product?.anaBirim || 'Adet');
       const lotNumarasi = item.lotNumarasi || 'Lotsuz';
       const miadStr = formatMiad(item.miad);
@@ -1475,7 +1487,7 @@ export default function UrunKullanimPanel() {
         return { ...row, count: liveCount };
       })
       .sort((a, b) => (a.stokAdi || '').localeCompare(b.stokAdi || '', 'tr') || (a.lotNumarasi || '').localeCompare(b.lotNumarasi || '', 'tr'));
-  }, [labStock, products, selectedLab?.visualDeductionEnabled, selectedLabId]);
+  }, [labStock, productByStokKodu, selectedLab?.visualDeductionEnabled, selectedLabId]);
 
   const labGroupCategories = useMemo(() => {
     const cats = new Set(listDeductionItems.map(i => i.laboratuvarGrubu));
