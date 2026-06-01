@@ -12,7 +12,8 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { PlusCircle, Edit3, Trash2, Loader2, Building2, UserCog } from 'lucide-react';
 import { collection, getDocs, setDoc, deleteDoc, doc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { getAuth } from 'firebase/auth';
+import { db, app } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import type { Company, User } from '@/lib/types';
@@ -32,6 +33,12 @@ export default function FirmaPanel() {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
+      // Firestore Security Rules isSuperAdmin custom claim'ini kontrol eder.
+      // Token'ı zorla yenileyerek claim'lerin güncel olduğundan emin oluyoruz.
+      const auth = getAuth(app);
+      if (auth.currentUser) {
+        await auth.currentUser.getIdToken(true);
+      }
       const [companySnap, userSnap] = await Promise.all([
         getDocs(collection(db, 'companies')),
         getDocs(collection(db, 'users')),

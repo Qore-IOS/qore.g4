@@ -193,7 +193,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               // Claim'ler cache'li token'da yoksa (yeni kullanıcı veya onUserClaimSync
               // henüz propagate etmediyse) arka planda zorla yenile — ilk boyamayı
               // BLOKE ETMEDEN — ve geldiğinde companyId/superadmin'i güncelle.
-              if (!claimCompanyId) {
+              if (!claimCompanyId || (userData.role === 'super_admin' && !claimIsSuperAdmin)) {
                 user.getIdTokenResult(true)
                   .then((fresh) => {
                     const freshCompanyId = fresh.claims.companyId as string | undefined;

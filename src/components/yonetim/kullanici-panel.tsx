@@ -8,11 +8,13 @@ import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { PlusCircle, Edit3, Trash2, Loader2, Users, Bell, ShieldAlert } from 'lucide-react';
+import { PlusCircle, Edit3, Trash2, Loader2, Users, Bell, ShieldAlert, Building2 } from 'lucide-react';
 import { collection, getDocs, addDoc, setDoc, deleteDoc, doc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { getAuth } from 'firebase/auth';
+import { db, app } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
-import type { User as AppUser, Hospital, Depot, AppView, ProductCode } from '@/lib/types';
+import type { User as AppUser, Hospital, Depot, AppView, ProductCode, Company } from '@/lib/types';
+import { LEGACY_COMPANY_ID } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { VIEWS } from '@/lib/constants';
@@ -75,6 +77,7 @@ export default function KullaniciPanel() {
   const [depots, setDepots] = useState<Depot[]>([]);
   const [brands, setBrands] = useState<string[]>([]);
   const [labGroups, setLabGroups] = useState<{ id: string; name: string }[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<Partial<AppUser & { notificationsEnabled?: boolean; notificationPreferences?: NotificationTypeUI[] }>>({});
@@ -83,6 +86,13 @@ export default function KullaniciPanel() {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
+      // Token'ı yenileyerek custom claim'lerin (companyId, isSuperAdmin) güncel
+      // olduğundan emin ol. Firestore Security Rules bu claim'leri kontrol eder.
+      if (isSuperAdmin) {
+        const auth = getAuth(app);
+        if (auth.currentUser) await auth.currentUser.getIdToken(true);
+      }
+
       const [uSnap, hSnap, dSnap, pSnap, lgSnap] = await Promise.all([
         getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin)),
         getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
@@ -98,12 +108,18 @@ export default function KullaniciPanel() {
       const uniqueBrands = Array.from(new Set(productCodes.map(p => p.marka).filter(Boolean) as string[]));
       setBrands(uniqueBrands);
 
+      // Süper Admin ise firma listesini çek (kullanıcıya firma atayabilmek için)
+      if (isSuperAdmin) {
+        const cSnap = await getDocs(collection(db, 'companies'));
+        setCompanies(cSnap.docs.map(d => ({ id: d.id, ...d.data() } as Company)));
+      }
+
     } catch (e) {
       toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
     } finally {
       setIsLoading(false);
     }
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
     fetchData();
@@ -148,6 +164,7 @@ export default function KullaniciPanel() {
     const userData: Partial<AppUser & { notificationsEnabled?: boolean; notificationPreferences?: NotificationTypeUI[] }> = {
       name: currentUser.name,
       role: currentUser.role || 'user',
+      companyId: currentUser.companyId,
       nfcId: (currentUser.nfcId || '').replace(/[^a-fA-F0-9]/g, '').toUpperCase(),
       accessibleViews: currentUser.accessibleViews,
       assignedLaboratories: currentUser.assignedLaboratories,
@@ -330,6 +347,28 @@ export default function KullaniciPanel() {
                       <SelectItem value="teknisyen">Teknisyen</SelectItem>
                     </SelectContent>
                 </Select>
+                {isSuperAdmin && (
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium flex items-center gap-1.5">
+                      <Building2 className="h-3.5 w-3.5 text-orange-500" />
+                      Firma Ataması
+                    </label>
+                    <Select
+                      value={currentUser.companyId || LEGACY_COMPANY_ID}
+                      onValueChange={(value) => setCurrentUser({ ...currentUser, companyId: value })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Firma seçin" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={LEGACY_COMPANY_ID}>Legacy Firma (Varsayılan)</SelectItem>
+                        {companies.map((c) => (
+                          <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <Input
                   placeholder="NFC Kart ID (XXXXXXXX)"
                   value={currentUser.nfcId || ''}
