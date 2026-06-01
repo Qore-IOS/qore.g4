@@ -597,33 +597,6 @@ export function useShippedDepoStok() {
 }
 
 /**
- * Son N günün sevkiyatları. Dashboard ve raporlama için.
- * Varsayılan: 180 gün.
- */
-export function useRecentShipments(daysWindow: number = 180) {
-  const { currentCompanyId, isSuperAdmin } = useAuth();
-  return useQuery({
-    queryKey: ['shipments', 'recent', daysWindow, currentCompanyId, isSuperAdmin],
-    queryFn: async () => {
-      const sinceTs = Timestamp.fromDate(subDays(new Date(), daysWindow));
-      const snap = await getDocs(scopedQuery(
-        'shipments',
-        currentCompanyId,
-        isSuperAdmin,
-        where('timestamp', '>=', sinceTs),
-        orderBy('timestamp', 'desc'),
-        limit(2000),
-      ));
-      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Shipment));
-      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
-    },
-    enabled: !!currentCompanyId || isSuperAdmin,
-    staleTime: 5 * 60 * 1000,
-    gcTime: 30 * 60 * 1000,
-  });
-}
-
-/**
  * Son N günün tüketim kayıtları. Tüketim trend grafikleri için.
  * Varsayılan: 90 gün.
  */
