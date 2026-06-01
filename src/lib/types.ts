@@ -824,6 +824,8 @@ export interface SparePartTransferLog {
   stokAdi: string;
   anaBirim?: string;
   serialNumber: string;
+  hucreNumarasi?: string;      // Hücre numarası (1 harf + 4 rakam)
+  removedHucreNumarasi?: string; // Hücre değişiminde cihazdan çıkan hücre
   fromUid?: string;            // Kimden
   fromName?: string;
   toUid?: string;              // Kime
@@ -851,6 +853,7 @@ export interface PendingReturn {
   stokAdi: string;
   anaBirim?: string;
   serialNumber: string;
+  hucreNumarasi?: string;      // Hücre numarası (1 harf + 4 rakam)
   source: PersonalStockSource; // Orijinal kaynak
   sourceDeviceId?: string;
   sourceDeviceName?: string;

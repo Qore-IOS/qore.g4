@@ -63,6 +63,7 @@ type ActionItem = {
   id: string;
   type: 'part_change' | 'operation' | 'hucre_degisimi';
   action: string;
+  productCodeId?: string;
   stokKodu?: string;
   stokAdi?: string;
   anaBirim?: string;
@@ -1693,7 +1694,7 @@ export default function IslemFormuPage() {
   const createDepotBorrowRecord = (partChange: ActionItem, depotEntry: YedekParcaDepoStokItem, batch: any, currentDevice: Device, formId: string, now: Date) => {
     const borrowedRef = doc(collection(db, 'borrowedSpareParts'));
     batch.set(borrowedRef, {
-      productCodeId: partChange.action || depotEntry.productCodeId || '',
+      productCodeId: partChange.productCodeId || depotEntry.productCodeId || '',
       stokKodu: partChange.stokKodu,
       stokAdi: partChange.stokAdi,
       anaBirim: partChange.anaBirim || depotEntry.anaBirim || 'Adet',
@@ -1714,6 +1715,78 @@ export default function IslemFormuPage() {
       borrowedAt: Timestamp.fromDate(now),
       status: 'pending',
     });
+  };
+
+
+  const returnRemovedHucreToDepot = (hucreChange: ActionItem, batch: any, currentDevice: Device, formId: string, now: Date) => {
+    const removedHucre = String(hucreChange.removedHucreNumarasi || '').trim().toUpperCase();
+    const installedHucre = String(hucreChange.hucreNumarasi || '').trim().toUpperCase();
+    if (!removedHucre || removedHucre === installedHucre) return;
+
+    const depotRef = doc(collection(db, 'yedekParcaDepoStok'));
+    batch.set(depotRef, withCompanyScope({
+      productCodeId: hucreChange.productCodeId || '',
+      stokKodu: hucreChange.removedPartStokKodu || hucreChange.stokKodu || '',
+      stokAdi: hucreChange.removedPartStokAdi || hucreChange.stokAdi || '',
+      anaBirim: hucreChange.anaBirim || 'Adet',
+      serialNumber: '',
+      hucreNumarasi: removedHucre,
+      quantity: 1,
+      source: 'device_removed_cell',
+      sourceDeviceId: currentDevice.id,
+      sourceDeviceName: currentDevice.cihazAdi || currentDevice.model || '',
+      sourceFormId: formId,
+      sourceFormType: 'teknik_servis',
+      createdAt: Timestamp.fromDate(now),
+      createdByUid: currentUserProfile?.uid || '',
+      createdByName: currentUserProfile?.name || '',
+    }, currentCompanyId));
+
+    batch.set(doc(collection(db, 'yedekParcaDepoLog')), withCompanyScope({
+      action: 'hucre_iade_giris',
+      productCodeId: hucreChange.productCodeId || '',
+      stokKodu: hucreChange.removedPartStokKodu || hucreChange.stokKodu || '',
+      stokAdi: hucreChange.removedPartStokAdi || hucreChange.stokAdi || '',
+      anaBirim: hucreChange.anaBirim || 'Adet',
+      serialNumber: '',
+      hucreNumarasi: removedHucre,
+      quantity: 1,
+      relatedDeviceId: currentDevice.id,
+      relatedDeviceName: currentDevice.cihazAdi || currentDevice.model || '',
+      relatedPersonnelUid: currentUserProfile?.uid || '',
+      relatedPersonnelName: currentUserProfile?.name || '',
+      formId,
+      formType: 'teknik_servis',
+      notes: `Hücre değişimi: çıkan hücre ${removedHucre} depoya iade edildi, takılan hücre ${installedHucre || '-'} cihazda kullanıldı.`,
+      createdAt: Timestamp.fromDate(now),
+      createdByUid: currentUserProfile?.uid || '',
+      createdByName: currentUserProfile?.name || '',
+    }, currentCompanyId));
+  };
+
+  const logPersonalHucreUsage = (hucreChange: ActionItem, batch: any, currentDevice: Device, formId: string, now: Date) => {
+    if (!hucreChange.personalStockId) return;
+
+    batch.set(doc(collection(db, 'sparePartTransferLogs')), withCompanyScope({
+      action: 'use_on_device',
+      personalStockId: hucreChange.personalStockId,
+      productCodeId: hucreChange.productCodeId || '',
+      stokKodu: hucreChange.stokKodu,
+      stokAdi: hucreChange.stokAdi,
+      anaBirim: hucreChange.anaBirim || 'Adet',
+      serialNumber: hucreChange.serialNumber || '',
+      hucreNumarasi: hucreChange.hucreNumarasi || '',
+      removedHucreNumarasi: hucreChange.removedHucreNumarasi || '',
+      quantity: 1,
+      deviceId: currentDevice.id,
+      deviceName: currentDevice.cihazAdi || currentDevice.model || '',
+      labName: hospital?.name || '',
+      formId,
+      formType: 'teknik_servis',
+      createdAt: Timestamp.fromDate(now),
+      createdByUid: currentUserProfile?.uid || '',
+      createdByName: currentUserProfile?.name || '',
+    }, currentCompanyId));
   };
 
   const handleSaveSignaturesAndFinish = (finalSignatures: { personnel?: string; technician?: string }, finalTechnicianName?: string) => {
@@ -2072,11 +2145,13 @@ export default function IslemFormuPage() {
                 usedOnFormId: formRef.id,
                 usedOnFormType: 'teknik_servis',
               });
+              logPersonalHucreUsage(hucreChange, batch, currentDevice, formRef.id, now);
             }
             if (hucreChange.isDepotSelection) {
               const depotEntry = await consumeDepotSelection(hucreChange, batch);
               createDepotBorrowRecord(hucreChange, depotEntry, batch, currentDevice, formRef.id, now);
             }
+            returnRemovedHucreToDepot(hucreChange, batch, currentDevice, formRef.id, now);
           }
 
           if (previousIslemTuru === 'periyodik_bakim' && previousSelectedMaintenanceTasks.length > 0 && isPrimaryDevice) {
@@ -3261,6 +3336,7 @@ export default function IslemFormuPage() {
               id: `hucre_${Date.now()}_${i}`,
               type: 'hucre_degisimi',
               action: `Hücre Değişimi: ${selectedItem.hucreNumarasi}`,
+              productCodeId: (selectedItem as any).productCodeId || '',
               stokKodu: selectedItem.stokKodu,
               stokAdi: selectedItem.stokAdi,
               anaBirim: selectedItem.anaBirim,
