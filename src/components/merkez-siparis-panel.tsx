@@ -418,12 +418,35 @@ export default function MerkezSiparisPanel() {
     setter(prev => (prev.includes(value) ? prev.filter(x => x !== value) : [...prev, value]));
   };
 
+  // PERF (Faz 4): Stok sayımlarını O(1) lookup'a indir. Önceden getCurrentStockCount
+  // ve getLinkedLaboratoryStockCount HER çağrıda tüm depoStok'u .filter ile tarıyordu;
+  // handleGenerate bunları kural×lokasyon kez çağırınca O(kural×lokasyon×|depoStok|)
+  // senkron yük oluşuyordu (Siparişler INP'sinin baş suçlusu). Stok BİR KEZ Map'e
+  // indekslenir; sayım sonuçları orijinal filtrelerle birebir aynıdır.
+  const { depotStockCountMap, labStockCountMap } = useMemo(() => {
+    const depotMap = new Map<string, number>();
+    const labMap = new Map<string, number>();
+    for (const st of depoStok) {
+      if (!st.stokKodu) continue;
+      if (!st.isShipped) {
+        if (st.depotId) {
+          const k = `${st.depotId}|${st.stokKodu}`;
+          depotMap.set(k, (depotMap.get(k) ?? 0) + 1);
+        }
+      } else if (st.hedefKurumId) {
+        const k = `${st.hedefKurumId}|${st.stokKodu}`;
+        labMap.set(k, (labMap.get(k) ?? 0) + 1);
+      }
+    }
+    return { depotStockCountMap: depotMap, labStockCountMap: labMap };
+  }, [depoStok]);
+
   const getCurrentStockCount = (locationType: LocationType, locationId: string, stokKodu: string) => {
     if (locationType === 'depot') {
-      return depoStok.filter(st => st.depotId === locationId && !st.isShipped && st.stokKodu === stokKodu).length;
+      return depotStockCountMap.get(`${locationId}|${stokKodu}`) ?? 0;
     }
 
-    return depoStok.filter(st => st.hedefKurumId === locationId && st.isShipped && st.stokKodu === stokKodu).length;
+    return labStockCountMap.get(`${locationId}|${stokKodu}`) ?? 0;
   };
 
   const getLinkedLaboratoryStockCount = (depotId: string, stokKodu: string) => {
@@ -434,12 +457,14 @@ export default function MerkezSiparisPanel() {
     const relevantLabIds = linkedLabIds.filter(labId => Boolean(hospitalRulesMap[labId]?.[stokKodu]));
     if (relevantLabIds.length === 0) return 0;
 
-    return depoStok.filter(st => (
-      st.isShipped
-      && Boolean(st.hedefKurumId)
-      && relevantLabIds.includes(st.hedefKurumId as string)
-      && st.stokKodu === stokKodu
-    )).length;
+    // labStockCountMap zaten hedefKurumId|stokKodu bazında sevk edilmiş stoğu sayıyor;
+    // ilgili lab'ların toplamı orijinal tek-filtre sonucuyla aynıdır (her sevk kaydının
+    // tek hedefKurumId'si var → çift sayım yok).
+    let total = 0;
+    for (const labId of relevantLabIds) {
+      total += labStockCountMap.get(`${labId}|${stokKodu}`) ?? 0;
+    }
+    return total;
   };
 
   const periodKey = normalizePeriodKey(`${String(selectedMonth).padStart(2, '0')}-${selectedYear}`);

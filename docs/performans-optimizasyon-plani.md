@@ -260,13 +260,18 @@ Her rotaya dokunur, izole değişiklikler.
 - _Not: `useMaintenanceLogs` yalnızca cihaz-host'ta (Faz 6); action-forms listesi zaten 180g/2000
   sınırlı ve bilinçli birleşik görünüm._
 
-### Faz 4 — INP: senkron compute hotspot'larını öldür (7 sn'lik katil) — ~2–3 gün, risk: orta
-- Min-Max (merkez-siparis + siparisler): stoğu **bir kez** `Map<depotId|stokKodu→adet>` ve
-  `Map<labId|stokKodu→adet>`'e grupla; O(kural×lokasyon×stok) → O(kural) lookup.
-- Toplama `enrichedList`: `depoStok`'u seri & stokKodu ile **bir kez** indeksle; tarama başına
-  `Map.get` (tam filter değil).
-- Ürün kullanım `listDeductionItems`: ürün lookup `Map`'i önceden kur; döngüden `products.find`'ı kaldır.
-- Gerçekten ağır toplu işlemleri tık yolundan çıkar (chunk + `requestIdleCallback`, veya Cloud Function).
+### Faz 4 — INP: senkron compute hotspot'larını öldür (7 sn'lik katil) — 🟡 KISMEN (bölüm 1)
+- ✅ **Min-Max / toplu sipariş (merkez-siparis + siparisler-panel):** stok **bir kez**
+  `Map<depotId|stokKodu→adet>` ve `Map<hedefKurumId|stokKodu→adet>`'e (siparisler'de ayrıca
+  legacy `Map<hedefKurum(ad)|stokKodu→adet>`) indekslenir → `O(kural×lokasyon×|depoStok|)`
+  senkron döngüler `O(|depoStok|)` bir kez + `O(1)` lookup'lara indi. Sonuçlar orijinal
+  `.filter()` + `sumStockItemQuantities` ile **birebir aynı**. `/siparisler`'in ölçülen
+  7416 ms INP'sini doğrudan hedefler.
+- ⏳ **Faz 4b (sıradaki, aynı pattern):**
+  - Toplama `enrichedList` (`toplama/page.tsx:1102`): `depoStok`'u seri & stokKodu ile bir kez
+    indeksle; her taramada 2 tam `.filter` yerine `Map.get` → tarama-başı INP düşer.
+  - Ürün kullanım `listDeductionItems`: ürün lookup `Map`'i önceden kur; döngüden `products.find`.
+  - Gerçekten ağır toplu üretimi tık yolundan çıkar (chunk/`requestIdleCallback`).
 - **Beklenen etki:** Bu akışlarda INP saniyelerden **on ms**'lere.
 
 ### Faz 5 — INP: render disiplini + sanallaştırma — ~2 gün, risk: orta
