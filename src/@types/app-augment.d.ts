@@ -39,7 +39,9 @@ declare module "@/lib/types" {
     | "cihaz-yonetimi"
     | "miad-uyarilari"
     | "verimlilik"
-    | "numune-arsivi";
+    | "numune-arsivi"
+    | "cari-odeme"
+    | "cari-odeme-onay";
 
   export interface User {
     id: ID;

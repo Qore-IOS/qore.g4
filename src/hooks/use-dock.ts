@@ -321,6 +321,38 @@ const subItemMap: Record<string, DockSubItem[]> = {
     // { key: 'masraf-bildirimi', label: 'Masraf Bildirimi', icon: Wallet, href: '/personel-islemleri/masraf' },
     // { key: 'izin-talebi', label: 'İzin Talebi', icon: CalendarCheck, href: '/personel-islemleri/izin' },
   ],
+  "cari-odeme": [
+    {
+      key: "cari-odeme-genel",
+      label: "Gösterge Paneli",
+      icon: BarChart3,
+      href: "/cari-odeme",
+    },
+    {
+      key: "cari-odemeler",
+      label: "Ödemeler",
+      icon: Wallet,
+      href: "/cari-odeme/odemeler",
+    },
+    {
+      key: "cari-sablonlar",
+      label: "Ödeme Talimatları",
+      icon: ClipboardPlus,
+      href: "/cari-odeme/sablonlar",
+    },
+    {
+      key: "cari-firmalar",
+      label: "Cari Firmalar",
+      icon: Building,
+      href: "/cari-odeme/firmalar",
+    },
+    {
+      key: "cari-ayarlar",
+      label: "Ayarlar",
+      icon: Settings,
+      href: "/cari-odeme/ayarlar",
+    },
+  ],
 };
 
 export function useDock() {
