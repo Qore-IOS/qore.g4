@@ -81,7 +81,8 @@ export function useProductCodes() {
     enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 60 * 60 * 1000, // 1 hour
     gcTime: 2 * 60 * 60 * 1000, // 2 hours
-    refetchOnWindowFocus: true,
+    // PERF (Faz 2): refetchOnWindowFocus kaldırıldı → global false miras alınır.
+    // Statik master-data; her tab-focus'ta tüm koleksiyonu yeniden çekmeye gerek yok.
   });
 }
 
@@ -100,7 +101,7 @@ export function useDepots() {
     enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 60 * 60 * 1000,
     gcTime: 2 * 60 * 60 * 1000,
-    refetchOnWindowFocus: true,
+    // PERF (Faz 2): refetchOnWindowFocus kaldırıldı → global false miras alınır.
   });
 }
 
@@ -119,7 +120,7 @@ export function useHospitals() {
     enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 60 * 60 * 1000,
     gcTime: 2 * 60 * 60 * 1000,
-    refetchOnWindowFocus: true,
+    // PERF (Faz 2): refetchOnWindowFocus kaldırıldı → global false miras alınır.
   });
 }
 
@@ -955,9 +956,14 @@ export function useLabStock(
       return filterByCompanyScope(Array.from(resultMap.values()), currentCompanyId, isSuperAdmin);
     },
     enabled: externalEnabled && labIds.length > 0,
-    staleTime: 0, // Always stale - allows metadata listener to trigger refetch immediately
+    // PERF (Faz 2): Önceden staleTime:0 + refetchInterval:3000 idi → tüm lab stoğunu
+    // HER 3 SANİYEDE bir yeniden indiriyordu (sürekli network + render yükü; "tek en
+    // zararlı hook"). useStockUpdateListener zaten stok değişiminde ['depoStok']
+    // ailesini invalidate ediyor (bu key'i de kapsar) ve invalidation staleTime'ı
+    // ezerek anında refetch eder; tüketim panelinin kendi invalidate'i de tazeler.
+    // Bu yüzden 3sn polling kaldırıldı, staleTime modest bir değere çekildi.
+    staleTime: 30 * 1000,
     gcTime: 10 * 60 * 1000,
-    refetchInterval: 3 * 1000, // Poll every 3 seconds for real-time updates
     refetchOnWindowFocus: true,
   });
 }

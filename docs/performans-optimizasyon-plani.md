@@ -223,15 +223,24 @@ Her rotaya dokunur, izole değişiklikler.
   `gsap`/`three`/`ogl` bağımlılıklarını kaldır.
 - **Beklenen etki:** Her rotada LCP'de büyük düşüş (2 seri round-trip + log seli + bundle kalkar).
 
-### Faz 2 — Arka plan gürültüsünü durdur — ~1 gün, risk: düşük
-- `useLabStock` (`:903`): `staleTime:0` + `refetchInterval:3000` kaldır; mevcut
-  `useStockUpdateListener` invalidation'ına güven. Legacy isim sorgusunu birleştir/kaldır.
-- Dashboard'ları **mevcut ama kullanılmayan** `useOpenDeviceFaultReports` (limit 1000)'a geçir;
-  **`companyStats`'ı gerçekten kullan** (KPI'ları 10k reduce yerine özetten oku).
-- Statik kataloglardan `refetchOnWindowFocus:true` kaldır (productCodes/depots/hospitals).
-- `def_mainUnits`/`def_deviceGroups`/`faultDefinitions` ham `getDocs`'ları uzun-cache'li hook'a al.
-- `useDock`'u paylaşılan tek listener (context/singleton) yap → 4 listener → 1.
-- **Beklenen etki:** 3 sn polling, 60 sn 10k refetch ve 3 fazla listener kalkar.
+### Faz 2 — Arka plan gürültüsünü durdur — ✅ KISMEN UYGULANDI
+- ✅ `useLabStock` (`:903`): `staleTime:0` + `refetchInterval:3000` **kaldırıldı** (lab stoğu
+  artık her 3 sn'de baştan inmiyor); `staleTime` 30sn'ye çekildi. `useStockUpdateListener`
+  zaten `['depoStok']` ailesini invalidate ediyor (bu key'i kapsar) → stok değişiminde anında
+  tazelenir. _Legacy isim sorgusu KORUNDU (eski kayıt desteği — Faz 7 migration'a bırakıldı)._
+- ✅ Dashboard (`DashboardV2`): `useDeviceFaultReports` (730g/10k/60sn) → **mevcut ama hiç
+  kullanılmayan** `useOpenDeviceFaultReports` (status≠closed, 1000). KPI'lar yalnızca açık
+  arıza durumlarını sayıyordu → drop-in. _("Kurulmuş ama bağlanmamış altyapıyı bağla" ilkesi.)_
+- ✅ Statik kataloglardan (`productCodes`/`depots`/`hospitals`) `refetchOnWindowFocus:true`
+  kaldırıldı → global `false` miras alınır.
+- ⏳ **Ertelendi (ayrı PR, gerekçe):**
+  - `useDock` singleton: notification listener'ı UI yan-etkileriyle (ses, peek, okunmamış
+    sayacı) iç içe ve 4 tüketicisi var → hassas; bildirimleri bozmamak için ayrı/dikkatli
+    ele alınacak.
+  - `def_mainUnits`/`def_deviceGroups` cache hook'u: 6+ ham `getDocs` çağrı yerini değiştirir.
+  - `cihaz-yonetimi-host` (10k fault hook) → Faz 6'da (kompleks panel) ele alınacak.
+- **Beklenen etki:** En kritik arka plan yükü olan 3 sn'lik lab-stok polling'i ve dashboard'ın
+  60 sn'de 10k arıza refetch'i kalktı.
 
 ### Faz 3 — Ağır sorguları sınırla + first-paint'i serbest bırak — ~2–3 gün, risk: orta
 - 24 paneldeki `isLoading` gate'i: **shell + iskelet hemen** boyansın; bağımsız sorgular ayrı
