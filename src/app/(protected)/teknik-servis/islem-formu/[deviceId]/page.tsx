@@ -31,7 +31,6 @@ import { Textarea } from '@/components/ui/textarea';
 import WizardFormShell, { hapticDouble } from '@/components/islem-formu/WizardFormShell';
 import type { WizardHeading } from '@/components/islem-formu/WizardFormShell';
 import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
-import { filterByCompanyScope } from '@/lib/company-scope';
 import { reserveActionFormNumber } from '@/lib/form-number';
 import { useQueryClient } from '@tanstack/react-query';
 import {

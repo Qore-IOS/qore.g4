@@ -5,6 +5,14 @@
  * @version 2.0.0
  */
 
+import withBundleAnalyzerInit from "@next/bundle-analyzer";
+
+// Faz 0 ölçüm: `ANALYZE=true pnpm analyze` ile rota bazlı bundle raporu üretir.
+// ANALYZE set değilse hiçbir etkisi yoktur (normal build'i değiştirmez).
+const withBundleAnalyzer = withBundleAnalyzerInit({
+  enabled: process.env.ANALYZE === "true",
+});
+
 /** @type {import('next').NextConfig} */
 const config = {
   // Enable React Strict Mode for highlighting potential problems
@@ -101,4 +109,4 @@ const config = {
   },
 };
 
-export default config;
+export default withBundleAnalyzer(config);

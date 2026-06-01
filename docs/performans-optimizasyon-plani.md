@@ -149,12 +149,55 @@ combined isLoading; action-forms her iki koleksiyonu çekiyor; form detayında l
 Her faz: **düşük riskten yükseğe, en yüksek etki/efor oranından düşüğe** sıralı. Her fazın
 sonunda metrikler yeniden ölçülür (gate). Her faz ayrı PR(ler) olarak ilerler.
 
-### Faz 0 — Ölçülebilirlik (bu sefer kanıtlayabilmek için) — ~0,5 gün, risk: yok
-Önceki program "işe yaramadı" çünkü ölçüm yoktu. Önce ölçüm kuruyoruz.
-- `web-vitals` ekle → LCP/INP/CLS'i rota bazında konsola/dev-overlay'e raporla.
-- `@next/bundle-analyzer` ekle → rota bazlı bundle boyutu baseline'ı al.
-- Baseline tablosu (yukarıdaki DevTools değerleri) + hedef bütçeler dokümante.
-- **Çıktı:** Her fazdan önce/sonra ölçülen tekrarlanabilir metrik seti.
+### Faz 0 — Ölçülebilirlik (bu sefer kanıtlayabilmek için) — ✅ UYGULANDI
+Önceki program "işe yaramadı" çünkü ölçüm yoktu. Önce ölçümü kurduk.
+
+**Eklenenler:**
+- `web-vitals` + `src/components/perf/WebVitalsReporter.tsx` (root layout'a monte).
+  Gerçek kullanıcı ortamında (prod + mobil dahil) LCP/INP/CLS/FCP/TTFB yakalar.
+- `@next/bundle-analyzer` + `pnpm analyze` script'i (`ANALYZE=true next build`).
+
+**Nasıl ölçülür (her fazdan önce/sonra):**
+- *Runtime (LCP/INP/CLS):* Uygulamayı aç, URL'ye `?vitals=1` ekle → sol-altta canlı
+  panel çıkar (yeşil/sarı/kırmızı). Kapatmak için `?vitals=0`. Konsolda tablo için:
+  `window.__qoreVitals__()`. Tüm örnekler `window.__QORE_VITALS__` dizisinde. Mobilde
+  de çalışır (konsola gerek yok). Faz 1'in `removeConsole`'undan etkilenmez.
+- *Bundle:* `pnpm analyze` → `.next` altında `client.html` raporu; rota bazlı JS
+  boyutları. Her fazdan önce/sonra karşılaştır.
+
+**⚠️ Build-blocker bulundu ve düzeltildi:** `next build` PR #1270'ten beri **derlenmiyordu**
+(`teknik-servis/islem-formu/[deviceId]/page.tsx`'te çift `filterByCompanyScope` import'u →
+SWC hatası, `ignoreBuildErrors` bunu bastırmaz). Bu, önceki perf çalışmasının (phase1-6)
+**production'a hiç ulaşmamış olabileceği** anlamına gelir. Çift import kaldırıldı; build artık
+geçiyor (153/153 statik sayfa). _Not: build'de var olan birkaç `Attempted import error` uyarısı
+(`useFirebaseQueries`, `emitMaliyetSayimInvitation`, `toStorageUrl` eksik export'ları) latent
+runtime bug'ı; ayrı ele alınacak, build'i kırmıyor._
+
+**Baseline — İlk-Yük JS (production build, Faz öncesi):**
+
+| Rota | İlk-Yük JS |
+|---|---|
+| `/cihaz-yonetimi/dashboard` | 641 kB |
+| `/dashboard` | 637 kB |
+| `/direkt-transfer` | 621 kB |
+| `/siparisler/[orderId]/toplama` | 556 kB |
+| `/siparisler` | 547 kB |
+| `/mal-kabul` | 526 kB |
+| `/urun-kullanim/[[...slug]]` | 465 kB |
+| `/cihaz-yonetimi-ana` | 356 kB |
+| `/login` | 318 kB |
+| **Paylaşılan (tüm rotalar)** | **89,2 kB** |
+
+Sağlıklı hedef ~130–170 kB; ağır paneller 3–5× üzerinde. Runtime baseline (DevTools): LCP
+4,7–6,8 sn · INP 1,7–7,4 sn (§0).
+
+**Faz ilerleme tablosu:**
+
+| Faz | LCP (kötü panel) | INP (Siparişler) | Paylaşılan JS | `/siparisler` İlk-Yük | Not |
+|---|---|---|---|---|---|
+| Baseline | 6,79 sn | 7.416 ms | 89,2 kB | 547 kB | build düzeltildi |
+| Faz 1 sonrası | _ölç_ | _ölç_ | _ölç_ | _ölç_ | |
+| Faz 2 sonrası | _ölç_ | _ölç_ | _ölç_ | _ölç_ | |
 
 ### Faz 1 — First-paint hızlı kazanımlar (config + auth + ölü kod) — ~1 gün, risk: düşük
 Her rotaya dokunur, izole değişiklikler.
