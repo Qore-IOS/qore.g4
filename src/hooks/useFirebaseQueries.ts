@@ -48,7 +48,7 @@ import type {
 import { DepotStockCountSession } from '@/lib/mal-kabul/types';
 import { SayimSession } from '@/lib/cost-analytics';
 import { filterByCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { getScopedDocs, scopedQuery } from '@/lib/firestore-helpers';
 
 // Helper to convert Firestore timestamps
 const processTimestamp = (docData: any) => {
@@ -68,14 +68,18 @@ const processTimestamp = (docData: any) => {
 /**
  * Product Codes - Used in 15+ places
  * Cache for 1 hour, refetch on window focus
+ *
+ * Legacy-aware: getScopedDocs ensures eski/__legacy__ etiketli ürün kayıtları
+ * non-superadmin kullanıcılar için de görünür kalır (barkod çözümlemesi bu
+ * koleksiyona bağımlı — bkz. yönetim panelleri için aynı düzeltme: ac34a38).
  */
 export function useProductCodes() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['productCodes', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const snap = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin));
-      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as ProductCode));
+      const docs = await getScopedDocs('productCodes', currentCompanyId, isSuperAdmin);
+      const items = docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as ProductCode));
       return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
     },
     enabled: !!currentCompanyId || isSuperAdmin,
@@ -283,16 +287,24 @@ export function useLabPools() {
 
 /**
  * Barcode Formats - Active only
+ *
+ * Ürün kullanım panelinde non-superadmin (admin/user) rolleri barkod
+ * okuturken "Barkod Ayrıştırma Hatası — Tanımlı formatlarla eşleşmedi"
+ * alıyordu: companyId'siz veya `__legacy__` etiketli eski format kayıtları
+ * scopedQuery'nin server-side `where('companyId', '==', X)` filtresine
+ * takılıp dönmüyor; süperadminde filtre uygulanmadığından sorun gizli kalıyordu.
+ * Yönetim panelleri (ac34a38) ile aynı tutarlılık için getScopedDocs kullanıyoruz.
  */
 export function useBarcodeFormatsQuery() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['barcodeFormats', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const snap = await getDocs(
-        scopedQuery('barcodeFormats', currentCompanyId, isSuperAdmin, where('active', '==', true)),
+      const docs = await getScopedDocs(
+        'barcodeFormats', currentCompanyId, isSuperAdmin, where('active', '==', true),
       );
-      return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as BarcodeFormat));
+      const items = docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as BarcodeFormat));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
     },
     enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 60 * 60 * 1000,
