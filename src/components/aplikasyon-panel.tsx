@@ -83,17 +83,35 @@ export default function AplikasyonPanel({
     return () => unsub();
   }, [currentCompanyId, isSuperAdmin]);
 
-  const getDevicesForHospital = (hospitalId: string): Device[] => {
-    return devices
-      .filter(d => (d as any).hospitalId === hospitalId)
-      .sort((a, b) => (Number(a.order ?? 99)) - (Number(b.order ?? 99)));
-  };
+  // Pre-group devices by hospital once per `devices` change so each card does an
+  // O(1) map lookup instead of re-filtering + re-sorting the full device list
+  // for every hospital/pool card on every render (including each realtime
+  // open-fault snapshot). Groups are pre-sorted by display order.
+  const devicesByHospitalId = useMemo(() => {
+    const map = new Map<string, Device[]>();
+    for (const d of devices) {
+      const hid = (d as any).hospitalId as string | undefined;
+      if (!hid) continue;
+      const group = map.get(hid);
+      if (group) group.push(d); else map.set(hid, [d]);
+    }
+    for (const group of map.values()) {
+      group.sort((a, b) => (Number(a.order ?? 99)) - (Number(b.order ?? 99)));
+    }
+    return map;
+  }, [devices]);
+
+  const getDevicesForHospital = (hospitalId: string): Device[] =>
+    devicesByHospitalId.get(hospitalId) ?? [];
 
   // Get devices for multiple hospitals (for pool summary)
   const getDevicesForHospitals = (hospitalIds: string[]): Device[] => {
-    return devices
-      .filter(d => hospitalIds.includes((d as any).hospitalId))
-      .sort((a, b) => (Number(a.order ?? 99)) - (Number(b.order ?? 99)));
+    const out: Device[] = [];
+    for (const id of hospitalIds) {
+      const group = devicesByHospitalId.get(id);
+      if (group) out.push(...group);
+    }
+    return out.sort((a, b) => (Number(a.order ?? 99)) - (Number(b.order ?? 99)));
   };
 
   // Filter hospitals based on user's assigned laboratories

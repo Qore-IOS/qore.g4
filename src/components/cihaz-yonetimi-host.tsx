@@ -355,6 +355,33 @@ export default function CihazYonetimiHost() {
     return map;
   }, [hospitals]);
 
+  // Index the first active (unresolved) fault per assigned user, so the
+  // personnel table resolves each person's status with an O(1) lookup instead
+  // of re-scanning the full (up to ~10k) fault list per person. Preserves the
+  // previous "first matching fault in list order" semantics.
+  const activeFaultByUid = useMemo(() => {
+    const map = new Map<string, FaultLike>();
+    for (const fault of faultRows) {
+      const uid = fault.assignedToUid;
+      if (!uid) continue;
+      if (fault.status === 'cozuldu' || fault.status === 'closed') continue;
+      if (!map.has(uid)) map.set(uid, fault);
+    }
+    return map;
+  }, [faultRows]);
+
+  // Index the first currently-active form window per user (same idea).
+  const activeWindowByUid = useMemo(() => {
+    const now = new Date();
+    const map = new Map<string, PersonnelFormWindow>();
+    for (const w of formWindows) {
+      if (!w.uid) continue;
+      if (!isDateInRange(now, w.startAt, w.endAt)) continue;
+      if (!map.has(w.uid)) map.set(w.uid, w);
+    }
+    return map;
+  }, [formWindows]);
+
   const personnelRows = useMemo<PersonnelRowData[]>(() => {
     const now = new Date();
     return personnelUsers.map((user) => {
@@ -367,8 +394,7 @@ export default function CihazYonetimiHost() {
           statusTone: 'success',
         };
       }
-      const userFaults = faultRows.filter((fault) => fault.assignedToUid === user.uid);
-      const activeFault = userFaults.find((fault) => fault.status !== 'cozuldu' && fault.status !== 'closed');
+      const activeFault = activeFaultByUid.get(user.uid);
       if (activeFault) {
         const meta = getFaultStatusMeta(activeFault);
         return {
@@ -378,7 +404,7 @@ export default function CihazYonetimiHost() {
           laboratoryName: meta.laboratoryId ? hospitalNameById.get(meta.laboratoryId) : undefined,
         };
       }
-      const activeWindow = formWindows.find((w) => w.uid === user.uid && isDateInRange(now, w.startAt, w.endAt));
+      const activeWindow = activeWindowByUid.get(user.uid);
       if (activeWindow) {
         return {
           user,
@@ -389,7 +415,7 @@ export default function CihazYonetimiHost() {
       }
       return { user, statusLabel: '', statusTone: 'neutral' };
     });
-  }, [availabilityByUser, faultRows, formWindows, hospitalNameById, personnelUsers]);
+  }, [availabilityByUser, activeFaultByUid, activeWindowByUid, hospitalNameById, personnelUsers]);
 
   // Aktif cihazlar: atama kaydı olanlar (assignment-based)
   const activeDeviceCount = useMemo(() => {
