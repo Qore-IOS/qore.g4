@@ -447,7 +447,8 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
   }, [form, moduleType]);
 
   useEffect(() => {
-    if (!currentUserProfile?.uid) return;
+    // PERF (Faz 3): Şahsi stok yalnızca parça-ekle modalı açıkken gerekli.
+    if (!isAddPartModalOpen || !currentUserProfile?.uid) return;
     (async () => {
       try {
         const q = scopedQuery(
@@ -463,10 +464,12 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         console.error('Error fetching personal stock:', error);
       }
     })();
-  }, [currentUserProfile?.uid]);
+  }, [isAddPartModalOpen, currentUserProfile?.uid]);
 
   useEffect(() => {
-    if (!form?.hospitalId) return;
+    // PERF (Faz 3): Havuz stok yürüyüşü (deviceLabPools → depots → poolWarehouseStock)
+    // yalnızca parça-ekle modalı açıkken gerekli.
+    if (!isAddPartModalOpen || !form?.hospitalId) return;
     (async () => {
       try {
         const poolsSnap = await getDocs(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin));
@@ -515,9 +518,13 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         console.error('Error fetching pool stock:', error);
       }
     })();
-  }, [form?.hospitalId, currentCompanyId, isSuperAdmin]);
+  }, [isAddPartModalOpen, form?.hospitalId, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
+    // PERF (Faz 3): Limitsiz yedekParcaDepoStok koleksiyonu yalnızca "Değişen Parça
+    // Ekle" modalı açıkken gerekli. Önceden form-detayı HER açıldığında (modal
+    // açılmasa bile) tüm koleksiyon mount'ta çekiliyordu.
+    if (!isAddPartModalOpen) return;
     (async () => {
       try {
         const snap = await getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
@@ -535,7 +542,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         console.error('Error fetching depot stock:', error);
       }
     })();
-  }, []);
+  }, [isAddPartModalOpen, currentCompanyId, isSuperAdmin]);
 
   const filteredStock = useMemo(() => {
     if (!partSearchQuery) return personalStock;

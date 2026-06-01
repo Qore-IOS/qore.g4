@@ -242,16 +242,23 @@ Her rotaya dokunur, izole değişiklikler.
 - **Beklenen etki:** En kritik arka plan yükü olan 3 sn'lik lab-stok polling'i ve dashboard'ın
   60 sn'de 10k arıza refetch'i kalktı.
 
-### Faz 3 — Ağır sorguları sınırla + first-paint'i serbest bırak — ~2–3 gün, risk: orta
-- 24 paneldeki `isLoading` gate'i: **shell + iskelet hemen** boyansın; bağımsız sorgular ayrı
-  ayrı çözülsün (VEYA ile birleştirme). `cihaz-yonetimi-host` 10-sorgu gate'ini parçala.
-- `useMaintenanceLogs`/`useMaintenancePlans`/`useDevices`/`useDepoStok`: tarih penceresi + `limit`,
-  veya scoped/aggregate. **Siparişler tüm `depoStok`'u çekmeyi bıraksın.**
-- Fault listener'ları `scopedQuery`'ye geçir (companyId Firestore'a); `orders`/`faults`
-  listener'larına `limit` ekle (gerekli yeni indeksler).
-- Action-forms: yalnızca ilgili modülün koleksiyonunu çek (`action-forms-view.tsx:131–171`).
-- Form detayı: `yedekParcaDepoStok` + pool/depo gezintisini talep üzerine lazy yükle.
-- **Beklenen etki:** Ağır panellerde LCP düşer; cross-tenant indirme durur.
+### Faz 3 — Ağır sorguları sınırla + first-paint'i serbest bırak — 🟡 KISMEN (bölüm 1)
+- ✅ **Form-detayı lazy stok** (`action-forms-view.tsx` `ActionFormDetailView`): şahsi stok,
+  havuz-stok yürüyüşü (deviceLabPools→depots→poolWarehouseStock) ve **limitsiz `yedekParcaDepoStok`
+  koleksiyonu** artık form-detayı mount'unda değil, yalnızca "Değişen Parça Ekle" modalı (`isAddPartModalOpen`)
+  açıldığında çekiliyor. Tüm stok kullanımı modal içinde olduğu için davranış korunur (seçili öğe ayrı
+  state'te). `/teknik-servis|aplikasyon/tum-formlar/[formId]` (522 kB) rotalarına etki eder.
+- ⏳ **Ertelendi (runtime testi gerektirir — staging'de yapılmalı):**
+  - 24 paneldeki `isLoading` tam-ekran gating'i shell+iskelete çevirme: her panel bespoke,
+    veri `undefined` iken çökme riski → runtime doğrulama şart.
+  - Sorgu bounding (`useDepoStok`/`useDevices`/`useMaintenanceLogs`/`orders` listener limit):
+    tüketiciler tam veri bekliyor; kör limit/scope **legacy kayıt** veya davranış kırabilir
+    (ör. `perifer` `hedefKurumId` legacy fallback, `orders` durum-filtresi). Aggregate (Faz 7)
+    veya dikkatli per-consumer iş.
+  - Wizard `islem-formu/[deviceId]` (546 kB) lazy stok: stoklar modal DIŞINDA da kullanılıyor
+    (save yolları) → action-forms gibi temiz değil; ayrı/test gerekli.
+- _Not: `useMaintenanceLogs` yalnızca cihaz-host'ta (Faz 6); action-forms listesi zaten 180g/2000
+  sınırlı ve bilinçli birleşik görünüm._
 
 ### Faz 4 — INP: senkron compute hotspot'larını öldür (7 sn'lik katil) — ~2–3 gün, risk: orta
 - Min-Max (merkez-siparis + siparisler): stoğu **bir kez** `Map<depotId|stokKodu→adet>` ve
