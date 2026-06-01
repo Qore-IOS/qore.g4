@@ -48,7 +48,7 @@ import type {
 import { DepotStockCountSession } from '@/lib/mal-kabul/types';
 import { SayimSession } from '@/lib/cost-analytics';
 import { filterByCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { getScopedDocs, scopedQuery } from '@/lib/firestore-helpers';
 
 // Helper to convert Firestore timestamps
 const processTimestamp = (docData: any) => {
@@ -289,10 +289,18 @@ export function useBarcodeFormatsQuery() {
   return useQuery({
     queryKey: ['barcodeFormats', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const snap = await getDocs(
-        scopedQuery('barcodeFormats', currentCompanyId, isSuperAdmin, where('active', '==', true)),
+      // Barkod formatları eski kurulumlarda companyId'siz (legacy) kalmış olabilir.
+      // Sadece scopedQuery kullanmak non-superadmin kullanıcıların formatları hiç
+      // görememesine ve ürün kullanım ekranında "Barkod Ayrıştırma Hatası" almasına
+      // neden oluyordu; getScopedDocs şirket + legacy uyumluluğunu birlikte korur.
+      const docs = await getScopedDocs(
+        'barcodeFormats',
+        currentCompanyId,
+        isSuperAdmin,
+        where('active', '==', true),
       );
-      return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as BarcodeFormat));
+      const formats = docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as BarcodeFormat));
+      return filterByCompanyScope(formats, currentCompanyId, isSuperAdmin);
     },
     enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 60 * 60 * 1000,
