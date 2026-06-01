@@ -147,7 +147,7 @@ export default function SiparislerPanel(): JSX.Element {
 
   const isLoading = depotsLoading || hospitalsLoading || productsLoading || stokLoading;
   const [isProcessing, setIsProcessing] = useState(false);
-  
+
   const [showBulk, setShowBulk] = useState(false);
   const [selectedBulkDepots, setSelectedBulkDepots] = useState<string[]>([]);
   const [selectedBulkLabs, setSelectedBulkLabs] = useState<string[]>([]);
@@ -175,9 +175,9 @@ export default function SiparislerPanel(): JSX.Element {
       });
       setAllOrders(updatedOrders);
     };
-  
+
     let unsubscribe: (() => void) | null = null;
-  
+
     const startListener = () => {
       try {
         const q1 = scopedQuery(
@@ -209,7 +209,7 @@ export default function SiparislerPanel(): JSX.Element {
         unsubscribe = onSnapshot(q2, (snapshot) => mapSnapshot(snapshot));
       }
     };
-  
+
     startListener();
     return () => { if (unsubscribe) unsubscribe(); };
   }, [selectedDepotId, currentCompanyId, isSuperAdmin]);
@@ -229,7 +229,7 @@ export default function SiparislerPanel(): JSX.Element {
           snap.forEach(docSnap => {
             const data = docSnap.data();
             if (!data.depotId) {
-              batch.update(docSnap.ref, { 
+              batch.update(docSnap.ref, {
                 depotId: data.targetDepotId,
                 depotName: data.targetDepotName || data.depotName || ''
               });
@@ -336,7 +336,7 @@ export default function SiparislerPanel(): JSX.Element {
       id: orderId,
       createdAt: Timestamp.fromDate(newOrder.createdAt as Date),
     }, currentCompanyId));
-    
+
     // Bildirim için kısa ürün özeti: ilk 3 ürünü "Ad x adet" formatıyla, fazlasını "+N kalem" olarak göster.
     const totalAdetForNotif = orderItems.reduce((s, it) => s + (Number(it.adet) || 0), 0);
     const preview = orderItems
@@ -347,7 +347,7 @@ export default function SiparislerPanel(): JSX.Element {
     const itemsSummary = `${preview}${extra}`;
 
     await emitOrderCreatedFromRequest({
-      actor: { uid: currentUserProfile?.uid ?? '', name: currentUserProfile?.name ?? ''},
+      actor: { uid: currentUserProfile?.uid ?? '', name: currentUserProfile?.name ?? '' },
       orderId: orderId,
       labId: selectedLabId,
       labName: hospitalName,
@@ -364,32 +364,32 @@ export default function SiparislerPanel(): JSX.Element {
         depotIds: currentUserProfile?.assignedDepots ?? undefined,
       }
     });
-    
+
     toast({ title: 'Sipariş Oluşturuldu', description: 'Siparişiniz "Bekleyen Siparişler" listesine eklendi.' });
-    
+
     setOrderItems([]);
     setSelectedLabId('');
 
   };
-  
+
   const startPickingProcess = async (order: Order) => {
     if (!order.id) return;
     setIsProcessing(true);
     try {
-        await updateDoc(doc(db, "orders", order.id), {
-          status: 'toplaniyor',
-          pickingStartedAt: serverTimestamp(),
-          pickingStartedById: currentUser?.uid ?? null,
-          pickingStartedBy: currentUserProfile?.name ?? currentUser?.email ?? null,
-        });
-        router.push(`/siparisler/${order.id}/toplama`);
+      await updateDoc(doc(db, "orders", order.id), {
+        status: 'toplaniyor',
+        pickingStartedAt: serverTimestamp(),
+        pickingStartedById: currentUser?.uid ?? null,
+        pickingStartedBy: currentUserProfile?.name ?? currentUser?.email ?? null,
+      });
+      router.push(`/siparisler/${order.id}/toplama`);
     } catch (e) {
-        toast({ title: 'Hata', description: 'Toplama işlemi başlatılamadı.', variant: 'destructive' });
+      toast({ title: 'Hata', description: 'Toplama işlemi başlatılamadı.', variant: 'destructive' });
     } finally {
-        setIsProcessing(false);
+      setIsProcessing(false);
     }
   };
-  
+
   const toggleSelect = (id: string, list: string[], setList: React.Dispatch<React.SetStateAction<string[]>>) => {
     setList(prev =>
       prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
@@ -459,7 +459,7 @@ export default function SiparislerPanel(): JSX.Element {
     const workbook = XLSX.utils.book_new();
     Object.entries(sheets).forEach(([name, data]) => {
       const ws = XLSX.utils.json_to_sheet(data, {
-        header: ['Stok Kodu','Stok Adı','Mevcut Stok','Max Adedi','Sipariş Adeti']
+        header: ['Stok Kodu', 'Stok Adı', 'Mevcut Stok', 'Max Adedi', 'Sipariş Adeti']
       });
       XLSX.utils.book_append_sheet(workbook, ws, name.substring(0, 31)); // Sheet names have a 31-char limit
     });
@@ -470,34 +470,34 @@ export default function SiparislerPanel(): JSX.Element {
     if (!selectedLabId) {
       return toast({ title: 'Hata', description: 'Lütfen siparişin oluşturulacağı hedef laboratuvarı seçin.', variant: 'destructive' });
     }
-  
+
     const hospital = hospitals.find(h => h.id === selectedLabId);
     if (!hospital || !hospital.id) return;
 
     const rulesSnap = await getDocs(collection(db, 'hospitals', hospital.id, 'minMaxRules'));
     const rules: Record<string, MinMaxRule> = {};
     rulesSnap.forEach(doc => {
-        const d = doc.data() as MinMaxRule;
-        const stokKodu = d.stokKodu;
-        if (stokKodu) rules[stokKodu] = d;
+      const d = doc.data() as MinMaxRule;
+      const stokKodu = d.stokKodu;
+      if (stokKodu) rules[stokKodu] = d;
     });
-  
+
     const neededItems: OrderItem[] = [];
-  
+
     for (const rule of Object.values(rules)) {
       const labStockCount = sumStockItemQuantities(depoStok.filter(
         st => st.isShipped && (st.hedefKurumId === hospital.id || (!st.hedefKurumId && st.hedefKurum === hospital.name)) && st.stokKodu === rule.stokKodu
       ));
       const maxValue = rule.max ?? 0;
       const need = maxValue - labStockCount;
-  
+
       if (need > 0) {
         const product = productCodes.find(p => p.stokKodu === rule.stokKodu);
         if (product) {
           const depotStockCount = sumStockItemQuantities(depoStok.filter(
             st => st.depotId === selectedDepotId && !st.isShipped && st.stokKodu === rule.stokKodu
           ));
-          
+
           neededItems.push({
             id: generateId(),
             stokKodu: rule.stokKodu,
@@ -507,7 +507,7 @@ export default function SiparislerPanel(): JSX.Element {
         }
       }
     }
-  
+
     if (neededItems.length > 0) {
       const consolidatedItems: Record<string, OrderItem> = {};
       [...orderItems, ...neededItems].forEach(item => {
@@ -533,7 +533,7 @@ export default function SiparislerPanel(): JSX.Element {
       });
     }
   };
-  
+
   /**
    * Handles order deletion with confirmation
    * @param orderId - ID of the order to delete
@@ -977,74 +977,74 @@ export default function SiparislerPanel(): JSX.Element {
                     const meta = productMetaByCode.get(item.stokKodu || '');
                     const multiplier = formatUnitMultiplier(meta);
                     return (
-                    <div key={item.id} className="border-b border-[var(--dashboard-stroke)] last:border-b-0">
-                      {/* Desktop row */}
-                      <div className="hidden sm:grid grid-cols-[2fr_1fr_80px_90px_40px] gap-1 items-center px-4 sm:px-5 py-2.5">
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{item.stokAdi}</p>
-                          <p className="text-[10px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</p>
-                        </div>
-                        <div>
-                          <span className="text-[11px] text-[var(--dashboard-muted)]">{item.stokKodu}</span>
-                        </div>
-                        <div className="flex items-center justify-center">
-                          <div className="flex items-center gap-0.5">
-                            <button
-                              onClick={() => {
-                                const newQty = Math.max(1, (item.adet ?? 1) - 1);
-                                setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: newQty } : i));
-                              }}
-                              className="w-6 h-6 rounded-md bg-[var(--dashboard-surface-2)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors"
-                            >
-                              <Minus className="h-3 w-3" />
-                            </button>
-                            <span className="text-center text-sm font-bold text-[var(--dashboard-text)] min-w-[72px]">{item.adet}</span>
-                            <button
-                              onClick={() => {
-                                setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: (i.adet ?? 1) + 1 } : i));
-                              }}
-                              className="w-6 h-6 rounded-md bg-[var(--dashboard-surface-2)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors"
-                            >
-                              <Plus className="h-3 w-3" />
-                            </button>
-                          </div>
-                        </div>
-                        <div className="flex justify-center">
-                          <span className="text-[11px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</span>
-                        </div>
-                        <div className="flex justify-center">
-                          <button
-                            onClick={() => removeItem(item.id ?? '')}
-                            className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-100 transition-colors"
-                          >
-                            <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                          </button>
-                        </div>
-                      </div>
-                      {/* Mobile row */}
-                      <div className="sm:hidden px-3 py-2.5">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex-1 min-w-0">
+                      <div key={item.id} className="border-b border-[var(--dashboard-stroke)] last:border-b-0">
+                        {/* Desktop row */}
+                        <div className="hidden sm:grid grid-cols-[2fr_1fr_80px_90px_40px] gap-1 items-center px-4 sm:px-5 py-2.5">
+                          <div className="min-w-0">
                             <p className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{item.stokAdi}</p>
                             <p className="text-[10px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</p>
-                            <p className="text-[11px] text-[var(--dashboard-muted)]">{item.stokKodu}</p>
                           </div>
-                          <div className="flex items-center gap-1">
-                            <button onClick={() => { const newQty = Math.max(1, (item.adet ?? 1) - 1); setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: newQty } : i)); }} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
-                              <Minus className="h-3 w-3" />
-                            </button>
-                            <span className="text-center text-sm font-bold min-w-[92px]">{item.adet}</span>
-                            <button onClick={() => { setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: (i.adet ?? 1) + 1 } : i)); }} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
-                              <Plus className="h-3 w-3" />
-                            </button>
-                            <span className="text-[10px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</span>
-                            <button onClick={() => removeItem(item.id ?? '')} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-100 ml-1">
+                          <div>
+                            <span className="text-[11px] text-[var(--dashboard-muted)]">{item.stokKodu}</span>
+                          </div>
+                          <div className="flex items-center justify-center">
+                            <div className="flex items-center gap-0.5">
+                              <button
+                                onClick={() => {
+                                  const newQty = Math.max(1, (item.adet ?? 1) - 1);
+                                  setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: newQty } : i));
+                                }}
+                                className="w-6 h-6 rounded-md bg-[var(--dashboard-surface-2)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors"
+                              >
+                                <Minus className="h-3 w-3" />
+                              </button>
+                              <span className="text-center text-sm font-bold text-[var(--dashboard-text)] min-w-[72px]">{item.adet}</span>
+                              <button
+                                onClick={() => {
+                                  setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: (i.adet ?? 1) + 1 } : i));
+                                }}
+                                className="w-6 h-6 rounded-md bg-[var(--dashboard-surface-2)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors"
+                              >
+                                <Plus className="h-3 w-3" />
+                              </button>
+                            </div>
+                          </div>
+                          <div className="flex justify-center">
+                            <span className="text-[11px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</span>
+                          </div>
+                          <div className="flex justify-center">
+                            <button
+                              onClick={() => removeItem(item.id ?? '')}
+                              className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-100 transition-colors"
+                            >
                               <Trash2 className="h-3.5 w-3.5 text-red-500" />
                             </button>
                           </div>
                         </div>
+                        {/* Mobile row */}
+                        <div className="sm:hidden px-3 py-2.5">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{item.stokAdi}</p>
+                              <p className="text-[10px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</p>
+                              <p className="text-[11px] text-[var(--dashboard-muted)]">{item.stokKodu}</p>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <button onClick={() => { const newQty = Math.max(1, (item.adet ?? 1) - 1); setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: newQty } : i)); }} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
+                                <Minus className="h-3 w-3" />
+                              </button>
+                              <span className="text-center text-sm font-bold min-w-[92px]">{item.adet}</span>
+                              <button onClick={() => { setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: (i.adet ?? 1) + 1 } : i)); }} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
+                                <Plus className="h-3 w-3" />
+                              </button>
+                              <span className="text-[10px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</span>
+                              <button onClick={() => removeItem(item.id ?? '')} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-100 ml-1">
+                                <Trash2 className="h-3.5 w-3.5 text-red-500" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
                       </div>
-                    </div>
                     );
                   })
                 )}
