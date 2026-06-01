@@ -124,6 +124,29 @@ test('SuperAdmin can write a device in any company', async () => {
   );
 });
 
+
+test('Company A user can read own scoped definition data', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'def_labGroups', 'labGroupA'), {
+      name: 'Hematoloji',
+      companyId: 'companyA',
+    });
+  });
+  const db = authedAsCompanyA();
+  await assertSucceeds(getDoc(doc(db, 'def_labGroups', 'labGroupA')));
+});
+
+test('Company A user cannot read Company B scoped definition data', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'def_labGroups', 'labGroupB'), {
+      name: 'Biyokimya',
+      companyId: 'companyB',
+    });
+  });
+  const db = authedAsCompanyA();
+  await assertFails(getDoc(doc(db, 'def_labGroups', 'labGroupB')));
+});
+
 // ============================================================================
 // Unauthenticated
 // ============================================================================

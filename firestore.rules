@@ -153,6 +153,12 @@ service cloud.firestore {
     match /transferTemplates/{id}             { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /vehicles/{id}                      { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /testDefinitions/{id}               { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /def_brands/{id}                    { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /def_labGroups/{id}                 { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /def_testGroups/{id}                { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /def_deviceGroups/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /def_productGroups/{id}             { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /def_mainUnits/{id}                 { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /deviceBrandModels/{id}             { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /deviceModelDefinitions/{id}        { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /costCheckpoints/{id}               { allow read: if inCompany(); allow write: if writingInCompany(); }
