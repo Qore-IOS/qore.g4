@@ -619,6 +619,8 @@ export type AppView =
   | 'satin-alma'
   | 'kullanici-talepleri'
   | 'maliyet-sayim'
+  | 'cari-odeme'
+  | 'cari-odeme-onay'
   ;
 
 export type CihazYonetimiSubView = 'ana' | 'ayarlar' | 'cihazListesi' | 'teknikServis';

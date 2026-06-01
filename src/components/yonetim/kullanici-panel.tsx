@@ -404,6 +404,15 @@ export default function KullaniciPanel() {
                             <label htmlFor={view.key} className="text-sm">{view.label}</label>
                         </div>
                     ))}
+                    {/* Cari Ödeme onay yetkisi: bir nav paneli değil, bir kabiliyet (ödeme durum/onay değişikliği). */}
+                    <div className="mt-2 pt-2 border-t flex items-center space-x-2 mb-1">
+                        <Checkbox
+                            id="cari-odeme-onay"
+                            checked={currentUser.accessibleViews?.includes('cari-odeme-onay' as AppView)}
+                            onCheckedChange={(checked) => handleCheckboxChange('cari-odeme-onay' as AppView, !!checked)}
+                        />
+                        <label htmlFor="cari-odeme-onay" className="text-sm">Cari Ödeme · Onay Yetkisi</label>
+                    </div>
                 </ScrollArea>
                 <div className="flex flex-col gap-4 h-[calc(70vh-100px)]">
                     <ScrollArea className="flex-1 min-h-0 border rounded-md p-2">

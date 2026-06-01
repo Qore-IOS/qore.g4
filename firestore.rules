@@ -224,5 +224,25 @@ service cloud.firestore {
     match /pushTokens/{token}                 { allow read, write: if isSignedIn(); }
     match /metadata/{id}                      { allow read, write: if isSignedIn(); }
     match /presence/{id}                      { allow read, write: if isSignedIn(); }
+
+    // -----------------------------
+    // Cari Ödeme (tedarikçi ödemeleri) paneli — tenant izolasyonlu.
+    // Onay yetkisi (cari-odeme-onay) UI tarafında uygulanır; bu kurallar
+    // tenant (companyId) bazlı veri izolasyonunu zorunlu kılar.
+    // -----------------------------
+    match /cariPayments/{id}                  { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /cariPaymentTemplates/{id}          { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /cariBankAccounts/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /cariFirmalar/{id} {
+      allow read: if inCompany();
+      allow write: if writingInCompany();
+      match /ibans/{ibanId}                   { allow read: if inCompany(); allow write: if writingInCompany(); }
+      match /history/{historyId}              { allow read: if inCompany(); allow write: if writingInCompany(); }
+    }
+    match /cariDepartments/{id} {
+      allow read: if inCompany();
+      allow write: if writingInCompany();
+      match /history/{historyId}              { allow read: if inCompany(); allow write: if writingInCompany(); }
+    }
   }
 }
