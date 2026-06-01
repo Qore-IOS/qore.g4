@@ -36,14 +36,15 @@ export function scopedQuery(
   ...extraConstraints: QueryConstraint[]
 ): Query<DocumentData> {
   const base = collection(db, collectionPath);
-  if (isSuperAdmin) {
+  const normalized = normalizeCompanyId(currentCompanyId);
+  if (isSuperAdmin || normalized === '__legacy__') {
     return extraConstraints.length > 0
       ? query(base, ...extraConstraints)
       : query(base);
   }
   return query(
     base,
-    where('companyId', '==', normalizeCompanyId(currentCompanyId)),
+    where('companyId', '==', normalized),
     ...extraConstraints,
   );
 }
