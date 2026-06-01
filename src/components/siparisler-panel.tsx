@@ -93,7 +93,7 @@ type PeripheralFulfillmentItem = {
 };
 import { emitOrderCreatedFromRequest } from '@/lib/notifications';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
-import { sumStockItemQuantities } from '@/lib/stock-quantity';
+import { getStockItemQuantity } from '@/lib/stock-quantity';
 import { siparislerLogger } from '@/lib/logger';
 import LojistikSiparisView from '@/components/LojistikSiparisView';
 import { formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
@@ -396,6 +396,41 @@ export default function SiparislerPanel(): JSX.Element {
     );
   };
 
+  // PERF (Faz 4): Min-Max / toplu sipariş hesapları her kural için tüm depoStok'u
+  // .filter ile tarıyordu → O(kural×lokasyon×|depoStok|) senkron yük (Siparişler INP'si).
+  // Stok BİR KEZ adet-toplamlı Map'lere indekslenir; sonuçlar sumStockItemQuantities ile
+  // birebir aynıdır (getStockItemQuantity aynı adet mantığı). Lab tarafındaki legacy isim
+  // fallback'i (hedefKurumId yoksa hedefKurum adına göre) ayrı bir Map ile korunur.
+  const { depotQtyMap, labQtyByIdMap, labQtyByNameMap } = useMemo(() => {
+    const depotMap = new Map<string, number>();
+    const labById = new Map<string, number>();
+    const labByName = new Map<string, number>();
+    for (const st of depoStok) {
+      if (!st.stokKodu) continue;
+      const qty = getStockItemQuantity(st);
+      if (!st.isShipped) {
+        if (st.depotId) {
+          const k = `${st.depotId}|${st.stokKodu}`;
+          depotMap.set(k, (depotMap.get(k) ?? 0) + qty);
+        }
+      } else if (st.hedefKurumId) {
+        const k = `${st.hedefKurumId}|${st.stokKodu}`;
+        labById.set(k, (labById.get(k) ?? 0) + qty);
+      } else if (st.hedefKurum) {
+        const k = `${st.hedefKurum}|${st.stokKodu}`;
+        labByName.set(k, (labByName.get(k) ?? 0) + qty);
+      }
+    }
+    return { depotQtyMap: depotMap, labQtyByIdMap: labById, labQtyByNameMap: labByName };
+  }, [depoStok]);
+
+  const getDepotStockQty = (depotId: string | undefined, stokKodu: string) =>
+    depotId ? (depotQtyMap.get(`${depotId}|${stokKodu}`) ?? 0) : 0;
+
+  const getLabStockQty = (labId: string | undefined, labName: string | undefined | null, stokKodu: string) =>
+    (labId ? (labQtyByIdMap.get(`${labId}|${stokKodu}`) ?? 0) : 0)
+    + (labName ? (labQtyByNameMap.get(`${labName}|${stokKodu}`) ?? 0) : 0);
+
   const generateBulkOrder = async () => {
     if (selectedBulkDepots.length === 0 && selectedBulkLabs.length === 0) {
       return toast({ title: 'Hata', description: 'En az bir depo veya laboratuvar seçin.', variant: 'destructive' });
@@ -418,9 +453,7 @@ export default function SiparislerPanel(): JSX.Element {
       const depot = depots.find(d => d.id === depotId)!;
       const rules = await fetchRules('depots', depotId);
       const rows = Object.values(rules).map(rule => {
-        const have = sumStockItemQuantities(depoStok.filter(
-          st => st.depotId === depotId && !st.isShipped && st.stokKodu === rule.stokKodu
-        ));
+        const have = getDepotStockQty(depotId, rule.stokKodu);
         const maxValue = rule.max ?? 0;
         const need = maxValue - have;
         return {
@@ -439,9 +472,7 @@ export default function SiparislerPanel(): JSX.Element {
       const lab = hospitals.find(h => h.id === labId)!;
       const rules = await fetchRules('hospitals', labId);
       const rows = Object.values(rules).map(rule => {
-        const have = sumStockItemQuantities(depoStok.filter(
-          st => st.isShipped && (st.hedefKurumId === lab.id || (!st.hedefKurumId && st.hedefKurum === lab.name)) && st.stokKodu === rule.stokKodu
-        ));
+        const have = getLabStockQty(lab.id, lab.name, rule.stokKodu);
         const maxValue = rule.max ?? 0;
         const need = maxValue - have;
         return {
@@ -485,18 +516,14 @@ export default function SiparislerPanel(): JSX.Element {
     const neededItems: OrderItem[] = [];
 
     for (const rule of Object.values(rules)) {
-      const labStockCount = sumStockItemQuantities(depoStok.filter(
-        st => st.isShipped && (st.hedefKurumId === hospital.id || (!st.hedefKurumId && st.hedefKurum === hospital.name)) && st.stokKodu === rule.stokKodu
-      ));
+      const labStockCount = getLabStockQty(hospital.id, hospital.name, rule.stokKodu);
       const maxValue = rule.max ?? 0;
       const need = maxValue - labStockCount;
 
       if (need > 0) {
         const product = productCodes.find(p => p.stokKodu === rule.stokKodu);
         if (product) {
-          const depotStockCount = sumStockItemQuantities(depoStok.filter(
-            st => st.depotId === selectedDepotId && !st.isShipped && st.stokKodu === rule.stokKodu
-          ));
+          const depotStockCount = getDepotStockQty(selectedDepotId, rule.stokKodu);
 
           neededItems.push({
             id: generateId(),
