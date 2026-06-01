@@ -1914,8 +1914,8 @@ export default function YedekParcaTransferPage() {
 
     const isActiveStock = item.status === 'in_stock' || item.status === 'pending_approval';
     const confirmMessage = isActiveStock
-      ? `${item.stokKodu} (${item.serialNumber || 'Seri No Yok'}) aktif stok kaydı silinecek ve ürün depoya iade edilecektir. Devam edilsin mi?`
-      : `${item.stokKodu} (${item.serialNumber || 'Seri No Yok'}) personel stok kaydı silinsin mi?`;
+      ? `${item.stokKodu} (${item.serialNumber || item.hucreNumarasi || 'Seri/Hücre No Yok'}) aktif stok kaydı silinecek ve ürün depoya iade edilecektir. Devam edilsin mi?`
+      : `${item.stokKodu} (${item.serialNumber || item.hucreNumarasi || 'Seri/Hücre No Yok'}) personel stok kaydı silinsin mi?`;
     const shouldDelete = window.confirm(confirmMessage);
     if (!shouldDelete) return;
 
@@ -1950,6 +1950,7 @@ export default function YedekParcaTransferPage() {
           stokAdi: item.stokAdi,
           anaBirim: item.anaBirim || 'Adet',
           serialNumber: item.serialNumber || '',
+          ...(item.hucreNumarasi ? { hucreNumarasi: item.hucreNumarasi } : {}),
           quantity: 1,
           personalStockDocId: item.id,
           relatedPersonnelUid: item.ownerUid,
@@ -1970,6 +1971,7 @@ export default function YedekParcaTransferPage() {
         stokAdi: item.stokAdi,
         anaBirim: item.anaBirim || 'Adet',
         serialNumber: item.serialNumber || '',
+        ...(item.hucreNumarasi ? { hucreNumarasi: item.hucreNumarasi } : {}),
         fromUid: item.ownerUid,
         fromName: item.ownerName,
         quantity: item.quantity || 1,
@@ -2009,7 +2011,7 @@ export default function YedekParcaTransferPage() {
       return;
     }
 
-    const shouldDelete = window.confirm(`${item.stokKodu} (${item.serialNumber || 'Seri No Yok'}) havuz stok kaydı silinsin mi?`);
+    const shouldDelete = window.confirm(`${item.stokKodu} (${item.serialNumber || item.hucreNumarasi || 'Seri/Hücre No Yok'}) havuz stok kaydı silinsin mi?`);
     if (!shouldDelete) return;
 
     try {
@@ -2077,6 +2079,7 @@ export default function YedekParcaTransferPage() {
           anaBirim: pendingReturn.anaBirim || 'Adet',
           cihazGrubu: pc?.cihazGrubu || '',
           serialNumber: pendingReturn.serialNumber || '',
+          ...((pendingReturn as any).hucreNumarasi ? { hucreNumarasi: (pendingReturn as any).hucreNumarasi } : {}),
           address: '',
           quantity: 1,
           partCondition: pendingReturn.returnCondition || 'iyi',
@@ -2095,6 +2098,7 @@ export default function YedekParcaTransferPage() {
           anaBirim: pendingReturn.anaBirim || 'Adet',
           cihazGrubu: pc?.cihazGrubu || '',
           serialNumber: pendingReturn.serialNumber || '',
+          ...((pendingReturn as any).hucreNumarasi ? { hucreNumarasi: (pendingReturn as any).hucreNumarasi } : {}),
           address: '',
           quantity: 1,
           relatedPersonnelUid: pendingReturn.ownerUid,
@@ -2114,6 +2118,7 @@ export default function YedekParcaTransferPage() {
         stokAdi: pendingReturn.stokAdi,
           anaBirim: pendingReturn.anaBirim || 'Adet',
         serialNumber: pendingReturn.serialNumber,
+        ...((pendingReturn as any).hucreNumarasi ? { hucreNumarasi: (pendingReturn as any).hucreNumarasi } : {}),
         fromUid: pendingReturn.ownerUid,
         fromName: pendingReturn.ownerName,
         notes: `İade durumu: ${pendingReturn.returnCondition || 'iyi'}${pendingReturn.returnConditionNote ? ` (${pendingReturn.returnConditionNote})` : ''}`,
@@ -2124,7 +2129,7 @@ export default function YedekParcaTransferPage() {
 
       toast({
         title: 'Teslim Alındı',
-        description: `${pendingReturn.stokAdi} (${pendingReturn.serialNumber || 'Seri No Yok'}) depoya teslim alındı (${pendingReturn.returnCondition || 'iyi'}).`,
+        description: `${pendingReturn.stokAdi} (${pendingReturn.serialNumber || (pendingReturn as any).hucreNumarasi || 'Seri/Hücre No Yok'}) depoya teslim alındı (${pendingReturn.returnCondition || 'iyi'}).`,
       });
 
       setPendingReturns(prev => prev.filter(p => p.id !== pendingReturn.id));
@@ -2165,6 +2170,7 @@ export default function YedekParcaTransferPage() {
         stokAdi: returnModalItem.stokAdi,
         anaBirim: returnModalItem.anaBirim || 'Adet',
         serialNumber: returnModalItem.serialNumber || '',
+        ...(returnModalItem.hucreNumarasi ? { hucreNumarasi: returnModalItem.hucreNumarasi } : {}),
         source: returnModalItem.source,
         returnType: 'return_to_depot' as const,
         returnCondition,
@@ -2189,7 +2195,7 @@ export default function YedekParcaTransferPage() {
       setReturnNote('');
       toast({
         title: 'İade Talebi Gönderildi',
-        description: `${returnModalItem.stokAdi} için iade talebi lojistik sorumlusuna iletildi.`,
+        description: `${returnModalItem.stokAdi} (${returnModalItem.serialNumber || returnModalItem.hucreNumarasi || 'Seri/Hücre No Yok'}) için iade talebi lojistik sorumlusuna iletildi.`,
       });
       await loadRecentTransferLogs();
     } catch (err) {
@@ -2650,6 +2656,7 @@ export default function YedekParcaTransferPage() {
           stokAdi: item.stokAdi,
           anaBirim: item.anaBirim || 'Adet',
           serialNumber: item.serialNumber || '',
+          ...(item.hucreNumarasi ? { hucreNumarasi: item.hucreNumarasi } : {}),
           toUid: item.ownerUid,
           toName: item.ownerName,
           quantity: 1,
@@ -2661,7 +2668,7 @@ export default function YedekParcaTransferPage() {
 
       toast({
         title: 'Onaylandı',
-        description: `${item.stokAdi} (${item.serialNumber || item.stokKodu}) stoğunuza eklendi.`,
+        description: `${item.stokAdi} (${item.serialNumber || item.hucreNumarasi || item.stokKodu}) stoğunuza eklendi.`,
       });
 
       if (menuSelection.personnelUid) {
@@ -2686,7 +2693,7 @@ export default function YedekParcaTransferPage() {
   const rejectTransfer = async (item: PersonnelStockViewItem) => {
     const hasPreviousOwner = !!(item as any).previousOwnerUid;
     const returnLabel = hasPreviousOwner ? `${(item as any).previousOwnerName} adlı personele geri gönderilecektir` : 'depoya geri gönderilecektir';
-    const shouldReject = window.confirm(`${item.stokKodu} (${item.serialNumber || 'Seri No Yok'}) transferini reddetmek istediğinize emin misiniz? Ürün ${returnLabel}.`);
+    const shouldReject = window.confirm(`${item.stokKodu} (${item.serialNumber || item.hucreNumarasi || 'Seri/Hücre No Yok'}) transferini reddetmek istediğinize emin misiniz? Ürün ${returnLabel}.`);
     if (!shouldReject) return;
 
     try {
@@ -2725,6 +2732,7 @@ export default function YedekParcaTransferPage() {
             stokAdi: item.stokAdi,
             anaBirim: item.anaBirim || 'Adet',
             serialNumber: item.serialNumber || '',
+            ...(item.hucreNumarasi ? { hucreNumarasi: item.hucreNumarasi } : {}),
             fromUid: item.ownerUid,
             fromName: item.ownerName,
             toUid: (item as any).previousOwnerUid,
@@ -2762,6 +2770,7 @@ export default function YedekParcaTransferPage() {
             stokAdi: item.stokAdi,
             anaBirim: item.anaBirim || 'Adet',
             serialNumber: item.serialNumber || '',
+            ...(item.hucreNumarasi ? { hucreNumarasi: item.hucreNumarasi } : {}),
             fromUid: item.ownerUid,
             fromName: item.ownerName,
             quantity: 1,
@@ -2779,6 +2788,7 @@ export default function YedekParcaTransferPage() {
             stokAdi: item.stokAdi,
             anaBirim: item.anaBirim || 'Adet',
             serialNumber: item.serialNumber || '',
+            ...(item.hucreNumarasi ? { hucreNumarasi: item.hucreNumarasi } : {}),
             quantity: 1,
             relatedPersonnelUid: item.ownerUid,
             relatedPersonnelName: item.ownerName,
@@ -2794,7 +2804,7 @@ export default function YedekParcaTransferPage() {
         title: 'Reddedildi',
         description: hasPreviousOwner
           ? `${item.stokAdi} transferi reddedildi, ürün ${(item as any).previousOwnerName} adlı personele geri gönderildi.`
-          : `${item.stokAdi} (${item.serialNumber || item.stokKodu}) transferi reddedildi, ürün depoya iade edildi.`,
+          : `${item.stokAdi} (${item.serialNumber || item.hucreNumarasi || item.stokKodu}) transferi reddedildi, ürün depoya iade edildi.`,
       });
 
       if (menuSelection.personnelUid) {
