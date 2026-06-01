@@ -6,6 +6,7 @@ import { AuthProvider } from "@/contexts/auth-context";
 import { QueryProvider } from "@/contexts/query-context";
 import { Toaster } from "@/components/ui/toaster";
 import MobileResponsiveFix from "@/components/responsive/MobileResponsiveFix";
+import WebVitalsReporter from "@/components/perf/WebVitalsReporter";
 import React from "react";
 
 
@@ -55,6 +56,7 @@ export default function RootLayout({
               <MobileResponsiveFix />
               {children}
               <Toaster />
+              <WebVitalsReporter />
             </QueryProvider>
           </AuthProvider>
         </ThemeProvider>
