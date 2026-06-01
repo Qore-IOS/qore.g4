@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import type { Depot, ProductCode, AddressDefinition, Hospital, DeviceLabPool } from '@/lib/types';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, addDoc, setDoc, deleteDoc, doc, query, orderBy } from 'firebase/firestore';
+import { collection, addDoc, setDoc, deleteDoc, doc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -17,7 +17,7 @@ import MapDefinitionModal from '@/components/MapDefinitionModal';
 import MinMaxSettingsPanel from '@/components/MinMaxSettingsPanel';
 import dynamic from 'next/dynamic';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { getScopedDocs } from '@/lib/firestore-helpers';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 
 const LocationPicker = dynamic(() => import('@/components/LocationPicker'), {
@@ -48,17 +48,21 @@ export default function DepoYonetimPanel() {
     setIsLoading(true);
     try {
       const [depotsSnap, productsSnap, hospitalsSnap, addressesSnap, poolsSnap] = await Promise.all([
-        getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('addressDefinitions', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
+        getScopedDocs('depots', currentCompanyId, isSuperAdmin),
+        getScopedDocs('productCodes', currentCompanyId, isSuperAdmin),
+        getScopedDocs('hospitals', currentCompanyId, isSuperAdmin),
+        getScopedDocs('addressDefinitions', currentCompanyId, isSuperAdmin),
+        getScopedDocs('deviceLabPools', currentCompanyId, isSuperAdmin),
       ]);
-      setDepots(filterByCompanyScope(depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)), currentCompanyId, isSuperAdmin));
-      setProductCodes(productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
-      setHospitals(filterByCompanyScope(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)), currentCompanyId, isSuperAdmin));
-      setAddressDefinitions(filterByCompanyScope(addressesSnap.docs.map(d => ({ id: d.id, ...d.data() } as AddressDefinition)), currentCompanyId, isSuperAdmin));
-      setDeviceLabPools(filterByCompanyScope(poolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceLabPool)), currentCompanyId, isSuperAdmin));
+      setDepots(filterByCompanyScope(depotsSnap.map(d => ({ id: d.id, ...d.data() } as Depot)), currentCompanyId, isSuperAdmin));
+      setProductCodes(productsSnap.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
+      setHospitals(filterByCompanyScope(hospitalsSnap.map(d => ({ id: d.id, ...d.data() } as Hospital)), currentCompanyId, isSuperAdmin));
+      setAddressDefinitions(filterByCompanyScope(addressesSnap.map(d => ({ id: d.id, ...d.data() } as AddressDefinition)), currentCompanyId, isSuperAdmin));
+      setDeviceLabPools(filterByCompanyScope(poolsSnap.map(d => ({ id: d.id, ...d.data() } as DeviceLabPool)), currentCompanyId, isSuperAdmin).sort((a, b) => {
+        const aMs = (a as any).createdAt?.toMillis?.() ?? (a as any).createdAt?.toDate?.()?.getTime?.() ?? 0;
+        const bMs = (b as any).createdAt?.toMillis?.() ?? (b as any).createdAt?.toDate?.()?.getTime?.() ?? 0;
+        return bMs - aMs;
+      }));
     } catch (e) {
       toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
     } finally {

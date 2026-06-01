@@ -1,9 +1,9 @@
 'use client';
 import React, { useEffect, useState, useCallback } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, doc, getDocs, orderBy, query, setDoc, deleteDoc, deleteField } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, deleteField } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { getScopedDocs } from '@/lib/firestore-helpers';
 import type { BarcodeFormat, ExpiryPattern } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -100,15 +100,15 @@ export default function SeriNoFormatPanel() {
   const fetchFormats = useCallback(async () => {
     setIsLoading(true);
     try {
-        const snap = await getDocs(scopedQuery('barcodeFormats', currentCompanyId, isSuperAdmin, orderBy('priority', 'asc')));
-        const rawFormats = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
-        setFormats(rawFormats.map(f => normalizeFormat(f) as BarcodeFormat));
+        const docs = await getScopedDocs('barcodeFormats', currentCompanyId, isSuperAdmin);
+        const rawFormats = docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+        setFormats(rawFormats.map(f => normalizeFormat(f) as BarcodeFormat).sort((a, b) => (a.priority ?? 10) - (b.priority ?? 10)));
     } catch (error) {
         console.error("Format fetch error:", error);
     } finally {
         setIsLoading(false);
     }
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   useEffect(() => { fetchFormats(); }, [fetchFormats]);
 
