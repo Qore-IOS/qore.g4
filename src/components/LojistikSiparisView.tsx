@@ -15,7 +15,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { getScopedDocs, scopedQuery } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 import type { Order, Hospital, ProductCode, DepoStokItem, PeripheralFulfillmentItem, Depot } from '@/lib/types';
 import { format as formatDate, compareAsc, parse as parseDate } from 'date-fns';
@@ -131,22 +131,16 @@ export default function LojistikSiparisView() {
   const [labGroupNamesById, setLabGroupNamesById] = useState<Map<string, string>>(new Map());
 
   // Build the set of group names the current user (lojistik sorumlusu) is responsible for.
-  // Empty set when the user has no assignedLabGroups (no group-based filtering applies).
+  // assignedLabGroups can contain either definition document IDs or legacy group names.
   const userGroupNames = useMemo(() => {
     const out = new Set<string>();
     const ids = currentUserProfile?.assignedLabGroups ?? [];
     if (!ids.length) return out;
-    const allKnownNames = new Set(Array.from(labGroupNamesById.values()));
     for (const entry of ids) {
-      if (!entry) continue;
-      const byId = labGroupNamesById.get(entry);
-      if (byId) {
-        out.add(byId);
-        continue;
-      }
-      // Legacy data tolerance: entry might be a name instead of doc ID.
-      const trimmed = String(entry).trim();
-      if (allKnownNames.has(trimmed)) out.add(trimmed);
+      const trimmed = String(entry || '').trim();
+      if (!trimmed) continue;
+      const byId = labGroupNamesById.get(trimmed);
+      out.add(byId || trimmed);
     }
     return out;
   }, [currentUserProfile?.assignedLabGroups, labGroupNamesById]);
@@ -164,7 +158,7 @@ export default function LojistikSiparisView() {
 
   // True when the current user has at least one assigned lab group; if so, list/detail
   // views are scoped to items whose product group is in `userGroupNames`.
-  const groupFilteringActive = userGroupNames.size > 0;
+  const groupFilteringActive = (currentUserProfile?.assignedLabGroups?.length ?? 0) > 0 && userGroupNames.size > 0;
 
   const itemBelongsToUserGroup = useCallback(
     (stokKodu: string | undefined | null): boolean => {
@@ -180,68 +174,99 @@ export default function LojistikSiparisView() {
 
   // Fetch hospitals, products, depots and lab groups
   useEffect(() => {
+    let cancelled = false;
+
     (async () => {
-      const [hSnap, pSnap, dSnap, lgSnap] = await Promise.all([
-        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('def_labGroups', currentCompanyId, isSuperAdmin)),
+      const [hResult, pResult, dResult, lgResult] = await Promise.allSettled([
+        getScopedDocs('hospitals', currentCompanyId, isSuperAdmin),
+        getScopedDocs('productCodes', currentCompanyId, isSuperAdmin),
+        getScopedDocs('depots', currentCompanyId, isSuperAdmin),
+        getScopedDocs('def_labGroups', currentCompanyId, isSuperAdmin),
       ]);
-      setHospitals(hSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Hospital)));
-      setProductCodes(pSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ProductCode)));
-      setDepots(dSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Depot)));
-      const lgMap = new Map<string, string>();
-      lgSnap.docs.forEach((d) => {
-        const name = (d.data() as any)?.name;
-        if (name) lgMap.set(d.id, String(name).trim());
-      });
-      setLabGroupNamesById(lgMap);
+
+      if (cancelled) return;
+
+      if (hResult.status === 'fulfilled') {
+        setHospitals(hResult.value.map((d) => ({ id: d.id, ...d.data() } as Hospital)));
+      }
+      if (pResult.status === 'fulfilled') {
+        setProductCodes(pResult.value.map((d) => ({ id: d.id, ...d.data() } as ProductCode)));
+      }
+      if (dResult.status === 'fulfilled') {
+        setDepots(dResult.value.map((d) => ({ id: d.id, ...d.data() } as Depot)));
+      }
+      if (lgResult.status === 'fulfilled') {
+        const lgMap = new Map<string, string>();
+        lgResult.value.forEach((d) => {
+          const name = (d.data() as any)?.name;
+          if (name) lgMap.set(d.id, String(name).trim());
+        });
+        setLabGroupNamesById(lgMap);
+      } else {
+        console.error('Lojistik lab grupları yüklenemedi:', lgResult.reason);
+      }
     })();
-  }, []);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentCompanyId, isSuperAdmin]);
 
   // Listen peripheral orders
   useEffect(() => {
     const q = scopedQuery('orders', currentCompanyId, isSuperAdmin, where('isPeripheral', '==', true));
-    const unsub = onSnapshot(q, (snap) => {
-      const rowsData = snap.docs.map((d) => {
-        const data = d.data();
-        return {
-          ...data,
-          id: d.id,
-          createdAt: (data.createdAt as Timestamp)?.toDate?.() ?? new Date(),
-        } as Order;
-      });
-      const active: Order[] = [];
-      const completed: Order[] = [];
-      rowsData.forEach((o) => {
-        // Visibility rules:
-        // - Lojistik users with assignedLabGroups: show orders that contain at least
-        //   one item whose product is in one of their groups.
-        // - Otherwise fall back to legacy lab-ID-based filtering.
-        if (groupFilteringActive) {
-          const items = Array.isArray(o.items) ? o.items : [];
-          const hasMatchingItem = items.some((it: any) => itemBelongsToUserGroup(it?.stokKodu));
-          if (!hasMatchingItem) return;
-        } else {
-          if (!o.labId || !assignedLabIds.has(o.labId)) return;
-        }
-        if (o.status === 'completed') completed.push(o);
-        else active.push(o);
-      });
-      active.sort(
-        (a, b) =>
-          ((b.createdAt as Date)?.getTime?.() ?? 0) - ((a.createdAt as Date)?.getTime?.() ?? 0)
-      );
-      completed.sort(
-        (a, b) =>
-          ((b.createdAt as Date)?.getTime?.() ?? 0) - ((a.createdAt as Date)?.getTime?.() ?? 0)
-      );
-      setPeripheralOrders(active);
-      setCompletedOrders(completed);
-      setIsLoading(false);
-    });
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const rowsData = snap.docs.map((d) => {
+          const data = d.data();
+          return {
+            ...data,
+            id: d.id,
+            createdAt: (data.createdAt as Timestamp)?.toDate?.() ?? new Date(),
+          } as Order;
+        });
+        const active: Order[] = [];
+        const completed: Order[] = [];
+        rowsData.forEach((o) => {
+          // Visibility rules:
+          // - Lojistik users with assignedLabGroups: show orders that contain at least
+          //   one item whose product is in one of their groups.
+          // - Otherwise fall back to legacy lab-ID-based filtering.
+          if (groupFilteringActive) {
+            const items = Array.isArray(o.items) ? o.items : [];
+            const hasMatchingItem = items.some((it: any) => itemBelongsToUserGroup(it?.stokKodu));
+            if (!hasMatchingItem) return;
+          } else {
+            if (!o.labId || !assignedLabIds.has(o.labId)) return;
+          }
+          if (o.status === 'completed') completed.push(o);
+          else active.push(o);
+        });
+        active.sort(
+          (a, b) =>
+            ((b.createdAt as Date)?.getTime?.() ?? 0) - ((a.createdAt as Date)?.getTime?.() ?? 0)
+        );
+        completed.sort(
+          (a, b) =>
+            ((b.createdAt as Date)?.getTime?.() ?? 0) - ((a.createdAt as Date)?.getTime?.() ?? 0)
+        );
+        setPeripheralOrders(active);
+        setCompletedOrders(completed);
+        setIsLoading(false);
+      },
+      (error) => {
+        console.error('Lojistik sipariş dinleyici hatası:', error);
+        setIsLoading(false);
+        toast({
+          title: 'Siparişler yüklenemedi',
+          description: 'Yetki veya bağlantı nedeniyle sipariş verileri alınamadı.',
+          variant: 'destructive',
+        });
+      }
+    );
     return () => unsub();
-  }, [assignedLabIds, groupFilteringActive, itemBelongsToUserGroup]);
+  }, [assignedLabIds, currentCompanyId, groupFilteringActive, isSuperAdmin, itemBelongsToUserGroup, toast]);
 
   const selectedOrder = useMemo(() => {
     if (!selectedOrderId) return null;
