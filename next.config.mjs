@@ -5,13 +5,20 @@
  * @version 2.0.0
  */
 
-import withBundleAnalyzerInit from "@next/bundle-analyzer";
-
 // Faz 0 ölçüm: `ANALYZE=true pnpm analyze` ile rota bazlı bundle raporu üretir.
 // ANALYZE set değilse hiçbir etkisi yoktur (normal build'i değiştirmez).
-const withBundleAnalyzer = withBundleAnalyzerInit({
-  enabled: process.env.ANALYZE === "true",
-});
+let withBundleAnalyzer = (config) => config;
+
+if (process.env.ANALYZE === "true") {
+  try {
+    const withBundleAnalyzerInit = (await import("@next/bundle-analyzer")).default;
+    withBundleAnalyzer = withBundleAnalyzerInit({
+      enabled: true,
+    });
+  } catch (e) {
+    console.warn("Bundle analyzer could not be loaded:", e);
+  }
+}
 
 /** @type {import('next').NextConfig} */
 const config = {
