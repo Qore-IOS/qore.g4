@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useMemo } from 'react';
 import {
   getAuth, onAuthStateChanged, User as FirebaseUser, signOut as firebaseSignOut,
   createUserWithEmailAndPassword, signInWithEmailAndPassword, GoogleAuthProvider,
@@ -93,34 +93,34 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   }, []);
 
-  const toggleOrbAnimation = () => {
+  const toggleOrbAnimation = useCallback(() => {
     setIsOrbAnimationEnabled(prev => {
       const newState = !prev;
       localStorage.setItem('orb_animation_enabled', String(newState));
       return newState;
     });
-  };
-  
-  const toggleNavMode = () => {
+  }, []);
+
+  const toggleNavMode = useCallback(() => {
     setNavMode(prev => {
         const newMode = prev === 'dock' ? 'sidebar' : 'dock';
         localStorage.setItem('nav_mode', newMode);
         return newMode;
     });
-  };
+  }, []);
 
-  const setDockStyle = (style: DockStyle) => {
+  const setDockStyle = useCallback((style: DockStyle) => {
     setDockStyleState(style);
     localStorage.setItem('dock_style', style);
-  };
+  }, []);
 
-  const setWallpaper = (mode: 'light' | 'dark', path: string | null) => {
+  const setWallpaper = useCallback((mode: 'light' | 'dark', path: string | null) => {
     setWallpaperState(prev => {
       const next = { ...prev, [mode]: path };
       localStorage.setItem('wallpaper_settings', JSON.stringify(next));
       return next;
     });
-  };
+  }, []);
 
   // Save theme preference to Firestore and apply it
   const setUserTheme = useCallback(async (newTheme: ThemePreference) => {
@@ -159,7 +159,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           setPermissions([]);
         } else {
             const userDocRef = doc(db, "users", user.uid);
-            const userDocSnap = await getDoc(userDocRef);
+            // PERF (Faz 1): Doküman okuması ve (cache'li) token claim'lerini PARALEL
+            // çalıştır. Önceden getDoc -> getIdTokenResult(true) seri ve force-refresh
+            // idi; ikisi de setIsLoadingAuth(false)'tan önce await edildiği için her
+            // açılışta iki seri network round-trip ilk boyamayı bloke ediyordu.
+            // Artık cache'li token (force YOK) kullanılıyor; claim eksikse arka planda
+            // zorla yenileniyor. Firestore Security Rules zaten server-side token
+            // claim'lerini kullanır; client companyId yalnızca scoped query'ler içindir.
+            const [userDocSnap, tokenResult] = await Promise.all([
+              getDoc(userDocRef),
+              user.getIdTokenResult().catch(() => null),
+            ]);
             if (userDocSnap.exists()) {
               const userData = userDocSnap.data() as User;
               const userPermissions = userData.accessibleViews || [];
@@ -170,19 +180,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                   userPermissions.push('kullanici-talepleri');
               }
 
-              // Force-refresh ID token so we pick up custom claims set by the
-              // onUserClaimSync Cloud Function. Token claims are the source of
-              // truth for Firestore Security Rules (Faz 6). Falls back to the
-              // users doc if claims haven't propagated yet.
-              let claimCompanyId: string | undefined;
-              let claimIsSuperAdmin: boolean | undefined;
-              try {
-                const tokenResult = await user.getIdTokenResult(true);
-                claimCompanyId = tokenResult.claims.companyId as string | undefined;
-                claimIsSuperAdmin = tokenResult.claims.isSuperAdmin as boolean | undefined;
-              } catch (err) {
-                console.warn('Token claim okunamadı, users doc fallback:', err);
-              }
+              const claimCompanyId = tokenResult?.claims.companyId as string | undefined;
+              const claimIsSuperAdmin = tokenResult?.claims.isSuperAdmin as boolean | undefined;
 
               setCurrentUserProfile({...userData, accessibleViews: userPermissions});
               setIsSuperAdmin(claimIsSuperAdmin ?? userData.role === 'super_admin');
@@ -190,6 +189,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               setIsAdminDeveloper(userData.role === 'super_admin' || userData.role === 'admin_developer' || user.uid === ADMIN_USER_UID);
               setCurrentCompanyId(claimCompanyId || userData.companyId || LEGACY_COMPANY_ID);
               setPermissions(userPermissions);
+
+              // Claim'ler cache'li token'da yoksa (yeni kullanıcı veya onUserClaimSync
+              // henüz propagate etmediyse) arka planda zorla yenile — ilk boyamayı
+              // BLOKE ETMEDEN — ve geldiğinde companyId/superadmin'i güncelle.
+              if (!claimCompanyId) {
+                user.getIdTokenResult(true)
+                  .then((fresh) => {
+                    const freshCompanyId = fresh.claims.companyId as string | undefined;
+                    const freshIsSuperAdmin = fresh.claims.isSuperAdmin as boolean | undefined;
+                    if (freshCompanyId) setCurrentCompanyId(freshCompanyId);
+                    if (freshIsSuperAdmin !== undefined) setIsSuperAdmin(freshIsSuperAdmin);
+                  })
+                  .catch(() => { /* sessizce geç; users doc fallback geçerli */ });
+              }
 
               // Force dark mode for 'user' role, otherwise apply user's preference
               if (userData.role === 'user') {
@@ -241,21 +254,21 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return () => unsubscribe();
   }, [auth]);
 
-  const login = async (email: string, pass: string) => {
+  const login = useCallback(async (email: string, pass: string) => {
     try {
       const userCredential = await signInWithEmailAndPassword(auth, email, pass);
       return userCredential.user;
-    } catch (error: any) { 
+    } catch (error: any) {
       if (error.code === 'auth/invalid-credential') {
         console.info("Login attempt failed (invalid credentials):", error.message);
       } else {
         console.error("Login error:", error);
       }
-      throw error; 
+      throw error;
     }
-  };
-  
-  const loginWithCustomToken = async (token: string) => {
+  }, [auth]);
+
+  const loginWithCustomToken = useCallback(async (token: string) => {
     try {
       const userCredential = await signInWithCustomToken(auth, token);
       return userCredential.user;
@@ -263,9 +276,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.error("Custom token sign-in error:", error);
       throw error;
     }
-  };
+  }, [auth]);
 
-  const loginWithGoogle = async () => {
+  const loginWithGoogle = useCallback(async () => {
     const provider = new GoogleAuthProvider();
     try {
       const result = await signInWithPopup(auth, provider);
@@ -274,9 +287,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.error("Google sign-in error:", error);
       throw error;
     }
-  };
-  
-  const loginAnonymously = async () => {
+  }, [auth]);
+
+  const loginAnonymously = useCallback(async () => {
     try {
       const result = await signInAnonymously(auth);
       return result.user;
@@ -284,9 +297,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.error("Anonymous sign-in error:", error);
       throw error;
     }
-  };
+  }, [auth]);
 
-  const signup = async (email: string, pass: string, additionalData: Partial<User> = {}) => {
+  const signup = useCallback(async (email: string, pass: string, additionalData: Partial<User> = {}) => {
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, pass);
       const user = userCredential.user;
@@ -315,16 +328,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       console.error("Signup error:", error);
       throw error;
     }
-  };
+  }, [auth]);
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
     try {
       await safeSignOut();
       router.push('/login');
     } catch (error) {
       console.error("Logout error:", error);
     }
-  };
+  }, [router]);
 
   // Listen for forceLogout flag and auto-logout time from personnel groups
   useEffect(() => {
@@ -419,7 +432,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     };
   }, [currentUser]);
 
-  const contextValue = {
+  // PERF (Faz 1): AuthProvider tüm uygulamayı sarıyor. Daha önce bu obje her
+  // render'da yeniden oluşuyordu (fonksiyonlar da dahil), bu yüzden alakasız bir
+  // render bile tüm context tüketicilerini yeniden render ediyordu. Artık değer ve
+  // fonksiyonlar memoize; obje yalnızca gerçek auth/UI state değişiminde değişir.
+  const contextValue = useMemo(() => ({
     currentUser,
     currentUserProfile,
     isLoadingAuth,
@@ -444,7 +461,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     loginWithGoogle,
     loginAnonymously,
     loginWithCustomToken,
-  };
+  }), [
+    currentUser, currentUserProfile, isLoadingAuth, isAdmin, isAdminDeveloper,
+    isSuperAdmin, currentCompanyId, permissions, isOrbAnimationEnabled,
+    toggleOrbAnimation, navMode, toggleNavMode, dockStyle, setDockStyle,
+    themePreference, setUserTheme, wallpaper, setWallpaper, login, signup,
+    logout, loginWithGoogle, loginAnonymously, loginWithCustomToken,
+  ]);
 
   return (
     <AuthContext.Provider value={contextValue}>

@@ -21,6 +21,16 @@ const config = {
   // Remove X-Powered-By header for security
   poweredByHeader: false,
 
+  // PERF (Faz 1): Production'da console.* çağrılarını kaldır (error/warn hariç).
+  // Kod tabanında 727 console çağrısı vardı; her biri prod'da ana thread'de
+  // çalışıp argümanları serialize ediyordu (SW/FCM log seli). error/warn,
+  // prod teşhisi için korunur. Dev build'i etkilenmez.
+  compiler: {
+    removeConsole: {
+      exclude: ["error", "warn"],
+    },
+  },
+
   // ESLint Configuration
   // TEMPORARILY DISABLED: Set to false after fixing all linting errors
   // This allows production deployment while lint errors are being resolved
@@ -50,6 +60,15 @@ const config = {
   // Experimental features
   experimental: {
     serverComponentsExternalPackages: ["@napi-rs/canvas", "canvas"],
+    // PERF (Faz 1): Barrel paketlerden yalnızca kullanılan export'ları al →
+    // paylaşılan/rota bundle'larını küçültür. lucide-react 268 dosyada import
+    // ediliyor; date-fns/recharts/framer-motion ağır barrel'lar.
+    optimizePackageImports: [
+      "lucide-react",
+      "date-fns",
+      "recharts",
+      "framer-motion",
+    ],
   },
 
   // Webpack configuration
