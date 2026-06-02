@@ -172,6 +172,13 @@ function SidebarNotificationsBell({ collapsed }: { collapsed: boolean }) {
 
 export default function QoreTechnicShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || '';
+  // Arıza detayı (/ariza-yonetimi/[id]) KENDİ tam-sayfa shell'ine (fault-clay-page +
+  // fault-topbar) sahip. Shell'in mobil üst başlığı çift "QORE technic" yaratıyordu →
+  // bu rotada shell başlığını gizle (alt nav korunur). İstatistik/diğer-firma hariç.
+  const isFaultDetailPage =
+    pathname.startsWith('/ariza-yonetimi/') &&
+    !pathname.startsWith('/ariza-yonetimi/istatistikler') &&
+    !pathname.startsWith('/ariza-yonetimi/diger-firma-gecmisi');
   const router = useRouter();
   const { currentUserProfile, logout } = useAuth();
   const role = currentUserProfile?.role;
@@ -408,10 +415,13 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
         </div>
       </aside>
 
-      {/* Mobile top brand */}
-      <header className="qore-technic-mobile-header md:hidden">
-        <QoreTechnicBrand align="center" size="md" />
-      </header>
+      {/* Mobile top brand — arıza detayı kendi başlığına (fault-topbar) sahip olduğundan
+          çift "QORE technic" başlığı olmaması için bu rotada gizlenir. */}
+      {!isFaultDetailPage && (
+        <header className="qore-technic-mobile-header md:hidden">
+          <QoreTechnicBrand align="center" size="md" />
+        </header>
+      )}
 
       {/* Main content area */}
       <main className="qore-technic-main qt-content">
