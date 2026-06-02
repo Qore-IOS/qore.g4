@@ -33,7 +33,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { getScopedDocs } from '@/lib/firestore-helpers';
 import { db } from '@/lib/firebase';
 import {
   collection,
@@ -681,17 +681,22 @@ export default function UrunTalepPanel() {
 
 
   // -- Data Fetching --
+  // Legacy-aware: getScopedDocs eski/__legacy__ etiketli kayıtları da getirir.
+  // Aksi halde min-max kuralları (hospitals/{id}/minMaxRules subkoleksiyonunda)
+  // legacy bir stokKodu referanslıyorsa, allProducts içinde eşleşen ürün
+  // bulunmadığı için availableProducts boş kalıyor ve hiçbir kullanıcı
+  // ürünleri göremiyor.
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [depotSnap, hospitalSnap, productSnap] = await Promise.all([
-        getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+      const [depotDocs, hospitalDocs, productDocs] = await Promise.all([
+        getScopedDocs('depots', currentCompanyId, isSuperAdmin),
+        getScopedDocs('hospitals', currentCompanyId, isSuperAdmin),
+        getScopedDocs('productCodes', currentCompanyId, isSuperAdmin),
       ]);
-      setDepots(depotSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)));
-      setAllHospitals(hospitalSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
-      setAllProducts(productSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
+      setDepots(depotDocs.map(d => ({ id: d.id, ...d.data() } as Depot)));
+      setAllHospitals(hospitalDocs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
+      setAllProducts(productDocs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
     } catch (err) {
       console.error('Error fetching initial data:', err);
       toast({ title: 'Hata', description: 'Gerekli veriler yüklenemedi.', variant: 'destructive' });
