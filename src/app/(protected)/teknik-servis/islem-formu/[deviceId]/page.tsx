@@ -24,7 +24,6 @@ import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import TeknikServisTutanakPDFButton, { generateTeknikServisTutanakPDF } from '@/components/exports/TeknikServisTutanakPDFButton';
 import SignaturePad from '@/components/SignaturePad';
 import type { SignaturePadRef } from '@/components/SignaturePad';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
@@ -2228,42 +2227,9 @@ export default function IslemFormuPage() {
           throw new Error('Kaydedilecek cihaz aksiyonu bulunamadı.');
         }
 
-        // Decoupled DB and PDF for maximum speed
-        const dbPromise = batch.commit();
-        
-        // Start PDF generation immediately
-        const pdfPromises = createdFormsData.map(data =>
-           generateTeknikServisTutanakPDF(data.device, data.hospital, data.actionRecord as any, true, currentCompanyId, isSuperAdmin)
-        );
-
-        // Show WhatsApp button as soon as PDF is ready
-        Promise.all(pdfPromises).then(() => {
-          hapticDouble();
-          const firstForm = createdFormsData[0];
-          const waText = encodeURIComponent(
-            `🚀 *Teknik Servis İşlemi Tamamlandı*\n\n` +
-            `🏥 *Kurum:* ${firstForm.hospital?.name || '-'}\n` +
-            `🔬 *Cihaz:* ${firstForm.device.cihazAdi || firstForm.device.model || '-'}\n` +
-            `📋 *Form No:* ${firstForm.actionRecord.formNo || '-'}\n` +
-            `👨‍🔧 *Teknisyen:* ${currentUserProfile?.name || '-'}\n\n` +
-            `QORE Sistemi üzerinden detaylara ulaşabilirsiniz.`
-          );
-
-          toast({
-            title: 'Başarılı',
-            description: isLabMode ? 'Laboratuvar geneli form oluşturuldu ve PDF hazır.' : 'İşlem formu kaydedildi ve PDF hazır.',
-            action: (
-              <ToastAction altText="WhatsApp" onClick={() => window.open(`https://wa.me/?text=${waText}`, '_blank')}>
-                <div className="flex items-center gap-1.5">
-                  <MessageCircle className="h-4 w-4" />
-                  <span>WhatsApp</span>
-                </div>
-              </ToastAction>
-            )
-          });
-        });
-
-        await dbPromise;
+        // İşlem formunu kaydet. (Otomatik PDF açma kaldırıldı — formlar zaten WhatsApp'a
+        // otomatik iletiliyor; her kayıtta PDF üretip yeni sekmede açmaya gerek yok.)
+        await batch.commit();
 
         if (currentDraftId) await deleteDoc(doc(db, 'draftActionForms', currentDraftId));
 
@@ -2271,6 +2237,29 @@ export default function IslemFormuPage() {
         queryClient.invalidateQueries({ queryKey: ['maintenancePlans', 'forDevice', deviceId] });
         queryClient.invalidateQueries({ queryKey: ['deviceActionForms'] });
         queryClient.invalidateQueries({ queryKey: ['deviceFaultReports'] });
+
+        hapticDouble();
+        const firstForm = createdFormsData[0];
+        const waText = encodeURIComponent(
+          `🚀 *Teknik Servis İşlemi Tamamlandı*\n\n` +
+          `🏥 *Kurum:* ${firstForm.hospital?.name || '-'}\n` +
+          `🔬 *Cihaz:* ${firstForm.device.cihazAdi || firstForm.device.model || '-'}\n` +
+          `📋 *Form No:* ${firstForm.actionRecord.formNo || '-'}\n` +
+          `👨‍🔧 *Teknisyen:* ${currentUserProfile?.name || '-'}\n\n` +
+          `QORE Sistemi üzerinden detaylara ulaşabilirsiniz.`
+        );
+        toast({
+          title: 'Başarılı',
+          description: isLabMode ? 'Laboratuvar geneli form oluşturuldu.' : 'İşlem formu kaydedildi.',
+          action: (
+            <ToastAction altText="WhatsApp" onClick={() => window.open(`https://wa.me/?text=${waText}`, '_blank')}>
+              <div className="flex items-center gap-1.5">
+                <MessageCircle className="h-4 w-4" />
+                <span>WhatsApp</span>
+              </div>
+            </ToastAction>
+          )
+        });
 
       } catch (err) {
         console.error("Error saving action form (Optimistic):", err);
