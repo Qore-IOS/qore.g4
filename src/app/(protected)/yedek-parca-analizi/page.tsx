@@ -6,7 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
+import { where, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { Loader2, Package, Search, ArrowLeft, Monitor, Users, Warehouse, UserCheck, ChevronRight, Clock, CalendarClock, Building2, ChevronsUpDown, X } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
@@ -19,7 +19,7 @@ import { useRouter } from 'next/navigation';
 import type { Hospital } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { getScopedDocs } from '@/lib/firestore-helpers';
 
 interface TransferLog {
   id: string;
@@ -108,16 +108,21 @@ export default function YedekParcaAnaliziPage() {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [useOnDeviceSnap, borrowedPartSnap, hospitalsSnap, assignmentsSnap, devicesSnap] = await Promise.all([
-          getDocs(scopedQuery('sparePartTransferLogs', currentCompanyId, isSuperAdmin, where('action', '==', 'use_on_device'))),
-          getDocs(scopedQuery('sparePartTransferLogs', currentCompanyId, isSuperAdmin, where('action', '==', 'borrowed_part'))),
-          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-          getDocs(scopedQuery('hospitalDeviceAssignments', currentCompanyId, isSuperAdmin)),
-          getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
+        // Legacy-aware: getScopedDocs companyId'si eksik ya da __legacy__ etiketli
+        // eski sparePartTransferLogs/hospitals/devices kayıtlarını da getirir.
+        // scopedQuery'nin server-side where('companyId', '==', X) filtresi bu
+        // kayıtları dışarıda bırakıp panelde "sadece son birkaç" değişim
+        // görünmesine yol açıyordu (eski form+arıza işlemleri görünmez kalıyordu).
+        const [useOnDeviceDocs, borrowedPartDocs, hospitalDocs, assignmentDocs, deviceDocs] = await Promise.all([
+          getScopedDocs('sparePartTransferLogs', currentCompanyId, isSuperAdmin, where('action', '==', 'use_on_device')),
+          getScopedDocs('sparePartTransferLogs', currentCompanyId, isSuperAdmin, where('action', '==', 'borrowed_part')),
+          getScopedDocs('hospitals', currentCompanyId, isSuperAdmin),
+          getScopedDocs('hospitalDeviceAssignments', currentCompanyId, isSuperAdmin),
+          getScopedDocs('devices', currentCompanyId, isSuperAdmin),
         ]);
 
         const scopedHospitals = filterByCompanyScope(
-          hospitalsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Hospital)),
+          hospitalDocs.map((d) => ({ id: d.id, ...d.data() } as Hospital)),
           currentCompanyId,
           isSuperAdmin
         );
@@ -126,7 +131,7 @@ export default function YedekParcaAnaliziPage() {
 
         const dlMap = new Map<string, { labId: string; labName: string }>();
         filterByCompanyScope(
-          devicesSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+          deviceDocs.map((d) => ({ id: d.id, ...d.data() })),
           currentCompanyId,
           isSuperAdmin
         ).forEach((data) => {
@@ -137,7 +142,7 @@ export default function YedekParcaAnaliziPage() {
           }
         });
         filterByCompanyScope(
-          assignmentsSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+          assignmentDocs.map((d) => ({ id: d.id, ...d.data() })),
           currentCompanyId,
           isSuperAdmin
         ).forEach((data) => {
@@ -165,22 +170,29 @@ export default function YedekParcaAnaliziPage() {
         };
 
         // use_on_device: tüm onaylı parça değişimleri (form + arıza kaynaklı)
-        const useOnDeviceLogs = useOnDeviceSnap.docs.map(mapLog);
+        const useOnDeviceLogs = useOnDeviceDocs.map(mapLog);
 
         // borrowed_part: arızadan kaynaklanan ama henüz onaylanmamış veya hücre değişimleri
         // use_on_device ile zaten referans edilen borrowedPartId'leri çıkar (mükerrer sayımı önlemek için)
         const approvedBorrowedIds = new Set(useOnDeviceLogs.map(l => l.borrowedPartId).filter(Boolean));
-        const arizaBorrowedLogs = borrowedPartSnap.docs
+        const arizaBorrowedLogs = borrowedPartDocs
           .map(mapLog)
           .filter(l => l.formType === 'ariza_yonetimi' && !approvedBorrowedIds.has(l.id));
 
         const allLogs = [...useOnDeviceLogs, ...arizaBorrowedLogs];
 
         // Transfer loglarını şirketin cihazlarına göre filtrele (eski kayıtlarda companyId olmayabilir)
+        // companyId boş/__legacy__ kayıtlar getScopedDocs üzerinden geliyor; burada
+        // ek olarak deviceId şirket cihazlarıyla eşleşenleri de tutarak şirket dışı
+        // bir cihaza ait legacy log sızmasını engelliyoruz.
         setTransferLogs(
           isSuperAdmin
             ? allLogs
-            : allLogs.filter((log) => log.companyId === currentCompanyId || dlMap.has(log.deviceId))
+            : allLogs.filter((log) => {
+                const tag = (log.companyId || '').trim();
+                if (!tag || tag === '__legacy__') return dlMap.has(log.deviceId || '');
+                return tag === currentCompanyId;
+              })
         );
       } catch (error) {
         logFirestoreIndexHint(error, 'yedek-parca-analizi/fetchData');
@@ -253,14 +265,14 @@ export default function YedekParcaAnaliziPage() {
         return { id: log.id, date: log.createdAt, deviceName: log.deviceName || 'Bilinmiyor', labId: labInfo?.labId, labName: labInfo?.labName || 'Bilinmiyor', personnelUid: log.createdByUid, personnelName: log.createdByName, serialNumber: log.serialNumber, formType: log.formType };
       }).sort((a, b) => b.date.getTime() - a.date.getTime());
 
-      const [depoSnap, personalSnap] = await Promise.all([
-        getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin, where('stokKodu', '==', part.stokKodu))),
-        getDocs(scopedQuery('personalStock', currentCompanyId, isSuperAdmin, where('stokKodu', '==', part.stokKodu), where('status', '==', 'in_stock'))),
+      const [depoDocs, personalDocs] = await Promise.all([
+        getScopedDocs('yedekParcaDepoStok', currentCompanyId, isSuperAdmin, where('stokKodu', '==', part.stokKodu)),
+        getScopedDocs('personalStock', currentCompanyId, isSuperAdmin, where('stokKodu', '==', part.stokKodu), where('status', '==', 'in_stock')),
       ]);
 
       let depoStokCount = 0;
       for (const doc of filterByCompanyScope(
-        depoSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+        depoDocs.map((d) => ({ id: d.id, ...d.data() })),
         currentCompanyId,
         isSuperAdmin
       )) { depoStokCount += doc.quantity || 1; }
@@ -268,7 +280,7 @@ export default function YedekParcaAnaliziPage() {
       const personnelStokMap = new Map<string, { uid: string; name: string; count: number }>();
       let totalPersonnelStok = 0;
       for (const data of filterByCompanyScope(
-        personalSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+        personalDocs.map((d) => ({ id: d.id, ...d.data() })),
         currentCompanyId,
         isSuperAdmin
       )) {
