@@ -10,6 +10,7 @@ import { withCompanyScope } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { WizardFormSkeleton } from '@/components/perf/PanelSkeletons';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -2421,14 +2422,8 @@ export default function AplikasyonIslemFormuPage() {
   ], [islemTuru, baslangicTarihi, baslangicSaati, bitisTarihi, bitisSaati, actions, aciklama]);
 
   if (loading) {
-    return (
-      <div className="cihaz-shell flex items-center justify-center min-h-screen">
-        <div className="flex flex-col items-center gap-4">
-          <Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)]" />
-          <p className="text-sm text-[var(--dashboard-muted)]">Yükleniyor...</p>
-        </div>
-      </div>
-    );
+    // PERF (Faz 6 mobil): Spinner yerine form-layout skeleton → mobilde anında yapı.
+    return <WizardFormSkeleton />;
   }
   if (!device) {
     return (

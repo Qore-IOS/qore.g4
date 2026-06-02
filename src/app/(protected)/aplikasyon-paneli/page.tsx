@@ -13,7 +13,8 @@ import {
   useDeviceLabPools,
 } from '@/hooks/useFirebaseQueries';
 import AplikasyonPanel from '@/components/aplikasyon-panel';
-import { Loader2, Download, Upload } from 'lucide-react';
+import { HospitalGridPanelSkeleton } from '@/components/perf/PanelSkeletons';
+import { Download, Upload } from 'lucide-react';
 import { reserveActionFormNumber } from '@/lib/form-number';
 import { format } from 'date-fns';
 
@@ -69,7 +70,8 @@ export default function AplikasyonPaneliPage() {
 
 
   if (isLoading) {
-    return <div className="flex items-center justify-center h-full"><Loader2 className="h-10 w-10 animate-spin text-primary" /><p className="ml-4 text-lg">Aplikasyon Paneli Yükleniyor...</p></div>
+    // PERF (Faz 6 mobil): Spinner yerine layout-eşleşen skeleton → mobilde anında yapı.
+    return <HospitalGridPanelSkeleton />;
   }
 
   const buildScopedOptions = () => {
