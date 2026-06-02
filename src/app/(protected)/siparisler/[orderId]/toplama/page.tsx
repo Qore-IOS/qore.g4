@@ -32,7 +32,7 @@ import { useToast } from '@/hooks/use-toast';
 import useHidScanner from '@/hooks/useHidScanner';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { getScopedDocs, scopedQuery } from '@/lib/firestore-helpers';
 import { useLoading } from '@/contexts/loading-context';
 import { parse as parseDate, compareAsc } from 'date-fns';
 import { useBarcodeParser } from '@/hooks/useBarcodeParser';
@@ -191,22 +191,27 @@ export default function ToplamaPage() {
         }
 
         // 2. Fetch Dependent Data (Depot specific stock, etc.)
-        const [productsSnap, depoStokSnap, deviceGroupsSnap, hospitalsSnap, depotSnap] = await Promise.all([
-          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
-          getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('depotId', '==', orderData.depotId), where('isShipped', '==', false))),
-          getDocs(scopedQuery('def_deviceGroups', currentCompanyId, isSuperAdmin)),
-          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        // Legacy-aware: getScopedDocs companyId'si eksik ya da __legacy__ etiketli
+        // eski ürün/depoStok kayıtlarını da getirir. scopedQuery'nin server-side
+        // where('companyId', '==', X) filtresi bu kayıtları dışarıda bırakıyor;
+        // sonuçta barkod formatı doğru eşleşse bile resolveProductFromParsed
+        // ürünü bulamayıp "Barkod eşleşmedi" hatası ortaya çıkıyordu.
+        const [productDocs, depoStokDocs, deviceGroupDocs, hospitalDocs, depotSnap] = await Promise.all([
+          getScopedDocs('productCodes', currentCompanyId, isSuperAdmin),
+          getScopedDocs('depoStok', currentCompanyId, isSuperAdmin, where('depotId', '==', orderData.depotId), where('isShipped', '==', false)),
+          getScopedDocs('def_deviceGroups', currentCompanyId, isSuperAdmin),
+          getScopedDocs('hospitals', currentCompanyId, isSuperAdmin),
           getDoc(doc(db, 'depots', orderData.depotId)),
         ]);
 
-        const productsData = productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode));
+        const productsData = productDocs.map(d => ({ id: d.id, ...d.data() } as ProductCode));
         const depoStokData = filterByCompanyScope(
-          depoStokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
+          depoStokDocs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
           currentCompanyId,
           isSuperAdmin,
         );
-        const deviceGroupsData = deviceGroupsSnap.docs.map(d => ({id: d.id, ...d.data()} as DeviceGroup));
-        const hospitalsData = hospitalsSnap.docs.map(d => ({id: d.id, ...d.data()} as Hospital));
+        const deviceGroupsData = deviceGroupDocs.map(d => ({id: d.id, ...d.data()} as DeviceGroup));
+        const hospitalsData = hospitalDocs.map(d => ({id: d.id, ...d.data()} as Hospital));
 
         // Determine effective labId - try order.labId first, then find by kurumAdi
         let effectiveLabId = orderData.labId;
