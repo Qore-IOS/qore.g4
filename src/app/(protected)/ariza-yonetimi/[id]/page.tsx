@@ -23,9 +23,9 @@ import { scopedQuery } from '@/lib/firestore-helpers';
 import type { Device, DeviceFaultReport, DeviceFaultStatus, InterventionType, ProductCode, User, PersonalStockItem, PoolWarehouseStockItem, Depot, DeviceLabPool, YedekParcaDepoStokItem } from '@/lib/types';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
-import QRCode from 'qrcode';
+// PERF (mobil): jspdf + jspdf-autotable + qrcode (~500KB JS) yalnızca PDF dışa-aktarımında
+// kullanılıyor → statik import yerine generatePdf içinde DİNAMİK import edilir; böylece her
+// arıza-id açılışında mobil bundle'a girmez (zayıf mobil CPU'da parse maliyeti düşer).
 import { prefetchPdfAssets, resolveLabDisplayName, computeFormNo } from '@/lib/pdf-assets';
 import {
   DropdownMenu,
@@ -1352,6 +1352,13 @@ export default function FaultDetailPage() {
 
   const generatePdf = async () => {
     if (!fault) return;
+
+    // Ağır PDF/QR kütüphanelerini yalnızca burada (export anında) yükle — bkz. import notu.
+    const [{ default: jsPDF }, { default: autoTable }, { default: QRCode }] = await Promise.all([
+      import('jspdf'),
+      import('jspdf-autotable'),
+      import('qrcode'),
+    ]);
 
     const hospitalId = fault.hospitalId || fault.labId;
     const recordUrl = `${window.location.origin}/ariza-yonetimi/${fault.id}`;
