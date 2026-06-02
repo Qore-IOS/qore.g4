@@ -301,6 +301,13 @@ aplikasyon, işlem-formları, tüm-arızalar "geç açılma" + yavaşlama.
   → `WizardFormSkeleton`. (En ağır rota — 546 kB.)
 - ✅ **Bulgu:** `cihaz-yonetimi-host` ZATEN progressive (blocking gate YOK; birleşik `isLoading`
   ölü kod). Header/metric/personnel per-query skeleton kullanıyor → ilk-boya zaten iyi.
+- ✅ **Skeleton → gerçek shell eşleme:** generic skeleton (düz başlık + sahte arama/sekme) yerine
+  panelin GERÇEK shell'i (cihaz-card-strong başlık kartı + ikon/aksiyon + cihaz-card grid) → shift yok.
+- ✅ **Veri 15 sn → lab-scoped sorgu:** kullanıcı geri bildirimi "skeleton anında ama veri 15 sn".
+  Kök neden: panel TÜM `devices` koleksiyonunu (binlerce doc) çekip gate'liyordu. `useDevicesForLabs`:
+  lab-scoped teknisyen yalnızca atandığı lab'ların cihazlarını çeker (chunked `hospitalId in`,
+  companyId+hospitalId index, index-yoksa tam-liste fallback). Admin → null = tam liste. + Ölü
+  `hospitalDeviceAssignments` sorgusu gate'ten kaldırıldı (panelde kullanılmıyordu). → 15 sn → <1 sn (lab-scoped).
 - ⏳ **Kalan (gerçek render/veri hızı — mobil testle):**
   - Kart grid'lerinde `content-visibility: auto` veya sanallaştırma (100+ hastane kartı render'ı).
   - Hastane kartı bileşenine `React.memo` (arama/filtre/fault-update'te tüm kartların yeniden

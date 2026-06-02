@@ -8,8 +8,7 @@ import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import {
   useHospitals,
-  useDevices,
-  useHospitalDeviceAssignments,
+  useDevicesForLabs,
   useDeviceLabPools,
 } from '@/hooks/useFirebaseQueries';
 import TeknikServisPanel from '@/components/teknik-servis-panel';
@@ -29,29 +28,31 @@ export default function TeknikServisPage() {
   // Static data (hospitals, devices, assignments, lab pools) changes rarely; TQ falls back
   // to refetchOnWindowFocus + 30 min staleTime, which keeps the list responsive without
   // a permanent realtime listener.
+  // PERF (Faz 6 mobil): Lab-scoped teknisyen YALNIZCA atandığı lab'ların cihazlarını çeker
+  // (tüm şirket koleksiyonu yerine) → panel açılışındaki 15+ sn'lik veri beklemesi biter.
+  // Admin/superadmin (atanmış lab yok) → null = tüm liste (eski davranış).
+  const assignedLabIds = currentUserProfile?.assignedLaboratories ?? [];
+  const labScope = isAdminRole || assignedLabIds.length === 0 ? null : assignedLabIds;
+
   const hospitalsQuery = useHospitals();
-  const devicesQuery = useDevices();
-  const assignmentsQuery = useHospitalDeviceAssignments();
+  const devicesQuery = useDevicesForLabs(labScope);
   const labPoolsQuery = useDeviceLabPools();
 
   const isLoading =
     hospitalsQuery.isLoading ||
     devicesQuery.isLoading ||
-    assignmentsQuery.isLoading ||
     labPoolsQuery.isLoading;
 
   useEffect(() => {
     const anyError =
-      hospitalsQuery.isError || devicesQuery.isError ||
-      assignmentsQuery.isError || labPoolsQuery.isError;
+      hospitalsQuery.isError || devicesQuery.isError || labPoolsQuery.isError;
     if (anyError) {
       toast({ title: 'Veri Hatası', description: 'Teknik servis verileri yüklenemedi.', variant: 'destructive' });
     }
-  }, [hospitalsQuery.isError, devicesQuery.isError, assignmentsQuery.isError, labPoolsQuery.isError, toast]);
+  }, [hospitalsQuery.isError, devicesQuery.isError, labPoolsQuery.isError, toast]);
 
   const hospitals = (hospitalsQuery.data ?? []) as Hospital[];
   const devices = (devicesQuery.data ?? []) as Device[];
-  const hospitalDeviceAssignments = (assignmentsQuery.data ?? []) as AssignedDevice[];
   const deviceLabPools = (labPoolsQuery.data ?? []) as DeviceLabPool[];
 
   // Sort hospitals by name to preserve previous orderBy('name', 'asc') behavior.
@@ -67,7 +68,6 @@ export default function TeknikServisPage() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['hospitals'] }),
       queryClient.invalidateQueries({ queryKey: ['devices'] }),
-      queryClient.invalidateQueries({ queryKey: ['hospitalDeviceAssignments'] }),
       queryClient.invalidateQueries({ queryKey: ['deviceLabPools'] }),
     ]);
   }, [queryClient]);
@@ -243,7 +243,9 @@ export default function TeknikServisPage() {
     // the list (the prop is in the interface but not destructured). Keep a no-op
     // setter so the component contract stays satisfied.
     setDevices: (() => {}) as React.Dispatch<React.SetStateAction<Device[]>>,
-    hospitalDeviceAssignments,
+    // Panel bu prop'u kullanmıyor (arayüzde var ama destructure edilmiyor); ölü
+    // assignments sorgusu kaldırıldı → boş dizi geçilir.
+    hospitalDeviceAssignments: [] as AssignedDevice[],
     labPools: deviceLabPools,
     userAssignedLabs: currentUserProfile?.assignedLaboratories || [],
     userRole: currentUserProfile?.role || '',
