@@ -1,10 +1,10 @@
 // src/hooks/useSafeBarcodeFormats.ts
 'use client';
 import { useEffect, useMemo, useState } from 'react';
-import { collection, getDocs, orderBy, query, where } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { where } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { getScopedDocs } from '@/lib/firestore-helpers';
+import { filterByCompanyScope } from '@/lib/company-scope';
 import type { BarcodeFormat } from '@/lib/barcode';
 
 type State = {
@@ -18,6 +18,12 @@ type State = {
  * 1) Try active=true ordered by priority (preferred)
  * 2) If that fails (index/network), fetch all and filter client-side
  * 3) Ensure legacy Roche is present as a fallback entry
+ *
+ * Legacy-aware: getScopedDocs eski/__legacy__ etiketli format kayıtlarını
+ * non-superadmin oturumlarda da getirir. Aksi halde mal kabul ve ürün
+ * kullanım panellerinde (useBarcodeFormatsQuery üstünden çalışan) okuyan
+ * bir barkod, direkt transfer panelinde "format hatası" verir; çünkü bu
+ * hook scopedQuery'nin server-side companyId filtresine takılı kalıyordu.
  */
 export function useSafeBarcodeFormats(): State {
   const { currentCompanyId, isSuperAdmin } = useAuth();
@@ -29,26 +35,27 @@ export function useSafeBarcodeFormats(): State {
     async function load() {
       setState(prev => ({ ...prev, loading: true, error: undefined }));
       try {
-        // Preferred query — tenant-scoped
-        const q = scopedQuery(
+        // Preferred query — tenant-scoped, legacy-aware
+        const docs = await getScopedDocs(
           'barcodeFormats',
           currentCompanyId,
           isSuperAdmin,
-          where('active', '==', true)
+          where('active', '==', true),
         );
-        const snap = await getDocs(q);
-        const items = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as BarcodeFormat[];
+        const items = docs.map(d => ({ id: d.id, ...(d.data() as any) })) as BarcodeFormat[];
+        const scoped = filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
         // Sort by priority (ascending - lower priority number = higher precedence)
-        const sorted = items.sort((a, b) => (a.priority ?? 10) - (b.priority ?? 10));
+        const sorted = scoped.sort((a, b) => (a.priority ?? 10) - (b.priority ?? 10));
         if (!canceled) {
           setState({ formats: withLegacy(sorted), loading: false });
         }
       } catch (err: any) {
-        // Fallback: fetch tenant collection, filter/sort locally
+        // Fallback: fetch tenant collection without active filter, filter/sort locally
         try {
-          const snapAll = await getDocs(scopedQuery('barcodeFormats', currentCompanyId, isSuperAdmin));
-          const all = snapAll.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as BarcodeFormat[];
-          const activeOnly = all.filter((f: any) => f.active !== false);
+          const docsAll = await getScopedDocs('barcodeFormats', currentCompanyId, isSuperAdmin);
+          const all = docsAll.map(d => ({ id: d.id, ...(d.data() as any) })) as BarcodeFormat[];
+          const scoped = filterByCompanyScope(all, currentCompanyId, isSuperAdmin);
+          const activeOnly = scoped.filter((f: any) => f.active !== false);
           // Sort by priority (ascending - lower priority number = higher precedence)
           const sorted = activeOnly.sort((a, b) => (a.priority ?? 10) - (b.priority ?? 10));
 
