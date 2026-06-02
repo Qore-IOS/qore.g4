@@ -166,6 +166,60 @@ export function useDevices() {
 }
 
 /**
+ * Devices scoped to specific hospitals/labs — PERF (Faz 6 mobil).
+ *
+ * Lab-scoped kullanıcılar (teknik_servis / aplikasyon teknisyenleri) yalnızca
+ * atandıkları laboratuvarların cihazlarını çeker; tüm şirket `devices` koleksiyonunu
+ * (binlerce doc / birkaç MB) mobilde indirmek yerine. Panel açılışındaki 15+ sn'lik
+ * veri beklemesini ortadan kaldırır.
+ *
+ * `hospitalIds` null/boş → admin/superadmin: tüm (scoped) koleksiyon (eski davranış).
+ * Firestore `in` 30 değerle sınırlı → 30'arlı parçalara bölünür, paralel sorgulanır, birleştirilir.
+ * (companyId, hospitalId) composite index gerekir; index henüz deploy edilmemişse
+ * FAILED_PRECONDITION'da güvenle TAM listeye düşer (davranış bozulmaz, sadece yavaş kalır).
+ */
+export function useDevicesForLabs(hospitalIds: string[] | null | undefined) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  const ids = hospitalIds && hospitalIds.length > 0
+    ? Array.from(new Set(hospitalIds)).sort()
+    : null;
+  return useQuery({
+    queryKey: ['devices', 'labScoped', currentCompanyId, isSuperAdmin, ids],
+    queryFn: async () => {
+      const mapDocs = (snap: Awaited<ReturnType<typeof getDocs>>) =>
+        snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Device));
+      const fetchAll = async () => {
+        const snap = await getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin));
+        return filterByCompanyScope(mapDocs(snap), currentCompanyId, isSuperAdmin);
+      };
+      if (!ids) return fetchAll();
+      try {
+        const chunks: string[][] = [];
+        for (let i = 0; i < ids.length; i += 30) chunks.push(ids.slice(i, i + 30));
+        const snaps = await Promise.all(
+          chunks.map(c => getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin, where('hospitalId', 'in', c)))),
+        );
+        const merged: Device[] = [];
+        const seen = new Set<string>();
+        for (const snap of snaps) {
+          for (const dev of mapDocs(snap)) {
+            if (!seen.has(dev.id)) { seen.add(dev.id); merged.push(dev); }
+          }
+        }
+        return filterByCompanyScope(merged, currentCompanyId, isSuperAdmin);
+      } catch (err) {
+        console.warn('useDevicesForLabs: scoped sorgu başarısız (index eksik olabilir), tam listeye düşülüyor', err);
+        return fetchAll();
+      }
+    },
+    enabled: !!currentCompanyId || isSuperAdmin,
+    staleTime: 30 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+/**
  * Purchasing Tasks - Used in Dashboard and Task Planner
  */
 export function usePurchasingTasks() {
