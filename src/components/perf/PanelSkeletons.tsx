@@ -15,43 +15,44 @@ import { Skeleton } from '@/components/ui/skeleton';
 /** Hastane/havuz kart-grid'li paneller (teknik-servis, aplikasyon) için iskelet. */
 export function HospitalGridPanelSkeleton() {
   return (
-    <div className="cihaz-shell min-h-screen">
-      <div className="max-w-5xl mx-auto space-y-5 p-4 sm:p-6">
-        {/* Başlık satırı */}
-        <div className="flex items-center justify-between gap-3">
-          <div className="space-y-2">
-            <Skeleton className="h-6 w-44" />
-            <Skeleton className="h-4 w-56 max-w-[55vw]" />
+    // Gerçek panelin (teknik-servis / aplikasyon) shell'iyle BİREBİR aynı sarmalayıcı:
+    // cihaz-shell → max-w-5xl konteyner → cihaz-card-strong başlık kartı → cihaz-card grid.
+    // Böylece veri gelince içerik aynı yere oturur (layout shift olmaz).
+    <div className="cihaz-shell px-4 py-6 sm:px-8 sm:py-10">
+      <div className="max-w-5xl mx-auto space-y-5">
+        {/* Başlık KARTI — ikon + başlık + alt yazı + sağ üst aksiyon butonları (Nöbet/Harita) */}
+        <div className="cihaz-card-strong p-5 sm:p-7 bg-white/40 backdrop-blur-md border border-white/50 shadow-sm relative">
+          <div className="absolute top-4 right-4 flex items-center gap-2">
+            <Skeleton className="h-8 w-16 rounded-lg" />
+            <Skeleton className="h-8 w-16 rounded-lg" />
           </div>
-          <Skeleton className="h-9 w-24 rounded-lg shrink-0" />
+          <div className="flex items-center gap-2.5 pr-32">
+            <Skeleton className="h-10 w-10 rounded-xl shrink-0" />
+            <div className="space-y-2">
+              <Skeleton className="h-5 w-40" />
+              <Skeleton className="h-3 w-48 max-w-[50vw]" />
+            </div>
+          </div>
         </div>
 
-        {/* Arama + sekmeler */}
-        <Skeleton className="h-10 w-full rounded-xl" />
-        <div className="flex gap-2">
-          <Skeleton className="h-8 w-24 rounded-lg" />
-          <Skeleton className="h-8 w-24 rounded-lg" />
-          <Skeleton className="h-8 w-20 rounded-lg" />
-        </div>
-
-        {/* Kart grid — panelin grid-cols-1 md:2 xl:3 yapısıyla aynı */}
+        {/* Hastane/havuz kart grid'i — gerçek cihaz-card yapısıyla aynı
+            (başlık + chevron + ayraç + "N cihaz" + durum rozetleri) */}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
           {Array.from({ length: 6 }).map((_, i) => (
             <div
               key={i}
-              className="rounded-2xl border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)] p-4 space-y-3"
+              className="cihaz-card w-full p-4 sm:p-5 flex flex-col bg-white/40 backdrop-blur-sm border border-white/40 shadow-sm"
             >
-              <div className="flex items-center gap-3">
-                <Skeleton className="h-10 w-10 rounded-xl shrink-0" />
-                <div className="flex-1 space-y-2">
-                  <Skeleton className="h-4 w-3/4" />
-                  <Skeleton className="h-3 w-1/2" />
-                </div>
+              <div className="flex items-start justify-between gap-2">
+                <Skeleton className="h-4 w-3/4" />
+                <Skeleton className="h-4 w-4 rounded shrink-0" />
               </div>
-              <Skeleton className="h-2 w-full rounded-full" />
-              <div className="flex gap-2">
-                <Skeleton className="h-6 w-16 rounded-full" />
-                <Skeleton className="h-6 w-16 rounded-full" />
+              <div className="mt-3 pt-3 border-t border-[var(--dashboard-stroke)] space-y-2">
+                <Skeleton className="h-3 w-16" />
+                <div className="flex items-center gap-2">
+                  <Skeleton className="h-5 w-12 rounded-full" />
+                  <Skeleton className="h-5 w-12 rounded-full" />
+                </div>
               </div>
             </div>
           ))}
