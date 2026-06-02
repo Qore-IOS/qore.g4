@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { getScopedDocs } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 import {
   Check,
@@ -367,9 +367,13 @@ export default function LaboratuvarSayimPage() {
     (async () => {
       try {
         const labRef = doc(db, 'hospitals', labId as string);
-        const [labSnap, productsSnap, rulesSnap] = await Promise.all([
+        // Legacy-aware: getScopedDocs companyId'si eksik ya da __legacy__
+        // etiketli ürün ve depoStok kayıtlarını da getirir. scopedQuery'nin
+        // server-side where('companyId', '==', X) filtresi eski kayıtları
+        // dışarıda bırakıyor ve sayım sayfası boş yükleniyordu.
+        const [labSnap, productDocs, rulesSnap] = await Promise.all([
           getDoc(labRef),
-          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+          getScopedDocs('productCodes', currentCompanyId, isSuperAdmin),
           getDocs(collection(db, 'hospitals', labId as string, 'minMaxRules')),
         ]);
 
@@ -381,18 +385,18 @@ export default function LaboratuvarSayimPage() {
         const { name } = labSnap.data() as any;
         if (!cancelled) {
           setLabName(name);
-          setProductCodes(productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
+          setProductCodes(productDocs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
           setMinMaxRules(rulesSnap.docs.map(d => d.data() as MinMaxRule));
         }
 
         // Load lab stock — match by hedefKurumId, plus legacy by name
-        const [byIdSnap, legacySnap] = await Promise.all([
-          getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true), where('hedefKurumId', '==', labId))),
-          getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true), where('hedefKurum', '==', name))),
+        const [byIdDocs, legacyDocs] = await Promise.all([
+          getScopedDocs('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true), where('hedefKurumId', '==', labId)),
+          getScopedDocs('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true), where('hedefKurum', '==', name)),
         ]);
 
-        const byId = byIdSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
-        const legacy = legacySnap.docs
+        const byId = byIdDocs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+        const legacy = legacyDocs
           .map(d => ({ id: d.id, ...d.data() } as DepoStokItem))
           .filter(item => !item.hedefKurumId);
         const all = filterByCompanyScope([...byId, ...legacy], currentCompanyId, isSuperAdmin);

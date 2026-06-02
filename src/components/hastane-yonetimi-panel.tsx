@@ -230,13 +230,17 @@ export default function LaboratuvarYonetimiPanel() {
     }
   }, [laboratories, selectedLabId, isLoading]);
 
-  // Compute pool member IDs and names for lab stock query
+  // Hastane yönetimi paneli her laboratuvarın KENDİ stoğunu yönetmek içindir.
+  // Önceden seçili lab bir havuzda yer alıyorsa havuzun tüm üyelerinin stoğu
+  // çekiliyor ve seçili lab'a aitmiş gibi gösteriliyordu — yanıltıcıydı. Burada
+  // sadece seçili lab'ın hedefKurumId/hedefKurum eşleşmelerini istiyoruz; havuz
+  // çapraz-tüketim semantiği yalnızca urun-kullanim-panel için geçerlidir.
   const { poolMemberIds, poolMemberNames } = useMemo(() => {
-    const pool = labPools.find(p => p.memberIds.includes(selectedLabId));
-    const ids = pool?.memberIds || (selectedLabId ? [selectedLabId] : []);
+    if (!selectedLabId) return { poolMemberIds: [], poolMemberNames: [] as string[] };
+    const ids = [selectedLabId];
     const names = ids.map(id => allLaboratories.find(l => l.id === id)?.name).filter((n): n is string => !!n);
     return { poolMemberIds: ids, poolMemberNames: names };
-  }, [labPools, selectedLabId, allLaboratories]);
+  }, [selectedLabId, allLaboratories]);
 
   // Use targeted lab stock query instead of broad depoStok fetch
   const { data: labStocks = [] } = useLabStock(poolMemberIds, poolMemberNames, {
