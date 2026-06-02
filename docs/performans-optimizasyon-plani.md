@@ -291,6 +291,23 @@ Her rotaya dokunur, izole değişiklikler.
   modal/sekme içerikleri ve büyük panel alt-bölümleri talep üzerine yüklenmeli.
 - **Beklenen etki:** Tarama/yazma anında hissedilir; ağır panel İlk-Yük JS'i düşer.
 
+### Faz 6m — Mobil ilk-boya: skeleton ekranlar — 🟢 UYGULANDI
+Kullanıcı geri bildirimi: masaüstü kabul edilebilir; mobilde cihaz-yönetimi-ana, teknik-servis,
+aplikasyon, işlem-formları, tüm-arızalar "geç açılma" + yavaşlama.
+- ✅ **teknik-servis & aplikasyon panel sayfaları:** `if (isLoading) return <full-screen spinner>`
+  (4-sorgu OR-gate) → `HospitalGridPanelSkeleton`. Mobilde boş ekran yerine **anında** panel
+  yapısı (başlık + arama + kart grid skeleton); veri gelince aynı layout'a oturur (shift yok).
+- ✅ **teknik-servis & aplikasyon işlem-formu (wizard) sayfaları:** blocking `if (loading)` spinner
+  → `WizardFormSkeleton`. (En ağır rota — 546 kB.)
+- ✅ **Bulgu:** `cihaz-yonetimi-host` ZATEN progressive (blocking gate YOK; birleşik `isLoading`
+  ölü kod). Header/metric/personnel per-query skeleton kullanıyor → ilk-boya zaten iyi.
+- ⏳ **Kalan (gerçek render/veri hızı — mobil testle):**
+  - Kart grid'lerinde `content-visibility: auto` veya sanallaştırma (100+ hastane kartı render'ı).
+  - Hastane kartı bileşenine `React.memo` (arama/filtre/fault-update'te tüm kartların yeniden
+    render'ını önle).
+  - **cihaz-ana & tüm-arızalar mobil yavaşlığı = veri hacmi** (10k fault + 5k×2 form + unbounded
+    bakım). Gerçek çözüm: server-side aggregation/özet (Faz 7) — sayımları tüm doc'ları indirmeden.
+
 ### Faz 6 — Cihaz Yönetimi derin düzeltmeler — ~2–3 gün, risk: orta
 - Detay sayfaları (`teknik-servis/[id]`, `aplikasyon-paneli/[id]`): N+1'i (cihaz başına arıza
   geçmişi `:184–207`, 4×N bakım `:236–346`) tek `hospitalId`-scope'lu sorguya çevir + client'ta

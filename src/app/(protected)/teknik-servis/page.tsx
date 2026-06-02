@@ -13,7 +13,8 @@ import {
   useDeviceLabPools,
 } from '@/hooks/useFirebaseQueries';
 import TeknikServisPanel from '@/components/teknik-servis-panel';
-import { Loader2, Download, Upload } from 'lucide-react';
+import { HospitalGridPanelSkeleton } from '@/components/perf/PanelSkeletons';
+import { Download, Upload } from 'lucide-react';
 import { reserveActionFormNumber } from '@/lib/form-number';
 import { format } from 'date-fns';
 
@@ -73,14 +74,9 @@ export default function TeknikServisPage() {
 
 
   if (isLoading) {
-    return (
-      <div className="cihaz-shell flex items-center justify-center min-h-screen">
-        <div className="flex flex-col items-center gap-4">
-          <Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)]" />
-          <p className="text-sm text-[var(--dashboard-muted)]">Teknik Servis Paneli yükleniyor&hellip;</p>
-        </div>
-      </div>
-    );
+    // PERF (Faz 6 mobil): Boş ekran + ortada spinner yerine layout-eşleşen skeleton.
+    // Mobilde anında panel yapısı görünür → "geç açılma" hissini ortadan kaldırır.
+    return <HospitalGridPanelSkeleton />;
   }
 
   const buildScopedOptions = () => {
