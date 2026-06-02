@@ -229,21 +229,25 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
         </div>
 
         <div className="cihaz-card-strong p-2 sm:p-3">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-2 p-2">
+          {/* Mobilde: arama tam genişlik + 3 filtre YAN YANA (grid-cols-3, alt alta değil).
+              Masaüstünde: md:contents ile 3 select üst grid'e akar → eski 4'lü tek satır korunur. */}
+          <div className="p-2 flex flex-col gap-2 md:grid md:grid-cols-4">
             <Input placeholder="Cihaz, seri, lab, personel ara..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
-            <select className="h-10 rounded-md border bg-background px-3 text-sm" value={filterModuleType} onChange={(e) => setFilterModuleType(e.target.value as any)}>
-              <option value="all">Tüm Modüller</option>
-              <option value="teknik-servis">Teknik Servis</option>
-              <option value="aplikasyon-paneli">Aplikasyon</option>
-            </select>
-            <select className="h-10 rounded-md border bg-background px-3 text-sm" value={filterLab} onChange={(e) => setFilterLab(e.target.value)}>
-              <option value="all">Tüm Lablar</option>
-              {availableLabs.map(lab => <option key={lab} value={lab}>{lab}</option>)}
-            </select>
-            <select className="h-10 rounded-md border bg-background px-3 text-sm" value={filterPersonnel} onChange={(e) => setFilterPersonnel(e.target.value)}>
-              <option value="all">Tüm Personeller</option>
-              {availablePersonnel.map(name => <option key={name} value={name}>{name}</option>)}
-            </select>
+            <div className="grid grid-cols-3 gap-2 md:contents">
+              <select className="h-10 min-w-0 rounded-md border bg-background px-2 text-sm" value={filterModuleType} onChange={(e) => setFilterModuleType(e.target.value as any)}>
+                <option value="all">Tüm Modüller</option>
+                <option value="teknik-servis">Teknik Servis</option>
+                <option value="aplikasyon-paneli">Aplikasyon</option>
+              </select>
+              <select className="h-10 min-w-0 rounded-md border bg-background px-2 text-sm" value={filterLab} onChange={(e) => setFilterLab(e.target.value)}>
+                <option value="all">Tüm Lablar</option>
+                {availableLabs.map(lab => <option key={lab} value={lab}>{lab}</option>)}
+              </select>
+              <select className="h-10 min-w-0 rounded-md border bg-background px-2 text-sm" value={filterPersonnel} onChange={(e) => setFilterPersonnel(e.target.value)}>
+                <option value="all">Tüm Personeller</option>
+                {availablePersonnel.map(name => <option key={name} value={name}>{name}</option>)}
+              </select>
+            </div>
           </div>
           {loading ? (
             <div className="flex items-center justify-center py-16 gap-2 text-[var(--dashboard-muted)]">

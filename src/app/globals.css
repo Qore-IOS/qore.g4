@@ -5386,6 +5386,35 @@ body:has(.fault-clay-page) .page-shell {
   color: #fff;
 }
 
+/* Faz 6: Arıza-id eylem butonu (AI 'Yenile' vb.) — gri outline/neumorphic yerine
+   clay-cam pill (sayfanın beyaz-cam + mor/pembe accent estetiğiyle uyumlu). */
+.fault-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.58);
+  background: rgba(255, 255, 255, 0.56);
+  color: #7c3aed;
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 1;
+  box-shadow: 0 10px 22px rgba(57, 46, 92, 0.14), inset 0 1px 0 rgba(255,255,255,0.78);
+  backdrop-filter: blur(18px) saturate(1.2);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  transition: background .15s ease;
+}
+.fault-pill-btn:hover:not(:disabled) { background: rgba(255,255,255,0.78); }
+.fault-pill-btn:disabled { opacity: .6; cursor: not-allowed; }
+.dark .fault-pill-btn {
+  background: rgba(255,255,255,0.10);
+  border-color: rgba(255,255,255,0.14);
+  color: #c4b5fd;
+}
+
 .fault-hero-card,
 .fault-clay-section {
   border-radius: 42px !important;

@@ -325,7 +325,10 @@ export default function FaultDetailPage() {
   // Laboratuvara ait test listesini çek
   useEffect(() => {
     const fetchTests = async () => {
-      if (!fault?.hospitalId) return;
+      // PERF (Faz 6 mobil): availableTests yalnızca arıza KAPATMA akışında kullanılıyor.
+      // Çözülmüş (cozuldu) arızada gereksiz — tüm productCodes'u indirmeyi atla → mobilde
+      // görüntüleme anında. Açık arızada yüklenir (kapatırken test listesi gerekir).
+      if (!fault?.hospitalId || normalizeStatus(fault.status) === 'cozuldu') return;
 
       try {
         // Laboratuvara tanımlı minMaxRules'dan ürünlerin testAdi'lerini al
@@ -355,7 +358,7 @@ export default function FaultDetailPage() {
     };
 
     fetchTests();
-  }, [fault?.hospitalId]);
+  }, [fault?.hospitalId, fault?.status]);
 
   // Kit arızası için ürünün testAdi bilgisini çek
   useEffect(() => {
@@ -392,6 +395,9 @@ export default function FaultDetailPage() {
 
   // Fetch personnel for support personnel selector
   useEffect(() => {
+    // PERF (Faz 6 mobil): Destek personeli yalnızca kapatma akışında gerekli.
+    // Çözülmüş arızada tüm users'ı indirmeyi atla.
+    if (!fault || normalizeStatus(fault.status) === 'cozuldu') return;
     (async () => {
       try {
         const usersSnap = await getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin));
@@ -403,7 +409,7 @@ export default function FaultDetailPage() {
         console.error('Personel listesi alınamadı:', e);
       }
     })();
-  }, [currentCompanyId, isSuperAdmin]);
+  }, [currentCompanyId, isSuperAdmin, fault?.status]);
 
   // Şahsi stok verilerini çek
   useEffect(() => {
@@ -426,6 +432,9 @@ export default function FaultDetailPage() {
   }, [currentUser]);
 
   useEffect(() => {
+    // PERF (Faz 6 mobil): Limitsiz yedekParcaDepoStok koleksiyonu yalnızca parça-ekleme
+    // akışında gerekli. Çözülmüş arızada indirmeyi atla → görüntüleme anında.
+    if (!fault || normalizeStatus(fault.status) === 'cozuldu') return;
     (async () => {
       try {
         const snap = await getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
@@ -442,11 +451,13 @@ export default function FaultDetailPage() {
         console.error('Depo stok alınamadı:', err);
       }
     })();
-  }, [currentCompanyId, isSuperAdmin]);
+  }, [currentCompanyId, isSuperAdmin, fault?.status]);
 
   // Havuz stok verilerini çek
   useEffect(() => {
-    if (!fault?.deviceId) return;
+    // PERF (Faz 6 mobil): Havuz stok yürüyüşü (pools→depots→poolWarehouseStock) yalnızca
+    // parça-ekleme akışında gerekli. Çözülmüş arızada atla.
+    if (!fault?.deviceId || normalizeStatus(fault.status) === 'cozuldu') return;
     (async () => {
       try {
         const deviceSnap = await getDoc(doc(db, 'devices', fault.deviceId));
@@ -499,7 +510,7 @@ export default function FaultDetailPage() {
         console.error("Error fetching pool stock:", err);
       }
     })();
-  }, [fault?.deviceId, currentCompanyId, isSuperAdmin]);
+  }, [fault?.deviceId, currentCompanyId, isSuperAdmin, fault?.status]);
 
   // Arızaya eklenen parça değişimlerini çek
   useEffect(() => {
@@ -1864,19 +1875,19 @@ export default function FaultDetailPage() {
                 <Sparkles className="h-4 w-4" />
                 AI Açıklama
               </p>
-              <Button
-                variant="outline"
-                size="sm"
+              <button
+                type="button"
+                className="fault-pill-btn"
                 onClick={() => fetchAiSuggestion(true)}
                 disabled={aiLoading}
               >
                 {aiLoading ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  <Sparkles className="h-4 w-4 mr-1" />
+                  <Sparkles className="h-4 w-4" />
                 )}
                 {aiLoading ? 'Üretiliyor…' : 'Yenile'}
-              </Button>
+              </button>
             </div>
             <div className="fault-action-card text-sm">
               {aiLoading && !aiSuggestion?.briefExplanation ? (
