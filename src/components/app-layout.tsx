@@ -111,6 +111,22 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     handleMouseLeave,
   } = useDock();
 
+  const isStandardAppShell = !isQoreTechnicRole && !(isLojistikTerminalRole && isLojistikTerminalPath);
+  const showGlobalWindowChrome =
+    navMode !== "sidebar" &&
+    !isMobile &&
+    !isTeknisyen &&
+    isStandardAppShell;
+
+  useEffect(() => {
+    document.body.classList.toggle("qore-standard-shell-bg", isStandardAppShell);
+    document.body.classList.toggle("qore-global-window-chrome", showGlobalWindowChrome);
+    return () => {
+      document.body.classList.remove("qore-standard-shell-bg");
+      document.body.classList.remove("qore-global-window-chrome");
+    };
+  }, [isStandardAppShell, showGlobalWindowChrome]);
+
   useEffect(() => {
     if (!isLoadingAuth && !currentUser) {
       router.replace("/login");
@@ -265,7 +281,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <OnlyUsageAutoRedirect />
       <main className="flex w-full flex-1 flex-col items-center">
         <PersistentNotificationToast />
-        {!isMobile && !isTeknisyen && <WindowChrome />}
+        {showGlobalWindowChrome && <WindowChrome />}
         <WindowFrame>
           <PageShell
             edgeToEdge={isEdgeToEdgeRoute}
