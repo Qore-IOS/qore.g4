@@ -6228,6 +6228,7 @@ html.dark body.mg-edge-body {
 }
 
 @layer components {
+  html:not(.dark) body.qore-standard-shell-bg,
   html:not(.dark) body.qore-global-window-chrome {
     --background: 191 66% 68%;
     --dashboard-bg: #78cfe3;
@@ -6236,6 +6237,12 @@ html.dark body.mg-edge-body {
     background: #78cfe3 !important;
   }
 
+  html:not(.dark) body.qore-standard-shell-bg main,
+  html:not(.dark) body.qore-standard-shell-bg [data-qore-window-content="true"],
+  html:not(.dark) body.qore-standard-shell-bg .page-shell,
+  html:not(.dark) body.qore-standard-shell-bg .cihaz-shell,
+  html:not(.dark) body.qore-standard-shell-bg .mg-root,
+  html:not(.dark) body.qore-standard-shell-bg .satin-alma-fluid-shell,
   html:not(.dark) body.qore-global-window-chrome main,
   html:not(.dark) body.qore-global-window-chrome [data-qore-window-content="true"],
   html:not(.dark) body.qore-global-window-chrome .page-shell,

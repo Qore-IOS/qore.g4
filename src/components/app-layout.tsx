@@ -111,19 +111,21 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     handleMouseLeave,
   } = useDock();
 
+  const isStandardAppShell = !isQoreTechnicRole && !(isLojistikTerminalRole && isLojistikTerminalPath);
   const showGlobalWindowChrome =
     navMode !== "sidebar" &&
     !isMobile &&
     !isTeknisyen &&
-    !isQoreTechnicRole &&
-    !(isLojistikTerminalRole && isLojistikTerminalPath);
+    isStandardAppShell;
 
   useEffect(() => {
+    document.body.classList.toggle("qore-standard-shell-bg", isStandardAppShell);
     document.body.classList.toggle("qore-global-window-chrome", showGlobalWindowChrome);
     return () => {
+      document.body.classList.remove("qore-standard-shell-bg");
       document.body.classList.remove("qore-global-window-chrome");
     };
-  }, [showGlobalWindowChrome]);
+  }, [isStandardAppShell, showGlobalWindowChrome]);
 
   useEffect(() => {
     if (!isLoadingAuth && !currentUser) {
