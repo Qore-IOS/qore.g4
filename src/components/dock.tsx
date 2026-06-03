@@ -948,6 +948,7 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
       <TooltipProvider delayDuration={150}>
         <motion.div
           ref={dockRef}
+          data-qore-dock
           className={cn(
             "relative flex h-[72px] items-center gap-1 px-3 py-2.5 rounded-[24px] transition-shadow duration-300",
             "bg-white/80 backdrop-blur-xl border border-gray-200/60",

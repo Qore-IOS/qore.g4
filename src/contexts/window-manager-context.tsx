@@ -85,29 +85,38 @@ export function WindowManagerProvider({ children }: { children: React.ReactNode 
     const t = dockTargetRef.current;
     if (!t) return null;
     
-    // minZoneRef is the container. Find the specific slot or use container as fallback.
+    // minZone container'ının çocuklarından hedef slotu bul.
     const children = Array.from(t.children);
     const targetChild = (children[index] as HTMLElement) || t;
     
     const r = targetChild.getBoundingClientRect();
     if (!r.width) return null;
 
+    // Dock gizliyken framer-motion translateY(20px) uygular.
+    // getBoundingClientRect bu transform'u içerir, biz "açık" konumu istiyoruz.
     let yOffset = 0;
-    // Account for Dock's transform (e.g. translateY(20px)) if it's currently hidden
-    // We use closest with a specific class that framer-motion applies to the dock.
-    const dockEl = t.closest('.h-\\[72px\\]');
+    let scaleCompensation = 1;
+    const dockEl = t.closest('[data-qore-dock]') as HTMLElement | null;
     if (dockEl) {
-       const style = window.getComputedStyle(dockEl);
-       const transform = style.transform;
-       if (transform && transform !== 'none') {
-           try {
-               const matrix = new DOMMatrixReadOnly(transform);
-               yOffset = matrix.f; // f is the translateY component
-           } catch(e) {}
-       }
+      const style = window.getComputedStyle(dockEl);
+      const transform = style.transform;
+      if (transform && transform !== 'none') {
+        try {
+          const matrix = new DOMMatrixReadOnly(transform);
+          yOffset = matrix.f; // translateY bileşeni
+          // fitScale de transform matrisinde. a ve d ölçek bileşenleri.
+          if (matrix.a > 0 && matrix.a < 1) {
+            scaleCompensation = matrix.a;
+          }
+        } catch (_e) { /* ignore */ }
+      }
     }
 
-    return { x: r.left + r.width / 2, y: r.top - yOffset, w: r.width };
+    return {
+      x: r.left + r.width / 2,
+      y: r.top - yOffset,
+      w: r.width / scaleCompensation, // scale'den arındırılmış gerçek genişlik
+    };
   }, []);
 
   const minimizeCurrent = useCallback(() => {
