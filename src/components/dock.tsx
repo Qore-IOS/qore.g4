@@ -11,11 +11,10 @@ import { ChevronRight } from 'lucide-react';
 import NotificationsBell from '@/components/notifications/NotificationsBell';
 import type { DockItemData } from '@/hooks/use-dock';
 import { useAuth } from '@/contexts/auth-context';
-import { useAI } from '@/contexts/ai-context';
+import { useStartMenu } from '@/contexts/start-menu-context';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { ThemeToggleDock } from "@/components/ui/theme-toggle-dock"
-import { useTheme } from 'next-themes';
 import Image from 'next/image';
 import { useIconMappings, getIconSrc } from '@/hooks/useIconMappings';
 
@@ -766,31 +765,34 @@ const DockItem = ({
   );
 };
 
+// Windows-vari "Başlat" düğmesi — Qore Start menüsünü açar. Marka kimliğini
+// koruyan turuncu gradyan kutu + beyaz Qore logosu.
 const DockLogo = () => {
-  const { resolvedTheme } = useTheme();
-  const { openAI } = useAI();
-  const [logoSrc, setLogoSrc] = useState('/wt.png');
-
-  useEffect(() => {
-    setLogoSrc(resolvedTheme === 'light' ? '/blk.png' : '/wt.png');
-  }, [resolvedTheme]);
+  const { toggle, isOpen } = useStartMenu();
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <motion.button
-          whileHover={{ scale: 1.12, y: -3 }}
-          whileTap={{ scale: 0.95 }}
+          whileHover={{ scale: 1.08, y: -3 }}
+          whileTap={{ scale: 0.94 }}
           transition={{ type: 'spring', stiffness: 600, damping: 25 }}
-          onClick={openAI}
-          className="flex items-center justify-center h-10 w-10 px-2 cursor-pointer rounded-full hover:bg-white/10 transition-colors"
+          onClick={toggle}
+          aria-label="Başlat"
+          aria-expanded={isOpen}
+          className={cn(
+            'flex items-center justify-center h-11 w-11 cursor-pointer rounded-2xl text-white transition-shadow',
+            'bg-gradient-to-br from-[#f99a52] to-[#f06f2c]',
+            'shadow-[0_8px_16px_-5px_rgba(240,111,44,0.7),inset_0_1px_1px_rgba(255,255,255,0.4)]',
+            isOpen && 'ring-2 ring-orange-300/70'
+          )}
         >
-          <Image src={logoSrc} alt="Qore AI" width={28} height={28} className="object-contain" />
+          <Image src="/wt.png" alt="Qore" width={24} height={24} className="object-contain" />
         </motion.button>
       </TooltipTrigger>
       <TooltipPrimitive.Portal>
         <TooltipContent side="top" align="center" sideOffset={12} className="dock-tooltip" style={{ zIndex: 'var(--z-float)' } as React.CSSProperties}>
-          <p>Qore AI</p>
+          <p>Başlat</p>
         </TooltipContent>
       </TooltipPrimitive.Portal>
     </Tooltip>

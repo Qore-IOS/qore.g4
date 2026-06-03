@@ -69,7 +69,7 @@ const HUE_STYLES: Record<QuickAction['hue'], { icon: string; ring: string }> = {
 };
 
 export function AIChatbot() {
-  const { isAIOpen, closeAI } = useAI();
+  const { isAIOpen, closeAI, consumePendingPrompt } = useAI();
   const { currentUserProfile, currentUser } = useAuth();
 
   const firstName = useMemo(() => {
@@ -198,6 +198,21 @@ export function AIChatbot() {
       setIsLoading(false);
     }
   }, [input, isLoading, messages]);
+
+  // Keep a ref to the latest sendMessage so the "open with queued prompt"
+  // effect can fire it without re-subscribing on every keystroke.
+  const sendMessageRef = useRef(sendMessage);
+  useEffect(() => { sendMessageRef.current = sendMessage; }, [sendMessage]);
+
+  // When opened from the Start menu search bar a prompt is queued on the AI
+  // context; consume and auto-send it once the panel is open.
+  useEffect(() => {
+    if (!isAIOpen) return;
+    const queued = consumePendingPrompt();
+    if (!queued) return;
+    const t = setTimeout(() => sendMessageRef.current(queued), 60);
+    return () => clearTimeout(t);
+  }, [isAIOpen, consumePendingPrompt]);
 
   const handleKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
