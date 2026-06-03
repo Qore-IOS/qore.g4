@@ -6276,3 +6276,45 @@ html.dark body.mg-edge-body {
     filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.45));
   }
 }
+
+@layer components {
+  body.qore-global-window-chrome {
+    --qore-chrome-space: max(2.1rem, env(safe-area-inset-top));
+  }
+
+  body.qore-global-window-chrome.qore-window-chrome-expanded {
+    --qore-chrome-space: max(3.5rem, env(safe-area-inset-top));
+  }
+
+  body.qore-global-window-chrome .page-shell {
+    padding-top: var(--qore-chrome-space);
+    transition: padding-top 520ms cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: padding-top;
+  }
+
+  .qore-window-chrome {
+    transform-origin: top left;
+    transform: scale(0.6);
+    opacity: 0.48;
+    filter: saturate(0.92) brightness(0.96);
+    transition:
+      transform 520ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 420ms cubic-bezier(0.22, 1, 0.36, 1),
+      filter 420ms cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: transform, opacity, filter;
+  }
+
+  .qore-window-chrome:hover,
+  .qore-window-chrome:focus-within {
+    transform: scale(1);
+    opacity: 1;
+    filter: saturate(1) brightness(1);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    body.qore-global-window-chrome .page-shell,
+    .qore-window-chrome {
+      transition: none;
+    }
+  }
+}
