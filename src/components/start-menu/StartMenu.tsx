@@ -11,7 +11,10 @@ import {
   Settings,
   Power,
   CornerDownLeft,
+  Sun,
+  Moon,
 } from 'lucide-react';
+import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { useAI } from '@/contexts/ai-context';
@@ -56,13 +59,21 @@ function renderEmphasis(text: string) {
 
 export function StartMenu() {
   const { isOpen, close, toggle } = useStartMenu();
-  const { currentUser, currentUserProfile, logout } = useAuth();
+  const { currentUser, currentUserProfile, logout, setUserTheme } = useAuth();
   const { openAI } = useAI();
+  const { theme, resolvedTheme } = useTheme();
   const router = useRouter();
 
   const [query, setQuery] = useState('');
   const [showAllPins, setShowAllPins] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Avoid hydration mismatch for the theme switch.
+  useEffect(() => setMounted(true), []);
+  const isDark = (theme === 'dark') || (theme === 'system' && resolvedTheme === 'dark');
+  // 'user' role is forced to dark mode app-wide, so no theme switch for them.
+  const canSwitchTheme = mounted && currentUserProfile?.role !== 'user';
 
   // Panels this user can reach (real data). Anonymous sessions see everything.
   const accessibleViews = useMemo<string[]>(
@@ -464,6 +475,41 @@ export function StartMenu() {
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
+                  {/* Basit tema switch'i (dock'tan buraya taşındı) */}
+                  {canSwitchTheme && (
+                    <div className="flex items-center rounded-xl p-0.5 bg-black/[0.04] dark:bg-white/[0.06] border border-black/[0.05] dark:border-white/10">
+                      <button
+                        type="button"
+                        onClick={() => setUserTheme('light')}
+                        className={cn(
+                          'grid place-items-center h-8 w-8 rounded-lg transition',
+                          !isDark
+                            ? 'bg-white text-orange-500 shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground',
+                        )}
+                        aria-label="Açık tema"
+                        aria-pressed={!isDark}
+                        title="Açık tema"
+                      >
+                        <Sun className="h-[16px] w-[16px]" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setUserTheme('dark')}
+                        className={cn(
+                          'grid place-items-center h-8 w-8 rounded-lg transition',
+                          isDark
+                            ? 'bg-zinc-800 text-amber-300 shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground',
+                        )}
+                        aria-label="Koyu tema"
+                        aria-pressed={isDark}
+                        title="Koyu tema"
+                      >
+                        <Moon className="h-[16px] w-[16px]" />
+                      </button>
+                    </div>
+                  )}
                   <button
                     type="button"
                     onClick={() => go('/yonetim/kisisellistirme')}

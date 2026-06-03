@@ -39,7 +39,7 @@
     --radius: 1rem;
 
     /* Dock & z-index layout contract */
-    --dock-h: 56px;
+    --dock-h: 76px;
     --dock-gap: 16px;
     --z-content: 1;
     --z-sticky: 100;
@@ -2950,9 +2950,9 @@
   }
 }
 
-/* Dock item styling - Apple-like colorful 3D icons */
+/* Dock item styling - Apple-like colorful 3D icons (macOS-proportioned) */
 .dock-item-wrapper {
-  @apply w-12 h-12 rounded-xl flex items-center justify-center;
+  @apply w-14 h-14 rounded-2xl flex items-center justify-center;
   position: relative;
   transition: background 0.15s ease;
 }
@@ -2989,7 +2989,7 @@
 
 /* Icon sizing - colorful gradient applied inline via style */
 .dock-item-icon {
-  @apply w-6 h-6;
+  @apply w-8 h-8;
   transition: filter 0.15s ease;
 }
 
@@ -3014,6 +3014,34 @@
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.15);
   color: #e5e5e5;
+}
+
+/* Dock right-zone: hairline separators + reserved minimized-tab slots.
+   The minimized-tab zone keeps at least two reserved slots and grows as
+   tabs are sent down (the live minimize + genie animation arrive with the
+   tabbed-window system). */
+.qdock-sep {
+  width: 1px;
+  height: 42px;
+  margin: 0 7px;
+  border-radius: 1px;
+  background: rgba(20, 28, 50, 0.12);
+  align-self: center;
+  flex: 0 0 auto;
+}
+.dark .qdock-sep { background: rgba(255, 255, 255, 0.14); }
+
+.qdock-minslot {
+  width: 46px;
+  height: 46px;
+  border-radius: 15px;
+  border: 1.5px dashed rgba(20, 28, 50, 0.16);
+  background: rgba(20, 28, 50, 0.03);
+  flex: 0 0 auto;
+}
+.dark .qdock-minslot {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 /* Ensure dialogs with glass-card maintain fixed positioning */
