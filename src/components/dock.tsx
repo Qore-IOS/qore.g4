@@ -12,6 +12,7 @@ import NotificationsBell from '@/components/notifications/NotificationsBell';
 import type { DockItemData } from '@/hooks/use-dock';
 import { useAuth } from '@/contexts/auth-context';
 import { useStartMenu } from '@/contexts/start-menu-context';
+import { useWindowManager } from '@/contexts/window-manager-context';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { CalendarDockPanel } from '@/components/dock/CalendarDockPanel';
@@ -846,6 +847,14 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
   const [calendarOpen, setCalendarOpen] = useState(false);
   useEffect(() => { setCalendarOpen(false); }, [currentView]);
 
+  // Window manager — minimized-tab zone (genie target) + restore.
+  const { registerDockTarget, minimized: minimizedWins, restore: restoreWindow } = useWindowManager();
+  const minZoneRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    registerDockTarget(minZoneRef.current);
+    return () => registerDockTarget(null);
+  }, [registerDockTarget]);
+
   // Auto-fit: shrink the whole dock proportionally if it would overflow the
   // viewport (many panels). offsetWidth is the layout width — unaffected by the
   // transform scale we apply — so it's a stable basis for the ratio.
@@ -992,11 +1001,34 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
 
             {/* ---- right zone: hairline-separated utilities ---- */}
             <div className="qdock-sep" />
-            {/* Minimized-tab zone — reserved (≥2 slots, grows as tabs arrive).
-                Live minimize + genie animation land with the tabbed-window system. */}
-            <div className="flex items-center gap-1">
-              <span className="qdock-minslot" />
-              <span className="qdock-minslot" />
+            {/* Minimized-tab zone — küçültülmüş paneller buraya genie ile iner.
+                Sekme yoksa ≥2 rezerve yuva görünür, sekme geldikçe büyür. */}
+            <div ref={minZoneRef} className="flex items-center gap-1">
+              {minimizedWins.map((m) => (
+                <Tooltip key={m.id}>
+                  <TooltipTrigger asChild>
+                    <motion.button
+                      whileHover={{ scale: 1.35, y: -8 }}
+                      transition={{ type: 'spring', stiffness: 600, damping: 25 }}
+                      onClick={() => restoreWindow(m.id)}
+                      className="dock-item-wrapper flex items-center justify-center cursor-pointer"
+                      aria-label={`${m.title} — geri getir`}
+                    >
+                      <span className="grid place-items-center w-full h-full rounded-2xl bg-black/[0.05] dark:bg-white/[0.06] border border-black/[0.06] dark:border-white/10">
+                        <m.icon className="w-7 h-7 text-foreground/70" />
+                      </span>
+                    </motion.button>
+                  </TooltipTrigger>
+                  <TooltipPrimitive.Portal>
+                    <TooltipContent side="top" align="center" sideOffset={12} className="dock-tooltip" style={{ zIndex: 'var(--z-float)' } as React.CSSProperties}>
+                      <p>{m.title}</p>
+                    </TooltipContent>
+                  </TooltipPrimitive.Portal>
+                </Tooltip>
+              ))}
+              {Array.from({ length: Math.max(0, 2 - minimizedWins.length) }).map((_, i) => (
+                <span key={`mslot-${i}`} className="qdock-minslot" />
+              ))}
             </div>
             <div className="qdock-sep" />
             <CalendarDockButton open={calendarOpen} onToggle={() => setCalendarOpen((o) => !o)} />

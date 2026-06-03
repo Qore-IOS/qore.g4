@@ -13,6 +13,8 @@ import { useDock } from "@/hooks/use-dock";
 import PresenceManager from "./PresenceManager";
 import PersistentNotificationToast from "./notifications/PersistentNotificationToast";
 import PageShell from "./responsive/PageShell";
+import WindowFrame from "./window/WindowFrame";
+import WindowChrome from "./window/WindowChrome";
 import NotificationsBell from "@/components/notifications/NotificationsBell";
 import { ThemeToggleDock } from "./ui/theme-toggle-dock";
 import {
@@ -263,12 +265,15 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <OnlyUsageAutoRedirect />
       <main className="flex w-full flex-1 flex-col items-center">
         <PersistentNotificationToast />
-        <PageShell
-          edgeToEdge={isEdgeToEdgeRoute}
-          className={`w-full flex-1 ${isWideContentRoute ? "max-w-none md:px-3" : ""}`}
-        >
-          {children}
-        </PageShell>
+        {!isMobile && !isTeknisyen && <WindowChrome />}
+        <WindowFrame>
+          <PageShell
+            edgeToEdge={isEdgeToEdgeRoute}
+            className={`w-full flex-1 ${isWideContentRoute ? "max-w-none md:px-3" : ""}`}
+          >
+            {children}
+          </PageShell>
+        </WindowFrame>
 
         {!isMobile && !isTeknisyen && (
           <div
