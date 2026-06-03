@@ -7,6 +7,8 @@ import { useWindowManager } from '@/contexts/window-manager-context';
 
 const TITLE_SOURCE_SELECTOR = '[data-qore-window-content="true"] h1:not([data-qore-ignore-global-title])';
 const TITLE_SOURCE_ATTR = 'data-qore-global-title-source';
+const TITLE_BLOCK_ATTR = 'data-qore-global-title-block';
+const TITLE_DECORATOR_ATTR = 'data-qore-global-title-decorator';
 
 function readPanelTitle(fallbackTitle: string) {
   if (typeof document === 'undefined') return fallbackTitle;
@@ -15,9 +17,26 @@ function readPanelTitle(fallbackTitle: string) {
   document.querySelectorAll(`[${TITLE_SOURCE_ATTR}="true"]`).forEach((el) => {
     if (el !== titleEl) el.removeAttribute(TITLE_SOURCE_ATTR);
   });
+  document.querySelectorAll(`[${TITLE_BLOCK_ATTR}="true"]`).forEach((el) => {
+    el.removeAttribute(TITLE_BLOCK_ATTR);
+  });
+  document.querySelectorAll(`[${TITLE_DECORATOR_ATTR}="true"]`).forEach((el) => {
+    el.removeAttribute(TITLE_DECORATOR_ATTR);
+  });
 
   if (!titleEl) return fallbackTitle;
+
+  const titleBlock = titleEl.parentElement;
+  const decorator = titleBlock?.previousElementSibling;
+
   titleEl.setAttribute(TITLE_SOURCE_ATTR, 'true');
+  titleBlock?.setAttribute(TITLE_BLOCK_ATTR, 'true');
+
+  // Common title rows place a decorative icon immediately before the text block.
+  // Hide that ornament globally too; the chrome title is intentionally iconless.
+  if (decorator && decorator.querySelector('svg') && !decorator.textContent?.trim()) {
+    decorator.setAttribute(TITLE_DECORATOR_ATTR, 'true');
+  }
 
   return titleEl.textContent?.replace(/\s+/g, ' ').trim() || fallbackTitle;
 }
@@ -25,7 +44,7 @@ function readPanelTitle(fallbackTitle: string) {
 /**
  * macOS-vari global pencere başlığı.
  * Trafik ışıklarının konumu sabit kalır; hemen yanında tüm standart panellerin
- * ortak dairesel geri butonu ve panelin ilk h1'inden okunan ikonsuz başlığı gösterilir.
+ * ortak dairesel geri butonu ve panelin ilk h1'inden okunan ikonsuz başlığı gösterilir; yerel başlık bloğu global olarak gizlenir.
  */
 export function WindowChrome() {
   const { windowHidden, closeCurrent, minimizeCurrent, current } = useWindowManager();
@@ -118,7 +137,7 @@ export function WindowChrome() {
       </button>
 
       <div className="min-w-0 pl-1">
-        <h1 className="max-w-[min(52vw,520px)] truncate text-[19px] font-extrabold leading-none tracking-[-0.035em] text-slate-950 drop-shadow-[0_1px_0_rgba(255,255,255,0.65)] dark:text-white sm:text-[21px]">
+        <h1 className="qore-window-title max-w-[min(52vw,520px)] truncate text-[19px] font-extrabold leading-none tracking-[-0.035em] text-slate-950 drop-shadow-[0_1px_0_rgba(255,255,255,0.65)] dark:text-white sm:text-[21px]">
           {title}
         </h1>
       </div>

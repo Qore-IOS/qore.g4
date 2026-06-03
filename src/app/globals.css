@@ -6226,3 +6226,46 @@ html.dark body.mg-edge-body {
     border: 0 !important;
   }
 }
+
+@layer components {
+  html:not(.dark) body.qore-global-window-chrome {
+    --background: 33 51% 17%;
+    --dashboard-bg: #402f15;
+    --device-bg: #402f15;
+    --mg-bg: #402f15;
+    background: #402f15 !important;
+  }
+
+  html:not(.dark) body.qore-global-window-chrome main,
+  html:not(.dark) body.qore-global-window-chrome [data-qore-window-content="true"],
+  html:not(.dark) body.qore-global-window-chrome .page-shell,
+  html:not(.dark) body.qore-global-window-chrome .cihaz-shell,
+  html:not(.dark) body.qore-global-window-chrome .mg-root,
+  html:not(.dark) body.qore-global-window-chrome .satin-alma-fluid-shell {
+    background: #402f15 !important;
+  }
+
+  body.qore-global-window-chrome [data-qore-global-title-block="true"],
+  body.qore-global-window-chrome [data-qore-global-title-decorator="true"] {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+  }
+
+  body.qore-global-window-chrome [data-qore-window-content="true"] button[aria-label="Geri"] {
+    display: none !important;
+  }
+}
+
+@layer components {
+  html:not(.dark) body.qore-global-window-chrome .qore-window-title {
+    color: #ffffff !important;
+    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35));
+  }
+}
