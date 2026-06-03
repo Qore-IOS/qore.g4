@@ -17,6 +17,34 @@ if exist set-env.bat (
   echo   set CEOMED_PAROLA=12345
   echo   set GOOGLE_APPLICATION_CREDENTIALS=C:\Users\btuba\Desktop\firebase-sa.json
   echo   set FIREBASE_PROJECT_ID=invpilot
+  echo   set CEOMED_COMPANY_ID=your-company-id
+  exit /b 1
+)
+
+REM Zorunlu env kontrolleri. Task Scheduler normalde son komutun exit code'unu
+REM basarili gorebildigi icin eksik ayarlari burada net sekilde fail ettiriyoruz.
+if not defined CEOMED_BASE_URL (
+  echo [HATA] CEOMED_BASE_URL tanimli degil. >> sync.log
+  exit /b 1
+)
+if not defined CEOMED_EPOSTA (
+  echo [HATA] CEOMED_EPOSTA tanimli degil. >> sync.log
+  exit /b 1
+)
+if not defined CEOMED_PAROLA (
+  echo [HATA] CEOMED_PAROLA tanimli degil. >> sync.log
+  exit /b 1
+)
+if not defined GOOGLE_APPLICATION_CREDENTIALS (
+  echo [HATA] GOOGLE_APPLICATION_CREDENTIALS tanimli degil. >> sync.log
+  exit /b 1
+)
+if not defined FIREBASE_PROJECT_ID (
+  echo [HATA] FIREBASE_PROJECT_ID tanimli degil. >> sync.log
+  exit /b 1
+)
+if not defined CEOMED_COMPANY_ID (
+  echo [HATA] CEOMED_COMPANY_ID tanimli degil. Yeni irsaliyeler panelde gorunmez. set-env.bat icine ekleyin. >> sync.log
   exit /b 1
 )
 
@@ -28,8 +56,16 @@ echo [%date% %time%] Sync basliyor: %BAS% - %BIT% >> sync.log
 
 REM 3 durumu da cek (filtre yok = ALLOWED_STATUSES hepsi)
 node syncToFirestore.js %BAS% %BIT% >> sync.log 2>&1
+set SYNC_EXIT=%ERRORLEVEL%
 
-echo [%date% %time%] Sync bitti. >> sync.log
+if not "%SYNC_EXIT%"=="0" (
+  echo [%date% %time%] Sync HATALI bitti. ExitCode=%SYNC_EXIT% >> sync.log
+  echo. >> sync.log
+  exit /b %SYNC_EXIT%
+)
+
+echo [%date% %time%] Sync bitti. ExitCode=0 >> sync.log
 echo. >> sync.log
 
 endlocal
+exit /b 0
