@@ -7,17 +7,25 @@ setlocal
 REM Calisma dizini
 cd /d %~dp0
 
-REM Env yukle: set-env.bat (gitignored) icinde plain "set KEY=VALUE" satirlari olmali.
+REM Env yukle: once varsa set-env.bat, sonra varsa .env okunur.
+REM .env satirlari KEY=VALUE formatinda olmali; .env, set-env.bat degerlerini ezebilir.
+set ENV_LOADED=
 if exist set-env.bat (
   call set-env.bat
-) else (
-  echo [HATA] set-env.bat bulunamadi. Ornek icerik:
-  echo   set CEOMED_BASE_URL=http://192.168.1.5:8081
-  echo   set CEOMED_EPOSTA=merkez
-  echo   set CEOMED_PAROLA=12345
-  echo   set GOOGLE_APPLICATION_CREDENTIALS=C:\Users\btuba\Desktop\firebase-sa.json
-  echo   set FIREBASE_PROJECT_ID=invpilot
-  echo   set CEOMED_COMPANY_ID=your-company-id
+  set ENV_LOADED=1
+)
+if exist .env (
+  for /f "usebackq eol=# tokens=1,* delims==" %%A in (".env") do set "%%A=%%B"
+  set ENV_LOADED=1
+)
+if not defined ENV_LOADED (
+  echo [HATA] set-env.bat veya .env bulunamadi. Ornek .env icerigi:
+  echo   CEOMED_BASE_URL=http://192.168.1.5:8081
+  echo   CEOMED_EPOSTA=merkez
+  echo   CEOMED_PAROLA=12345
+  echo   GOOGLE_APPLICATION_CREDENTIALS=C:\Users\btuba\Desktop\firebase-sa.json
+  echo   FIREBASE_PROJECT_ID=invpilot
+  echo   CEOMED_COMPANY_ID=your-company-id
   exit /b 1
 )
 
@@ -44,7 +52,7 @@ if not defined FIREBASE_PROJECT_ID (
   exit /b 1
 )
 if not defined CEOMED_COMPANY_ID (
-  echo [HATA] CEOMED_COMPANY_ID tanimli degil. Yeni irsaliyeler panelde gorunmez. set-env.bat icine ekleyin. >> sync.log
+  echo [HATA] CEOMED_COMPANY_ID tanimli degil. Yeni irsaliyeler panelde gorunmez. .env veya set-env.bat icine ekleyin. >> sync.log
   exit /b 1
 )
 

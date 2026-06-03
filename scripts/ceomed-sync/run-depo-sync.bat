@@ -3,10 +3,40 @@ REM Ceomed Merkez Depo -> Firestore sync (gunde 1 kez)
 setlocal
 cd /d %~dp0
 
+REM Env yukle: once varsa set-env.bat, sonra varsa .env okunur.
+REM .env satirlari KEY=VALUE formatinda olmali; .env, set-env.bat degerlerini ezebilir.
+set ENV_LOADED=
 if exist set-env.bat (
   call set-env.bat
-) else (
-  echo [HATA] set-env.bat bulunamadi.
+  set ENV_LOADED=1
+)
+if exist .env (
+  for /f "usebackq eol=# tokens=1,* delims==" %%A in (".env") do set "%%A=%%B"
+  set ENV_LOADED=1
+)
+if not defined ENV_LOADED (
+  echo [HATA] set-env.bat veya .env bulunamadi.
+  exit /b 1
+)
+
+if not defined CEOMED_BASE_URL (
+  echo [HATA] CEOMED_BASE_URL tanimli degil. >> sync-depo.log
+  exit /b 1
+)
+if not defined CEOMED_EPOSTA (
+  echo [HATA] CEOMED_EPOSTA tanimli degil. >> sync-depo.log
+  exit /b 1
+)
+if not defined CEOMED_PAROLA (
+  echo [HATA] CEOMED_PAROLA tanimli degil. >> sync-depo.log
+  exit /b 1
+)
+if not defined GOOGLE_APPLICATION_CREDENTIALS (
+  echo [HATA] GOOGLE_APPLICATION_CREDENTIALS tanimli degil. >> sync-depo.log
+  exit /b 1
+)
+if not defined FIREBASE_PROJECT_ID (
+  echo [HATA] FIREBASE_PROJECT_ID tanimli degil. >> sync-depo.log
   exit /b 1
 )
 
