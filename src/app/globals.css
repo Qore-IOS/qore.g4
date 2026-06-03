@@ -6198,3 +6198,31 @@ body.mg-edge-body {
 html.dark body.mg-edge-body {
   background: #000000 !important;
 }
+
+@layer components {
+  /* Global desktop window chrome reserves the top-left title rail for the
+     traffic lights, one shared circular back action, and the route title. */
+  body.qore-global-window-chrome .page-shell {
+    padding-top: max(3.5rem, env(safe-area-inset-top));
+  }
+
+  body.qore-global-window-chrome .qore-local-back-button {
+    display: none !important;
+  }
+}
+
+@layer components {
+  /* The first local h1 is the global title source. Keep it readable by assistive
+     tech, but remove its panel-specific visual/icon row from the desktop shell. */
+  body.qore-global-window-chrome [data-qore-global-title-source="true"] {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+  }
+}
