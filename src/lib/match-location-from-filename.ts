@@ -121,36 +121,25 @@ function scoreCandidate(
   haystackTokens: Set<string>,
   meaningfulHaystackTokens: Set<string>
 ): ScoredCandidate | null {
-  // 0. Özel kısaltma/akronim kuralları (Beykoz, ZKM -> Zeynep Kamil, Feriha Öz vs.)
-  for (const token of meaningfulHaystackTokens) {
-    if (token === 'zkm') {
-      if (normalize(cand.c.name).includes('zeynep kamil')) {
-        return { cand, score: 0.98, reason: 'akronim' };
-      }
-    }
-    if (token === 'feriha') {
-      if (normalize(cand.c.name).includes('feriha oz') || normalize(cand.c.name).includes('feriha')) {
-        return { cand, score: 0.98, reason: 'name' };
-      }
-    }
-    if (token === 'beykoz') {
-      const normName = normalize(cand.c.name);
-      if (normName.includes('beykoz devlet') || normName === 'beykoz') {
-        return { cand, score: 0.98, reason: 'name' };
-      }
-    }
-  }
-
   // 1. Konum kodu varsa tam token eşleşmesi → en güçlü sinyal (0.95).
   if (cand.kod && cand.kod.length >= 2 && haystackTokens.has(cand.kod)) {
     return { cand, score: 0.95, reason: 'kod' };
   }
 
-  // 2. Akronim eşleşmesi (zk, zkc, se, vb.). Dosya adında tek başına geçiyorsa
-  //    çok güçlü işaret — başka adayla karışma riski düşük (0.9).
+  // 2. Akronim / kısaltma eşleşmesi (zk, zkc, se, vb.). Dosya adında tek başına veya
+  //    kısmi akronim olarak (örn. "zkm" -> "zk") geçiyorsa güçlü işaret.
   for (const acr of cand.acronyms) {
+    // 2a. Tam akronim eşleşmesi
     if (haystackTokens.has(acr)) {
-      return { cand, score: 0.9, reason: 'akronim' };
+      return { cand, score: 0.95, reason: 'akronim' };
+    }
+    // 2b. Kısmi akronim/kısaltma eşleşmesi (örn. dosyadaki "zkm" tokenı aday "zk" akronimini içeriyor/başlıyor)
+    for (const token of meaningfulHaystackTokens) {
+      if (token.length >= 2 && acr.length >= 2) {
+        if (token.startsWith(acr) || acr.startsWith(token)) {
+          return { cand, score: 0.90, reason: 'akronim' };
+        }
+      }
     }
   }
 
