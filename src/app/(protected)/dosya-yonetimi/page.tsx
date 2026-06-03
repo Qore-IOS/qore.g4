@@ -36,6 +36,7 @@ import {
   CheckCircle2,
   Wand2,
   HelpCircle,
+  Pencil,
 } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import CeomedIrsaliyePanel from '@/components/ceomed/CeomedIrsaliyePanel';
@@ -87,6 +88,8 @@ export default function DosyaYonetimiPage() {
   const [autoScanningId, setAutoScanningId] = useState<string | null>(null);
   /** Sırada taranmak için bekleyen dosya kimlikleri. */
   const [autoScanQueue, setAutoScanQueue] = useState<string[]>([]);
+  /** Otomatik eşleşen bir dosyada inline konum değiştirme kontrolü açık mı. */
+  const [changingLocationFileId, setChangingLocationFileId] = useState<string | null>(null);
   const { data: productCodes = [] } = useProductCodes();
 
   // Listen to irsaliye files in real-time
@@ -268,43 +271,67 @@ export default function DosyaYonetimiPage() {
     cleanupExpired();
   }, [toast, currentCompanyId, isSuperAdmin]);
 
-  const locationCandidates: LocationCandidate[] = useMemo(() => {
-    if (selectedLocationType === 'hospital') {
-      return hospitals.map((h: any) => ({ id: h.id, name: h.name || h.ad || '', kod: h.kod }));
-    }
-    if (selectedLocationType === 'depot') {
-      return depots.map((d: any) => ({ id: d.id, name: d.name || '', kod: d.kod }));
-    }
+  const getLocationOptions = useCallback((type: 'hospital' | 'depot' | '') => {
+    if (type === 'hospital') return hospitals;
+    if (type === 'depot') return depots;
     return [];
-  }, [selectedLocationType, hospitals, depots]);
+  }, [hospitals, depots]);
 
-  const findLocationName = useCallback((locId: string): string => {
-    if (selectedLocationType === 'hospital') {
-      const h = hospitals.find((x: any) => x.id === locId);
-      return (h?.name || h?.ad || '') as string;
-    }
-    return (depots.find((d: any) => d.id === locId)?.name || '') as string;
-  }, [selectedLocationType, hospitals, depots]);
+  const locationCandidates: LocationCandidate[] = useMemo(() => {
+    return getLocationOptions(selectedLocationType).map((loc: any) => ({
+      id: loc.id,
+      name: loc.name || loc.ad || '',
+      kod: loc.kod,
+    }));
+  }, [selectedLocationType, getLocationOptions]);
 
-  /** Konum atanmamış bir dosyayı manuel olarak konumla eşleştir. */
+  const findLocationName = useCallback((locId: string, type: 'hospital' | 'depot' | '' = selectedLocationType): string => {
+    const loc = getLocationOptions(type).find((x: any) => x.id === locId);
+    return (loc?.name || loc?.ad || '') as string;
+  }, [selectedLocationType, getLocationOptions]);
+
+  /** Konum atanmamış veya otomatik eşleşmiş bir dosyayı manuel olarak konumla eşleştir. */
   const assignLocationToFile = useCallback(async (dosya: IrsaliyeDosya, locId: string) => {
-    const name = findLocationName(locId);
-    if (!name) return;
+    const locationType = dosya.locationType || selectedLocationType;
+    const name = findLocationName(locId, locationType);
+    if (!locationType || !name) return;
     try {
       await updateDoc(doc(db, 'irsaliyeDosyalari', dosya.id), {
-        locationType: selectedLocationType,
+        locationType,
         locationId: locId,
         locationName: name,
         autoMatchedLocation: false,
+        autoMatchConfidence: null,
+        autoMatchReason: 'manuel_degistirildi',
       });
-      toast({ title: 'Konum atandı', description: `${dosya.fileName} → ${name}` });
-      if (autoScanEnabled && dosya.fileType === 'pdf') {
+
+      const pendingSnapshot = await getDocs(scopedQuery(
+        'bekleyenIrsaliyeler',
+        currentCompanyId,
+        isSuperAdmin,
+        where('dosyaId', '==', dosya.id)
+      ));
+      const pendingDocs = pendingSnapshot.docs.filter((docSnap) => docSnap.data()?.status === 'pending');
+      await Promise.all(pendingDocs.map((docSnap) => updateDoc(doc(db, 'bekleyenIrsaliyeler', docSnap.id), {
+        locationType,
+        locationId: locId,
+        locationName: name,
+      })));
+
+      setChangingLocationFileId(null);
+      toast({
+        title: 'Konum güncellendi',
+        description: pendingDocs.length === 0
+          ? `${dosya.fileName} → ${name}`
+          : `${dosya.fileName} ve bekleyen irsaliye kaydı → ${name}`,
+      });
+      if (autoScanEnabled && dosya.fileType === 'pdf' && pendingDocs.length === 0) {
         setAutoScanQueue(prev => prev.includes(dosya.id) ? prev : [...prev, dosya.id]);
       }
     } catch (err: any) {
       toast({ title: 'Hata', description: err?.message || 'Konum atanamadı.', variant: 'destructive' });
     }
-  }, [findLocationName, selectedLocationType, autoScanEnabled, toast]);
+  }, [findLocationName, selectedLocationType, autoScanEnabled, toast, currentCompanyId, isSuperAdmin]);
 
   const processFile = useCallback(async (file: File): Promise<{ ok: boolean; matched: boolean; docId?: string; locationId?: string; locationName?: string }> => {
     if (!currentUser) return { ok: false, matched: false };
@@ -548,7 +575,7 @@ export default function DosyaYonetimiPage() {
     return `${days} gün kaldı`;
   };
 
-  const konumSecenekleri = selectedLocationType === 'hospital' ? hospitals : depots;
+  const konumSecenekleri = getLocationOptions(selectedLocationType);
   /**
    * Liste filtresi: yalnızca seçili kategori türüne ait dosyalar gösterilir.
    * Konum-ID bazlı filtre artık yok — listeye seçili kategorideki tüm dosyalar
@@ -763,6 +790,7 @@ export default function DosyaYonetimiPage() {
                 const isBeingAutoScanned = autoScanningId === dosya.id;
                 const isQueued = autoScanQueue.includes(dosya.id) && !isBeingAutoScanned;
                 const wasAutoMatched = (dosya as any).autoMatchedLocation === true;
+                const rowLocationOptions = getLocationOptions(dosya.locationType || selectedLocationType);
                 return (
                   <div
                     key={dosya.id}
@@ -803,13 +831,41 @@ export default function DosyaYonetimiPage() {
                             </span>
                           )}
                           {hasLocation && wasAutoMatched && (
-                            <span
-                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-violet-100 text-violet-700"
-                              title={`Konum dosya adından otomatik eşleştirildi (${(dosya as any).autoMatchReason || 'name'}, %${Math.round(((dosya as any).autoMatchConfidence || 0) * 100)})`}
-                            >
-                              <Wand2 className="h-3 w-3" />
-                              Otomatik atandı{(dosya as any).autoMatchReason === 'akronim' ? ' · kısaltma' : (dosya as any).autoMatchReason === 'ilk_kelime' ? ' · ilk kelime' : (dosya as any).autoMatchReason === 'kod' ? ' · kod' : ''}
-                            </span>
+                            <>
+                              <span
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-violet-100 text-violet-700"
+                                title={`Konum dosya adından otomatik eşleştirildi (${(dosya as any).autoMatchReason || 'name'}, %${Math.round(((dosya as any).autoMatchConfidence || 0) * 100)})`}
+                              >
+                                <Wand2 className="h-3 w-3" />
+                                Otomatik atandı{(dosya as any).autoMatchReason === 'akronim' ? ' · kısaltma' : (dosya as any).autoMatchReason === 'ilk_kelime' ? ' · ilk kelime' : (dosya as any).autoMatchReason === 'kod' ? ' · kod' : ''}
+                              </span>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 px-2 text-[10px] text-violet-700 hover:bg-violet-100"
+                                onClick={() => setChangingLocationFileId(prev => prev === dosya.id ? null : dosya.id)}
+                                title="Atanan laboratuvarı değiştir"
+                              >
+                                <Pencil className="h-3 w-3 mr-1" />
+                                Değiştir
+                              </Button>
+                              {changingLocationFileId === dosya.id && (
+                                <Select
+                                  value={dosya.locationId || ''}
+                                  onValueChange={(v) => assignLocationToFile(dosya, v)}
+                                >
+                                  <SelectTrigger className="h-7 text-xs w-56">
+                                    <SelectValue placeholder="Yeni konum seç..." />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {rowLocationOptions.map((loc: any) => (
+                                      <SelectItem key={loc.id} value={loc.id}>{loc.name || loc.ad}</SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              )}
+                            </>
                           )}
                           {!hasLocation && (
                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-red-100 text-red-700">
