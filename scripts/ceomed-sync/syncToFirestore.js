@@ -8,6 +8,9 @@
  *   CEOMED_BASE_URL, CEOMED_EPOSTA, CEOMED_PAROLA
  *   GOOGLE_APPLICATION_CREDENTIALS  -> service account JSON path
  *   FIREBASE_PROJECT_ID             -> Firebase project id
+ *   CEOMED_COMPANY_ID               -> bu Ceomed kurulumunun ait olduğu firma id'si
+ *                                      (multi-tenancy: yazılan tüm dokümanlar bu firmaya tag'lenir;
+ *                                      yoksa scopedQuery panellerden veriyi göstermez)
  */
 const admin = require('firebase-admin');
 const { login } = require('./login');
@@ -46,9 +49,17 @@ function parseArgs(argv) {
 }
 
 async function syncOnce({ baslangic, bitis, statusFilter }) {
+  const companyId = (process.env.CEOMED_COMPANY_ID || '').trim();
+  if (!companyId) {
+    throw new Error(
+      'CEOMED_COMPANY_ID env değişkeni zorunlu — yazılan dokümanlar multi-tenancy ' +
+        'kapsamında bu firmaya tag\'lenir. .env dosyana ekle (örn: CEOMED_COMPANY_ID=acme-corp).'
+    );
+  }
+
   const db = initFirestore();
   const { token, user } = await login(process.env.CEOMED_EPOSTA, process.env.CEOMED_PAROLA);
-  console.log(`Login OK (ID_USER=${user.ID_USER})`);
+  console.log(`Login OK (ID_USER=${user.ID_USER}, companyId=${companyId})`);
 
   const all = await fetchIrsaliyeMaster({
     token,
@@ -78,6 +89,7 @@ async function syncOnce({ baslangic, bitis, statusFilter }) {
           {
             durumAciklama: irs.DURUM_ACIKLAMA,
             durumTipi: irs.DURUM_TIPI,
+            companyId, // multi-tenancy: eski tag'siz kayıtlar bu refresh sırasında da tag'lensin
             syncedAt: admin.firestore.FieldValue.serverTimestamp(),
           },
           { merge: true }
@@ -109,6 +121,7 @@ async function syncOnce({ baslangic, bitis, statusFilter }) {
           itemCount: items.length,
           items,
           status: 'pending',
+          companyId, // multi-tenancy: panel scopedQuery'leri bu tag'e göre filtreliyor
           syncedAt: admin.firestore.FieldValue.serverTimestamp(),
         },
         { merge: true }

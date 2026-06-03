@@ -110,6 +110,8 @@ export default function CeomedIrsaliyePanel() {
   const [targetDepotId, setTargetDepotId] = useState<string>('');
 
   useEffect(() => {
+    // Deps: auth değişimine yanıt vermeli — aksi halde listener stale
+    // currentCompanyId/isSuperAdmin ile sabit kalıyordu.
     const q = scopedQuery('pendingCeomedIrsaliye', currentCompanyId, isSuperAdmin);
     const unsub = onSnapshot(
       q,
@@ -128,7 +130,7 @@ export default function CeomedIrsaliyePanel() {
       }
     );
     return () => unsub();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   // Hospital lookup by ceomedCariKodu
   const hospitalByCari = useMemo(() => {
