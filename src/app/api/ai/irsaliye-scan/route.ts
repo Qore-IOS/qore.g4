@@ -152,6 +152,123 @@ function normalizeText(value?: string): string {
     .trim();
 }
 
+function cleanCode(code: string): string {
+  return (code || '').replace(/[^A-Za-z0-9]+/g, '').toUpperCase();
+}
+
+function getTopCandidates(rawName: string, rawCode: string, products: ProductCandidate[], limitCount = 15): ProductCandidate[] {
+  const normRawName = normalizeText(rawName);
+  const normRawCode = cleanCode(rawCode);
+  if (!normRawName && !normRawCode) return [];
+
+  const scored = products.map(p => {
+    let score = 0;
+
+    // 1. Code similarity
+    if (normRawCode && p.stokKodu) {
+      const normPCode = cleanCode(p.stokKodu);
+      if (normPCode && (normRawCode.includes(normPCode) || normPCode.includes(normRawCode))) {
+        score += 12;
+      }
+    }
+
+    // 2. Name token overlap
+    const normPName = normalizeText(p.stokAdi);
+    if (normRawName && normPName) {
+      const rawTokens = normRawName.split(' ').filter(t => t.length >= 2);
+      const pTokens = new Set(normPName.split(' ').filter(t => t.length >= 2));
+      let overlap = 0;
+      rawTokens.forEach(t => { if (pTokens.has(t)) overlap += 1; });
+      score += overlap * 2;
+
+      // Substring bonus
+      if (normPName.includes(normRawName) || normRawName.includes(normPName)) {
+        score += 5;
+      }
+    }
+
+    return { product: p, score };
+  });
+
+  return scored
+    .filter(x => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limitCount)
+    .map(x => x.product);
+}
+
+interface AiMatchDecision {
+  index: number;
+  matchedStokKodu: string | null;
+  confidence: 'high' | 'medium' | 'low' | 'none';
+  reasoning?: string;
+}
+
+async function askAiForProductMatching(
+  itemsToMatch: Array<{ index: number; raw: RawAiItem; candidates: ProductCandidate[] }>
+): Promise<Map<number, AiMatchDecision>> {
+  const apiKey = getGeminiApiKey();
+  if (!apiKey || itemsToMatch.length === 0) return new Map();
+
+  const payload = itemsToMatch.map(it => ({
+    index: it.index,
+    invoiceItem: {
+      stokKodu: it.raw.stokKodu || '',
+      stokAdi: it.raw.stokAdi || '',
+      marka: it.raw.marka || it.raw.brand || '',
+    },
+    systemCandidates: it.candidates.map(c => ({
+      stokKodu: c.stokKodu,
+      stokAdi: c.stokAdi,
+      marka: c.marka || '',
+    })),
+  }));
+
+  const prompt = [
+    'Aşağıda faturadan okunan ve sistemle tam eşleşemeyen ürün kalemleri ile bu kalemler için sistemdeki en olası aday ürünler listelenmiştir.',
+    'Görev: Her fatura kalemi için sistem adaylarından en doğru olanını seçmek.',
+    'Kurallar:',
+    '- Ürün adlarındaki yazım farklılıklarını, marka kısaltmalarını, tıbbi terimleri ve kod benzerliklerini dikkate al.',
+    '- Stok kodu kısmi olarak eşleşiyorsa (örn: faturadaki "bd.442020", sistemdeki "442020" ile) ve ad benzerse eşleştir.',
+    '- Eğer adayların hiçbiri faturadaki ürünle kesinlikle uyuşmuyorsa, matchedStokKodu alanını null yap ve confidence değerini none yap.',
+    '- confidence değeri yüksek/orta/düşük/none olmalıdır.',
+    '- Sadece JSON dizisi döndür: [{"index":0,"matchedStokKodu":"KOD","confidence":"high","reasoning":"gerekçe"}].',
+    `Veri: ${JSON.stringify(payload)}`,
+  ].join('\n');
+
+  try {
+    const { text } = await generateWithGemini({
+      systemPrompt: 'Sen envanter ürün eşleştirme asistanısın. Sadece geçerli JSON dizisi döndür, markdown yok.',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.1,
+      maxOutputTokens: 2048,
+    });
+
+    const parsed = safeJsonParse(text);
+    const arr: AiMatchDecision[] = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.items)
+        ? parsed.items
+        : [];
+
+    const map = new Map<number, AiMatchDecision>();
+    arr.forEach(d => {
+      if (typeof d?.index === 'number') {
+        map.set(d.index, {
+          index: d.index,
+          matchedStokKodu: d.matchedStokKodu ? String(d.matchedStokKodu) : null,
+          confidence: d.confidence || 'none',
+          reasoning: d.reasoning || '',
+        });
+      }
+    });
+    return map;
+  } catch (err) {
+    console.warn('[irsaliye-scan] AI matching error:', err);
+    return new Map();
+  }
+}
+
 /**
  * Match an AI-extracted item back to a system product.
  * Prefer exact stokKodu match → otherwise score by stokAdı token overlap.
@@ -167,6 +284,17 @@ function matchProduct(
     const aiUpper = aiStokKodu.toUpperCase();
     const byCodeCI = products.find(p => p.stokKodu.toUpperCase() === aiUpper);
     if (byCodeCI) return { product: byCodeCI, matchedBy: 'stok_kodu', confidence: 'high' };
+
+    // Gelişmiş kod eşleştirme (fatura kodu "bd.442020", sistem kodu "442020" gibi önek/sonek durumları)
+    const cleanAi = cleanCode(aiStokKodu);
+    if (cleanAi.length >= 4) {
+      const byCleaned = products.find(p => {
+        const cleanSys = cleanCode(p.stokKodu);
+        if (cleanSys.length < 4) return false;
+        return cleanAi.endsWith(cleanSys) || cleanSys.endsWith(cleanAi);
+      });
+      if (byCleaned) return { product: byCleaned, matchedBy: 'stok_kodu', confidence: 'high' };
+    }
   }
 
   const aiName = normalizeText(raw.stokAdi);
@@ -487,7 +615,10 @@ export async function POST(req: NextRequest) {
     const resultItems: ScanResultItem[] = [];
     const brandSet = new Set<string>();
 
-    for (const raw of rawItems) {
+    const itemsForAiMatch: Array<{ index: number; raw: RawAiItem; candidates: ProductCandidate[] }> = [];
+
+    for (let i = 0; i < rawItems.length; i++) {
+      const raw = rawItems[i];
       const matchInfo = matchProduct(raw, products);
       const product = matchInfo.product;
 
@@ -524,6 +655,44 @@ export async function POST(req: NextRequest) {
         matchConfidence: matchInfo.confidence,
         matchedBy: matchInfo.matchedBy,
       });
+
+      // Eğer eşleşme zayıfsa veya eşleşemediyse, Gemini hibrit eşleştirme kuyruğuna alalım
+      if (matchInfo.confidence === 'low' || matchInfo.confidence === 'medium' || matchInfo.matchedBy === 'none') {
+        const candidates = getTopCandidates(raw.stokAdi || '', raw.stokKodu || '', products, 15);
+        if (candidates.length > 0) {
+          itemsForAiMatch.push({
+            index: resultItems.length - 1,
+            raw,
+            candidates,
+          });
+        }
+      }
+    }
+
+    // Gemini ile düşük/orta/eşleşmemiş kayıtları çözmeyi dene
+    if (itemsForAiMatch.length > 0) {
+      const aiMatches = await askAiForProductMatching(itemsForAiMatch);
+      for (const [idx, decision] of aiMatches) {
+        const item = resultItems[idx];
+        if (!item || !decision.matchedStokKodu || decision.confidence === 'none') continue;
+
+        const matchedProduct = products.find(p => p.stokKodu === decision.matchedStokKodu);
+        if (matchedProduct) {
+          const conv = planLocalConversion(item.sourceQuantity, item.sourceUnit, matchedProduct);
+          
+          item.stokKodu = matchedProduct.stokKodu;
+          item.stokAdi = matchedProduct.stokAdi;
+          if (matchedProduct.marka) item.marka = matchedProduct.marka;
+          item.anaBirim = matchedProduct.anaBirim;
+          item.ambalajDegeri = matchedProduct.ambalajDegeri;
+          item.convertedQuantity = conv.convertedQuantity;
+          item.convertedUnit = conv.convertedUnit;
+          item.conversionApplied = conv.conversionApplied;
+          item.conversionReasoning = conv.reasoning || item.conversionReasoning;
+          item.matchConfidence = decision.confidence as 'high' | 'medium' | 'low';
+          item.matchedBy = 'stok_adi';
+        }
+      }
     }
 
     // For items where local conversion is ambiguous, ask Gemini for a decision.
