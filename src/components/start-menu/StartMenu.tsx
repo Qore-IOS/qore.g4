@@ -186,7 +186,7 @@ export function StartMenu() {
               exit={{ opacity: 0, y: 18, scale: 0.985 }}
               transition={{ type: 'spring', stiffness: 420, damping: 34 }}
               className={cn(
-                'pointer-events-auto w-[min(96vw,900px)] rounded-[24px] p-4 flex flex-col gap-3 overflow-y-auto',
+                'pointer-events-auto w-[min(96vw,900px)] rounded-[24px] p-3.5 flex flex-col gap-2.5 overflow-y-auto',
                 SURFACE,
               )}
               style={{
@@ -197,7 +197,7 @@ export function StartMenu() {
               }}
             >
               {/* ---- AI command / search bar ---- */}
-              <div className={cn('flex items-center gap-2.5 h-[50px] px-2.5 rounded-2xl', FIELD)}>
+              <div className={cn('flex items-center gap-2.5 h-[46px] px-2.5 rounded-2xl', FIELD)}>
                 <button
                   type="button"
                   onClick={askAI}
@@ -216,9 +216,9 @@ export function StartMenu() {
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={onSearchKey}
                   placeholder="Qore AI'ya sorun ya da uygulamada arayın…"
-                  className="flex-1 bg-transparent text-[15px] font-medium text-foreground placeholder:text-muted-foreground/70 focus:outline-none"
+                  className="flex-1 bg-transparent text-[14.5px] font-medium text-foreground placeholder:text-muted-foreground/70 focus:outline-none"
                 />
-                <kbd className="shrink-0 text-[11.5px] font-semibold text-muted-foreground px-2 py-1 rounded-lg bg-black/[0.04] dark:bg-white/[0.06] border border-black/[0.04] dark:border-white/10">
+                <kbd className="shrink-0 text-[11px] font-semibold text-muted-foreground px-2 py-1 rounded-lg bg-black/[0.04] dark:bg-white/[0.06] border border-black/[0.04] dark:border-white/10">
                   ⌘ K
                 </kbd>
               </div>
@@ -282,7 +282,7 @@ export function StartMenu() {
                 <>
                   {/* Günün özeti (placeholder — real AI digest wired later) */}
                   <div
-                    className="rounded-2xl p-3.5 flex gap-3 items-start"
+                    className="rounded-2xl p-3 flex gap-2.5 items-start"
                     style={{
                       background:
                         'linear-gradient(150deg, rgba(244,123,52,.13), rgba(122,92,240,.12))',
@@ -290,28 +290,28 @@ export function StartMenu() {
                   >
                     <span
                       className={cn(
-                        'grid place-items-center h-10 w-10 rounded-xl text-white shrink-0',
+                        'grid place-items-center h-9 w-9 rounded-xl text-white shrink-0',
                         BRAND,
                       )}
                       style={{ boxShadow: '0 8px 16px -6px rgba(240,111,44,.7)' }}
                     >
-                      <Sparkles className="h-5 w-5" />
+                      <Sparkles className="h-[18px] w-[18px]" />
                     </span>
                     <div className="flex-1 min-w-0">
-                      <div className="text-[11.5px] font-bold uppercase tracking-wide text-orange-600 dark:text-orange-400">
+                      <div className="text-[11px] font-bold uppercase tracking-wide text-orange-600 dark:text-orange-400">
                         {summary.eyebrow}
                       </div>
-                      <p className="mt-1 text-[14px] font-semibold leading-snug text-foreground">
+                      <p className="mt-0.5 text-[13.5px] font-semibold leading-snug text-foreground">
                         {renderEmphasis(summary.message)}
                       </p>
-                      <div className="mt-2.5 flex flex-wrap gap-2">
+                      <div className="mt-2 flex flex-wrap gap-2">
                         {summary.actions.map((a, i) => (
                           <button
                             key={i}
                             type="button"
                             onClick={() => go(a.href)}
                             className={cn(
-                              'px-3.5 py-2 rounded-xl text-[13px] font-bold transition active:translate-y-px',
+                              'px-3 py-1.5 rounded-lg text-[12.5px] font-bold transition active:translate-y-px',
                               a.variant === 'primary'
                                 ? cn(
                                     BRAND,
@@ -342,26 +342,26 @@ export function StartMenu() {
                         </button>
                       )}
                     </div>
-                    <div className="mt-2 grid grid-cols-5 gap-2.5">
+                    <div className="mt-1.5 grid grid-cols-5 gap-2">
                       {pins.map((v) => (
                         <button
                           key={v.key}
                           type="button"
                           onClick={() => go(v.href)}
                           className={cn(
-                            'group flex flex-col items-center gap-2 rounded-2xl px-1.5 pt-3 pb-2.5 transition hover:-translate-y-0.5 active:translate-y-0',
+                            'group flex flex-col items-center gap-1.5 rounded-xl px-1 pt-2 pb-2 transition hover:-translate-y-0.5 active:translate-y-0',
                             TILE,
                           )}
                         >
                           <span
                             className={cn(
-                              'grid place-items-center h-11 w-11 rounded-2xl',
+                              'grid place-items-center h-9 w-9 rounded-xl',
                               TONE_CHIP[toneForKey(v.key)],
                             )}
                           >
-                            <v.icon className="h-[22px] w-[22px]" />
+                            <v.icon className="h-[18px] w-[18px]" />
                           </span>
-                          <span className="text-[12.5px] font-semibold text-foreground text-center leading-tight">
+                          <span className="text-[12px] font-semibold text-foreground text-center leading-tight">
                             {v.label}
                           </span>
                         </button>
@@ -374,35 +374,36 @@ export function StartMenu() {
                     <div className="flex items-baseline justify-between px-1">
                       <h3 className={SECTION_LABEL}>Kestirmeler</h3>
                     </div>
-                    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+                    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-2">
                       <button
                         type="button"
                         title="Yakında"
                         className={cn(
-                          'inline-flex items-center gap-2.5 pl-2 pr-3.5 py-2 rounded-xl text-[13.5px] font-semibold text-foreground transition hover:-translate-y-0.5',
+                          'inline-flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-xl text-[13px] font-semibold text-foreground transition hover:-translate-y-0.5',
                           TILE,
                         )}
                       >
                         <span
                           className={cn(
-                            'grid place-items-center h-7 w-7 rounded-lg text-white',
+                            'grid place-items-center h-6 w-6 rounded-lg text-white',
                             BRAND,
                           )}
                         >
-                          <Plus className="h-4 w-4" />
+                          <Plus className="h-3.5 w-3.5" />
                         </span>
                         Kestirme oluştur
-                        <span className="ml-0.5 text-[10px] font-bold uppercase tracking-wide text-orange-600/80 dark:text-orange-400/80 bg-orange-500/10 rounded px-1.5 py-0.5">
+                        <span className="ml-0.5 text-[9.5px] font-bold uppercase tracking-wide text-orange-600/80 dark:text-orange-400/80 bg-orange-500/10 rounded px-1.5 py-0.5">
                           Yakında
                         </span>
                       </button>
-                      <span className="text-[12.5px] text-muted-foreground">
+                      <span className="text-[12px] text-muted-foreground">
                         Sık tekrarladığın işlemleri tek tıkla çalıştır.
                       </span>
                     </div>
                   </section>
 
-                  {/* Son yapılan işlemler (placeholder — real feed wired later) */}
+                  {/* Son yapılan işlemler — 2 sütun, tek ekrana sığsın diye
+                      (placeholder; gerçek aktivite akışı sonra bağlanacak) */}
                   <section>
                     <div className="flex items-baseline justify-between px-1">
                       <h3 className={SECTION_LABEL}>Son Yapılan İşlemler</h3>
@@ -410,11 +411,11 @@ export function StartMenu() {
                         Yakında gerçek veri
                       </span>
                     </div>
-                    <div className="mt-1 flex flex-col">
+                    <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-0.5">
                       {PLACEHOLDER_RECENT_ACTIONS.map((a) => (
                         <div
                           key={a.id}
-                          className="flex items-center gap-3 px-2 py-1.5 rounded-xl"
+                          className="flex items-center gap-2.5 px-1.5 py-1 rounded-xl"
                         >
                           <span
                             className={cn(
@@ -425,14 +426,14 @@ export function StartMenu() {
                             <a.icon className="h-[16px] w-[16px]" />
                           </span>
                           <span className="flex-1 min-w-0">
-                            <span className="block text-[13.5px] font-semibold text-foreground truncate">
+                            <span className="block text-[13px] font-semibold text-foreground truncate">
                               {a.title}
                             </span>
-                            <span className="block text-[12px] text-muted-foreground truncate">
+                            <span className="block text-[11.5px] text-muted-foreground truncate">
                               {a.subtitle}
                             </span>
                           </span>
-                          <span className="text-[12px] font-semibold text-muted-foreground whitespace-nowrap">
+                          <span className="text-[11.5px] font-semibold text-muted-foreground whitespace-nowrap">
                             {a.time}
                           </span>
                         </div>
@@ -443,7 +444,7 @@ export function StartMenu() {
               )}
 
               {/* ---- footer: user + settings + power ---- */}
-              <div className="flex items-center justify-between pt-2.5 mt-0.5 border-t border-black/[0.06] dark:border-white/[0.08]">
+              <div className="flex items-center justify-between pt-2 mt-0.5 border-t border-black/[0.06] dark:border-white/[0.08]">
                 <div className="flex items-center gap-2.5">
                   <span
                     className="grid place-items-center h-9 w-9 rounded-full text-white font-extrabold text-[14px]"
