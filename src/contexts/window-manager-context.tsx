@@ -81,31 +81,64 @@ export function WindowManagerProvider({ children }: { children: React.ReactNode 
     dockTargetRef.current = el;
   }, []);
 
-  const dockTarget = useCallback(() => {
+  const dockTarget = useCallback((index: number) => {
     const t = dockTargetRef.current;
     if (!t) return null;
-    const r = t.getBoundingClientRect();
+    
+    // minZoneRef is the container. Find the specific slot or use container as fallback.
+    const children = Array.from(t.children);
+    const targetChild = (children[index] as HTMLElement) || t;
+    
+    const r = targetChild.getBoundingClientRect();
     if (!r.width) return null;
-    return { x: r.left + r.width / 2, y: r.top, w: r.width };
+
+    let yOffset = 0;
+    // Account for Dock's transform (e.g. translateY(20px)) if it's currently hidden
+    // We use closest with a specific class that framer-motion applies to the dock.
+    const dockEl = t.closest('.h-\\[72px\\]');
+    if (dockEl) {
+       const style = window.getComputedStyle(dockEl);
+       const transform = style.transform;
+       if (transform && transform !== 'none') {
+           try {
+               const matrix = new DOMMatrixReadOnly(transform);
+               yOffset = matrix.f; // f is the translateY component
+           } catch(e) {}
+       }
+    }
+
+    return { x: r.left + r.width / 2, y: r.top - yOffset, w: r.width };
   }, []);
 
   const minimizeCurrent = useCallback(() => {
     const el = contentRef.current;
     if (!el || isMinimized) return;
+    
+    // Yüzeyi göster (Dock'u aç)
+    window.dispatchEvent(new CustomEvent('qore:dock-show'));
+
     const finish = () => {
       setIsMinimized(true);
       setMinimized([{ id: pathname || 'win', title: current.title, icon: current.icon }]);
       // Eleman gizlendikten sonra inline genie stillerini temizle.
       requestAnimationFrame(() => requestAnimationFrame(() => clearGenie(el)));
     };
-    const tgt = dockTarget();
+    
+    // Sadece 1 pencere desteklendiği için eklenecek indeks minimized.length'dir.
+    const tgt = dockTarget(minimized.length);
     if (tgt) runGenie(el, tgt.x, tgt.y, { onDone: finish, slotW: tgt.w });
     else finish();
-  }, [isMinimized, pathname, current, dockTarget]);
+  }, [isMinimized, pathname, current, dockTarget, minimized]);
 
   const restore = useCallback(() => {
     const el = contentRef.current;
-    const tgt = dockTarget();
+    
+    // Yüzeyi göster (Dock'u aç)
+    window.dispatchEvent(new CustomEvent('qore:dock-show'));
+
+    // Geri getirme animasyonu dock'ta bulunan var olan (minimized) ikondan çıkar.
+    // Şimdilik sadece 1 pencere desteklediğimizden index 0'dır.
+    const tgt = dockTarget(0);
     // Flash'ı önlemek için göstermeden önce büzülmüş kareye sabitle.
     if (el && tgt) applyGenieCollapsed(el, tgt.x, tgt.y, tgt.w);
     setIsMinimized(false);
