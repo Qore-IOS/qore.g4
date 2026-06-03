@@ -128,7 +128,7 @@ export interface DailySummary {
 export const PLACEHOLDER_DAILY_SUMMARY: DailySummary = {
   eyebrow: 'Qore AI · Günün Özeti',
   message:
-    'Bu hafta IT bütçesinin **%12’si** kullanıldı ve **3 ödeme** onayınızı bekliyor. İstersen hepsini birlikte gözden geçirelim.',
+    'Bu hafta IT bütçesinin **%12’si** kullanıldı; **3 ödeme** onayını bekliyor.',
   actions: [
     { label: 'Onayları gör', href: '/cari-odeme/odemeler', variant: 'primary' },
     { label: 'Haftalık rapor oluştur', href: '/raporlama', variant: 'ghost' },
