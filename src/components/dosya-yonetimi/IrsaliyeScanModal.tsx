@@ -9,7 +9,7 @@ import { Loader2, Scan, AlertTriangle, CheckCircle, Trash2, Wand2, FileText, Cal
 import { extractTextFromPdf, renderPdfPagesToImages } from '@/lib/pdf';
 import type { BekleyenIrsaliyeItem, ProductCode } from '@/lib/types';
 import { db } from '@/lib/firebase';
-import { addDoc, collection, Timestamp } from 'firebase/firestore';
+import { addDoc, collection, Timestamp, deleteDoc, doc } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope } from '@/lib/company-scope';
 
@@ -234,6 +234,20 @@ export default function IrsaliyeScanModal({ isOpen, onClose, file, productCodes 
         title: 'Onaylandı',
         description: `${itemsToSave.length} ürün lab stok yönetimindeki "Bekleyen İrsaliyeler" listesine eklendi.`,
       });
+
+      // Stoğa aktarılan irsaliyenin orijinal dosyasını veritabanından ve depolamadan otomatik sil
+      try {
+        await fetch('/api/storage/delete-file', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ storagePath: file.storagePath }),
+        }).catch((err) => console.warn('Storage file deletion failed in approve:', err));
+        
+        await deleteDoc(doc(db, 'irsaliyeDosyalari', file.id));
+      } catch (delErr) {
+        console.error('Error deleting file after approval:', delErr);
+      }
+
       onClose();
     } catch (err: any) {
       console.error('Approve error:', err);

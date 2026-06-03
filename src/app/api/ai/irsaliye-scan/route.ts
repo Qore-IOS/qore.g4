@@ -269,25 +269,39 @@ function planLocalConversion(
   const mainIsPack = packUnits.has(mainLower);
   const srcIsPiece = pieceUnits.has(srcLower);
   const srcIsPack = packUnits.has(srcLower);
+  const srcIsAmbiguous = !srcLower;
 
-  if (mainIsPack && srcIsPiece) {
-    const divides = qty % ambalaj === 0;
-    const candidatePacks = qty / ambalaj;
-    if (divides && candidatePacks >= 1) {
+  if (mainIsPack && (srcIsPiece || srcIsAmbiguous)) {
+    if (qty >= ambalaj) {
+      const candidatePacks = qty / ambalaj;
+      const roundedPacks = Math.max(1, Math.round(candidatePacks));
+      const isClean = qty % ambalaj === 0;
       return {
-        convertedQuantity: Math.round(candidatePacks),
+        convertedQuantity: roundedPacks,
         convertedUnit: anaBirim,
         conversionApplied: true,
-        reasoning: `Faturada ${qty} ${sourceUnit || 'adet'} yazıyor, ambalaj ${ambalaj} ${anaBirim.toLowerCase()} → ${candidatePacks} ${anaBirim}.`,
+        reasoning: isClean
+          ? `Faturada ${qty} ${sourceUnit || 'birim'} yazıyor, ambalaj ${ambalaj} → ${roundedPacks} ${anaBirim}.`
+          : `Faturada ${qty} ${sourceUnit || 'birim'} yazıyor (tam bölünmüyor), ambalaj ${ambalaj} → yaklaşık ${roundedPacks} ${anaBirim} olarak yuvarlandı.`,
+        needsAi: false,
+      };
+    } else if (qty > ambalaj * 0.8) {
+      return {
+        convertedQuantity: 1,
+        convertedUnit: anaBirim,
+        conversionApplied: true,
+        reasoning: `Faturada ${qty} ${sourceUnit || 'birim'} yazıyor, ambalaj ${ambalaj} → 1 ${anaBirim} olarak kabul edildi.`,
         needsAi: false,
       };
     }
-    // Sayı bölünmüyor — AI mantığına ihtiyaç var.
+    
+    // Miktar ambalaj değerinden çok küçükse, kutu bazında yazılmış olması ihtimaline karşın
+    // birim dönüşümünü AI'a soralım ama default olarak qty değerini koruyalım.
     return {
       convertedQuantity: qty,
       convertedUnit: sourceUnit || 'Adet',
       conversionApplied: false,
-      reasoning: `Bölünme uymadığı için AI dönüşümü değerlendirecek (${qty} / ${ambalaj}).`,
+      reasoning: `Faturadaki miktar (${qty}) ambalaj değerinden (${ambalaj}) küçük, birim dönüşümü AI ile netleştirilecek.`,
       needsAi: true,
     };
   }
@@ -299,17 +313,6 @@ function planLocalConversion(
       conversionApplied: false,
       reasoning: 'Faturadaki birim de ambalaj birimi olduğundan dönüşüm uygulanmadı.',
       needsAi: false,
-    };
-  }
-
-  // Birim belirsiz / yazmıyor — AI'a sor.
-  if (!srcLower) {
-    return {
-      convertedQuantity: qty,
-      convertedUnit: sourceUnit || '',
-      conversionApplied: false,
-      reasoning: 'Faturada birim belirtilmemiş, AI değerlendirecek.',
-      needsAi: true,
     };
   }
 
