@@ -1,40 +1,58 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { ChevronLeft } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useWindowManager } from '@/contexts/window-manager-context';
 
-const ROUTE_TITLE_OVERRIDES: Array<{ match: (pathname: string) => boolean; title: string }> = [
-  {
-    match: (pathname) => pathname === '/stok-yonetimi' || pathname.startsWith('/stok-yonetimi/'),
-    title: 'Depo Stoğu',
-  },
-  {
-    match: (pathname) => pathname === '/mal-kabul' || pathname.startsWith('/mal-kabul/'),
-    title: 'Mal Kabul',
-  },
-  {
-    match: (pathname) => pathname === '/direkt-transfer' || pathname.startsWith('/direkt-transfer/'),
-    title: 'Direkt Transfer',
-  },
-];
+const TITLE_SOURCE_SELECTOR = '[data-qore-window-content="true"] h1:not([data-qore-ignore-global-title])';
+const TITLE_SOURCE_ATTR = 'data-qore-global-title-source';
 
-function getPanelTitle(pathname: string | null, fallbackTitle: string) {
-  if (!pathname) return fallbackTitle;
-  return ROUTE_TITLE_OVERRIDES.find(({ match }) => match(pathname))?.title || fallbackTitle;
+function readPanelTitle(fallbackTitle: string) {
+  if (typeof document === 'undefined') return fallbackTitle;
+
+  const titleEl = document.querySelector<HTMLHeadingElement>(TITLE_SOURCE_SELECTOR);
+  document.querySelectorAll(`[${TITLE_SOURCE_ATTR}="true"]`).forEach((el) => {
+    if (el !== titleEl) el.removeAttribute(TITLE_SOURCE_ATTR);
+  });
+
+  if (!titleEl) return fallbackTitle;
+  titleEl.setAttribute(TITLE_SOURCE_ATTR, 'true');
+
+  return titleEl.textContent?.replace(/\s+/g, ' ').trim() || fallbackTitle;
 }
 
 /**
  * macOS-vari global pencere başlığı.
  * Trafik ışıklarının konumu sabit kalır; hemen yanında tüm standart panellerin
- * ortak dairesel geri butonu ve ikonsuz başlığı gösterilir.
+ * ortak dairesel geri butonu ve panelin ilk h1'inden okunan ikonsuz başlığı gösterilir.
  */
 export function WindowChrome() {
   const { windowHidden, closeCurrent, minimizeCurrent, current } = useWindowManager();
   const router = useRouter();
   const pathname = usePathname();
-  const title = getPanelTitle(pathname, current.title);
+  const [title, setTitle] = useState(current.title);
+
+  useEffect(() => {
+    if (windowHidden) return;
+
+    const syncTitle = () => setTitle(readPanelTitle(current.title));
+    syncTitle();
+
+    const contentEl = document.querySelector('[data-qore-window-content="true"]');
+    if (!contentEl) return;
+
+    const observer = new MutationObserver(syncTitle);
+    observer.observe(contentEl, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ['class', 'style', 'hidden', 'aria-hidden'],
+    });
+
+    return () => observer.disconnect();
+  }, [current.title, pathname, windowHidden]);
 
   if (windowHidden) return null;
 
