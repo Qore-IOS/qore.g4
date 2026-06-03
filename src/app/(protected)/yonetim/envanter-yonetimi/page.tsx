@@ -232,22 +232,25 @@ export default function EnvanterYonetimiPage() {
     ]);
     XLSX.utils.book_append_sheet(workbook, templateSheet, 'Envanter Şablonu');
 
-    const refs = {
-      Kategoriler: categories.map(c => c.name),
-      Konumlar: locations.map(l => l.name)
-    };
+    const categoryNames = categories.map(c => c.name);
+    const locationNames = locations.map(l => l.name);
+    const durumOptions = ['iyi', 'orta', 'kötü', 'çok kötü'];
+    const amortismanOptions = ['dogrusal', 'azalan_bakiye'];
     const refData: any[] = [];
-    const maxLen = Math.max(refs.Kategoriler.length, refs.Konumlar.length);
+    const maxLen = Math.max(categoryNames.length, locationNames.length, durumOptions.length, amortismanOptions.length);
     for (let i = 0; i < maxLen; i++) {
       refData.push({
-        'Kategoriler': refs.Kategoriler[i] || '',
-        'Konumlar': refs.Konumlar[i] || ''
+        'Kategoriler': categoryNames[i] || '',
+        'Konumlar': locationNames[i] || '',
+        'Durum Seçenekleri': durumOptions[i] || '',
+        'Amortisman Yöntemleri': amortismanOptions[i] || '',
       });
     }
     const refSheet = XLSX.utils.json_to_sheet(refData);
     XLSX.utils.book_append_sheet(workbook, refSheet, 'Referans Tanımlar');
 
     XLSX.writeFile(workbook, 'Envanter_Giris_Sablonu.xlsx');
+    toast({ title: 'Şablon İndirildi', description: 'Envanter giriş şablonu indirildi. 2. sayfada tüm referans tanımlar mevcuttur.' });
   };
 
   const handleDownloadCurrentInventory = () => {

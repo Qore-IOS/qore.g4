@@ -1,6 +1,6 @@
 
 'use client';
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, ChangeEvent } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
@@ -8,9 +8,9 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { PlusCircle, Trash2, Loader2, Filter, Search, Eye, Pencil, ChevronLeft, Package, ChevronDown } from 'lucide-react';
+import { PlusCircle, Trash2, Loader2, Filter, Search, Eye, Pencil, ChevronLeft, Package, ChevronDown, Upload, Download } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { collection, getDocs, addDoc, deleteDoc, doc, query, where, setDoc } from 'firebase/firestore';
+import { collection, getDocs, addDoc, deleteDoc, doc, query, where, setDoc, writeBatch } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
@@ -19,7 +19,8 @@ import type { Hospital, Depot, Asset } from '@/lib/types';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
-import { cn } from '@/lib/utils';
+import { cn, readExcelDataSmart, exportDataToExcel } from '@/lib/utils';
+import * as XLSX from 'xlsx';
 import Link from 'next/link';
 import NextImage from 'next/image';
 import { useIconMappings, getIconSrc } from '@/hooks/useIconMappings';
@@ -100,12 +101,14 @@ export default function AssetCategoryPage() {
 
   const [assets, setAssets] = useState<Asset[]>([]);
   const [locations, setLocations] = useState<{ value: string; label: string }[]>([]);
+  const [allCategories, setAllCategories] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingAsset, setEditingAsset] = useState<Partial<Asset>>({});
   const [manualLocation, setManualLocation] = useState('');
   const [globalSearch, setGlobalSearch] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const excelFileInputRef = useRef<HTMLInputElement>(null);
 
   const [filters, setFilters] = useState<Record<FilterableColumn, Set<string>>>({
     demirbasNo: new Set(), urunKodu: new Set(), urunAdi: new Set(),
@@ -117,9 +120,10 @@ export default function AssetCategoryPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [labsSnap, depotsSnap] = await Promise.all([
+      const [labsSnap, depotsSnap, categoriesSnap] = await Promise.all([
         getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
         getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('assetCategories', currentCompanyId, isSuperAdmin)),
       ]);
       const labLocations = filterByCompanyScope(
         labsSnap.docs.map(doc => ({ value: (doc.data() as Hospital).name, label: `Lab: ${(doc.data() as Hospital).name}`, companyId: (doc.data() as any).companyId })),
@@ -130,6 +134,7 @@ export default function AssetCategoryPage() {
         currentCompanyId, isSuperAdmin
       ).map(({ value, label }) => ({ value, label }));
       setLocations([...labLocations, ...depotLocations, { value: 'Diğer', label: 'Diğer (Manuel Giriş)' }].sort((a, b) => a.label.localeCompare(b.label)));
+      setAllCategories(categoriesSnap.docs.map(d => (d.data() as any).name as string).filter(Boolean).sort());
 
       const assetsSnap = await getDocs(scopedQuery('assets', currentCompanyId, isSuperAdmin, where('category', '==', categoryName)));
       setAssets(filterByCompanyScope(
@@ -255,8 +260,174 @@ export default function AssetCategoryPage() {
   const set = (field: string, value: any) => setEditingAsset(prev => ({ ...prev, [field]: value }));
   const categoryIcon = envanterIcons[categoryName];
 
+  // --- Excel Template Download ---
+  const handleDownloadTemplate = () => {
+    const workbook = XLSX.utils.book_new();
+    const templateSheet = XLSX.utils.json_to_sheet([
+      {
+        'Demirbaş No': '',
+        'Ürün Adı': '',
+        'Seri Numarası': '',
+        Durum: 'iyi',
+        Marka: '',
+        Model: '',
+        Konum: '',
+        'Teslim Edilen Personel': '',
+        'Alım Fiyatı (TL)': '',
+        'Satın Alma Tarihi': '',
+        'Garanti Bitiş Tarihi': '',
+        'Planlı Kullanım Ömrü (Yıl)': '',
+        'Amortisman Yöntemi': 'dogrusal',
+        'Amortisman Başlangıç Tarihi': '',
+        'Hurda Tarihi': '',
+        'İmha Tarihi': '',
+        'Satış Tarihi': '',
+        'Son Bakım Tarihi': '',
+        'Sonraki Bakım Tarihi': '',
+        'Son Kalibrasyon Tarihi': '',
+        'Sonraki Kalibrasyon Tarihi': '',
+        'Bakım Maliyeti (TL)': '',
+        'Zimmetli Kişi': '',
+        'Check-Out Tarihi': '',
+        'Check-In Tarihi': '',
+        'Dijital İmza': '',
+        'Zimmet Fiş No': '',
+        Açıklama: '',
+      },
+    ]);
+    XLSX.utils.book_append_sheet(workbook, templateSheet, 'Envanter Şablonu');
+
+    // Reference sheet with all definitions
+    const locationNames = locations.filter(l => l.value !== 'Diğer').map(l => l.value);
+    const durumOptions = ['iyi', 'orta', 'kötü', 'çok kötü'];
+    const amortismanOptions = ['dogrusal', 'azalan_bakiye'];
+    const maxLen = Math.max(allCategories.length, locationNames.length, durumOptions.length, amortismanOptions.length);
+    const refData: any[] = [];
+    for (let i = 0; i < maxLen; i++) {
+      refData.push({
+        'Kategoriler': allCategories[i] || '',
+        'Konumlar': locationNames[i] || '',
+        'Durum Seçenekleri': durumOptions[i] || '',
+        'Amortisman Yöntemleri': amortismanOptions[i] || '',
+        'Aktif Kategori': i === 0 ? categoryName : '',
+      });
+    }
+    const refSheet = XLSX.utils.json_to_sheet(refData);
+    XLSX.utils.book_append_sheet(workbook, refSheet, 'Referans Tanımlar');
+
+    XLSX.writeFile(workbook, `${categoryName}_Envanter_Sablonu.xlsx`);
+    toast({ title: 'Şablon İndirildi', description: `${categoryName} kategorisi için şablon indirildi. 2. sayfada referans tanımlar mevcuttur.` });
+  };
+
+  // --- Excel Current Inventory Download ---
+  const handleDownloadCurrentList = () => {
+    if (assets.length === 0) {
+      toast({ title: 'Veri Yok', description: 'İndirilecek envanter kaydı bulunamadı.', variant: 'default' });
+      return;
+    }
+    const data = assets.map((asset) => ({
+      'Demirbaş No': asset.demirbasNo || '',
+      'Ürün Adı': asset.urunAdi || '',
+      'Seri Numarası': asset.seriNumarasi || '',
+      Durum: asset.durum || '',
+      Marka: asset.marka || '',
+      Model: asset.model || '',
+      Konum: asset.konum || '',
+      'Teslim Edilen Personel': asset.teslimEdilenPersonel || '',
+      'Alım Fiyatı (TL)': typeof asset.alimFiyatiTl === 'number' ? asset.alimFiyatiTl : '',
+      'Satın Alma Tarihi': asset.satinAlmaTarihi || '',
+      'Garanti Bitiş Tarihi': asset.garantiBitisTarihi || '',
+      'Planlı Kullanım Ömrü (Yıl)': asset.planliKullanimOmruYil ?? '',
+      'Amortisman Yöntemi': asset.amortismanYontemi || '',
+      'Zimmetli Kişi': asset.zimmetliKisi || '',
+      Açıklama: asset.aciklama || '',
+    }));
+    exportDataToExcel(data, `${categoryName}_Envanter`, categoryName, toast);
+  };
+
+  // --- Excel Import / Update ---
+  const handleExcelImport = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLoading(true);
+    try {
+      const data = await readExcelDataSmart(file, 'product', toast);
+      if (!data || data.length === 0) {
+        toast({ title: 'Boş Dosya', description: 'Excel dosyasında veri bulunamadı.', variant: 'default' });
+        setLoading(false);
+        return;
+      }
+
+      const batch = writeBatch(db);
+      let newCount = 0, updatedCount = 0;
+
+      for (const row of data) {
+        const demirbasNo = String(row['Demirbaş No'] || row['demirbasno'] || '').trim();
+        if (!demirbasNo) continue;
+
+        const locationNames = locations.filter(l => l.value !== 'Diğer').map(l => l.value);
+        const konumVal = String(row['Konum'] || row['konum'] || '').trim();
+
+        const assetData: Partial<Asset> = {
+          category: categoryName,
+          demirbasNo,
+          urunAdi: String(row['Ürün Adı'] || row['urunadi'] || '').trim(),
+          seriNumarasi: String(row['Seri Numarası'] || row['serinumarasi'] || '').trim(),
+          durum: String(row['Durum'] || row['durum'] || 'iyi').trim() as any,
+          marka: String(row['Marka'] || row['marka'] || '').trim(),
+          model: String(row['Model'] || row['model'] || '').trim(),
+          konum: konumVal,
+          teslimEdilenPersonel: String(row['Teslim Edilen Personel'] || row['teslimedilenpersonel'] || '').trim(),
+          alimFiyatiTl: Number(row['Alım Fiyatı (TL)'] || row['alimfiyatitl'] || 0) || 0,
+          satinAlmaTarihi: String(row['Satın Alma Tarihi'] || row['satinalmatarihi'] || '').trim(),
+          garantiBitisTarihi: String(row['Garanti Bitiş Tarihi'] || row['garantibitistarihi'] || '').trim(),
+          planliKullanimOmruYil: Number(row['Planlı Kullanım Ömrü (Yıl)'] || row['planlikullanimomruyil'] || 0) || 0,
+          amortismanYontemi: String(row['Amortisman Yöntemi'] || row['amortismanyontemi'] || 'dogrusal').trim() as 'dogrusal' | 'azalan_bakiye',
+          amortismanBaslangicTarihi: String(row['Amortisman Başlangıç Tarihi'] || row['amortismanbaslangictarihi'] || '').trim(),
+          hurdaTarihi: String(row['Hurda Tarihi'] || row['hurdatarihi'] || '').trim(),
+          imhaTarihi: String(row['İmha Tarihi'] || row['imhatarihi'] || '').trim(),
+          satisTarihi: String(row['Satış Tarihi'] || row['satistarihi'] || '').trim(),
+          sonBakimTarihi: String(row['Son Bakım Tarihi'] || row['sonbakimtarihi'] || '').trim(),
+          sonrakiBakimTarihi: String(row['Sonraki Bakım Tarihi'] || row['sonrakibakimtarihi'] || '').trim(),
+          sonKalibrasyonTarihi: String(row['Son Kalibrasyon Tarihi'] || row['sonkalibrasyontarihi'] || '').trim(),
+          sonrakiKalibrasyonTarihi: String(row['Sonraki Kalibrasyon Tarihi'] || row['sonrakikalibrasyontarihi'] || '').trim(),
+          bakimMaliyetiTl: Number(row['Bakım Maliyeti (TL)'] || row['bakimmaliyetitl'] || 0) || 0,
+          zimmetliKisi: String(row['Zimmetli Kişi'] || row['zimmetlikisi'] || '').trim(),
+          checkOutTarihi: String(row['Check-Out Tarihi'] || row['checkOutTarihi'] || '').trim(),
+          checkInTarihi: String(row['Check-In Tarihi'] || row['checkInTarihi'] || '').trim(),
+          dijitalImza: String(row['Dijital İmza'] || row['dijitalimza'] || '').trim(),
+          zimmetFisNo: String(row['Zimmet Fiş No'] || row['zimmetfisno'] || '').trim(),
+          aciklama: String(row['Açıklama'] || row['aciklama'] || '').trim(),
+          manuelKonum: locationNames.some(l => l === konumVal) ? undefined : konumVal,
+        };
+
+        const existingAsset = assets.find(a => a.demirbasNo === demirbasNo);
+
+        if (existingAsset) {
+          batch.set(doc(db, 'assets', existingAsset.id), withCompanyScope(assetData as Record<string, any>, currentCompanyId), { merge: true });
+          updatedCount++;
+        } else {
+          batch.set(doc(collection(db, 'assets')), withCompanyScope(assetData, currentCompanyId));
+          newCount++;
+        }
+      }
+
+      if (newCount > 0 || updatedCount > 0) {
+        await batch.commit();
+      }
+      toast({ title: 'İçe Aktarma Başarılı', description: `${newCount} yeni kayıt eklendi, ${updatedCount} kayıt güncellendi.` });
+      fetchData();
+    } catch (err) {
+      toast({ title: 'Hata', description: 'Excel işlenirken bir sorun oluştu.', variant: 'destructive' });
+    } finally {
+      setLoading(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
   return (
     <>
+      <input type="file" ref={excelFileInputRef} className="hidden" accept=".xlsx, .xls" onChange={handleExcelImport} />
       <div className="cihaz-shell min-h-screen">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 sm:pt-8 pb-24">
 
@@ -306,6 +477,34 @@ export default function AssetCategoryPage() {
                 <span className="text-[11px] text-[var(--dashboard-muted)]">{s.label}</span>
               </div>
             ))}
+          </div>
+
+          {/* ===== BULK EXCEL OPERATIONS ===== */}
+          <div className="cihaz-card p-4 mb-6">
+            <p className="text-xs font-semibold text-[var(--dashboard-text)] mb-3 uppercase tracking-wider">Toplu İşlemler — {categoryName}</p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                onClick={() => excelFileInputRef.current?.click()}
+                className="cihaz-tool-item h-9 px-3 text-xs font-medium text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] flex items-center gap-1.5"
+              >
+                <Upload className="w-3.5 h-3.5" /> Excel Yükle / Güncelle
+              </button>
+              <button
+                onClick={handleDownloadTemplate}
+                className="cihaz-tool-item h-9 px-3 text-xs font-medium text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] flex items-center gap-1.5"
+              >
+                <Download className="w-3.5 h-3.5" /> Şablon İndir
+              </button>
+              <button
+                onClick={handleDownloadCurrentList}
+                className="cihaz-tool-item h-9 px-3 text-xs font-medium text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] flex items-center gap-1.5"
+              >
+                <Download className="w-3.5 h-3.5" /> Mevcut Listeyi İndir
+              </button>
+            </div>
+            <p className="text-[11px] mt-2 text-[var(--dashboard-muted)]">
+              Aynı <strong>Demirbaş No</strong> ile yüklenen satırlar mevcut ürünü günceller, yeni Demirbaş No olan satırlar yeni kayıt olarak eklenir. Tüm kayıtlar <strong>{categoryName}</strong> kategorisine atanır.
+            </p>
           </div>
 
           {/* TABLE CARD */}
