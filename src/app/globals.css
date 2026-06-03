@@ -6229,11 +6229,11 @@ html.dark body.mg-edge-body {
 
 @layer components {
   html:not(.dark) body.qore-global-window-chrome {
-    --background: 33 51% 17%;
-    --dashboard-bg: #402f15;
-    --device-bg: #402f15;
-    --mg-bg: #402f15;
-    background: #402f15 !important;
+    --background: 191 66% 68%;
+    --dashboard-bg: #78cfe3;
+    --device-bg: #78cfe3;
+    --mg-bg: #78cfe3;
+    background: #78cfe3 !important;
   }
 
   html:not(.dark) body.qore-global-window-chrome main,
@@ -6242,7 +6242,7 @@ html.dark body.mg-edge-body {
   html:not(.dark) body.qore-global-window-chrome .cihaz-shell,
   html:not(.dark) body.qore-global-window-chrome .mg-root,
   html:not(.dark) body.qore-global-window-chrome .satin-alma-fluid-shell {
-    background: #402f15 !important;
+    background: #78cfe3 !important;
   }
 
   body.qore-global-window-chrome [data-qore-global-title-block="true"],
@@ -6265,7 +6265,7 @@ html.dark body.mg-edge-body {
 
 @layer components {
   html:not(.dark) body.qore-global-window-chrome .qore-window-title {
-    color: #ffffff !important;
-    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.35));
+    color: #0f172a !important;
+    filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.45));
   }
 }
