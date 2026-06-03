@@ -405,6 +405,7 @@ export default function AssetLocationPage() {
           )}
         </div>
       </div>
+      </div>
     </>
   );
 }
