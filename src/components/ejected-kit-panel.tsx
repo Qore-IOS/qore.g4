@@ -59,7 +59,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { getScopedDocs } from '@/lib/firestore-helpers';
 import { db } from '@/lib/firebase';
 import {
     collection,
@@ -163,21 +163,15 @@ export default function EjectedKitPanel() {
     const fetchData = useCallback(async () => {
         setLoading(true);
         try {
-            const [hospitalSnap, deviceSnap, productSnap] = await Promise.all([
-                getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-                getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
-                getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+            const [hospitalDocs, deviceDocs, productDocs] = await Promise.all([
+                getScopedDocs('hospitals', currentCompanyId, isSuperAdmin),
+                getScopedDocs('devices', currentCompanyId, isSuperAdmin),
+                getScopedDocs('productCodes', currentCompanyId, isSuperAdmin),
             ]);
 
-            setAllHospitals(
-                hospitalSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Hospital))
-            );
-            setAllDevices(
-                deviceSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Device))
-            );
-            setAllProducts(
-                productSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ProductCode))
-            );
+            setAllHospitals(hospitalDocs.map((d) => ({ id: d.id, ...d.data() } as Hospital)));
+            setAllDevices(deviceDocs.map((d) => ({ id: d.id, ...d.data() } as Device)));
+            setAllProducts(productDocs.map((d) => ({ id: d.id, ...d.data() } as ProductCode)));
         } catch (err) {
             console.error('Error fetching data:', err);
             toast({
@@ -188,7 +182,7 @@ export default function EjectedKitPanel() {
         } finally {
             setLoading(false);
         }
-    }, [toast]);
+    }, [currentCompanyId, isSuperAdmin, toast]);
 
     useEffect(() => {
         fetchData();
