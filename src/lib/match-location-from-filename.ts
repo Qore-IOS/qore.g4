@@ -59,6 +59,10 @@ const STOP_TOKENS = new Set([
   'eah', 'sbu', 'sb', // Eğitim ve Araştırma Hastanesi, SBÜ vs (kısaltma stopword)
   // Türkçe bağlaçlar (NFD sonrası 2-3 harflik connective'ler)
   've', 'ile', 'ya', 'veya', 'icin',
+  // Ortak sağlık/kurum stop kelimeleri (yanlış eşleşmeleri/akronimleri engellemek için)
+  'devlet', 'tip', 'merkezi', 'dernegi', 'vakfi', 'ozel', 'prof', 'dr', 'acil', 'durum',
+  'saglik', 'ocagi', 'hizmetleri', 'baskanligi', 'mudurlugu', 'universitesi',
+  'ortakligi', 'limited', 'sirketi', 'ltd', 'sti', 'as',
 ]);
 
 interface NormalizedCandidate {
@@ -85,10 +89,14 @@ function buildCandidate(c: LocationCandidate): NormalizedCandidate | null {
   const acronyms = new Set<string>();
   if (meaningful.length >= 2) {
     const allInits = meaningful.map(t => t[0]).join('');
-    if (allInits.length >= 2 && allInits.length <= 6) acronyms.add(allInits);
+    if (allInits.length >= 2 && allInits.length <= 6 && !STOP_TOKENS.has(allInits)) {
+      acronyms.add(allInits);
+    }
     for (let n = 2; n <= Math.min(meaningful.length, 4); n++) {
       const prefix = meaningful.slice(0, n).map(t => t[0]).join('');
-      if (prefix.length >= 2) acronyms.add(prefix);
+      if (prefix.length >= 2 && !STOP_TOKENS.has(prefix)) {
+        acronyms.add(prefix);
+      }
     }
   }
 
@@ -113,6 +121,26 @@ function scoreCandidate(
   haystackTokens: Set<string>,
   meaningfulHaystackTokens: Set<string>
 ): ScoredCandidate | null {
+  // 0. Özel kısaltma/akronim kuralları (Beykoz, ZKM -> Zeynep Kamil, Feriha Öz vs.)
+  for (const token of meaningfulHaystackTokens) {
+    if (token === 'zkm') {
+      if (normalize(cand.c.name).includes('zeynep kamil')) {
+        return { cand, score: 0.98, reason: 'akronim' };
+      }
+    }
+    if (token === 'feriha') {
+      if (normalize(cand.c.name).includes('feriha oz') || normalize(cand.c.name).includes('feriha')) {
+        return { cand, score: 0.98, reason: 'name' };
+      }
+    }
+    if (token === 'beykoz') {
+      const normName = normalize(cand.c.name);
+      if (normName.includes('beykoz devlet') || normName === 'beykoz') {
+        return { cand, score: 0.98, reason: 'name' };
+      }
+    }
+  }
+
   // 1. Konum kodu varsa tam token eşleşmesi → en güçlü sinyal (0.95).
   if (cand.kod && cand.kod.length >= 2 && haystackTokens.has(cand.kod)) {
     return { cand, score: 0.95, reason: 'kod' };

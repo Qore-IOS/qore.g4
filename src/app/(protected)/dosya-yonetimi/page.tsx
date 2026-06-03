@@ -91,6 +91,9 @@ export default function DosyaYonetimiPage() {
   /** Otomatik eşleşen bir dosyada inline konum değiştirme kontrolü açık mı. */
   const [changingLocationFileId, setChangingLocationFileId] = useState<string | null>(null);
   const { data: productCodes = [] } = useProductCodes();
+  const isScanningRef = useRef(false);
+  const queueRef = useRef<string[]>([]);
+  queueRef.current = autoScanQueue;
 
   // Listen to irsaliye files in real-time
   useEffect(() => {
@@ -143,70 +146,69 @@ export default function DosyaYonetimiPage() {
    * Tek seferde tek dosya tarar (rate-limit dostu).
    */
   useEffect(() => {
-    if (autoScanningId || autoScanQueue.length === 0) return;
+    if (isScanningRef.current || autoScanQueue.length === 0) return;
     if (productCodes.length === 0) return;
-    const fileId = autoScanQueue[0];
-    const file = dosyalar.find(d => d.id === fileId);
-    if (!file) {
-      // dosya henüz snapshot'a düşmemiş olabilir — sıradakini bekle.
-      setAutoScanQueue(q => q.slice(1));
-      return;
-    }
-    if (file.fileType !== 'pdf' || !file.locationType || !file.locationId) {
-      setAutoScanQueue(q => q.slice(1));
-      return;
-    }
-    if (pendingScannedDosyaIds.has(fileId)) {
-      // Zaten bekleyen irsaliye var, tekrar tarama.
-      setAutoScanQueue(q => q.slice(1));
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      setAutoScanningId(fileId);
-      const outcome = await autoScanIrsaliyeFile({
-        fileId: file.id,
-        fileName: file.fileName,
-        storagePath: file.storagePath,
-        downloadURL: file.downloadURL,
-        locationType: (file.locationType || 'hospital') as 'hospital' | 'depot',
-        locationId: file.locationId || '',
-        locationName: file.locationName || '',
-        productCodes,
-        companyId: currentCompanyId,
-        user: {
-          uid: currentUser?.uid || null,
-          name: currentUserProfile?.displayName || currentUserProfile?.email || null,
-        },
-      });
-      if (cancelled) return;
-      if (outcome.ok) {
-        toast({
-          title: 'Otomatik tarandı',
-          description: `${file.fileName}: ${outcome.matchedCount} ürün eşleşti, bekleyen irsaliyelere eklendi.`,
-        });
-      } else if (outcome.error) {
-        toast({
-          title: 'Otomatik tarama başarısız',
-          description: `${file.fileName}: ${outcome.error}. Manuel "Tara" ile tekrar deneyebilirsiniz.`,
-          variant: 'destructive',
-        });
+
+    const runQueue = async () => {
+      isScanningRef.current = true;
+      while (queueRef.current.length > 0) {
+        const fileId = queueRef.current[0];
+        const file = dosyalar.find(d => d.id === fileId);
+        if (!file) {
+          setAutoScanQueue(q => q.slice(1));
+          continue;
+        }
+        if (file.fileType !== 'pdf' || !file.locationType || !file.locationId) {
+          setAutoScanQueue(q => q.slice(1));
+          continue;
+        }
+        if (pendingScannedDosyaIds.has(fileId)) {
+          setAutoScanQueue(q => q.slice(1));
+          continue;
+        }
+
+        setAutoScanningId(fileId);
+        try {
+          const outcome = await autoScanIrsaliyeFile({
+            fileId: file.id,
+            fileName: file.fileName,
+            storagePath: file.storagePath,
+            downloadURL: file.downloadURL,
+            locationType: (file.locationType || 'hospital') as 'hospital' | 'depot',
+            locationId: file.locationId || '',
+            locationName: file.locationName || '',
+            productCodes,
+            companyId: currentCompanyId,
+            user: {
+              uid: currentUser?.uid || null,
+              name: currentUserProfile?.displayName || currentUserProfile?.email || null,
+            },
+          });
+          
+          if (outcome.ok) {
+            toast({
+              title: 'Otomatik tarandı',
+              description: `${file.fileName}: ${outcome.matchedCount} ürün eşleşti, bekleyen irsaliyelere eklendi.`,
+            });
+          } else if (outcome.error) {
+            toast({
+              title: 'Otomatik tarama başarısız',
+              description: `${file.fileName}: ${outcome.error}. Manuel "Tara" ile tekrar deneyebilirsiniz.`,
+              variant: 'destructive',
+            });
+          }
+        } catch (err: any) {
+          console.error('[auto-scan] error in queue loop:', err);
+        } finally {
+          setAutoScanningId(null);
+          setAutoScanQueue(q => q.slice(1));
+        }
       }
-      setAutoScanningId(null);
-      setAutoScanQueue(q => q.slice(1));
-    })();
-    return () => { cancelled = true; };
-  }, [
-    autoScanningId,
-    autoScanQueue,
-    dosyalar,
-    productCodes,
-    currentCompanyId,
-    currentUser,
-    currentUserProfile,
-    pendingScannedDosyaIds,
-    toast,
-  ]);
+      isScanningRef.current = false;
+    };
+
+    void runQueue();
+  }, [autoScanQueue, dosyalar, productCodes, currentCompanyId, currentUser, currentUserProfile, pendingScannedDosyaIds, toast]);
 
   /** Eşleşen ama taranmamış dosyalar için "Tümünü Otomatik Tara" butonu. */
   const queueAutoScanForUnscannedMatched = useCallback(() => {
