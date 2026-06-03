@@ -6198,3 +6198,81 @@ body.mg-edge-body {
 html.dark body.mg-edge-body {
   background: #000000 !important;
 }
+
+@layer components {
+  /* Global desktop window chrome reserves the top-left title rail for the
+     traffic lights, one shared circular back action, and the route title. */
+  body.qore-global-window-chrome .page-shell {
+    padding-top: max(3.5rem, env(safe-area-inset-top));
+  }
+
+  body.qore-global-window-chrome .qore-local-back-button {
+    display: none !important;
+  }
+}
+
+@layer components {
+  /* The first local h1 is the global title source. Keep it readable by assistive
+     tech, but remove its panel-specific visual/icon row from the desktop shell. */
+  body.qore-global-window-chrome [data-qore-global-title-source="true"] {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+  }
+}
+
+@layer components {
+  html:not(.dark) body.qore-standard-shell-bg,
+  html:not(.dark) body.qore-global-window-chrome {
+    --background: 191 66% 68%;
+    --dashboard-bg: #78cfe3;
+    --device-bg: #78cfe3;
+    --mg-bg: #78cfe3;
+    background: #78cfe3 !important;
+  }
+
+  html:not(.dark) body.qore-standard-shell-bg main,
+  html:not(.dark) body.qore-standard-shell-bg [data-qore-window-content="true"],
+  html:not(.dark) body.qore-standard-shell-bg .page-shell,
+  html:not(.dark) body.qore-standard-shell-bg .cihaz-shell,
+  html:not(.dark) body.qore-standard-shell-bg .mg-root,
+  html:not(.dark) body.qore-standard-shell-bg .satin-alma-fluid-shell,
+  html:not(.dark) body.qore-global-window-chrome main,
+  html:not(.dark) body.qore-global-window-chrome [data-qore-window-content="true"],
+  html:not(.dark) body.qore-global-window-chrome .page-shell,
+  html:not(.dark) body.qore-global-window-chrome .cihaz-shell,
+  html:not(.dark) body.qore-global-window-chrome .mg-root,
+  html:not(.dark) body.qore-global-window-chrome .satin-alma-fluid-shell {
+    background: #78cfe3 !important;
+  }
+
+  body.qore-global-window-chrome [data-qore-global-title-block="true"],
+  body.qore-global-window-chrome [data-qore-global-title-decorator="true"] {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+  }
+
+  body.qore-global-window-chrome [data-qore-window-content="true"] button[aria-label="Geri"] {
+    display: none !important;
+  }
+}
+
+@layer components {
+  html:not(.dark) body.qore-global-window-chrome .qore-window-title {
+    color: #0f172a !important;
+    filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.45));
+  }
+}

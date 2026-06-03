@@ -21,6 +21,7 @@ export function WindowFrame({ children }: { children: React.ReactNode }) {
   return (
     <div
       ref={ref}
+      data-qore-window-content="true"
       className={cn(
         'w-full flex-1 flex flex-col min-h-0',
         // visibility:hidden — layout/rect korunur (genie ölçümü için), görsel gizlenir
