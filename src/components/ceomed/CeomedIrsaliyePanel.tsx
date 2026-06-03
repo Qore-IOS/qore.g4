@@ -465,9 +465,32 @@ export default function CeomedIrsaliyePanel() {
             <Loader2 className="h-5 w-5 animate-spin mr-2" /> Yükleniyor...
           </div>
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-10 text-[var(--dashboard-muted)]">
+          <div className="flex flex-col items-center justify-center py-10 text-[var(--dashboard-muted)] text-center px-4">
             <Package className="h-8 w-8 mb-2 opacity-50" />
-            <p className="text-sm">Onay bekleyen irsaliye yok.</p>
+            {list.length === 0 ? (
+              <>
+                <p className="text-sm font-medium">Bu firma için kayıt bulunamadı.</p>
+                <p className="text-xs mt-2 max-w-md">
+                  Sync yazdığı dokümanlara <code className="px-1 rounded bg-black/10">companyId</code> tag'i koymuyor olabilir.
+                  Sync makinasındaki <code className="px-1 rounded bg-black/10">.env</code> dosyasına{' '}
+                  <code className="px-1 rounded bg-black/10">CEOMED_COMPANY_ID</code> ekleyip{' '}
+                  <code className="px-1 rounded bg-black/10">node backfillCompanyId.js</code> bir kere çalıştırılmalı
+                  (eski tag'siz kayıtlar tag'lenir, yeni kayıtlar otomatik tag'lenmeye başlar).
+                </p>
+              </>
+            ) : (
+              <p className="text-sm">
+                {recordStatusFilter === 'pending'
+                  ? 'Onay bekleyen irsaliye yok.'
+                  : recordStatusFilter === 'approved'
+                  ? 'Onaylanan irsaliye yok.'
+                  : recordStatusFilter === 'rejected'
+                  ? 'Reddedilen irsaliye yok.'
+                  : recordStatusFilter === 'deleted'
+                  ? 'Silinen irsaliye yok.'
+                  : 'Filtre sonucu boş.'}
+              </p>
+            )}
           </div>
         ) : (
           <div className="space-y-2">
