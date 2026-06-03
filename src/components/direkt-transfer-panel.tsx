@@ -1174,10 +1174,7 @@ export default function DirektTransferPanel() {
         <div className="flex items-center gap-3">
           <BackButton fallback="/siparisler" aria-label="Geri dön" />
           <div className="flex-1 min-w-0">
-            <h1 className="text-lg sm:text-xl font-bold text-[var(--dashboard-text)] flex items-center gap-2">
-              <Truck className="h-5 w-5 text-[var(--dashboard-accent)]" />
-              Direkt Transfer
-            </h1>
+            <h1 className="sr-only">Direkt Transfer</h1>
             <p className="text-[11px] sm:text-xs text-[var(--dashboard-muted)] truncate">
               {depotName ? `${depotName}` : 'Depo seçin'}{' '}
               {selectedLabName ? `→ ${selectedLabName}` : isBorcMode && selectedCompany ? `→ ${selectedCompany} (Borç)` : ''}
