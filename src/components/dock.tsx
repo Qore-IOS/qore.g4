@@ -7,14 +7,14 @@ import { cn } from '@/lib/utils';
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, Calendar } from 'lucide-react';
 import NotificationsBell from '@/components/notifications/NotificationsBell';
 import type { DockItemData } from '@/hooks/use-dock';
 import { useAuth } from '@/contexts/auth-context';
 import { useStartMenu } from '@/contexts/start-menu-context';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { ThemeToggleDock } from "@/components/ui/theme-toggle-dock"
+import { CalendarDockPanel } from '@/components/dock/CalendarDockPanel';
 import Image from 'next/image';
 import { useIconMappings, getIconSrc } from '@/hooks/useIconMappings';
 
@@ -482,12 +482,6 @@ const DockItem = ({
     );
   }
 
-  // The original theme button is removed from use-dock.ts now.
-  // This logic is preserved in case it's needed elsewhere but won't be triggered by the dock items.
-  if (item.key === 'theme') {
-    return <ThemeToggleDock />;
-  }
-
   const hasSubItems = item.subItems && item.subItems.length > 0;
 
   // Viewport-aware submenu positioning
@@ -682,7 +676,7 @@ const DockItem = ({
           <TooltipTrigger asChild>
             <motion.div
               ref={(el) => { if (onRefSet) onRefSet(el); (iconRef as React.MutableRefObject<HTMLDivElement | null>).current = el; }}
-              animate={!isLiquidMode && isHovered ? { scale: 2 } : { scale: 1 }}
+              animate={!isLiquidMode && isHovered ? { scale: 1.55 } : { scale: 1 }}
               className={cn(
                 'dock-item-wrapper flex items-center justify-center cursor-pointer',
                 isActive && item.type === 'nav' && 'active',
@@ -725,7 +719,7 @@ const DockItem = ({
       onMouseLeave={handleMouseLeave}
     >
       <motion.div
-        animate={!isLiquidMode && isHovered ? { scale: 2, y: -6 } : { scale: 1, y: 0 }}
+        animate={!isLiquidMode && isHovered ? { scale: 1.55, y: -8 } : { scale: 1, y: 0 }}
         className={cn(
           'dock-item-wrapper flex items-center justify-center cursor-pointer',
           isActive && item.type === 'nav' && 'active',
@@ -799,8 +793,40 @@ const DockLogo = () => {
   );
 };
 
+// Takvim kısayolu — dock'un sağ bölgesinde, basınca takvim panelini açar.
+const CalendarDockButton = ({ open, onToggle }: { open: boolean; onToggle: () => void }) => {
+  const calGradient = {
+    background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
+    WebkitBackgroundClip: 'text',
+    WebkitTextFillColor: 'transparent',
+    backgroundClip: 'text',
+    filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.15))',
+  } as React.CSSProperties;
+  return (
+    <Tooltip open={open ? false : undefined}>
+      <TooltipTrigger asChild>
+        <motion.div
+          whileHover={{ scale: 1.55, y: -8 }}
+          transition={{ type: 'spring', stiffness: 600, damping: 25 }}
+          className={cn('dock-item-wrapper flex items-center justify-center cursor-pointer', open && 'active')}
+          onClick={onToggle}
+          aria-label="Takvim"
+          aria-expanded={open}
+        >
+          <Calendar className="dock-item-icon" style={calGradient} />
+        </motion.div>
+      </TooltipTrigger>
+      <TooltipPrimitive.Portal>
+        <TooltipContent side="top" align="center" sideOffset={12} className="dock-tooltip" style={{ zIndex: 'var(--z-float)' } as React.CSSProperties}>
+          <p>Takvim · Planlama</p>
+        </TooltipContent>
+      </TooltipPrimitive.Portal>
+    </Tooltip>
+  );
+};
+
 export function Dock({ items, currentView, className, setTheme, isVisible }: DockProps) {
-  const { dockStyle } = useAuth();
+  const { dockStyle, currentUserProfile } = useAuth();
   const isLiquidMode = dockStyle === 'liquid';
   const iconData = useIconMappings();
   const dockIcons = iconData?.mappings?.dock || {};
@@ -815,6 +841,23 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
   const [activeItemKey, setActiveItemKey] = useState<string | null>(null);
   const [selectorPosition, setSelectorPosition] = useState({ x: 0, width: 48 });
   const mouseInDockRef = useRef(false);
+
+  // Calendar shortcut (right zone). Close it when navigating to another view.
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  useEffect(() => { setCalendarOpen(false); }, [currentView]);
+
+  // Auto-fit: shrink the whole dock proportionally if it would overflow the
+  // viewport (many panels). offsetWidth is the layout width — unaffected by the
+  // transform scale we apply — so it's a stable basis for the ratio.
+  const [fitScale, setFitScale] = useState(1);
+  const recomputeFit = useCallback(() => {
+    const el = dockRef.current;
+    if (!el) return;
+    const natural = el.offsetWidth;
+    const avail = window.innerWidth - 24;
+    const next = natural > avail ? Math.max(0.5, avail / natural) : 1;
+    setFitScale((prev) => (Math.abs(prev - next) > 0.005 ? next : prev));
+  }, []);
 
   // Track mouse position for liquid selector
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
@@ -875,6 +918,20 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
     }
   }, []);
 
+  // Logout stays in the dock only for the 'user' role; everyone else uses the
+  // Start menu's logout. The theme toggle moved to the Start menu entirely.
+  const role = currentUserProfile?.role;
+  const showDockLogout = role === 'user';
+  const mainItems = items.filter((i) => i.key !== 'logout');
+  const logoutItem = items.find((i) => i.key === 'logout');
+
+  // Recompute auto-fit on mount, on resize, and when the item set changes.
+  useLayoutEffect(() => { recomputeFit(); }, [recomputeFit, mainItems.length, showDockLogout]);
+  useEffect(() => {
+    window.addEventListener('resize', recomputeFit);
+    return () => window.removeEventListener('resize', recomputeFit);
+  }, [recomputeFit]);
+
   const activeItem = items.find(item => item.key === activeItemKey);
 
   return (
@@ -883,7 +940,7 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
         <motion.div
           ref={dockRef}
           className={cn(
-            "relative flex h-14 items-center gap-0.5 px-2.5 py-2 rounded-2xl transition-shadow duration-300",
+            "relative flex h-[72px] items-center gap-1 px-3 py-2.5 rounded-[24px] transition-shadow duration-300",
             "bg-white/80 backdrop-blur-xl border border-gray-200/60",
             "shadow-[0_2px_12px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]",
             "dark:bg-black/30 dark:backdrop-blur-xl dark:border-white/[0.08]",
@@ -893,15 +950,17 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
           animate={{
             opacity: isVisible ? 1 : 0,
             y: isVisible ? 0 : 20,
+            scale: fitScale,
             pointerEvents: isVisible ? 'auto' : 'none',
           }}
+          style={{ transformOrigin: 'bottom center' }}
           transition={{ duration: 0.3, ease: 'easeInOut' }}
           onMouseMove={handleMouseMove}
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
         >
           {/* Content wrapper for position reference */}
-          <div ref={dockContentRef} className="relative flex items-center gap-0.5">
+          <div ref={dockContentRef} className="relative flex items-center gap-1">
             {/* Liquid Glass Selector */}
             {isLiquidMode && (
               <AnimatePresence>
@@ -909,7 +968,7 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
                   <LiquidGlassSelector
                     x={selectorPosition.x}
                     width={selectorPosition.width}
-                    height={44}
+                    height={52}
                     isVisible={isMouseInDock}
                     activeLabel={activeItem?.label}
                   />
@@ -918,7 +977,7 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
             )}
 
             <DockLogo />
-            {items.map((item) => (
+            {mainItems.map((item) => (
               <DockItem
                 key={item.key}
                 item={item}
@@ -930,12 +989,36 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
                 customIcon={dockIcons[item.key]}
               />
             ))}
-          </div>
-          <div className="ml-1">
-            <ThemeToggleDock />
+
+            {/* ---- right zone: hairline-separated utilities ---- */}
+            <div className="qdock-sep" />
+            {/* Minimized-tab zone — reserved (≥2 slots, grows as tabs arrive).
+                Live minimize + genie animation land with the tabbed-window system. */}
+            <div className="flex items-center gap-1">
+              <span className="qdock-minslot" />
+              <span className="qdock-minslot" />
+            </div>
+            <div className="qdock-sep" />
+            <CalendarDockButton open={calendarOpen} onToggle={() => setCalendarOpen((o) => !o)} />
+            {showDockLogout && logoutItem && (
+              <DockItem
+                key={logoutItem.key}
+                item={logoutItem}
+                isActive={false}
+                setTheme={setTheme}
+                isLiquidMode={isLiquidMode}
+                isLiquidHovered={isLiquidMode && activeItemKey === logoutItem.key}
+                onRefSet={(el) => setItemRef(logoutItem.key, el)}
+                customIcon={dockIcons[logoutItem.key]}
+              />
+            )}
           </div>
         </motion.div>
       </TooltipProvider>
+
+      <AnimatePresence>
+        {calendarOpen && <CalendarDockPanel key="cal" onClose={() => setCalendarOpen(false)} />}
+      </AnimatePresence>
     </div>
   );
 }
