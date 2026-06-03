@@ -114,17 +114,20 @@ Task Scheduler'a günde 1 kez çalışacak şekilde ayrı bir görev ekle (örn.
 
 ## Adım 5 — Windows Task Scheduler ile Otomasyon
 
-`run-sync.bat` hazır — `.env` dosyasını yükler, dünden bugüne tarih aralığıyla 3 durumu da çeker, `sync.log`'a yazar.
+`run-sync.bat` hazır — `set-env.bat` dosyasını yükler, içinde bulunduğumuz haftanın tarih aralığıyla izinli durumları çeker ve `sync.log`'a yazar. Batch dosyası artık eksik zorunlu ayar veya Node hatasında non-zero exit code döndürür; böylece Task Scheduler gerçek hatayı “başarılı” gibi göstermez.
 
-### Önce `.env` oluştur
-`scripts/ceomed-sync/.env` dosyası (gitignore'da):
+### Önce `set-env.bat` oluştur
+`scripts/ceomed-sync/set-env.bat` dosyası (gitignore'da) düz `set KEY=VALUE` satırları içermeli:
+```bat
+set CEOMED_BASE_URL=http://192.168.1.5:8081
+set CEOMED_EPOSTA=merkez
+set CEOMED_PAROLA=12345
+set GOOGLE_APPLICATION_CREDENTIALS=C:\Users\btuba\firebase-sa.json
+set FIREBASE_PROJECT_ID=your-project-id
+set CEOMED_COMPANY_ID=your-company-id
 ```
-CEOMED_BASE_URL=http://192.168.1.5:8081
-CEOMED_EPOSTA=merkez
-CEOMED_PAROLA=12345
-GOOGLE_APPLICATION_CREDENTIALS=C:\Users\btuba\firebase-sa.json
-FIREBASE_PROJECT_ID=your-project-id
-```
+
+`CEOMED_COMPANY_ID` özellikle önemlidir: bu değer boşsa sync script'i yazma işlemini durdurur; çünkü panel `pendingCeomedIrsaliye` kayıtlarını firma kapsamına göre okur ve companyId'siz yeni kayıtlar arayüzde görünmez.
 
 ### Test et
 ```powershell
@@ -155,3 +158,5 @@ Artık her 15 dakikada bir Firestore otomatik güncelleniyor. Logu görmek için
 ```powershell
 type C:\Users\btuba\Desktop\qore.g4\scripts\ceomed-sync\sync.log
 ```
+
+Logda `[HATA] CEOMED_COMPANY_ID tanimli degil` veya `FATAL: CEOMED_COMPANY_ID env değişkeni zorunlu` görürsen `set-env.bat` dosyasına `set CEOMED_COMPANY_ID=...` satırını ekleyip bir kere `node backfillCompanyId.js` çalıştır; ardından `run-sync.bat` yeni irsaliyeleri tekrar yazacaktır.
