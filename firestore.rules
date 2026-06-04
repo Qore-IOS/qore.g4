@@ -247,6 +247,18 @@ service cloud.firestore {
       allow update: if writingInCompany();
       allow delete: if isSuperAdmin();
     }
+    match /cariInvoices/{id} {
+      allow read: if inCompany();
+      allow write: if writingInCompany();
+    }
+    match /cariReceipts/{id} {
+      allow read: if inCompany();
+      allow write: if writingInCompany();
+    }
+    match /cariLedgerEntries/{id} {
+      allow read: if inCompany();
+      allow write: if writingInCompany();
+    }
     match /cariPaymentTemplates/{id}          { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /cariBankAccounts/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /cariFirmalar/{id} {

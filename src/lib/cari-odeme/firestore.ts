@@ -33,6 +33,8 @@ import {
   Timestamp,
   where,
   writeBatch,
+  runTransaction,
+  serverTimestamp,
   type QueryConstraint,
   type FirestoreDataConverter,
 } from "firebase/firestore";
@@ -147,74 +149,115 @@ export async function updatePaymentStatus(
     rejectionReason?: string;
   }
 ): Promise<void> {
-  const payment = await getPayment(paymentId);
-  if (!payment) throw new Error("Ödeme bulunamadı.");
-
-  if (!canTransition(payment.status, newStatus, userRoles)) {
-    throw new Error(
-      `Bu durum geçişi (${payment.status} → ${newStatus}) yetkiniz dahilinde değil.`
-    );
-  }
-
-  const batch = writeBatch(db);
   const paymentRef = doc(db, CARI_PAYMENTS, paymentId);
-
-  // Build the update payload with audit trail fields
-  const updateData: Record<string, any> = {
-    status: newStatus,
-    updatedAt: Timestamp.now(),
-  };
-
-  if (opts?.bankName) {
-    updateData.bankName = opts.bankName;
-  }
-
-  if (newStatus === "approved") {
-    updateData.approvedBy = userId;
-    updateData.approvedByName = userName;
-    updateData.approvedAt = Timestamp.now();
-  } else if (newStatus === "paid") {
-    updateData.paidBy = userId;
-    updateData.paidByName = userName;
-    updateData.paidAt = Timestamp.now();
-  } else if (newStatus === "rejected") {
-    updateData.rejectedBy = userId;
-    updateData.rejectedByName = userName;
-    updateData.rejectedAt = Timestamp.now();
-    if (opts?.rejectionReason) {
-      updateData.rejectionReason = opts.rejectionReason;
-    }
-  }
-
-  batch.update(paymentRef, updateData);
-
-  // Create audit event in the same batch
   const auditRef = doc(collection(db, CARI_AUDIT_EVENTS));
-  batch.set(
-    auditRef,
-    withCompanyScope(
-      {
-        action: "payment_status_changed" as AuditEventAction,
-        entityType: "payment" as AuditEntityType,
-        entityId: paymentId,
-        userId,
-        userName,
-        timestamp: Timestamp.now(),
-        previousValue: {
-          status: payment.status,
-          bankName: payment.bankName,
-        },
-        newValue: {
-          status: newStatus,
-          bankName: opts?.bankName ?? payment.bankName,
-          ...(opts?.rejectionReason ? { rejectionReason: opts.rejectionReason } : {}),
-        },
-      },
-      scope.companyId
-    )
-  );
+  
+  await runTransaction(db, async (transaction) => {
+    // 1. Fetch payment inside transaction
+    const paymentSnap = await transaction.get(paymentRef.withConverter(paymentConverter));
+    if (!paymentSnap.exists()) {
+      throw new Error("Ödeme bulunamadı.");
+    }
+    const payment = paymentSnap.data();
 
-  await batch.commit();
+    // Re-verify transition inside transaction
+    if (!canTransition(payment.status, newStatus, userRoles)) {
+      throw new Error(`Bu durum geçişi (${payment.status} → ${newStatus}) yetkiniz dahilinde değil.`);
+    }
+
+    // Build the update payload with audit trail fields
+    const updateData: Record<string, any> = {
+      status: newStatus,
+      updatedAt: serverTimestamp(),
+    };
+
+    if (opts?.bankName) updateData.bankName = opts.bankName;
+
+    if (newStatus === "approved") {
+      updateData.approvedBy = userId;
+      updateData.approvedByName = userName;
+      updateData.approvedAt = serverTimestamp();
+    } else if (newStatus === "paid") {
+      updateData.paidBy = userId;
+      updateData.paidByName = userName;
+      updateData.paidAt = serverTimestamp();
+    } else if (newStatus === "rejected") {
+      updateData.rejectedBy = userId;
+      updateData.rejectedByName = userName;
+      updateData.rejectedAt = serverTimestamp();
+      if (opts?.rejectionReason) updateData.rejectionReason = opts.rejectionReason;
+    }
+
+    transaction.update(paymentRef, updateData);
+
+    // 2. Audit Event
+    transaction.set(
+      auditRef,
+      withCompanyScope(
+        {
+          action: "payment_status_changed" as AuditEventAction,
+          entityType: "payment" as AuditEntityType,
+          entityId: paymentId,
+          userId,
+          userName,
+          timestamp: serverTimestamp(),
+          previousValue: {
+            status: payment.status,
+            bankName: payment.bankName,
+          },
+          newValue: {
+            status: newStatus,
+            bankName: opts?.bankName ?? payment.bankName,
+            ...(opts?.rejectionReason ? { rejectionReason: opts.rejectionReason } : {}),
+          },
+        },
+        scope.companyId
+      )
+    );
+
+    // 3. (Faz 1) Ledger Entry & Balance update if status === "paid"
+    if (newStatus === "paid" && payment.cariFirmaId) {
+      const firmaRef = doc(db, "cariFirmalar", payment.cariFirmaId);
+      const firmaSnap = await transaction.get(firmaRef);
+      if (firmaSnap.exists()) {
+        const firmaData = firmaSnap.data();
+        const currentBalance = firmaData.currentBalance || 0;
+        
+        // Ödeme çıkışı (Biz ödüyoruz): Cari'nin alacağı düşer, yani balance (bizim onlara borcumuz, negatif tutulur, 
+        // ya da pozitif = müşteri borcu. Standart modelde "Tahsilat" credit ekliyordu, "Ödeme" debit ekler.
+        const debit = payment.amount || 0;
+        const credit = 0;
+        const newBalance = currentBalance + debit - credit;
+
+        transaction.update(firmaRef, {
+          currentBalance: newBalance,
+          updatedAt: serverTimestamp(),
+        });
+
+        const ledgerRef = doc(collection(db, "cariLedgerEntries"));
+        transaction.set(
+          ledgerRef,
+          withCompanyScope(
+            {
+              cariFirmaId: payment.cariFirmaId,
+              cariFirmaName: payment.companyName || firmaData.name || "",
+              entryDate: serverTimestamp(),
+              entryType: "odeme",
+              description: `Ödeme çıkışı: ${payment.description || ""}`,
+              debitAmount: debit,
+              creditAmount: credit,
+              balance: newBalance,
+              sourceDocType: "payment",
+              sourceDocId: paymentId,
+              currency: "TRY", // FIXME: Payment nesnesinden alınabilir
+              createdAt: serverTimestamp(),
+            },
+            scope.companyId
+          )
+        );
+      }
+    }
+  });
 }
 
 /**
