@@ -676,10 +676,6 @@ export default function SiparislerPanel(): JSX.Element {
     hasItems: orderItems.length > 0,
   }), [selectedDepotId, selectedLabId, orderItems]);
 
-  // Lojistik sorumlusu rolü: sipariş oluşturma ve depo seçim akışları gizlenir,
-  // yalnızca kendisine atanan laboratuvarların perifer siparişlerini görür.
-  const isLojistikSorumlusu = currentUserProfile?.role === 'lojistik_sorumlusu';
-
   // ── Lojistik Sorumlusu: completely different UI (skeleton yok, anında açılır) ──
   if (isLojistikSorumlusu) {
     return <LojistikSiparisView />;

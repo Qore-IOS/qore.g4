@@ -60,7 +60,7 @@ import { malKabulLogger, createCorrelationId } from '@/lib/logger';
 import { sanitizeBarcode, sanitizeStockCode, securityCheck } from '@/lib/mal-kabul/validation';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { formatQuantityWithUnit, formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
-import { matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { matchesCompanyScope, normalizeCompanyId, withCompanyScope } from '@/lib/company-scope';
 import BekleyenIrsaliyelerPanel from '@/components/lab/BekleyenIrsaliyelerPanel';
 
 // Child Components
@@ -1261,7 +1261,7 @@ export default function AnaPanel(props: AnaPanelProps) {
       const txRef = doc(db, 'malKabulTransactions', transactionId);
       const batch = writeBatch(db);
 
-      batch.set(txRef, stripUndefined(header));
+      batch.set(txRef, withCompanyScope(stripUndefined(header), currentCompanyId));
 
       const lines = buildTransactionLines(rows);
       for (const line of lines) {
@@ -1274,7 +1274,7 @@ export default function AnaPanel(props: AnaPanelProps) {
           adet: line.adet ?? 0,
           serials: Array.isArray(line.serials) ? (line.serials as string[]).filter(Boolean) : [],
         });
-        batch.set(lineRef, cleanLine);
+        batch.set(lineRef, withCompanyScope(cleanLine, currentCompanyId));
       }
 
       await batch.commit();
