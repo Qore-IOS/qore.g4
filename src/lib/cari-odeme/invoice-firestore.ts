@@ -15,14 +15,19 @@ import type { Invoice } from "./invoice-types";
 import type { LedgerEntry } from "./finance-types";
 import type { CariFirma } from "./types";
 import { getScopedDocs, scopedQuery } from "../firestore-helpers";
-import { createAuditEvent } from "./firestore";
+import { withCompanyScope } from "../company-scope";
+import { createAuditEvent, type Scope } from "./firestore";
 
 const INVOICE_COLLECTION = "cariInvoices";
 const FIRMALAR_COLLECTION = "cariFirmalar";
 const LEDGER_COLLECTION = "cariLedgerEntries";
 
+/**
+ * Faz 1: Fatura işlemleri (Alış, Satış, İade vb.)
+ */
+
 export async function listInvoices(
-  scope: { companyId?: string; isSuperAdmin?: boolean },
+  scope: Scope,
   limitCount = 10000
 ): Promise<Invoice[]> {
   const docs = await getScopedDocs(INVOICE_COLLECTION, scope.companyId, scope.isSuperAdmin, orderBy("issueDate", "desc"));
@@ -41,12 +46,12 @@ export async function listInvoices(
 
 export async function getInvoice(id: string): Promise<Invoice | null> {
   const docRef = doc(db, INVOICE_COLLECTION, id);
-  const snapshot = await getDoc(docRef);
-  if (!snapshot.exists()) return null;
-  const data = snapshot.data();
+  const snap = await getDoc(docRef);
+  if (!snap.exists()) return null;
+  const data = snap.data();
   return {
     ...data,
-    id: snapshot.id,
+    id: snap.id,
     issueDate: data.issueDate?.toDate?.() || new Date(data.issueDate),
     dueDate: data.dueDate?.toDate?.() || new Date(data.dueDate),
     createdAt: data.createdAt?.toDate?.() || new Date(data.createdAt),
@@ -55,7 +60,7 @@ export async function getInvoice(id: string): Promise<Invoice | null> {
 }
 
 export async function createInvoice(
-  scope: { companyId?: string; isSuperAdmin?: boolean },
+  scope: Scope,
   data: Omit<Invoice, "id" | "createdAt" | "updatedAt">,
   userId: string,
   userName: string
