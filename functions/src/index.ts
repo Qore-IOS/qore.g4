@@ -26,6 +26,7 @@ export {
   dailyStatsRollover,
   backfillCompanyStats,
 } from './companyStatsAggregation';
+export { onBankTransactionWritten } from './cariReconciliation';
 
 function chunk<T>(arr: T[], size = 500): T[][] {
   const out: T[][] = [];
