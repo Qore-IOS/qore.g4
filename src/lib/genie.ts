@@ -1,10 +1,11 @@
 // Mac-vari "genie" küçültme/geri getirme — clip-path warp keyframe'leri (WAAPI).
-// Demo genie.jsx mantığı korunarak TS'e uyarlandı. Bir DOM elemanını dock
-// yuvasına doğru huni şeklinde büzüp aşağı çeker (reverse ile tersine).
+// Demo genie.jsx ile birebir aynı keyframe yapısı: { clipPath, transform,
+// opacity }. (Keyframe'e webkitClipPath eklemek bazı motorlarda clip-path
+// interpolasyonunu bozup yalnızca translateY'in oynamasına — yani warp yerine
+// düz kaymaya — yol açıyor.)
 
 interface GenieFrame {
   clipPath: string;
-  webkitClipPath: string;
   transform: string;
   opacity: number;
 }
@@ -39,10 +40,8 @@ function buildGenieFrames(
       left.push(`${lx.toFixed(2)}% ${(y * 100).toFixed(2)}%`);
     }
     const poly = right.concat(left.reverse()).join(', ');
-    const clip = `polygon(${poly})`;
     frames.push({
-      clipPath: clip,
-      webkitClipPath: clip,
+      clipPath: `polygon(${poly})`,
       transform: `translateY(${ty.toFixed(1)}px)`,
       opacity: p > 0.92 ? 1 - (p - 0.92) / 0.08 : 1,
     });
@@ -52,7 +51,7 @@ function buildGenieFrames(
 
 function writeFrame(el: HTMLElement, f: GenieFrame) {
   el.style.clipPath = f.clipPath;
-  (el.style as unknown as { webkitClipPath: string }).webkitClipPath = f.webkitClipPath;
+  (el.style as unknown as { webkitClipPath: string }).webkitClipPath = f.clipPath;
   el.style.transform = f.transform;
   el.style.opacity = String(f.opacity);
 }
@@ -92,7 +91,7 @@ export function runGenie(
   targetY: number,
   opts: GenieOpts = {},
 ): Animation | null {
-  const { reverse = false, onDone, slotW = 56, duration = 560, rect: rectOverride } = opts;
+  const { reverse = false, onDone, slotW = 56, duration = 600, rect: rectOverride } = opts;
   const rect = rectOverride || el.getBoundingClientRect();
   let frames = buildGenieFrames(rect, targetX, targetY, slotW);
   if (reverse) frames = frames.slice().reverse();
@@ -109,6 +108,7 @@ export function runGenie(
     return null;
   }
 
+  // Keyframe'ler yalnızca clipPath / transform / opacity içerir (demo ile aynı).
   const anim = el.animate(frames as unknown as Keyframe[], {
     duration,
     easing: 'cubic-bezier(.42,0,.58,1)',

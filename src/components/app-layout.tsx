@@ -15,6 +15,7 @@ import PersistentNotificationToast from "./notifications/PersistentNotificationT
 import PageShell from "./responsive/PageShell";
 import WindowFrame from "./window/WindowFrame";
 import WindowChrome from "./window/WindowChrome";
+import { useWindowManager } from "@/contexts/window-manager-context";
 import NotificationsBell from "@/components/notifications/NotificationsBell";
 import { ThemeToggleDock } from "./ui/theme-toggle-dock";
 import {
@@ -110,6 +111,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     handleMouseEnter,
     handleMouseLeave,
   } = useDock();
+
+  // Minimize sırasında dock kapalıysa görünür yapabilmek için window manager'a
+  // dock-açma fonksiyonunu kaydet.
+  const { registerDockReveal } = useWindowManager();
+  useEffect(() => {
+    registerDockReveal(handleMouseEnter);
+    return () => registerDockReveal(null);
+  }, [registerDockReveal, handleMouseEnter]);
 
   useEffect(() => {
     if (!isLoadingAuth && !currentUser) {
