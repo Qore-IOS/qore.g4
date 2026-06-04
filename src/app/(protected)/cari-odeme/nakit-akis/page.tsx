@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LineChart } from "lucide-react";
@@ -113,96 +112,102 @@ export default function NakitAkisPage() {
     n.toLocaleString("tr-TR", { style: "currency", currency: "TRY" });
 
   return (
-    <div className="space-y-6 p-4">
-      <div>
-        <h1 className="text-3xl font-bold flex items-center gap-2">
-          <LineChart className="h-8 w-8 text-emerald-600" />
-          Nakit Akış Projeksiyonu
-        </h1>
-        <p className="text-muted-foreground mt-1">
-          Açık faturaların vade tarihlerine göre gelecek 6 aylık nakit akışı tahmini.
-        </p>
+    <div className="space-y-6 max-w-5xl mx-auto px-2 py-4">
+      {/* Header Area */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground flex items-center gap-2">
+            <LineChart className="h-6 w-6 text-primary" />
+            Nakit Akış Projeksiyonu
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Açık faturaların vade tarihlerine göre gelecek 6 aylık nakit akışı tahmini.
+          </p>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm text-muted-foreground">Toplam Beklenen Tahsilat</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {isLoading ? <Skeleton className="h-8 w-32" /> : (
-              <div className="text-3xl font-bold text-green-600">{formatCurrency(totalInflow)}</div>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
+          <div className="pb-2">
+            <h3 className="text-sm font-medium text-muted-foreground">Toplam Beklenen Tahsilat</h3>
+          </div>
+          <div>
+            {isLoading ? <Skeleton className="h-8 w-32 rounded-md" /> : (
+              <div className="text-2xl font-bold text-emerald-600">{formatCurrency(totalInflow)}</div>
             )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm text-muted-foreground">Toplam Beklenen Ödeme</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {isLoading ? <Skeleton className="h-8 w-32" /> : (
-              <div className="text-3xl font-bold text-red-600">{formatCurrency(totalOutflow)}</div>
+          </div>
+        </div>
+        
+        <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
+          <div className="pb-2">
+            <h3 className="text-sm font-medium text-muted-foreground">Toplam Beklenen Ödeme</h3>
+          </div>
+          <div>
+            {isLoading ? <Skeleton className="h-8 w-32 rounded-md" /> : (
+              <div className="text-2xl font-bold text-destructive">{formatCurrency(totalOutflow)}</div>
             )}
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm text-muted-foreground">Net Nakit Akışı</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {isLoading ? <Skeleton className="h-8 w-32" /> : (
-              <div className={`text-3xl font-bold ${totalInflow - totalOutflow >= 0 ? "text-green-600" : "text-red-600"}`}>
+          </div>
+        </div>
+        
+        <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
+          <div className="pb-2">
+            <h3 className="text-sm font-medium text-muted-foreground">Net Nakit Akışı</h3>
+          </div>
+          <div>
+            {isLoading ? <Skeleton className="h-8 w-32 rounded-md" /> : (
+              <div className={cn("text-2xl font-bold", totalInflow - totalOutflow >= 0 ? "text-emerald-600" : "text-destructive")}>
                 {formatCurrency(totalInflow - totalOutflow)}
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Aylık Projeksiyon</CardTitle>
-          <CardDescription>Vade tarihlerine göre gruplanmış nakit giriş ve çıkışları</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="space-y-2">
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-            </div>
-          ) : (
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Dönem</TableHead>
-                    <TableHead className="text-right">Nakit Girişi (Tahsilat)</TableHead>
-                    <TableHead className="text-right">Nakit Çıkışı (Ödeme)</TableHead>
-                    <TableHead className="text-right font-bold border-l">Net Nakit</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {projections.map((proj, idx) => (
-                    <TableRow key={idx} className={proj.month === "Vadesi Geçmiş" ? "bg-red-50/50" : ""}>
-                      <TableCell className="font-medium">{proj.month}</TableCell>
-                      <TableCell className="text-right text-green-600">
-                        {proj.inflow > 0 ? formatCurrency(proj.inflow) : "-"}
-                      </TableCell>
-                      <TableCell className="text-right text-red-600">
-                        {proj.outflow > 0 ? formatCurrency(proj.outflow) : "-"}
-                      </TableCell>
-                      <TableCell className={`text-right border-l font-bold ${proj.net >= 0 ? "text-green-600" : "text-red-600"}`}>
-                        {formatCurrency(proj.net)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <div className="rounded-xl border border-border overflow-hidden bg-card shadow-sm mt-8">
+        <div className="p-6 border-b border-border bg-muted/20">
+          <h3 className="text-base font-semibold">Aylık Projeksiyon</h3>
+          <p className="text-sm text-muted-foreground mt-1">Vade tarihlerine göre gruplanmış nakit giriş ve çıkışları</p>
+        </div>
+        
+        {isLoading ? (
+          <div className="space-y-2 p-6">
+            <Skeleton className="h-10 w-full rounded-md" />
+            <Skeleton className="h-10 w-full rounded-md" />
+            <Skeleton className="h-10 w-full rounded-md" />
+          </div>
+        ) : (
+          <Table>
+            <TableHeader className="bg-muted/50">
+              <TableRow className="border-border hover:bg-transparent">
+                <TableHead className="font-medium h-10">Dönem</TableHead>
+                <TableHead className="font-medium h-10 text-right">Nakit Girişi (Tahsilat)</TableHead>
+                <TableHead className="font-medium h-10 text-right">Nakit Çıkışı (Ödeme)</TableHead>
+                <TableHead className="font-bold h-10 text-right border-l border-border/50">Net Nakit</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {projections.map((proj, idx) => (
+                <TableRow key={idx} className={cn(
+                  "border-border/50 hover:bg-muted/30 transition-colors", 
+                  idx === projections.length - 1 && "border-0",
+                  proj.month === "Vadesi Geçmiş" && "bg-destructive/5 hover:bg-destructive/10"
+                )}>
+                  <TableCell className="py-3 font-medium text-foreground">{proj.month}</TableCell>
+                  <TableCell className="py-3 text-right font-medium text-emerald-600">
+                    {proj.inflow > 0 ? formatCurrency(proj.inflow) : "-"}
+                  </TableCell>
+                  <TableCell className="py-3 text-right font-medium text-destructive">
+                    {proj.outflow > 0 ? formatCurrency(proj.outflow) : "-"}
+                  </TableCell>
+                  <TableCell className={cn("py-3 text-right border-l border-border/50 font-bold", proj.net >= 0 ? "text-emerald-600" : "text-destructive")}>
+                    {formatCurrency(proj.net)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </div>
     </div>
   );
 }

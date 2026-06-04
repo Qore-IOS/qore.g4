@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -145,26 +144,26 @@ export default function BankaPage() {
     n.toLocaleString("tr-TR", { style: "currency", currency });
 
   return (
-    <div className="space-y-6 p-4">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+    <div className="space-y-6 max-w-5xl mx-auto px-2 py-4">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
         <div>
-          <h1 className="text-3xl font-bold flex items-center gap-2">
-            <Landmark className="h-8 w-8 text-blue-600" />
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground flex items-center gap-2">
+            <Landmark className="h-6 w-6 text-primary" />
             Banka İşlemleri
           </h1>
-          <p className="text-muted-foreground mt-1">
+          <p className="text-sm text-muted-foreground mt-1">
             Banka hesaplarınızı, bakiyeleri ve hareketleri yönetin.
           </p>
         </div>
 
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogTrigger asChild>
-            <Button className="gap-2">
+            <Button className="rounded-full gap-2 shadow-sm px-6">
               <Plus className="h-4 w-4" />
               Yeni Hareket İşle
             </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="sm:max-w-[500px] !rounded-xl">
             <DialogHeader>
               <DialogTitle>Manuel Banka Hareketi</DialogTitle>
             </DialogHeader>
@@ -175,7 +174,7 @@ export default function BankaPage() {
                   <FormItem>
                     <FormLabel>Hesap</FormLabel>
                     <Select onValueChange={field.onChange} defaultValue={field.value}>
-                      <FormControl><SelectTrigger><SelectValue placeholder="Banka Seçin" /></SelectTrigger></FormControl>
+                      <FormControl><SelectTrigger className="rounded-xl"><SelectValue placeholder="Banka Seçin" /></SelectTrigger></FormControl>
                       <SelectContent>
                         {accounts.map((a) => (
                           <SelectItem key={a.id} value={a.id}>{a.bankName} - {a.iban}</SelectItem>
@@ -191,7 +190,7 @@ export default function BankaPage() {
                     <FormItem>
                       <FormLabel>İşlem Yönü</FormLabel>
                       <Select onValueChange={field.onChange} defaultValue={field.value}>
-                        <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                        <FormControl><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger></FormControl>
                         <SelectContent>
                           <SelectItem value="giris">Hesaba Giriş (+)</SelectItem>
                           <SelectItem value="cikis">Hesaptan Çıkış (-)</SelectItem>
@@ -203,7 +202,7 @@ export default function BankaPage() {
                   <FormField control={form.control} name="amount" render={({ field }) => (
                     <FormItem>
                       <FormLabel>Tutar</FormLabel>
-                      <FormControl><Input type="number" step="0.01" {...field} /></FormControl>
+                      <FormControl><Input className="rounded-xl" type="number" step="0.01" {...field} /></FormControl>
                       <FormMessage />
                     </FormItem>
                   )} />
@@ -215,7 +214,7 @@ export default function BankaPage() {
                     <Popover>
                       <PopoverTrigger asChild>
                         <FormControl>
-                          <Button variant="outline" className={cn("pl-3 text-left font-normal w-full", !field.value && "text-muted-foreground")}>
+                          <Button variant="outline" className={cn("rounded-xl pl-3 text-left font-normal w-full", !field.value && "text-muted-foreground")}>
                             {field.value ? format(field.value, "PPP", { locale: tr }) : <span>Tarih seçin</span>}
                             <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
                           </Button>
@@ -232,14 +231,14 @@ export default function BankaPage() {
                 <FormField control={form.control} name="description" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Açıklama</FormLabel>
-                    <FormControl><Input placeholder="Örn: X Firması Havale" {...field} /></FormControl>
+                    <FormControl><Input className="rounded-xl" placeholder="Örn: X Firması Havale" {...field} /></FormControl>
                     <FormMessage />
                   </FormItem>
                 )} />
 
                 <div className="flex justify-end pt-4 gap-2">
-                  <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>İptal</Button>
-                  <Button type="submit" disabled={isSubmitting}>
+                  <Button type="button" variant="outline" className="rounded-full" onClick={() => setIsDialogOpen(false)}>İptal</Button>
+                  <Button type="submit" className="rounded-full" disabled={isSubmitting}>
                     {isSubmitting ? "İşleniyor..." : "Kaydet"}
                   </Button>
                 </div>
@@ -251,23 +250,31 @@ export default function BankaPage() {
 
       {isLoadingAccounts ? (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Skeleton className="h-32" />
-          <Skeleton className="h-32" />
+          <Skeleton className="h-32 rounded-xl" />
+          <Skeleton className="h-32 rounded-xl" />
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {accounts.map(acc => (
-            <Card 
+            <div 
               key={acc.id} 
-              className={cn("cursor-pointer transition-colors hover:bg-muted/50", selectedAccountId === acc.id ? "border-blue-500 bg-blue-50/50" : "")}
+              className={cn(
+                "cursor-pointer transition-colors border rounded-xl p-6 relative overflow-hidden group", 
+                selectedAccountId === acc.id 
+                  ? "border-primary bg-primary/5 shadow-sm" 
+                  : "border-border bg-card hover:bg-muted/30"
+              )}
               onClick={() => setSelectedAccountId(acc.id)}
             >
-              <CardHeader className="pb-2">
-                <CardTitle className="text-lg">{acc.bankName}</CardTitle>
-                <CardDescription className="font-mono text-xs truncate" title={acc.iban}>{acc.iban}</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
+              {selectedAccountId === acc.id && (
+                <div className="absolute top-0 left-0 w-1 h-full bg-primary" />
+              )}
+              <div className="pb-2">
+                <h3 className="text-lg font-semibold">{acc.bankName}</h3>
+                <p className="font-mono text-xs text-muted-foreground truncate mt-1" title={acc.iban}>{acc.iban}</p>
+              </div>
+              <div className="pt-2">
+                <div className="text-2xl font-bold text-foreground">
                   {formatCurrency(acc.currentBalance || 0, acc.currency || "TRY")}
                 </div>
                 {acc.lastReconciliationDate && (
@@ -275,84 +282,83 @@ export default function BankaPage() {
                     Son mutabakat: {format(acc.lastReconciliationDate, "dd.MM.yyyy")}
                   </p>
                 )}
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           ))}
         </div>
       )}
 
       {selectedAccountId && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Hesap Hareketleri</CardTitle>
-            <CardDescription>Seçili banka hesabının işlem geçmişi</CardDescription>
-          </CardHeader>
-          <CardContent>
-            {isLoadingTx ? (
-              <div className="space-y-2">
-                <Skeleton className="h-10 w-full" />
-                <Skeleton className="h-10 w-full" />
-                <Skeleton className="h-10 w-full" />
-              </div>
-            ) : transactions.length === 0 ? (
-              <div className="text-center py-10 text-muted-foreground">
-                Bu hesap için hiç hareket bulunmuyor.
-              </div>
-            ) : (
-              <div className="rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Tarih</TableHead>
-                      <TableHead>İşlem</TableHead>
-                      <TableHead>Açıklama</TableHead>
-                      <TableHead>Durum</TableHead>
-                      <TableHead className="text-right">Tutar</TableHead>
-                      <TableHead className="text-right">Bakiye</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {transactions.map((tx) => (
-                      <TableRow key={tx.id}>
-                        <TableCell>{format(new Date(tx.transactionDate), "dd.MM.yyyy")}</TableCell>
-                        <TableCell>
-                          {tx.type === "giris" ? (
-                            <Badge variant="outline" className="text-green-600 bg-green-50 border-green-200">
-                              <ArrowDownRight className="mr-1 h-3 w-3" /> Giriş
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline" className="text-red-600 bg-red-50 border-red-200">
-                              <ArrowUpRight className="mr-1 h-3 w-3" /> Çıkış
-                            </Badge>
-                          )}
-                        </TableCell>
-                        <TableCell className="max-w-[200px] truncate" title={tx.description}>
-                          {tx.description}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="secondary" className={
-                            tx.reconciliationStatus === "eslesmis" ? "bg-green-100 text-green-700" :
-                            tx.reconciliationStatus === "manuel_eslesmis" ? "bg-blue-100 text-blue-700" :
-                            "bg-yellow-100 text-yellow-700"
-                          }>
-                            {tx.reconciliationStatus === "eslesmemis" ? "Eşleşmedi" : 
-                             tx.reconciliationStatus === "manuel_eslesmis" ? "Manuel Eşleşti" : "Eşleşti"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className={cn("text-right font-medium", tx.type === "giris" ? "text-green-600" : "")}>
-                          {tx.type === "cikis" ? "-" : ""}{formatCurrency(tx.amount, tx.currency)}
-                        </TableCell>
-                        <TableCell className="text-right text-muted-foreground">
-                          {formatCurrency(tx.balance, tx.currency)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <div className="rounded-xl border border-border overflow-hidden bg-card shadow-sm mt-8">
+          <div className="p-6 border-b border-border bg-muted/20">
+            <h3 className="text-base font-semibold">Hesap Hareketleri</h3>
+            <p className="text-sm text-muted-foreground mt-1">Seçili banka hesabının işlem geçmişi</p>
+          </div>
+          
+          {isLoadingTx ? (
+            <div className="space-y-2 p-6">
+              <Skeleton className="h-10 w-full rounded-md" />
+              <Skeleton className="h-10 w-full rounded-md" />
+              <Skeleton className="h-10 w-full rounded-md" />
+            </div>
+          ) : transactions.length === 0 ? (
+            <div className="text-center py-16">
+              <Landmark className="h-12 w-12 mx-auto text-muted-foreground opacity-30 mb-4" />
+              <p className="text-muted-foreground">Bu hesap için hiç hareket bulunmuyor.</p>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader className="bg-muted/50">
+                <TableRow className="border-border hover:bg-transparent">
+                  <TableHead className="font-medium h-10">Tarih</TableHead>
+                  <TableHead className="font-medium h-10">İşlem</TableHead>
+                  <TableHead className="font-medium h-10">Açıklama</TableHead>
+                  <TableHead className="font-medium h-10">Durum</TableHead>
+                  <TableHead className="font-medium h-10 text-right">Tutar</TableHead>
+                  <TableHead className="font-medium h-10 text-right">Bakiye</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {transactions.map((tx, idx) => (
+                  <TableRow key={tx.id} className={cn("border-border/50 hover:bg-muted/30 transition-colors", idx === transactions.length - 1 && "border-0")}>
+                    <TableCell className="py-3 text-muted-foreground">{format(new Date(tx.transactionDate), "dd.MM.yyyy")}</TableCell>
+                    <TableCell className="py-3">
+                      {tx.type === "giris" ? (
+                        <Badge variant="outline" className="rounded-full px-2.5 font-normal text-emerald-600 bg-emerald-50 border-emerald-200">
+                          <ArrowDownRight className="mr-1 h-3 w-3" /> Giriş
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="rounded-full px-2.5 font-normal text-destructive bg-destructive/10 border-destructive/20">
+                          <ArrowUpRight className="mr-1 h-3 w-3" /> Çıkış
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="py-3 max-w-[200px] truncate" title={tx.description}>
+                      {tx.description}
+                    </TableCell>
+                    <TableCell className="py-3">
+                      <Badge variant="secondary" className={cn(
+                        "rounded-full px-2.5 font-medium",
+                        tx.reconciliationStatus === "eslesmis" ? "bg-emerald-500/10 text-emerald-600" :
+                        tx.reconciliationStatus === "manuel_eslesmis" ? "bg-blue-500/10 text-blue-600" :
+                        "bg-yellow-500/10 text-yellow-600"
+                      )}>
+                        {tx.reconciliationStatus === "eslesmemis" ? "Eşleşmedi" : 
+                         tx.reconciliationStatus === "manuel_eslesmis" ? "Manuel Eşleşti" : "Eşleşti"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className={cn("py-3 text-right font-medium", tx.type === "giris" ? "text-emerald-600" : "")}>
+                      {tx.type === "cikis" ? "-" : ""}{formatCurrency(tx.amount, tx.currency)}
+                    </TableCell>
+                    <TableCell className="py-3 text-right text-muted-foreground">
+                      {formatCurrency(tx.balance, tx.currency)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </div>
       )}
     </div>
   );

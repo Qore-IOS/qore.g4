@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -92,20 +91,20 @@ export default function KarlilikPage() {
   const totalNet = totalRev - totalCst;
 
   return (
-    <div className="space-y-6 p-4">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+    <div className="space-y-6 max-w-5xl mx-auto px-2 py-4">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
         <div>
-          <h1 className="text-3xl font-bold flex items-center gap-2">
-            <Activity className="h-8 w-8 text-indigo-600" />
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground flex items-center gap-2">
+            <Activity className="h-6 w-6 text-primary" />
             Operasyonel Karlılık Paneli
           </h1>
-          <p className="text-muted-foreground mt-1">
+          <p className="text-sm text-muted-foreground mt-1">
             Qore laboratuvar ve hastane verilerinin finansal maliyetlerle entegre analizi.
           </p>
         </div>
         
         <Select value={period} onValueChange={setPeriod}>
-          <SelectTrigger className="w-[180px]">
+          <SelectTrigger className="w-[180px] rounded-xl">
             <SelectValue placeholder="Dönem Seçin" />
           </SelectTrigger>
           <SelectContent>
@@ -117,108 +116,103 @@ export default function KarlilikPage() {
       </div>
 
       {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Skeleton className="h-32" />
-          <Skeleton className="h-32" />
-          <Skeleton className="h-32" />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <Skeleton className="h-32 rounded-xl" />
+          <Skeleton className="h-32 rounded-xl" />
+          <Skeleton className="h-32 rounded-xl" />
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Card>
-            <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Toplam Gelir</CardTitle>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
+            <div className="flex flex-row items-center justify-between pb-2">
+              <h3 className="text-sm font-medium text-muted-foreground">Toplam Gelir</h3>
               <DollarSign className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{formatCurrency(totalRev)}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Toplam Maliyet</CardTitle>
+            </div>
+            <div className="text-2xl font-bold text-foreground">{formatCurrency(totalRev)}</div>
+          </div>
+          
+          <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
+            <div className="flex flex-row items-center justify-between pb-2">
+              <h3 className="text-sm font-medium text-muted-foreground">Toplam Maliyet</h3>
               <Activity className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-red-600">{formatCurrency(totalCst)}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2 flex flex-row items-center justify-between space-y-0">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Net Kar / Zarar</CardTitle>
+            </div>
+            <div className="text-2xl font-bold text-destructive">{formatCurrency(totalCst)}</div>
+          </div>
+          
+          <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
+            <div className="flex flex-row items-center justify-between pb-2">
+              <h3 className="text-sm font-medium text-muted-foreground">Net Kar / Zarar</h3>
               {totalNet >= 0 ? (
-                <TrendingUp className="h-4 w-4 text-green-600" />
+                <TrendingUp className="h-4 w-4 text-emerald-600" />
               ) : (
-                <TrendingDown className="h-4 w-4 text-red-600" />
+                <TrendingDown className="h-4 w-4 text-destructive" />
               )}
-            </CardHeader>
-            <CardContent>
-              <div className={cn("text-2xl font-bold", totalNet >= 0 ? "text-green-600" : "text-red-600")}>
-                {formatCurrency(totalNet)}
-              </div>
-            </CardContent>
-          </Card>
+            </div>
+            <div className={cn("text-2xl font-bold", totalNet >= 0 ? "text-emerald-600" : "text-destructive")}>
+              {formatCurrency(totalNet)}
+            </div>
+          </div>
         </div>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Building2 className="h-5 w-5" />
+      <div className="rounded-xl border border-border overflow-hidden bg-card shadow-sm mt-8">
+        <div className="p-6 border-b border-border bg-muted/20">
+          <h3 className="text-base font-semibold flex items-center gap-2">
+            <Building2 className="h-5 w-5 text-primary" />
             Hastane Bazlı Karlılık Analizi
-          </CardTitle>
-          <CardDescription>Hastanelerdeki operasyonel maliyet ve gelirlerin karşılaştırması</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="space-y-2">
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-            </div>
-          ) : summaries.length === 0 ? (
-            <div className="text-center py-10 text-muted-foreground">Veri bulunamadı.</div>
-          ) : (
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Hastane</TableHead>
-                    <TableHead className="text-right">Gelir</TableHead>
-                    <TableHead className="text-right">Maliyet</TableHead>
-                    <TableHead className="text-right">Net Kar</TableHead>
-                    <TableHead className="text-right">Kar Marjı</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {summaries.map((s, idx) => (
-                    <TableRow key={idx}>
-                      <TableCell className="font-medium">{s.hospitalName}</TableCell>
-                      <TableCell className="text-right">{formatCurrency(s.totalRevenue)}</TableCell>
-                      <TableCell className="text-right text-red-600">{formatCurrency(s.totalCost)}</TableCell>
-                      <TableCell className={cn("text-right font-bold", s.netProfit >= 0 ? "text-green-600" : "text-red-600")}>
-                        {formatCurrency(s.netProfit)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          <span className={s.margin >= 0 ? "text-green-600" : "text-red-600"}>
-                            %{s.margin.toFixed(1)}
-                          </span>
-                          {/* Basit ProgressBar gösterimi */}
-                          <div className="w-16 h-2 bg-muted rounded-full overflow-hidden flex">
-                            <div 
-                              className={cn("h-full", s.margin >= 0 ? "bg-green-500" : "bg-red-500")} 
-                              style={{ width: `${Math.min(Math.abs(s.margin), 100)}%` }}
-                            />
-                          </div>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+          </h3>
+          <p className="text-sm text-muted-foreground mt-1">Hastanelerdeki operasyonel maliyet ve gelirlerin karşılaştırması</p>
+        </div>
+        
+        {isLoading ? (
+          <div className="space-y-2 p-6">
+            <Skeleton className="h-10 w-full rounded-md" />
+            <Skeleton className="h-10 w-full rounded-md" />
+          </div>
+        ) : summaries.length === 0 ? (
+          <div className="text-center py-16">
+            <Activity className="h-12 w-12 mx-auto text-muted-foreground opacity-30 mb-4" />
+            <p className="text-muted-foreground">Veri bulunamadı.</p>
+          </div>
+        ) : (
+          <Table>
+            <TableHeader className="bg-muted/50">
+              <TableRow className="border-border hover:bg-transparent">
+                <TableHead className="font-medium h-10">Hastane</TableHead>
+                <TableHead className="font-medium h-10 text-right">Gelir</TableHead>
+                <TableHead className="font-medium h-10 text-right">Maliyet</TableHead>
+                <TableHead className="font-medium h-10 text-right">Net Kar</TableHead>
+                <TableHead className="font-medium h-10 text-right">Kar Marjı</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {summaries.map((s, idx) => (
+                <TableRow key={idx} className={cn("border-border/50 hover:bg-muted/30 transition-colors", idx === summaries.length - 1 && "border-0")}>
+                  <TableCell className="py-3 font-medium text-foreground">{s.hospitalName}</TableCell>
+                  <TableCell className="py-3 text-right">{formatCurrency(s.totalRevenue)}</TableCell>
+                  <TableCell className="py-3 text-right text-destructive">{formatCurrency(s.totalCost)}</TableCell>
+                  <TableCell className={cn("py-3 text-right font-bold", s.netProfit >= 0 ? "text-emerald-600" : "text-destructive")}>
+                    {formatCurrency(s.netProfit)}
+                  </TableCell>
+                  <TableCell className="py-3 text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      <span className={cn("text-xs font-medium", s.margin >= 0 ? "text-emerald-600" : "text-destructive")}>
+                        %{s.margin.toFixed(1)}
+                      </span>
+                      <div className="w-16 h-2 bg-muted rounded-full overflow-hidden flex">
+                        <div 
+                          className={cn("h-full", s.margin >= 0 ? "bg-emerald-500" : "bg-destructive")} 
+                          style={{ width: `${Math.min(Math.abs(s.margin), 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </div>
     </div>
   );
 }

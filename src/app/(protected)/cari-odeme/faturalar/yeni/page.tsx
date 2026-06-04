@@ -5,7 +5,6 @@ import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Card, CardContent, CardHeader, CardTitle, CardFooter, CardDescription } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -135,24 +134,26 @@ export default function YeniFaturaPage() {
   };
 
   return (
-    <div className="space-y-6 p-4 max-w-5xl mx-auto">
-      <BackButton fallback="/cari-odeme/faturalar" />
-      <div className="flex items-center gap-2">
-        <h1 className="text-3xl font-bold">Yeni Fatura Oluştur</h1>
+    <div className="space-y-6 max-w-5xl mx-auto px-2 py-4">
+      <div className="flex items-center gap-2 mb-4">
+        <BackButton fallback="/cari-odeme/faturalar" className="border-border hover:bg-muted" />
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Yeni Fatura Oluştur</h1>
       </div>
 
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Genel Bilgiler</CardTitle>
-            </CardHeader>
-            <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
+          
+          {/* Genel Bilgiler Section */}
+          <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-border/50 bg-muted/20">
+              <h2 className="text-lg font-semibold">Genel Bilgiler</h2>
+            </div>
+            <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               <FormField control={form.control} name="type" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Fatura Tipi</FormLabel>
                   <Select onValueChange={field.onChange} defaultValue={field.value}>
-                    <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                    <FormControl><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger></FormControl>
                     <SelectContent>
                       <SelectItem value="alis">Alış Faturası</SelectItem>
                       <SelectItem value="satis">Satış Faturası</SelectItem>
@@ -167,7 +168,7 @@ export default function YeniFaturaPage() {
               <FormField control={form.control} name="invoiceNo" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Fatura No</FormLabel>
-                  <FormControl><Input placeholder="Örn: INV-2026-001" {...field} /></FormControl>
+                  <FormControl><Input className="rounded-xl" placeholder="Örn: INV-2026-001" {...field} /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
@@ -176,7 +177,7 @@ export default function YeniFaturaPage() {
                 <FormItem>
                   <FormLabel>Cari Firma</FormLabel>
                   <Select onValueChange={field.onChange} defaultValue={field.value}>
-                    <FormControl><SelectTrigger><SelectValue placeholder="Firma Seçin" /></SelectTrigger></FormControl>
+                    <FormControl><SelectTrigger className="rounded-xl"><SelectValue placeholder="Firma Seçin" /></SelectTrigger></FormControl>
                     <SelectContent>
                       {firmalar.map((f) => (
                         <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
@@ -193,7 +194,7 @@ export default function YeniFaturaPage() {
                   <Popover>
                     <PopoverTrigger asChild>
                       <FormControl>
-                        <Button variant="outline" className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>
+                        <Button variant="outline" className={cn("rounded-xl pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>
                           {field.value ? format(field.value, "PPP", { locale: tr }) : <span>Tarih seçin</span>}
                           <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
                         </Button>
@@ -213,7 +214,7 @@ export default function YeniFaturaPage() {
                   <Popover>
                     <PopoverTrigger asChild>
                       <FormControl>
-                        <Button variant="outline" className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>
+                        <Button variant="outline" className={cn("rounded-xl pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>
                           {field.value ? format(field.value, "PPP", { locale: tr }) : <span>Tarih seçin</span>}
                           <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
                         </Button>
@@ -231,7 +232,7 @@ export default function YeniFaturaPage() {
                 <FormItem>
                   <FormLabel>Döviz</FormLabel>
                   <Select onValueChange={field.onChange} defaultValue={field.value}>
-                    <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                    <FormControl><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger></FormControl>
                     <SelectContent>
                       <SelectItem value="TRY">TRY</SelectItem>
                       <SelectItem value="USD">USD</SelectItem>
@@ -242,40 +243,42 @@ export default function YeniFaturaPage() {
                   <FormMessage />
                 </FormItem>
               )} />
-            </CardContent>
-          </Card>
+            </div>
+          </div>
 
-          <Card>
-            <CardHeader className="flex flex-row justify-between items-center">
-              <CardTitle>Fatura Kalemleri</CardTitle>
-              <Button type="button" variant="outline" size="sm" onClick={() => append({ description: "", quantity: 1, unitPrice: 0, taxRate: 0.20 })}>
-                <Plus className="h-4 w-4 mr-2" />
+          {/* Kalemler Section */}
+          <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
+            <div className="p-6 border-b border-border/50 flex flex-row justify-between items-center bg-muted/20">
+              <h2 className="text-lg font-semibold">Fatura Kalemleri</h2>
+              <Button type="button" variant="outline" size="sm" className="rounded-full h-8" onClick={() => append({ description: "", quantity: 1, unitPrice: 0, taxRate: 0.20 })}>
+                <Plus className="h-4 w-4 mr-1" />
                 Kalem Ekle
               </Button>
-            </CardHeader>
-            <CardContent className="space-y-4">
+            </div>
+            
+            <div className="p-6 space-y-4">
               {fields.map((field, index) => (
-                <div key={field.id} className="flex flex-col md:flex-row gap-4 items-start border p-4 rounded-md relative">
+                <div key={field.id} className="flex flex-col md:flex-row gap-4 items-start bg-muted/30 border border-border/50 p-4 rounded-xl relative group transition-colors hover:bg-muted/50">
                   <div className="flex-1 space-y-4 w-full">
                     <FormField control={form.control} name={`lines.${index}.description`} render={({ field }) => (
                       <FormItem>
                         <FormLabel>Açıklama</FormLabel>
-                        <FormControl><Input {...field} /></FormControl>
+                        <FormControl><Input className="bg-card rounded-xl" {...field} /></FormControl>
                         <FormMessage />
                       </FormItem>
                     )} />
-                    <div className="grid grid-cols-3 gap-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                       <FormField control={form.control} name={`lines.${index}.quantity`} render={({ field }) => (
                         <FormItem>
                           <FormLabel>Miktar</FormLabel>
-                          <FormControl><Input type="number" {...field} /></FormControl>
+                          <FormControl><Input className="bg-card rounded-xl" type="number" {...field} /></FormControl>
                           <FormMessage />
                         </FormItem>
                       )} />
                       <FormField control={form.control} name={`lines.${index}.unitPrice`} render={({ field }) => (
                         <FormItem>
                           <FormLabel>Birim Fiyat</FormLabel>
-                          <FormControl><Input type="number" step="0.01" {...field} /></FormControl>
+                          <FormControl><Input className="bg-card rounded-xl" type="number" step="0.01" {...field} /></FormControl>
                           <FormMessage />
                         </FormItem>
                       )} />
@@ -283,7 +286,7 @@ export default function YeniFaturaPage() {
                         <FormItem>
                           <FormLabel>KDV Oranı</FormLabel>
                           <Select onValueChange={(val) => field.onChange(parseFloat(val))} defaultValue={field.value.toString()}>
-                            <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                            <FormControl><SelectTrigger className="bg-card rounded-xl"><SelectValue /></SelectTrigger></FormControl>
                             <SelectContent>
                               <SelectItem value="0">0%</SelectItem>
                               <SelectItem value="0.01">1%</SelectItem>
@@ -297,7 +300,7 @@ export default function YeniFaturaPage() {
                     </div>
                   </div>
                   {fields.length > 1 && (
-                    <Button type="button" variant="ghost" size="icon" className="md:mt-8 text-destructive" onClick={() => remove(index)}>
+                    <Button type="button" variant="ghost" size="icon" className="md:mt-8 rounded-full text-destructive hover:bg-destructive/10" onClick={() => remove(index)}>
                       <Trash2 className="h-5 w-5" />
                     </Button>
                   )}
@@ -306,8 +309,10 @@ export default function YeniFaturaPage() {
               {form.formState.errors.lines?.root && (
                 <p className="text-sm font-medium text-destructive">{form.formState.errors.lines.root.message}</p>
               )}
-            </CardContent>
-            <CardFooter className="flex flex-col items-end border-t pt-6 bg-muted/50 gap-2 text-sm">
+            </div>
+
+            {/* Totals Footer */}
+            <div className="p-6 flex flex-col items-end border-t border-border bg-muted/10 gap-2 text-sm">
               <div className="flex justify-between w-full md:w-64">
                 <span className="text-muted-foreground">Ara Toplam:</span>
                 <span>{subtotal.toLocaleString("tr-TR", { style: "currency", currency: form.watch("currency") })}</span>
@@ -316,30 +321,28 @@ export default function YeniFaturaPage() {
                 <span className="text-muted-foreground">KDV Toplamı:</span>
                 <span>{taxTotal.toLocaleString("tr-TR", { style: "currency", currency: form.watch("currency") })}</span>
               </div>
-              <div className="flex justify-between w-full md:w-64 font-bold text-lg border-t pt-2 mt-2">
+              <div className="flex justify-between w-full md:w-64 font-bold text-lg border-t border-border/50 pt-3 mt-1">
                 <span>Genel Toplam:</span>
-                <span>{grandTotal.toLocaleString("tr-TR", { style: "currency", currency: form.watch("currency") })}</span>
+                <span className="text-primary">{grandTotal.toLocaleString("tr-TR", { style: "currency", currency: form.watch("currency") })}</span>
               </div>
-            </CardFooter>
-          </Card>
+            </div>
+          </div>
 
-          <Card>
-            <CardContent className="pt-6">
-              <FormField control={form.control} name="notes" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Notlar</FormLabel>
-                  <FormControl><Input placeholder="Fatura ile ilgili ek notlar..." {...field} /></FormControl>
-                  <FormMessage />
-                </FormItem>
-              )} />
-            </CardContent>
-          </Card>
+          <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
+            <FormField control={form.control} name="notes" render={({ field }) => (
+              <FormItem>
+                <FormLabel>Notlar</FormLabel>
+                <FormControl><Input className="rounded-xl" placeholder="Fatura ile ilgili ek notlar..." {...field} /></FormControl>
+                <FormMessage />
+              </FormItem>
+            )} />
+          </div>
 
-          <div className="flex justify-end gap-4">
-            <Button type="button" variant="ghost" asChild>
+          <div className="flex justify-end gap-3 pb-8">
+            <Button type="button" variant="outline" className="rounded-full px-6 border-border" asChild>
               <Link href="/cari-odeme/faturalar">İptal</Link>
             </Button>
-            <Button type="submit" disabled={isSubmitting}>
+            <Button type="submit" disabled={isSubmitting} className="rounded-full px-6">
               {isSubmitting ? "Kaydediliyor..." : "Faturayı Kaydet"}
             </Button>
           </div>
