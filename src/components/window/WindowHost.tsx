@@ -3,9 +3,6 @@
 import React, { useEffect, useRef } from 'react';
 import { useWindowManager, type WMWindow } from '@/contexts/window-manager-context';
 
-/** Pencere başlık çubuğu yüksekliği (trafik ışıkları + geri + başlık). */
-export const WINDOW_HEADER_H = 44;
-
 /**
  * Açık/küçültülmüş pencereleri iframe olarak render eder. Tüm pencereler tek bir
  * stabil listede tutulur (key=id) — aktif↔küçük geçişlerinde iframe remount
@@ -13,9 +10,8 @@ export const WINDOW_HEADER_H = 44;
  * görünür; diğerleri visibility:hidden ile DOM'da canlı kalır. Sarmalayıcı div
  * genie animasyonunun hedefidir (window manager'a kaydedilir).
  *
- * Pencereler TAM EKRAN açılır (başlık çubuğunun altı → ekran altı; dock üstte
- * yüzer). İframe kendi compositing katmanına alınır (translateZ) — böylece
- * üstündeki clip-path warp'ı yırtılma/yarım çizim olmadan kırpar.
+ * Pencereler TAM EKRAN (inset:0). İframe kendi compositing katmanına alınır
+ * (translateZ) — üstündeki clip-path warp'ını yırtılma/yarım çizim olmadan kırpar.
  */
 function WindowItem({ win, active }: { win: WMWindow; active: boolean }) {
   const { registerWindowEl } = useWindowManager();
@@ -32,10 +28,7 @@ function WindowItem({ win, active }: { win: WMWindow; active: boolean }) {
       aria-hidden={!active}
       style={{
         position: 'fixed',
-        left: 0,
-        right: 0,
-        top: WINDOW_HEADER_H,
-        bottom: 0,
+        inset: 0,
         zIndex: 60,
         overflow: 'hidden',
         background: 'hsl(var(--background))',
@@ -65,6 +58,19 @@ function WindowItem({ win, active }: { win: WMWindow; active: boolean }) {
 
 export function WindowHost() {
   const { windows, activeId } = useWindowManager();
+
+  // Bir pencere açıkken dış (masaüstü) kaydırmayı kilitle — yoksa sağda iki
+  // kaydırma çubuğu üst üste biner ve bazen arkadaki panel scroll edilir.
+  useEffect(() => {
+    if (activeId == null) return;
+    const el = document.documentElement;
+    const prev = el.style.overflow;
+    el.style.overflow = 'hidden';
+    return () => {
+      el.style.overflow = prev;
+    };
+  }, [activeId]);
+
   return (
     <>
       {windows.map((w) => (

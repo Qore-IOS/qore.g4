@@ -112,6 +112,9 @@ function buildGenieFrames(
       let suck = sigmoid((y - neckY) * sharpness);
       // Ekstra yumuşatma — organik his
       suck = smootherstep(suck);
+      // İlerleme kapısı: t=0'da suck=0 (TAM dikdörtgen) garanti — böylece son
+      // kare (restore'da tutulan) yırtık bırakmaz, animasyon tam-ekrandan başlar.
+      suck *= smoothstep(Math.min(1, t * 1.3));
 
       // ── Yatay konumlar ──
       // Üst (tam genişlik tarafı): hafif squeeze ile
@@ -229,6 +232,16 @@ export function runGenie(
   let frames = buildGenieFrames(rect, targetX, targetY, slotW);
   if (reverse) frames = frames.slice().reverse();
 
+  // Önceki genie animasyonunun "fill:forwards" ile takılı kalmış efektini temizle
+  // (yoksa yeni animasyon üst üste biner / eski kare ezilemez).
+  try {
+    if (typeof el.getAnimations === 'function') {
+      el.getAnimations().forEach((a) => a.cancel());
+    }
+  } catch {
+    /* yoksay */
+  }
+
   el.style.willChange = 'transform, clip-path, opacity, filter';
   // İlk kareyi senkron uygula (1 karelik flash'ı önlemek için).
   writeFrame(el, frames[0]);
@@ -249,7 +262,16 @@ export function runGenie(
   });
 
   anim.onfinish = () => {
-    if (reverse) clearGenie(el);
+    if (reverse) {
+      // Önce inline'ı temizle, sonra animasyonu iptal et — yoksa fill:forwards
+      // ile tutulan son kare inline temizliği ezer ve yırtık bırakır.
+      clearGenie(el);
+      try {
+        anim.cancel();
+      } catch {
+        /* yoksay */
+      }
+    }
     onDone?.();
   };
 

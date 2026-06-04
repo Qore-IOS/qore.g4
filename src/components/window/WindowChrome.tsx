@@ -3,14 +3,12 @@
 import React from 'react';
 import { ChevronLeft } from 'lucide-react';
 import { useWindowManager } from '@/contexts/window-manager-context';
-import { WINDOW_HEADER_H } from './WindowHost';
 
 /**
- * Global pencere başlık çubuğu (başlık paketi):
- *  • macOS-vari trafik ışıkları (kapat / küçült / tam ekran)
- *  • global geri butonu (aktif pencerenin iframe geçmişinde geri gider)
- *  • aktif panelin başlığı
- * Aktif pencere yoksa (sade masaüstü) gizlenir.
+ * macOS-vari global pencere başlığı — sol üstte YÜZER (ayrı şerit/arka plan yok;
+ * masaüstü arka planıyla aynı). Boştayken küçülüp soluklaşır, mouse gelince
+ * büyür (`.qore-window-chrome` CSS'i globals.css'te). Aktif pencere üzerinde
+ * çalışır: trafik ışıkları + global geri butonu + aktif panel başlığı.
  */
 export function WindowChrome() {
   const { windows, activeId, minimizeWindow, closeWindow, windowBack } = useWindowManager();
@@ -20,20 +18,21 @@ export function WindowChrome() {
 
   return (
     <div
-      className="fixed top-0 left-0 right-0 flex items-center gap-3 px-4 select-none bg-white/70 dark:bg-zinc-900/70 backdrop-blur-xl border-b border-black/[0.06] dark:border-white/10"
-      style={{ height: WINDOW_HEADER_H, zIndex: 220 }}
+      className="qore-window-chrome fixed top-3.5 left-4 flex items-center gap-2 select-none"
+      style={{ zIndex: 200 }}
       onMouseDown={(e) => e.stopPropagation()}
+      aria-label="Global pencere başlığı"
     >
       {/* trafik ışıkları */}
-      <div className="group flex items-center gap-2">
+      <div className="flex items-center gap-2">
         <button
           type="button"
           onClick={() => closeWindow(activeId)}
           aria-label="Kapat"
           title="Kapat"
-          className="relative h-[13px] w-[13px] rounded-full bg-[#ff5f57] border border-black/10 grid place-items-center transition active:brightness-90"
+          className="group/light relative h-[13px] w-[13px] rounded-full bg-[#ff5f57] border border-black/10 grid place-items-center transition active:brightness-90"
         >
-          <svg className="opacity-0 group-hover:opacity-100 transition-opacity" width="7" height="7" viewBox="0 0 8 8" stroke="rgba(80,0,0,.55)" strokeWidth="1.3" strokeLinecap="round">
+          <svg className="opacity-0 transition-opacity duration-150 group-hover/light:opacity-100" width="7" height="7" viewBox="0 0 8 8" stroke="rgba(80,0,0,.55)" strokeWidth="1.3" strokeLinecap="round">
             <path d="M1.5 1.5l5 5M6.5 1.5l-5 5" />
           </svg>
         </button>
@@ -42,9 +41,9 @@ export function WindowChrome() {
           onClick={() => minimizeWindow(activeId)}
           aria-label="Küçült"
           title="Küçült"
-          className="relative h-[13px] w-[13px] rounded-full bg-[#febc2e] border border-black/10 grid place-items-center transition active:brightness-90"
+          className="group/light relative h-[13px] w-[13px] rounded-full bg-[#febc2e] border border-black/10 grid place-items-center transition active:brightness-90"
         >
-          <svg className="opacity-0 group-hover:opacity-100 transition-opacity" width="8" height="8" viewBox="0 0 8 8" stroke="rgba(110,70,0,.6)" strokeWidth="1.3" strokeLinecap="round">
+          <svg className="opacity-0 transition-opacity duration-150 group-hover/light:opacity-100" width="8" height="8" viewBox="0 0 8 8" stroke="rgba(110,70,0,.6)" strokeWidth="1.3" strokeLinecap="round">
             <path d="M1.5 4h5" />
           </svg>
         </button>
@@ -53,9 +52,9 @@ export function WindowChrome() {
           disabled
           aria-label="Tam ekran (zaten tam ekran)"
           title="Tam ekran"
-          className="relative h-[13px] w-[13px] rounded-full bg-[#28c840] border border-black/10 grid place-items-center opacity-90 cursor-default"
+          className="group/light relative h-[13px] w-[13px] rounded-full bg-[#28c840] border border-black/10 grid place-items-center opacity-90 cursor-default"
         >
-          <svg className="opacity-0 group-hover:opacity-100 transition-opacity" width="8" height="8" viewBox="0 0 8 8" fill="rgba(0,80,0,.5)">
+          <svg className="opacity-0 transition-opacity duration-150 group-hover/light:opacity-100" width="8" height="8" viewBox="0 0 8 8" fill="rgba(0,80,0,.5)">
             <path d="M1.6 1.6h2.2L1.6 3.8zM6.4 6.4H4.2L6.4 4.2z" />
           </svg>
         </button>
@@ -65,18 +64,20 @@ export function WindowChrome() {
       <button
         type="button"
         onClick={windowBack}
-        aria-label="Geri"
-        title="Geri"
-        className="flex items-center justify-center h-7 w-7 rounded-lg text-muted-foreground hover:text-foreground hover:bg-black/[0.05] dark:hover:bg-white/[0.06] transition"
+        aria-label="Geri dön"
+        title="Geri dön"
+        className="ml-3 grid h-7 w-7 place-items-center rounded-full border border-black/5 bg-white/75 text-slate-800 shadow-[0_8px_22px_rgba(15,23,42,0.10),inset_0_1px_0_rgba(255,255,255,0.75)] backdrop-blur-md transition hover:bg-white active:scale-95 dark:border-white/10 dark:bg-white/10 dark:text-white dark:hover:bg-white/15"
       >
-        <ChevronLeft className="h-[18px] w-[18px]" />
+        <ChevronLeft className="h-4 w-4" strokeWidth={2.4} />
       </button>
 
-      {/* panel başlığı */}
+      {/* aktif panel başlığı */}
       {active && (
-        <span className="text-[13.5px] font-semibold text-foreground truncate">
-          {active.title}
-        </span>
+        <div className="min-w-0 pl-1">
+          <h1 className="qore-window-title max-w-[min(52vw,520px)] truncate text-[19px] font-extrabold leading-none tracking-[-0.035em] text-slate-950 drop-shadow-[0_1px_0_rgba(255,255,255,0.65)] dark:text-white sm:text-[21px]">
+            {active.title}
+          </h1>
+        </div>
       )}
     </div>
   );
