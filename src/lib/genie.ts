@@ -1,20 +1,11 @@
-// ─────────────────────────────────────────────────────────
-// macOS-style "Genie" minimize / restore animation
-// ─────────────────────────────────────────────────────────
-// Bézier warp clip-path yaklaşımı: Sigmoid tabanlı "yürüyen boyun" (traveling
-// neck) ile alt satırlar önce emilir, Gaussian bulge boyun bölgesinde organik
-// Bézier eğrisi oluşturur.  48 vertex/kenar ile pürüzsüz polygon konturları,
-// bottom-anchor hedefleme ile huni ucu dock yuvasının tam merkezine iner.
-//
-// WAAPI (Web Animations API) ile GPU-hızlandırmalı keyframe animasyonu.
-
-/* ================================================================
-   Types
-   ================================================================ */
+// Mac-vari "genie" küçültme/geri getirme — clip-path warp keyframe'leri (WAAPI).
+// Demo genie.jsx ile birebir aynı keyframe yapısı: { clipPath, transform,
+// opacity }. (Keyframe'e webkitClipPath eklemek bazı motorlarda clip-path
+// interpolasyonunu bozup yalnızca translateY'in oynamasına — yani warp yerine
+// düz kaymaya — yol açıyor.)
 
 interface GenieFrame {
   clipPath: string;
-  webkitClipPath: string;
   transform: string;
   opacity: number;
   filter: string;
@@ -150,32 +141,11 @@ function buildGenieFrames(
       rightPts.push(`${rx.toFixed(2)}% ${(y * 100).toFixed(2)}%`);
       leftPts.push(`${lx.toFixed(2)}% ${(y * 100).toFixed(2)}%`);
     }
-
-    const poly = rightPts.concat(leftPts.reverse()).join(', ');
-    const clip = `polygon(${poly})`;
-
-    // ── Dikey kaydırma ──
-    // Ease-out: elemanın altı hızlıca dock'a ulaşır, sonra yavaşlar.
-    const ty = easeOutCubic(t) * dy;
-
-    // ── Ölçek — derinlik hissi ──
-    const scale = 1 - smoothstep(t) * 0.04;
-
-    // ── Opaklık — son %18'de kaybolma ──
-    const opacity = t > 0.82 ? Math.max(0, 1 - (t - 0.82) / 0.18) : 1;
-
-    // ── Drop shadow — clip-path'e uyarak huninin gölgesi ──
-    const shadowAlpha = (0.22 * (1 - t * 0.9)).toFixed(3);
-    const shadowY = (4 + t * 14).toFixed(0);
-    const shadowBlur = (8 + t * 20).toFixed(0);
-    const filter = `drop-shadow(0px ${shadowY}px ${shadowBlur}px rgba(0,0,0,${shadowAlpha}))`;
-
+    const poly = right.concat(left.reverse()).join(', ');
     frames.push({
-      clipPath: clip,
-      webkitClipPath: clip,
-      transform: `translateY(${ty.toFixed(1)}px) scale(${scale.toFixed(4)})`,
-      opacity,
-      filter,
+      clipPath: `polygon(${poly})`,
+      transform: `translateY(${ty.toFixed(1)}px)`,
+      opacity: p > 0.92 ? 1 - (p - 0.92) / 0.08 : 1,
     });
   }
 
@@ -188,8 +158,7 @@ function buildGenieFrames(
 
 function writeFrame(el: HTMLElement, f: GenieFrame) {
   el.style.clipPath = f.clipPath;
-  (el.style as unknown as { webkitClipPath: string }).webkitClipPath =
-    f.webkitClipPath;
+  (el.style as unknown as { webkitClipPath: string }).webkitClipPath = f.clipPath;
   el.style.transform = f.transform;
   el.style.opacity = String(f.opacity);
   el.style.filter = f.filter;
@@ -251,14 +220,7 @@ export function runGenie(
   targetY: number,
   opts: GenieOpts = {},
 ): Animation | null {
-  const {
-    reverse = false,
-    onDone,
-    slotW = 56,
-    duration = 620,
-    rect: rectOverride,
-  } = opts;
-
+  const { reverse = false, onDone, slotW = 56, duration = 600, rect: rectOverride } = opts;
   const rect = rectOverride || el.getBoundingClientRect();
   let frames = buildGenieFrames(rect, targetX, targetY, slotW);
   if (reverse) frames = frames.slice().reverse();
@@ -275,6 +237,7 @@ export function runGenie(
     return null;
   }
 
+  // Keyframe'ler yalnızca clipPath / transform / opacity içerir (demo ile aynı).
   const anim = el.animate(frames as unknown as Keyframe[], {
     duration,
     easing: 'cubic-bezier(.22,.61,.36,1)', // ease-out-cubic benzeri

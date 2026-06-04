@@ -29,6 +29,7 @@ interface WindowManagerCtx {
   current: { title: string; icon: React.ElementType };
   registerContentEl: (el: HTMLElement | null) => void;
   registerDockTarget: (el: HTMLElement | null) => void;
+  registerDockReveal: (fn: (() => void) | null) => void;
   minimizeCurrent: () => void;
   closeCurrent: () => void;
   restore: (id: string) => void;
@@ -80,16 +81,19 @@ export function WindowManagerProvider({ children }: { children: React.ReactNode 
   const registerDockTarget = useCallback((el: HTMLElement | null) => {
     dockTargetRef.current = el;
   }, []);
+  // Dock kapalıyken (auto-hide) minimize edildiğinde dock'u görünür yapacak fn.
+  const dockRevealRef = useRef<(() => void) | null>(null);
+  const registerDockReveal = useCallback((fn: (() => void) | null) => {
+    dockRevealRef.current = fn;
+  }, []);
 
-  const dockTarget = useCallback((index: number) => {
+  // Genie hedefi: minimize alanının İLK yuvası (sekme oraya iner), konteyner
+  // merkezi değil — böylece efekt tam o yuvada son bulur.
+  const dockTarget = useCallback(() => {
     const t = dockTargetRef.current;
     if (!t) return null;
-    
-    // minZone container'ının çocuklarından hedef slotu bul.
-    const children = Array.from(t.children);
-    const targetChild = (children[index] as HTMLElement) || t;
-    
-    const r = targetChild.getBoundingClientRect();
+    const slot = (t.firstElementChild as HTMLElement) || t;
+    const r = slot.getBoundingClientRect();
     if (!r.width) return null;
 
     // Dock gizliyken framer-motion translateY(20px) uygular.
@@ -122,22 +126,23 @@ export function WindowManagerProvider({ children }: { children: React.ReactNode 
   const minimizeCurrent = useCallback(() => {
     const el = contentRef.current;
     if (!el || isMinimized) return;
-    
-    // Yüzeyi göster (Dock'u aç)
-    window.dispatchEvent(new CustomEvent('qore:dock-show'));
-
+    // Dock kapalıysa önce göster ki panel ulaşacağı yuvayı görebilelim.
+    dockRevealRef.current?.();
     const finish = () => {
       setIsMinimized(true);
       setMinimized([{ id: pathname || 'win', title: current.title, icon: current.icon }]);
       // Eleman gizlendikten sonra inline genie stillerini temizle.
       requestAnimationFrame(() => requestAnimationFrame(() => clearGenie(el)));
     };
-    
-    // Sadece 1 pencere desteklendiği için eklenecek indeks minimized.length'dir.
-    const tgt = dockTarget(minimized.length);
-    if (tgt) runGenie(el, tgt.x, tgt.y, { onDone: finish, slotW: tgt.w });
-    else finish();
-  }, [isMinimized, pathname, current, dockTarget, minimized]);
+    // Dock görünür konuma gelsin diye birkaç kare bekleyip ölç + genie başlat.
+    requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        const tgt = dockTarget();
+        if (tgt) runGenie(el, tgt.x, tgt.y, { onDone: finish, slotW: tgt.w });
+        else finish();
+      }),
+    );
+  }, [isMinimized, pathname, current, dockTarget]);
 
   const restore = useCallback(() => {
     const el = contentRef.current;
@@ -186,6 +191,7 @@ export function WindowManagerProvider({ children }: { children: React.ReactNode 
       current,
       registerContentEl,
       registerDockTarget,
+      registerDockReveal,
       minimizeCurrent,
       closeCurrent,
       restore,
@@ -198,6 +204,7 @@ export function WindowManagerProvider({ children }: { children: React.ReactNode 
       current,
       registerContentEl,
       registerDockTarget,
+      registerDockReveal,
       minimizeCurrent,
       closeCurrent,
       restore,

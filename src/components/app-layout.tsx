@@ -15,6 +15,7 @@ import PersistentNotificationToast from "./notifications/PersistentNotificationT
 import PageShell from "./responsive/PageShell";
 import WindowFrame from "./window/WindowFrame";
 import WindowChrome from "./window/WindowChrome";
+import { useWindowManager } from "@/contexts/window-manager-context";
 import NotificationsBell from "@/components/notifications/NotificationsBell";
 import { ThemeToggleDock } from "./ui/theme-toggle-dock";
 import {
@@ -111,21 +112,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     handleMouseLeave,
   } = useDock();
 
-  const isStandardAppShell = !isQoreTechnicRole && !(isLojistikTerminalRole && isLojistikTerminalPath);
-  const showGlobalWindowChrome =
-    navMode !== "sidebar" &&
-    !isMobile &&
-    !isTeknisyen &&
-    isStandardAppShell;
-
+  // Minimize sırasında dock kapalıysa görünür yapabilmek için window manager'a
+  // dock-açma fonksiyonunu kaydet.
+  const { registerDockReveal } = useWindowManager();
   useEffect(() => {
-    document.body.classList.toggle("qore-standard-shell-bg", isStandardAppShell);
-    document.body.classList.toggle("qore-global-window-chrome", showGlobalWindowChrome);
-    return () => {
-      document.body.classList.remove("qore-standard-shell-bg");
-      document.body.classList.remove("qore-global-window-chrome");
-    };
-  }, [isStandardAppShell, showGlobalWindowChrome]);
+    registerDockReveal(handleMouseEnter);
+    return () => registerDockReveal(null);
+  }, [registerDockReveal, handleMouseEnter]);
 
   useEffect(() => {
     if (!isLoadingAuth && !currentUser) {
