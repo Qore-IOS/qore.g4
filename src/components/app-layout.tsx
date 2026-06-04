@@ -13,9 +13,7 @@ import { useDock } from "@/hooks/use-dock";
 import PresenceManager from "./PresenceManager";
 import PersistentNotificationToast from "./notifications/PersistentNotificationToast";
 import PageShell from "./responsive/PageShell";
-import WindowFrame from "./window/WindowFrame";
-import WindowChrome from "./window/WindowChrome";
-import { useWindowManager } from "@/contexts/window-manager-context";
+import { useIsWindowMode } from "@/contexts/window-manager-context";
 import NotificationsBell from "@/components/notifications/NotificationsBell";
 import { ThemeToggleDock } from "./ui/theme-toggle-dock";
 import {
@@ -112,13 +110,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     handleMouseLeave,
   } = useDock();
 
-  // Minimize sırasında dock kapalıysa görünür yapabilmek için window manager'a
-  // dock-açma fonksiyonunu kaydet.
-  const { registerDockReveal } = useWindowManager();
-  useEffect(() => {
-    registerDockReveal(handleMouseEnter);
-    return () => registerDockReveal(null);
-  }, [registerDockReveal, handleMouseEnter]);
+  // İframe pencere (çıplak mod): yalnızca panel içeriğini render et.
+  // (Dock'u açma artık window manager'ın yayınladığı 'qore:dock-show' olayıyla
+  //  use-dock içinde yapılıyor.)
+  const isWindowMode = useIsWindowMode();
 
   useEffect(() => {
     if (!isLoadingAuth && !currentUser) {
@@ -134,6 +129,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   if (isLoadingAuth || !currentUser) {
     return null;
+  }
+
+  // İframe pencere (çıplak mod): kabuk/dock olmadan yalnızca panel içeriği.
+  if (isWindowMode) {
+    return (
+      <main className="flex min-h-screen w-full flex-col bg-background">
+        <PageShell edgeToEdge={isEdgeToEdgeRoute} className="w-full flex-1">
+          {children}
+        </PageShell>
+      </main>
+    );
   }
 
   // Lojistik terminal — dedicated shell for lojistik_sorumlusu role.
@@ -274,15 +280,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <OnlyUsageAutoRedirect />
       <main className="flex w-full flex-1 flex-col items-center">
         <PersistentNotificationToast />
-        {showGlobalWindowChrome && <WindowChrome />}
-        <WindowFrame>
-          <PageShell
-            edgeToEdge={isEdgeToEdgeRoute}
-            className={`w-full flex-1 ${isWideContentRoute ? "max-w-none md:px-3" : ""}`}
-          >
-            {children}
-          </PageShell>
-        </WindowFrame>
+        <PageShell
+          edgeToEdge={isEdgeToEdgeRoute}
+          className={`w-full flex-1 ${isWideContentRoute ? "max-w-none md:px-3" : ""}`}
+        >
+          {children}
+        </PageShell>
 
         {!isMobile && !isTeknisyen && (
           <div

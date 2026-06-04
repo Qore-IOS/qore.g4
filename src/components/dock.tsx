@@ -418,15 +418,23 @@ const DockItem = ({
 
   const { isOrbAnimationEnabled, toggleOrbAnimation, toggleNavMode, navMode } = useAuth();
   const router = useRouter();
+  const { openWindow } = useWindowManager();
   const [isHovered, setIsHovered] = useState(false);
   const [activeSubMenu, setActiveSubMenu] = useState<string | null>(null);
   const hoverTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
   const subMenuTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 
-  const handleNavigate = (e: React.MouseEvent, path?: string) => {
+  // Panelleri iframe pencere olarak aç (route'a gitmek yerine) — böylece
+  // küçültülünce state korunur ve aynı anda birden fazla panel canlı kalabilir.
+  const handleNavigate = (
+    e: React.MouseEvent,
+    path?: string,
+    label?: string,
+    icon?: React.ElementType,
+  ) => {
     if (path) {
       e.stopPropagation();
-      router.push(path);
+      openWindow(path, label || item.label, icon || item.icon);
     } else if (item.onClick) {
       item.onClick();
     }
@@ -626,7 +634,7 @@ const DockItem = ({
                   >
                     <button
                       className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-sm font-medium hover:bg-black/[0.06] dark:hover:bg-white/[0.08] transition-colors text-left"
-                      onClick={(e) => handleNavigate(e, sub.href)}
+                      onClick={(e) => handleNavigate(e, sub.href, sub.label, sub.icon)}
                     >
                       <sub.icon className="w-4 h-4 flex-shrink-0" style={{ color: subColors[0] }} />
                       <span className="text-foreground">{sub.label}</span>
@@ -655,7 +663,7 @@ const DockItem = ({
                               <button
                                 key={nestedSub.key}
                                 className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-sm font-medium hover:bg-black/[0.06] dark:hover:bg-white/[0.08] transition-colors text-left"
-                                onClick={(e) => handleNavigate(e, nestedSub.href)}
+                                onClick={(e) => handleNavigate(e, nestedSub.href, nestedSub.label, nestedSub.icon)}
                               >
                                 <nestedSub.icon className="w-4 h-4 flex-shrink-0" style={{ color: nestedColors[0] }} />
                                 <span className="text-foreground">{nestedSub.label}</span>
@@ -848,7 +856,7 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
   useEffect(() => { setCalendarOpen(false); }, [currentView]);
 
   // Window manager — minimized-tab zone (genie target) + restore.
-  const { registerDockTarget, minimized: minimizedWins, restore: restoreWindow } = useWindowManager();
+  const { registerDockTarget, minimizedWindows, restoreWindow, activeId } = useWindowManager();
   const minZoneRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     registerDockTarget(minZoneRef.current);
@@ -991,7 +999,7 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
               <DockItem
                 key={item.key}
                 item={item}
-                isActive={item.key === currentView && item.type === 'nav'}
+                isActive={(item.key === currentView && item.type === 'nav') || (!!item.href && item.href === activeId)}
                 setTheme={setTheme}
                 isLiquidMode={isLiquidMode}
                 isLiquidHovered={isLiquidMode && activeItemKey === item.key}
@@ -1005,7 +1013,7 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
             {/* Minimized-tab zone — küçültülmüş paneller buraya genie ile iner.
                 Sekme yoksa ≥2 rezerve yuva görünür, sekme geldikçe büyür. */}
             <div ref={minZoneRef} className="flex items-center gap-1">
-              {minimizedWins.map((m) => (
+              {minimizedWindows.map((m) => (
                 <Tooltip key={m.id}>
                   <TooltipTrigger asChild>
                     <motion.button
@@ -1027,7 +1035,7 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
                   </TooltipPrimitive.Portal>
                 </Tooltip>
               ))}
-              {Array.from({ length: Math.max(0, 2 - minimizedWins.length) }).map((_, i) => (
+              {Array.from({ length: Math.max(0, 2 - minimizedWindows.length) }).map((_, i) => (
                 <span key={`mslot-${i}`} className="qdock-minslot" />
               ))}
             </div>

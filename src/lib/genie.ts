@@ -141,11 +141,15 @@ function buildGenieFrames(
       rightPts.push(`${rx.toFixed(2)}% ${(y * 100).toFixed(2)}%`);
       leftPts.push(`${lx.toFixed(2)}% ${(y * 100).toFixed(2)}%`);
     }
-    const poly = right.concat(left.reverse()).join(', ');
+    const poly = rightPts.concat(leftPts.reverse()).join(', ');
+    // Dikey iniş: eleman, t ile birlikte dock yuvasına doğru kayar. WAAPI
+    // zaman çizelgesi easing'i (ease-out) tüm hareketi yumuşatır.
+    const ty = t * dy;
     frames.push({
       clipPath: `polygon(${poly})`,
       transform: `translateY(${ty.toFixed(1)}px)`,
-      opacity: p > 0.92 ? 1 - (p - 0.92) / 0.08 : 1,
+      opacity: t > 0.92 ? 1 - (t - 0.92) / 0.08 : 1,
+      filter: '',
     });
   }
 

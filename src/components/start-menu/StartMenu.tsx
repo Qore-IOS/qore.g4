@@ -13,12 +13,14 @@ import {
   CornerDownLeft,
   Sun,
   Moon,
+  AppWindow,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { useAI } from '@/contexts/ai-context';
 import { useStartMenu } from '@/contexts/start-menu-context';
+import { useWindowManager } from '@/contexts/window-manager-context';
 import { VIEWS } from '@/lib/constants';
 import {
   TONE_CHIP,
@@ -61,6 +63,7 @@ export function StartMenu() {
   const { isOpen, close, toggle } = useStartMenu();
   const { currentUser, currentUserProfile, logout, setUserTheme } = useAuth();
   const { openAI } = useAI();
+  const { openWindow } = useWindowManager();
   const { theme, resolvedTheme } = useTheme();
   const router = useRouter();
 
@@ -127,9 +130,10 @@ export function StartMenu() {
     setShowAllPins(false);
   }, [isOpen]);
 
-  const go = (href?: string) => {
+  // Panelleri iframe pencere olarak aç (route'a gitmek yerine).
+  const go = (href?: string, title?: string, icon?: React.ElementType) => {
     if (!href) return;
-    router.push(href);
+    openWindow(href, title || href, icon || AppWindow);
     close();
   };
 
@@ -264,7 +268,7 @@ export function StartMenu() {
                     <button
                       key={v.key}
                       type="button"
-                      onClick={() => go(v.href)}
+                      onClick={() => go(v.href, v.label, v.icon)}
                       className={ROW}
                     >
                       <span
@@ -320,7 +324,7 @@ export function StartMenu() {
                           <button
                             key={i}
                             type="button"
-                            onClick={() => go(a.href)}
+                            onClick={() => go(a.href, a.label)}
                             className={cn(
                               'px-3 py-1.5 rounded-lg text-[12.5px] font-bold transition active:translate-y-px',
                               a.variant === 'primary'
@@ -358,7 +362,7 @@ export function StartMenu() {
                         <button
                           key={v.key}
                           type="button"
-                          onClick={() => go(v.href)}
+                          onClick={() => go(v.href, v.label, v.icon)}
                           className={cn(
                             'group flex flex-col items-center gap-1.5 rounded-xl px-1 pt-2 pb-2 transition hover:-translate-y-0.5 active:translate-y-0',
                             TILE,
@@ -512,7 +516,7 @@ export function StartMenu() {
                   )}
                   <button
                     type="button"
-                    onClick={() => go('/yonetim/kisisellistirme')}
+                    onClick={() => go('/yonetim/kisisellistirme', 'Ayarlar', Settings)}
                     className={cn(
                       'grid place-items-center h-9 w-9 rounded-xl text-muted-foreground hover:text-foreground transition',
                       TILE,
