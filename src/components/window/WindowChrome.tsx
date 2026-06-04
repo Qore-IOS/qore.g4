@@ -5,8 +5,6 @@ import { ChevronLeft } from 'lucide-react';
 import { useWindowManager } from '@/contexts/window-manager-context';
 import { useAuth } from '@/contexts/auth-context';
 
-import { usePathname } from 'next/navigation';
-
 /**
  * macOS-vari global pencere başlığı — sol üstte YÜZER (ayrı şerit/arka plan yok;
  * masaüstü arka planıyla aynı). Boştayken küçülüp soluklaşır, mouse gelince
@@ -16,14 +14,17 @@ import { usePathname } from 'next/navigation';
 export function WindowChrome() {
   const { windows, activeId, minimizeWindow, closeWindow, windowBack } = useWindowManager();
   const { currentUserProfile } = useAuth();
-  const pathname = usePathname();
 
   if (!activeId) return null;
-  if (pathname?.startsWith('/cari-odeme')) return null;
   // user rolündeki kullanıcılar hiçbir panelde trafik ışıklarını göremez
   if (currentUserProfile?.role === 'user') return null;
 
   const active = windows.find((w) => w.id === activeId);
+
+  // Cari-Ödeme kendi sidebar'ında trafik ışıklarını barındırır; global WindowChrome gizlenir.
+  // pathname yerine aktif pencerenin path'ini kontrol et — yoksa parent pathname takılı kalıp
+  // tüm panellerde gizlenmeye neden olur.
+  if (active?.path?.startsWith('/cari-odeme')) return null;
 
   return (
     <div
