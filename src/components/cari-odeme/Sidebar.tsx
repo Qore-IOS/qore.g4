@@ -42,8 +42,7 @@ export function CariOdemeSidebar() {
   
   const { windows, activeId, closeWindow, minimizeWindow, windowBack } = useWindowManager();
   const { currentUserProfile } = useAuth();
-  const active = windows.find((w) => w.id === activeId);
-  const title = active?.title || "Cari Ödeme";
+  const title = "Cari Ödeme";
 
   // user rolündeki kullanıcılardan trafik ışıklarını gizle
   const isUserRole = currentUserProfile?.role === 'user';
