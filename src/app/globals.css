@@ -148,7 +148,7 @@
 }
 
 @layer components {
-    /* ===== Device Management – Unified Light Neumorphic Primitives ===== */
+    /* ===== Device Management â€“ Unified Light Neumorphic Primitives ===== */
 
     /* Shell / page background */
     .cihaz-shell {
@@ -210,8 +210,8 @@
     }
 
     /* ============================================================
-       FLUID EDITORIAL DESIGN SYSTEM — Satın Alma Planning Panel
-       Scope: .fluid-editorial wrapper — overrides dashboard tokens
+       FLUID EDITORIAL DESIGN SYSTEM â€” SatÄ±n Alma Planning Panel
+       Scope: .fluid-editorial wrapper â€” overrides dashboard tokens
        ============================================================ */
 
     .fluid-editorial {
@@ -241,9 +241,9 @@
       min-height: 100dvh;
     }
 
-    /* Panel aktifken tüm görünür alan tek renk — üst / alt / yanlardan farklı
-       sistem UI rengi sızmasın. Body ve main arka planlarını panelin rengine
-       eşitleriz. */
+    /* Panel aktifken tÃ¼m gÃ¶rÃ¼nÃ¼r alan tek renk â€” Ã¼st / alt / yanlardan farklÄ±
+       sistem UI rengi sÄ±zmasÄ±n. Body ve main arka planlarÄ±nÄ± panelin rengine
+       eÅŸitleriz. */
     html:has(.fluid-editorial),
     body:has(.fluid-editorial),
     body:has(.fluid-editorial) main,
@@ -256,7 +256,7 @@
       background: #f7faf8 !important;
     }
 
-    /* İçerik safe zone'u — panel kenarlarında nefes payı */
+    /* Ä°Ã§erik safe zone'u â€” panel kenarlarÄ±nda nefes payÄ± */
     .fluid-editorial .fluid-safe-content {
       padding-left: clamp(1rem, 3vw, 2rem);
       padding-right: clamp(1rem, 3vw, 2rem);
@@ -373,7 +373,7 @@
       transform: scale(0.97);
     }
 
-    /* Fluid date pill — selected */
+    /* Fluid date pill â€” selected */
     .fluid-editorial .fluid-date-selected {
       background: linear-gradient(135deg, #006b68, #5bccca);
       color: #ffffff;
@@ -410,7 +410,7 @@
       pointer-events: none;
     }
 
-    /* E1 – subtle card / list-item (small elevation) */
+    /* E1 â€“ subtle card / list-item (small elevation) */
     .cihaz-card {
       background: var(--dashboard-surface);
       border: 1px solid var(--dashboard-stroke);
@@ -418,7 +418,7 @@
       border-radius: 20px;
     }
 
-    /* E2 – primary card / container (strong elevation) */
+    /* E2 â€“ primary card / container (strong elevation) */
     .cihaz-card-strong {
       background: var(--dashboard-surface);
       border: 1px solid var(--dashboard-stroke);
@@ -426,20 +426,20 @@
       border-radius: 24px;
     }
 
-    /* E0 – pressed / active / inset state */
+    /* E0 â€“ pressed / active / inset state */
     .cihaz-pressed {
       background: var(--dashboard-surface-2);
       box-shadow: var(--dashboard-pressed);
       border-radius: 14px;
     }
 
-    /* Focus ring – accessible keyboard indicator */
+    /* Focus ring â€“ accessible keyboard indicator */
     .cihaz-focus-ring:focus-visible {
       outline: none;
       box-shadow: 0 0 0 3px var(--dashboard-focus-glow);
     }
 
-    /* ===== Action tile – main hub buttons ===== */
+    /* ===== Action tile â€“ main hub buttons ===== */
     .cihaz-action-tile {
       background: var(--dashboard-surface);
       border: 1px solid var(--dashboard-stroke);
@@ -459,7 +459,7 @@
       box-shadow: var(--dashboard-pressed);
     }
 
-    /* ===== Tool list item – secondary actions ===== */
+    /* ===== Tool list item â€“ secondary actions ===== */
     .cihaz-tool-item {
       background: var(--dashboard-surface);
       border: 1px solid var(--dashboard-stroke);
@@ -549,7 +549,7 @@
     }
 
     /* ============================================================
-       LOJISTIK İŞ TERMİNALİ — Sipariş Paneli
+       LOJISTIK Ä°Å TERMÄ°NALÄ° â€” SipariÅŸ Paneli
        Light:  emerald (#10B981) accent, soft white surfaces
        Dark:   magenta (#EC4899) accent + emerald success, deep
                surfaces with glassmorphic glow per design ref.
@@ -1166,7 +1166,7 @@
     }
 
     /* ============================================================
-       LOJİSTİK TERMİNAL SHELL — sidebar / nav / mobile / confirm fx
+       LOJÄ°STÄ°K TERMÄ°NAL SHELL â€” sidebar / nav / mobile / confirm fx
        ============================================================ */
     :root {
       --lt-sidebar-w: 248px;
@@ -1752,7 +1752,7 @@
     .dark .lt-bottom-item--danger { color: #F87171; }
 
     /* ============================================================
-       lt-confirm — Apple Face-ID style success animation
+       lt-confirm â€” Apple Face-ID style success animation
        ============================================================ */
     .lt-confirm-overlay {
       position: fixed;
@@ -1874,33 +1874,33 @@
 
         /* 3D Depth: Multiple shadow layers + inner refraction shadows */
         box-shadow:
-          /* Dış derinlik gölgesi */
+          /* DÄ±ÅŸ derinlik gÃ¶lgesi */
           0 16px 56px rgba(15, 30, 60, 0.4),
           0 6px 20px rgba(15, 30, 60, 0.3),
-          /* İç üst ışık - üst kenardan vuran ışık (Y: 1) */
+          /* Ä°Ã§ Ã¼st Ä±ÅŸÄ±k - Ã¼st kenardan vuran Ä±ÅŸÄ±k (Y: 1) */
           inset 0 1px 2px rgba(255, 255, 255, 0.15),
-          /* İç alt ışık refraksiyonu - caustic effect (Y: -1) */
+          /* Ä°Ã§ alt Ä±ÅŸÄ±k refraksiyonu - caustic effect (Y: -1) */
           inset 0 -1px 2px rgba(255, 255, 255, 0.08),
-          /* İç kenar refraksiyon halkası - soldan */
+          /* Ä°Ã§ kenar refraksiyon halkasÄ± - soldan */
           inset 2px 0 3px rgba(255, 255, 255, 0.06),
-          /* İç kenar refraksiyon halkası - sağdan */
+          /* Ä°Ã§ kenar refraksiyon halkasÄ± - saÄŸdan */
           inset -2px 0 3px rgba(255, 255, 255, 0.06);
     }
 
-    /* Light A - Üst kenar rim glow (dış parlama) */
+    /* Light A - Ãœst kenar rim glow (dÄ±ÅŸ parlama) */
     .dark .neu-card::before {
         content: '';
         position: absolute;
         inset: -4px;
         border-radius: 24px;
         background:
-          /* Üst kenar gradient ışık */
+          /* Ãœst kenar gradient Ä±ÅŸÄ±k */
           radial-gradient(
             ellipse 60% 20% at 50% 0%,
             rgba(255, 255, 255, 0.18) 0%,
             transparent 60%
           ),
-          /* Sol üst köşe speküler */
+          /* Sol Ã¼st kÃ¶ÅŸe spekÃ¼ler */
           radial-gradient(
             ellipse 30% 20% at 10% 10%,
             rgba(255, 255, 255, 0.12) 0%,
@@ -1912,32 +1912,32 @@
         z-index: -1;
     }
 
-    /* Light B/C/D - İç hacimsel parlama, speküler ve refraksiyon */
+    /* Light B/C/D - Ä°Ã§ hacimsel parlama, spekÃ¼ler ve refraksiyon */
     .dark .neu-card::after {
         content: '';
         position: absolute;
         inset: 0;
         border-radius: inherit;
         background:
-          /* Light C - Sol üst speküler highlight (metalik parlama) */
+          /* Light C - Sol Ã¼st spekÃ¼ler highlight (metalik parlama) */
           radial-gradient(
             ellipse 40% 30% at 12% 12%,
             rgba(255, 255, 255, 0.12) 0%,
             transparent 50%
           ),
-          /* Light D - Sağ alt speküler */
+          /* Light D - SaÄŸ alt spekÃ¼ler */
           radial-gradient(
             ellipse 35% 25% at 88% 88%,
             rgba(255, 255, 255, 0.06) 0%,
             transparent 50%
           ),
-          /* Light B - Üst hacimsel iç ışık (camın içine yayılan) */
+          /* Light B - Ãœst hacimsel iÃ§ Ä±ÅŸÄ±k (camÄ±n iÃ§ine yayÄ±lan) */
           radial-gradient(
             ellipse 90% 40% at 50% 5%,
             rgba(255, 255, 255, 0.1) 0%,
             transparent 50%
           ),
-          /* Inner edge refraction gradient - üst kenar */
+          /* Inner edge refraction gradient - Ã¼st kenar */
           linear-gradient(
             180deg,
             rgba(255, 255, 255, 0.08) 0%,
@@ -2479,9 +2479,9 @@
     @apply transition-all duration-200 active:scale-95;
   }
 
-  /* Faz 6 (mobil modernizasyon): Light-mode butonlar — eski neumorphic GRİ raised stil
-     yerine DÜZ/FLAT modern yüzey (beyaz + ince kenarlık + hafif gölge). 3D neumorphic
-     çift-gölge kaldırıldı. Tüm uygulamada tutarlı; dark "liquid glass" korunur. */
+  /* Faz 6 (mobil modernizasyon): Light-mode butonlar â€” eski neumorphic GRÄ° raised stil
+     yerine DÃœZ/FLAT modern yÃ¼zey (beyaz + ince kenarlÄ±k + hafif gÃ¶lge). 3D neumorphic
+     Ã§ift-gÃ¶lge kaldÄ±rÄ±ldÄ±. TÃ¼m uygulamada tutarlÄ±; dark "liquid glass" korunur. */
   :root:not(.dark) .neu-btn-universal {
     background-color: #fbfbfc;
     color: var(--foreground);
@@ -2495,7 +2495,7 @@
     border-color: rgba(15, 23, 42, 0.16);
   }
 
-  /* Pressed/active state for Light Mode — flat (neumorphic inset değil) */
+  /* Pressed/active state for Light Mode â€” flat (neumorphic inset deÄŸil) */
   :root:not(.dark) .neu-btn-universal:active,
   :root:not(.dark) .neu-btn-universal[data-state="on"] {
     background-color: #f0f0f2;
@@ -2515,7 +2515,7 @@
       rgba(255, 255, 255, 0.02) 50%,
       rgba(255, 255, 255, 0.04) 100%
     );
-    /* Kenarlık yok - sadece ışık ve gölge ile tanımlanır */
+    /* KenarlÄ±k yok - sadece Ä±ÅŸÄ±k ve gÃ¶lge ile tanÄ±mlanÄ±r */
     border: none;
     border-radius: 12px;
     backdrop-filter: blur(20px) saturate(180%);
@@ -2523,7 +2523,7 @@
     overflow: visible;
     isolation: isolate;
 
-    /* Sadece dış gölge - kenar çizgisi yok */
+    /* Sadece dÄ±ÅŸ gÃ¶lge - kenar Ã§izgisi yok */
     box-shadow:
       0 8px 32px rgba(20, 40, 80, 0.35),
       0 2px 8px rgba(20, 40, 80, 0.25);
@@ -2531,7 +2531,7 @@
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
-  /* Light A - Çok yumuşak rim glow (kenar çizgisi değil, parlama) */
+  /* Light A - Ã‡ok yumuÅŸak rim glow (kenar Ã§izgisi deÄŸil, parlama) */
   .dark .neu-btn-universal::before {
     content: '';
     position: absolute;
@@ -3075,7 +3075,7 @@
   z-index: 10 !important;
 }
 
-/* ── Device Map Panel (Neumorphic) ── */
+/* â”€â”€ Device Map Panel (Neumorphic) â”€â”€ */
 .device-map-shell {
   max-width: 1200px;
   margin: 0 auto;
@@ -3461,7 +3461,7 @@
   animation: flow 2s ease-in-out infinite;
 }
 
-/* --- FROSTED GLASS CARD: Ürün Kullanım Panel için --- */
+/* --- FROSTED GLASS CARD: ÃœrÃ¼n KullanÄ±m Panel iÃ§in --- */
 .frosted-glass-card {
   position: relative;
   border-radius: 16px;
@@ -3490,7 +3490,7 @@
     inset 0 1px 1px rgba(255, 255, 255, 0.7);
 }
 
-/* Dark mode: Karartılmış buzlu cam efekti - %20 daha saydam */
+/* Dark mode: KarartÄ±lmÄ±ÅŸ buzlu cam efekti - %20 daha saydam */
 .dark .frosted-glass-card {
   background: rgba(0, 0, 0, 0.25);
   backdrop-filter: blur(20px) saturate(150%) brightness(0.9);
@@ -3511,7 +3511,7 @@
     inset 0 1px 1px rgba(255, 255, 255, 0.1);
 }
 
-/* Frosted glass card içindeki başlıklar için */
+/* Frosted glass card iÃ§indeki baÅŸlÄ±klar iÃ§in */
 .frosted-glass-card .frosted-header {
   padding: 12px 16px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.2);
@@ -3521,14 +3521,14 @@
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-/* Frosted glass kart içeriği */
+/* Frosted glass kart iÃ§eriÄŸi */
 .frosted-glass-card .frosted-content {
   padding: 16px;
 }
 
 /* Time-based background panel - now handled via inline styles */
 
-/* Frosted glass button stillerini ayrı tutuyoruz */
+/* Frosted glass button stillerini ayrÄ± tutuyoruz */
 .frosted-glass-btn {
   background: rgba(255, 255, 255, 0.4);
   backdrop-filter: blur(8px);
@@ -3627,11 +3627,11 @@
   }
 }
 
-/* ─────────────────────────────────────────────
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
    Stock warning: blinking red border
    Used on rows in lab stock management panel for items
    that are: expiring soon, at min-stock, or qty=1 (max>2)
-   ───────────────────────────────────────────── */
+   â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 @keyframes stockWarningBlink {
   0%, 100% {
     border-color: rgba(239, 68, 68, 1);
@@ -3674,7 +3674,7 @@
   --qt-surface-strong: rgba(255, 255, 255, 0.9);
   --qt-surface-soft: rgba(255, 255, 255, 0.55);
 
-  /* Brand accent — soft gradient hub palette */
+  /* Brand accent â€” soft gradient hub palette */
   --qt-accent: #7C3AED;       /* violet */
   --qt-accent-2: #06B6D4;     /* cyan */
   --qt-accent-3: #F59E0B;     /* amber for warnings */
@@ -4463,7 +4463,7 @@ html.qt-active { color: var(--qt-text); }
   box-shadow: 0 2px 6px rgba(239, 68, 68, 0.5);
 }
 
-/* Status row — mobile equal sizing */
+/* Status row â€” mobile equal sizing */
 .qt-status-row {
   display: flex;
   flex-wrap: wrap;
@@ -4962,9 +4962,9 @@ html.qt-active { color: var(--qt-text); }
    Hub content overrides for ALL module pages rendered inside
    QoreTechnicShell (.qt-content). Strips neumorphic backgrounds,
    turns shadcn Cards into transparent glass surfaces, and applies
-   consistent glass styling across every sub-panel (arıza-yönetimi,
+   consistent glass styling across every sub-panel (arÄ±za-yÃ¶netimi,
    teknik-servis, aplikasyon-paneli, lab detail, wizard forms,
-   yedek parça panels, transfer şablonları, etc.)
+   yedek parÃ§a panels, transfer ÅŸablonlarÄ±, etc.)
    NOTE: hub's own `qt-*` components are whitelisted via :not() so
    they keep their dedicated styles.
    ============================================ */
@@ -5035,7 +5035,7 @@ html.qt-active { color: var(--qt-text); }
   background: rgba(17, 24, 39, 0.5) !important;
 }
 
-/* Pressed / inset neumorphic elements → subtle frosted well */
+/* Pressed / inset neumorphic elements â†’ subtle frosted well */
 .qt-content .cihaz-pressed {
   background: rgba(255, 255, 255, 0.3) !important;
   border: 1px solid var(--qt-stroke) !important;
@@ -5115,7 +5115,7 @@ html.qt-active { color: var(--qt-text); }
   border-color: var(--qt-stroke) !important;
 }
 
-/* Tables — frosted look */
+/* Tables â€” frosted look */
 .qt-content thead,
 .qt-content thead tr,
 .qt-content thead th {
@@ -5172,7 +5172,7 @@ html.qt-active { color: var(--qt-text); }
   -webkit-backdrop-filter: blur(10px);
 }
 
-/* BackButton — align to hub theme */
+/* BackButton â€” align to hub theme */
 .qt-content a[href*="cihaz-yonetimi-ana"],
 .qt-content button:has(svg.lucide-arrow-left) {
   color: var(--qt-text-soft) !important;
@@ -5182,7 +5182,7 @@ html.qt-active { color: var(--qt-text); }
   color: var(--qt-accent) !important;
 }
 
-/* shadcn Button inside the hub — neutral ghost look by default.
+/* shadcn Button inside the hub â€” neutral ghost look by default.
    We leave `.qt-*-btn` and destructive variants alone. */
 .qt-content button[data-slot="button"]:not(.qt-icon-btn):not(.qt-ghost-btn):not(.qt-primary-btn):not([data-variant="destructive"]):not(.qore-technic-navitem):not(.qore-technic-bottom-item):not(.qore-technic-collapse-btn) {
   background: var(--qt-surface) !important;
@@ -5199,7 +5199,7 @@ html.qt-active { color: var(--qt-text); }
   box-shadow: var(--qt-elev-md);
 }
 
-/* Primary / default shadcn Button variant — promote to gradient */
+/* Primary / default shadcn Button variant â€” promote to gradient */
 .qt-content button[data-variant="default"]:not(.qore-technic-navitem):not(.qore-technic-bottom-item):not(.qore-technic-collapse-btn) {
   background: linear-gradient(135deg, var(--qt-accent), var(--qt-accent-2)) !important;
   color: #fff !important;
@@ -5230,7 +5230,7 @@ html.qt-active { color: var(--qt-text); }
   border-color: rgba(124, 58, 237, 0.22) !important;
 }
 
-/* Dialog / popover (portaled) content — theme in dark/light hub */
+/* Dialog / popover (portaled) content â€” theme in dark/light hub */
 html.qt-active [data-slot="dialog-content"],
 html.qt-active [data-slot="popover-content"],
 html.qt-active [data-slot="alert-dialog-content"] {
@@ -5241,7 +5241,7 @@ html.qt-active [data-slot="alert-dialog-content"] {
   color: var(--qt-text) !important;
 }
 
-/* Wizard form shell / step containers — allow gradient bg through */
+/* Wizard form shell / step containers â€” allow gradient bg through */
 .qt-content .wizard-form-shell,
 .qt-content .wizard-step,
 .qt-content form {
@@ -5256,7 +5256,7 @@ html.qt-active [data-slot="alert-dialog-content"] {
   background: transparent !important;
 }
 
-/* ---- Mobile menu overlay (yedek-parça transfer page) ----
+/* ---- Mobile menu overlay (yedek-parÃ§a transfer page) ----
    The page uses <div class="fixed inset-0 z-50"> with an internal
    <div class="... cihaz-shell ...">. Our transparency rule above
    would let the QOREtechnic bottom nav bleed through that drawer.
@@ -5280,8 +5280,8 @@ html.qt-active body[data-scroll-locked] .qore-technic-bottom-nav {
 }
 
 /* Ensure page content doesn't tuck UNDER the sidebar/bottom nav.
-   yedek-parça transfer header uses `flex items-center justify-between`
-   with a back button — add a little inline-start padding on mobile so
+   yedek-parÃ§a transfer header uses `flex items-center justify-between`
+   with a back button â€” add a little inline-start padding on mobile so
    it doesn't collide with the mobile brand/area. */
 @media (max-width: 767px) {
   .qt-content > .qore-technic-main__inner {
@@ -5289,7 +5289,7 @@ html.qt-active body[data-scroll-locked] .qore-technic-bottom-nav {
   }
 }
 
-/* ─── Total Verimlilik (Excel-style cells) ───────────────────────── */
+/* â”€â”€â”€ Total Verimlilik (Excel-style cells) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .tv-cell-input {
   width: 100%;
   height: 100%;
@@ -5420,8 +5420,8 @@ body:has(.fault-clay-page) .page-shell {
   color: #fff;
 }
 
-/* Faz 6: Arıza-id eylem butonu (AI 'Yenile' vb.) — gri outline/neumorphic yerine
-   clay-cam pill (sayfanın beyaz-cam + mor/pembe accent estetiğiyle uyumlu). */
+/* Faz 6: ArÄ±za-id eylem butonu (AI 'Yenile' vb.) â€” gri outline/neumorphic yerine
+   clay-cam pill (sayfanÄ±n beyaz-cam + mor/pembe accent estetiÄŸiyle uyumlu). */
 .fault-pill-btn {
   display: inline-flex;
   align-items: center;
@@ -6045,7 +6045,7 @@ body:has(.fault-clay-page) .page-shell {
   .fault-action-option small { font-size: 13px; }
 }
 
-/* ─── Minimalist horizontal table slider ─────────────────────────── */
+/* â”€â”€â”€ Minimalist horizontal table slider â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .table-hscroll-slider {
   -webkit-appearance: none;
   appearance: none;
@@ -6108,9 +6108,9 @@ body:has(.fault-clay-page) .page-shell {
   background: rgba(212, 212, 216, 1);
 }
 
-/* ────────────────────────────────────────────────────────────────────────── */
-/* Maliyet Gözlem Merkezi — variables + animations                            */
-/* ────────────────────────────────────────────────────────────────────────── */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* Maliyet GÃ¶zlem Merkezi â€” variables + animations                            */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 .mg-root {
   --mg-bg: #000000;
@@ -6191,7 +6191,7 @@ html:not(.dark) .mg-root {
   50%      { box-shadow: 0 0 0 6px rgba(251,146,60,0); }
 }
 
-/* Edge-to-edge sayfalar için body bg — Maliyet Gözlem & Dashboard v2 */
+/* Edge-to-edge sayfalar iÃ§in body bg â€” Maliyet GÃ¶zlem & Dashboard v2 */
 body.mg-edge-body {
   background: #f5f4f0 !important;
 }
@@ -6318,3 +6318,34 @@ html.dark body.mg-edge-body {
     }
   }
 }
+
+@layer base {
+  /* Cari Odeme Light Theme */
+  .cari-shell {
+    --background: 144 30% 97%; /* Very light greenish-white #f0f8f4 */
+    --foreground: 0 0% 10%;
+    
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 15%;
+    
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 15%;
+    
+    --primary: 147 76% 36%; /* Emerald / #16a34a */
+    --primary-foreground: 0 0% 100%;
+    
+    --secondary: 147 20% 90%;
+    --secondary-foreground: 147 80% 20%;
+    
+    --muted: 144 20% 90%;
+    --muted-foreground: 144 10% 40%;
+    
+    --accent: 147 30% 90%;
+    --accent-foreground: 147 80% 20%;
+    
+    --border: 144 15% 85%;
+    --input: 144 15% 85%;
+    --ring: 147 76% 36%;
+  }
+}
+

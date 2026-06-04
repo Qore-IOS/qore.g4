@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -134,26 +133,27 @@ export default function TahsilatPage() {
     n.toLocaleString("tr-TR", { style: "currency", currency });
 
   return (
-    <div className="space-y-6 p-4">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+    <div className="space-y-6 max-w-5xl mx-auto px-2 py-4">
+      {/* Header Area */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
         <div>
-          <h1 className="text-3xl font-bold flex items-center gap-2">
-            <Banknote className="h-8 w-8 text-green-600" />
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground flex items-center gap-2">
+            <Banknote className="h-6 w-6 text-primary" />
             Tahsilatlar
           </h1>
-          <p className="text-muted-foreground mt-1">
+          <p className="text-sm text-muted-foreground mt-1">
             Müşterilerden alınan ödemeleri (tahsilat makbuzlarını) buradan yönetin.
           </p>
         </div>
         
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
           <DialogTrigger asChild>
-            <Button className="gap-2">
+            <Button className="rounded-full gap-2 shadow-sm px-6">
               <Plus className="h-4 w-4" />
               Yeni Tahsilat
             </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[500px]">
+          <DialogContent className="sm:max-w-[500px] !rounded-xl">
             <DialogHeader>
               <DialogTitle>Yeni Tahsilat Ekle</DialogTitle>
             </DialogHeader>
@@ -164,7 +164,7 @@ export default function TahsilatPage() {
                   <FormItem>
                     <FormLabel>Cari Firma (Müşteri)</FormLabel>
                     <Select onValueChange={field.onChange} defaultValue={field.value}>
-                      <FormControl><SelectTrigger><SelectValue placeholder="Firma Seçin" /></SelectTrigger></FormControl>
+                      <FormControl><SelectTrigger className="rounded-xl"><SelectValue placeholder="Firma Seçin" /></SelectTrigger></FormControl>
                       <SelectContent>
                         {firmalar.map((f) => (
                           <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>
@@ -179,7 +179,7 @@ export default function TahsilatPage() {
                   <FormField control={form.control} name="receiptNo" render={({ field }) => (
                     <FormItem>
                       <FormLabel>Makbuz No</FormLabel>
-                      <FormControl><Input placeholder="MAK-001" {...field} /></FormControl>
+                      <FormControl><Input className="rounded-xl" placeholder="MAK-001" {...field} /></FormControl>
                       <FormMessage />
                     </FormItem>
                   )} />
@@ -187,7 +187,7 @@ export default function TahsilatPage() {
                     <FormItem>
                       <FormLabel>Ödeme Tipi</FormLabel>
                       <Select onValueChange={field.onChange} defaultValue={field.value}>
-                        <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                        <FormControl><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger></FormControl>
                         <SelectContent>
                           <SelectItem value="nakit">Nakit</SelectItem>
                           <SelectItem value="havale">Havale / EFT</SelectItem>
@@ -204,7 +204,7 @@ export default function TahsilatPage() {
                   <FormField control={form.control} name="amount" render={({ field }) => (
                     <FormItem>
                       <FormLabel>Tutar</FormLabel>
-                      <FormControl><Input type="number" step="0.01" {...field} /></FormControl>
+                      <FormControl><Input className="rounded-xl" type="number" step="0.01" {...field} /></FormControl>
                       <FormMessage />
                     </FormItem>
                   )} />
@@ -212,7 +212,7 @@ export default function TahsilatPage() {
                     <FormItem>
                       <FormLabel>Döviz</FormLabel>
                       <Select onValueChange={field.onChange} defaultValue={field.value}>
-                        <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                        <FormControl><SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger></FormControl>
                         <SelectContent>
                           <SelectItem value="TRY">TRY</SelectItem>
                           <SelectItem value="USD">USD</SelectItem>
@@ -231,7 +231,7 @@ export default function TahsilatPage() {
                     <Popover>
                       <PopoverTrigger asChild>
                         <FormControl>
-                          <Button variant="outline" className={cn("pl-3 text-left font-normal w-full", !field.value && "text-muted-foreground")}>
+                          <Button variant="outline" className={cn("rounded-xl pl-3 text-left font-normal w-full", !field.value && "text-muted-foreground")}>
                             {field.value ? format(field.value, "PPP", { locale: tr }) : <span>Tarih seçin</span>}
                             <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
                           </Button>
@@ -248,14 +248,14 @@ export default function TahsilatPage() {
                 <FormField control={form.control} name="description" render={({ field }) => (
                   <FormItem>
                     <FormLabel>Açıklama</FormLabel>
-                    <FormControl><Input placeholder="Örn: Ekim ayı fatura ödemesi" {...field} /></FormControl>
+                    <FormControl><Input className="rounded-xl" placeholder="Örn: Ekim ayı fatura ödemesi" {...field} /></FormControl>
                     <FormMessage />
                   </FormItem>
                 )} />
 
                 <div className="flex justify-end pt-4 gap-2">
-                  <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>İptal</Button>
-                  <Button type="submit" disabled={isSubmitting}>
+                  <Button type="button" variant="outline" className="rounded-full" onClick={() => setIsDialogOpen(false)}>İptal</Button>
+                  <Button type="submit" className="rounded-full" disabled={isSubmitting}>
                     {isSubmitting ? "Kaydediliyor..." : "Kaydet"}
                   </Button>
                 </div>
@@ -265,59 +265,53 @@ export default function TahsilatPage() {
         </Dialog>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Tahsilat Geçmişi</CardTitle>
-          <CardDescription>Sisteme kaydedilmiş tüm tahsilat makbuzları</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="space-y-2">
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-            </div>
-          ) : receipts.length === 0 ? (
-            <div className="text-center py-10">
-              <FileText className="h-12 w-12 mx-auto text-muted-foreground opacity-50 mb-4" />
-              <p className="text-muted-foreground">Henüz hiç tahsilat kaydı bulunmuyor.</p>
-            </div>
-          ) : (
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Tarih</TableHead>
-                    <TableHead>Makbuz No</TableHead>
-                    <TableHead>Firma</TableHead>
-                    <TableHead>Tutar</TableHead>
-                    <TableHead>Tip</TableHead>
-                    <TableHead>Ekleyen</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {receipts.map((rcpt) => (
-                    <TableRow key={rcpt.id}>
-                      <TableCell>{format(new Date(rcpt.receiptDate), "dd.MM.yyyy")}</TableCell>
-                      <TableCell className="font-medium">{rcpt.receiptNo}</TableCell>
-                      <TableCell>{rcpt.cariFirmaName}</TableCell>
-                      <TableCell className="font-semibold text-green-600">
-                        {formatCurrency(rcpt.amount, rcpt.currency)}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{TYPE_LABELS[rcpt.type]}</Badge>
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {rcpt.createdBy}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <div className="rounded-xl border border-border overflow-hidden bg-card shadow-sm">
+        {isLoading ? (
+          <div className="space-y-2 p-6">
+            <Skeleton className="h-10 w-full rounded-md" />
+            <Skeleton className="h-10 w-full rounded-md" />
+            <Skeleton className="h-10 w-full rounded-md" />
+          </div>
+        ) : receipts.length === 0 ? (
+          <div className="text-center py-16">
+            <FileText className="h-12 w-12 mx-auto text-muted-foreground opacity-30 mb-4" />
+            <p className="text-muted-foreground">Henüz hiç tahsilat kaydı bulunmuyor.</p>
+          </div>
+        ) : (
+          <Table>
+            <TableHeader className="bg-muted/50">
+              <TableRow className="border-border hover:bg-transparent">
+                <TableHead className="font-medium h-10">Tarih</TableHead>
+                <TableHead className="font-medium h-10">Makbuz No</TableHead>
+                <TableHead className="font-medium h-10">Firma</TableHead>
+                <TableHead className="font-medium h-10">Tutar</TableHead>
+                <TableHead className="font-medium h-10">Tip</TableHead>
+                <TableHead className="font-medium h-10">Ekleyen</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {receipts.map((rcpt, idx) => (
+                <TableRow key={rcpt.id} className={cn("border-border/50 hover:bg-muted/30 transition-colors", idx === receipts.length - 1 && "border-0")}>
+                  <TableCell className="py-3 text-muted-foreground">{format(new Date(rcpt.receiptDate), "dd.MM.yyyy")}</TableCell>
+                  <TableCell className="py-3 font-medium">{rcpt.receiptNo}</TableCell>
+                  <TableCell className="py-3 font-medium">{rcpt.cariFirmaName}</TableCell>
+                  <TableCell className="py-3 font-semibold text-emerald-600">
+                    {formatCurrency(rcpt.amount, rcpt.currency)}
+                  </TableCell>
+                  <TableCell className="py-3">
+                    <Badge variant="outline" className="rounded-full px-2.5 font-normal border-border bg-muted/50">
+                      {TYPE_LABELS[rcpt.type]}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="py-3 text-sm text-muted-foreground">
+                    {rcpt.createdBy}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </div>
     </div>
   );
 }

@@ -71,57 +71,55 @@ export default function FaturaDetayPage() {
   }
 
   return (
-    <div className="space-y-6 p-4 max-w-5xl mx-auto">
-      <BackButton fallback="/cari-odeme/faturalar" />
+    <div className="space-y-6 max-w-5xl mx-auto px-2 py-4">
+      <div className="flex items-center gap-2 mb-4">
+        <BackButton fallback="/cari-odeme/faturalar" className="border-border hover:bg-muted" />
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Fatura Detayı</h1>
+      </div>
       
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-6 bg-card border border-border rounded-xl shadow-sm">
         <div>
-          <h1 className="text-3xl font-bold flex items-center gap-2">
-            Fatura: {invoice.invoiceNo}
-          </h1>
-          <p className="text-muted-foreground mt-1">
+          <h2 className="text-xl font-bold flex items-center gap-2">
+            Fatura No: {invoice.invoiceNo}
+          </h2>
+          <p className="text-sm text-muted-foreground mt-1">
             Oluşturan: {invoice.createdBy} • {format(invoice.createdAt, "dd MMM yyyy HH:mm", { locale: tr })}
           </p>
         </div>
         <Badge
           variant="secondary"
-          className={`text-sm px-3 py-1 ${
-            invoice.status === "taslak" ? "bg-gray-100 text-gray-700" :
-            invoice.status === "onaylandi" ? "bg-blue-100 text-blue-700" :
-            invoice.status === "kismi_odendi" ? "bg-yellow-100 text-yellow-700" :
-            invoice.status === "odendi" ? "bg-green-100 text-green-700" :
-            "bg-red-100 text-red-700"
-          }`}
+          className={cn(
+            "rounded-full px-3 py-1 font-medium",
+            invoice.status === "taslak" ? "bg-muted text-muted-foreground" :
+            invoice.status === "onaylandi" ? "bg-blue-500/10 text-blue-600" :
+            invoice.status === "kismi_odendi" ? "bg-yellow-500/10 text-yellow-600" :
+            invoice.status === "odendi" ? "bg-emerald-500/10 text-emerald-600" :
+            "bg-red-500/10 text-red-600"
+          )}
         >
           {STATUS_LABELS[invoice.status]}
         </Badge>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Building2 className="h-5 w-5" /> Cari Firma
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-xl font-medium">{invoice.cariFirmaName}</p>
-            <p className="text-sm text-muted-foreground mt-2">ID: {invoice.cariFirmaId}</p>
-          </CardContent>
-        </Card>
+        <div className="bg-muted/30 border border-border rounded-xl p-6">
+          <h3 className="text-base font-semibold flex items-center gap-2 mb-4">
+            <Building2 className="h-5 w-5 text-muted-foreground" /> Cari Firma
+          </h3>
+          <p className="text-xl font-medium">{invoice.cariFirmaName}</p>
+          <p className="text-sm text-muted-foreground mt-1">Firma Kimliği: {invoice.cariFirmaId}</p>
+        </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Calendar className="h-5 w-5" /> Fatura Detayları
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <div className="flex justify-between border-b pb-2">
+        <div className="bg-muted/30 border border-border rounded-xl p-6">
+          <h3 className="text-base font-semibold flex items-center gap-2 mb-4">
+            <Calendar className="h-5 w-5 text-muted-foreground" /> Fatura Detayları
+          </h3>
+          <div className="space-y-3 text-sm">
+            <div className="flex justify-between border-b border-border/50 pb-2">
               <span className="text-muted-foreground">Fatura Tipi</span>
               <span className="font-medium">{TYPE_LABELS[invoice.type]}</span>
             </div>
-            <div className="flex justify-between border-b pb-2">
+            <div className="flex justify-between border-b border-border/50 pb-2">
               <span className="text-muted-foreground">Fatura Tarihi</span>
               <span className="font-medium">{format(invoice.issueDate, "dd MMMM yyyy", { locale: tr })}</span>
             </div>
@@ -129,87 +127,81 @@ export default function FaturaDetayPage() {
               <span className="text-muted-foreground">Vade Tarihi</span>
               <span className="font-medium">{format(invoice.dueDate, "dd MMMM yyyy", { locale: tr })}</span>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg flex items-center gap-2">
-            <FileSpreadsheet className="h-5 w-5" /> Fatura Kalemleri
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>#</TableHead>
-                <TableHead>Açıklama</TableHead>
-                <TableHead className="text-right">Miktar</TableHead>
-                <TableHead className="text-right">Birim Fiyat</TableHead>
-                <TableHead className="text-right">KDV %</TableHead>
-                <TableHead className="text-right">KDV Tutarı</TableHead>
-                <TableHead className="text-right">Toplam</TableHead>
+      <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
+        <div className="p-6 border-b border-border bg-muted/20">
+          <h3 className="text-base font-semibold flex items-center gap-2">
+            <FileSpreadsheet className="h-5 w-5 text-muted-foreground" /> Fatura Kalemleri
+          </h3>
+        </div>
+        <Table>
+          <TableHeader className="bg-muted/30">
+            <TableRow className="border-border hover:bg-transparent">
+              <TableHead className="font-medium h-10 w-16 text-center">#</TableHead>
+              <TableHead className="font-medium h-10">Açıklama</TableHead>
+              <TableHead className="font-medium h-10 text-right">Miktar</TableHead>
+              <TableHead className="font-medium h-10 text-right">Birim Fiyat</TableHead>
+              <TableHead className="font-medium h-10 text-right">KDV %</TableHead>
+              <TableHead className="font-medium h-10 text-right">KDV Tutarı</TableHead>
+              <TableHead className="font-medium h-10 text-right">Toplam</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {invoice.lines.map((line, idx) => (
+              <TableRow key={line.lineNo} className={cn("border-border/50 hover:bg-muted/30", idx === invoice.lines.length - 1 && "border-0")}>
+                <TableCell className="text-center py-3 text-muted-foreground">{line.lineNo}</TableCell>
+                <TableCell className="py-3 font-medium">{line.description}</TableCell>
+                <TableCell className="py-3 text-right">{line.quantity}</TableCell>
+                <TableCell className="py-3 text-right">{formatCurrency(line.unitPrice)}</TableCell>
+                <TableCell className="py-3 text-right text-muted-foreground">%{(line.taxRate * 100).toFixed(0)}</TableCell>
+                <TableCell className="py-3 text-right text-muted-foreground">{formatCurrency(line.taxAmount)}</TableCell>
+                <TableCell className="py-3 text-right font-medium">{formatCurrency(line.lineTotal)}</TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {invoice.lines.map((line) => (
-                <TableRow key={line.lineNo}>
-                  <TableCell>{line.lineNo}</TableCell>
-                  <TableCell className="font-medium">{line.description}</TableCell>
-                  <TableCell className="text-right">{line.quantity}</TableCell>
-                  <TableCell className="text-right">{formatCurrency(line.unitPrice)}</TableCell>
-                  <TableCell className="text-right">%{(line.taxRate * 100).toFixed(0)}</TableCell>
-                  <TableCell className="text-right">{formatCurrency(line.taxAmount)}</TableCell>
-                  <TableCell className="text-right font-medium">{formatCurrency(line.lineTotal)}</TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+            ))}
+          </TableBody>
+        </Table>
 
-          <div className="flex justify-end mt-6">
-            <div className="w-full md:w-72 space-y-3">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Ara Toplam</span>
-                <span>{formatCurrency(invoice.subtotal)}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">KDV Toplamı</span>
-                <span>{formatCurrency(invoice.taxTotal)}</span>
-              </div>
-              <div className="flex justify-between text-lg font-bold border-t pt-2">
-                <span>Genel Toplam</span>
-                <span>{formatCurrency(invoice.grandTotal)}</span>
-              </div>
-              
-              <div className="border-t border-dashed my-4"></div>
-              
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">Ödenen Tutar</span>
-                <span className="text-green-600">{formatCurrency(invoice.paidAmount)}</span>
-              </div>
-              <div className="flex justify-between text-sm font-semibold">
-                <span>Kalan Tutar</span>
-                <span className={invoice.remainingAmount > 0 ? "text-red-500" : ""}>
-                  {formatCurrency(invoice.remainingAmount)}
-                </span>
-              </div>
+        <div className="p-6 bg-muted/10 flex justify-end">
+          <div className="w-full md:w-80 space-y-3">
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Ara Toplam</span>
+              <span>{formatCurrency(invoice.subtotal)}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">KDV Toplamı</span>
+              <span>{formatCurrency(invoice.taxTotal)}</span>
+            </div>
+            <div className="flex justify-between text-lg font-semibold border-t border-border pt-3 mt-1">
+              <span>Genel Toplam</span>
+              <span>{formatCurrency(invoice.grandTotal)}</span>
+            </div>
+            
+            <div className="border-t border-border/50 border-dashed my-4"></div>
+            
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">Ödenen Tutar</span>
+              <span className="text-emerald-600 font-medium">{formatCurrency(invoice.paidAmount)}</span>
+            </div>
+            <div className="flex justify-between text-sm font-semibold">
+              <span>Kalan Tutar</span>
+              <span className={invoice.remainingAmount > 0 ? "text-destructive" : ""}>
+                {formatCurrency(invoice.remainingAmount)}
+              </span>
             </div>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {invoice.notes && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <FileText className="h-5 w-5" /> Notlar
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="whitespace-pre-wrap">{invoice.notes}</p>
-          </CardContent>
-        </Card>
+        <div className="bg-muted/30 border border-border rounded-xl p-6">
+          <h3 className="text-base font-semibold flex items-center gap-2 mb-3">
+            <FileText className="h-5 w-5 text-muted-foreground" /> Notlar
+          </h3>
+          <p className="whitespace-pre-wrap text-sm text-muted-foreground">{invoice.notes}</p>
+        </div>
       )}
     </div>
   );

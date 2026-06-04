@@ -1,7 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -11,6 +10,7 @@ import { listInvoices } from "@/lib/cari-odeme/invoice-firestore";
 import type { Invoice, InvoiceStatus, InvoiceType } from "@/lib/cari-odeme/invoice-types";
 import { format } from "date-fns";
 import { useAuth } from "@/contexts/auth-context";
+import { cn } from "@/lib/utils";
 
 const TYPE_LABELS: Record<InvoiceType, string> = {
   alis: "Alış",
@@ -51,18 +51,19 @@ export default function FaturalarPage() {
     n.toLocaleString("tr-TR", { style: "currency", currency });
 
   return (
-    <div className="space-y-6 p-4">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+    <div className="space-y-6 max-w-5xl mx-auto px-2 py-4">
+      {/* Header Area */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
         <div>
-          <h1 className="text-3xl font-bold flex items-center gap-2">
-            <Receipt className="h-8 w-8 text-blue-600" />
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground flex items-center gap-2">
+            <Receipt className="h-6 w-6 text-primary" />
             Faturalar
           </h1>
-          <p className="text-muted-foreground mt-1">
+          <p className="text-sm text-muted-foreground mt-1">
             Alış, satış ve iade faturalarınızı buradan yönetin.
           </p>
         </div>
-        <Button asChild className="gap-2">
+        <Button asChild className="rounded-full gap-2 shadow-sm px-6">
           <Link href="/cari-odeme/faturalar/yeni">
             <Plus className="h-4 w-4" />
             Yeni Fatura
@@ -70,80 +71,73 @@ export default function FaturalarPage() {
         </Button>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Fatura Listesi</CardTitle>
-          <CardDescription>Sisteme kayıtlı tüm faturalar</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="space-y-2">
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-              <Skeleton className="h-10 w-full" />
-            </div>
-          ) : invoices.length === 0 ? (
-            <div className="text-center py-10">
-              <FileText className="h-12 w-12 mx-auto text-muted-foreground opacity-50 mb-4" />
-              <p className="text-muted-foreground">Henüz hiç fatura bulunmuyor.</p>
-            </div>
-          ) : (
-            <div className="rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Tarih</TableHead>
-                    <TableHead>Fatura No</TableHead>
-                    <TableHead>Firma</TableHead>
-                    <TableHead>Tip</TableHead>
-                    <TableHead>Tutar</TableHead>
-                    <TableHead>Kalan</TableHead>
-                    <TableHead>Durum</TableHead>
-                    <TableHead></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {invoices.map((inv) => (
-                    <TableRow key={inv.id}>
-                      <TableCell>{format(new Date(inv.issueDate), "dd.MM.yyyy")}</TableCell>
-                      <TableCell className="font-medium">{inv.invoiceNo}</TableCell>
-                      <TableCell>{inv.cariFirmaName}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{TYPE_LABELS[inv.type]}</Badge>
-                      </TableCell>
-                      <TableCell>{formatCurrency(inv.grandTotal, inv.currency)}</TableCell>
-                      <TableCell className={inv.remainingAmount > 0 ? "text-red-500 font-medium" : ""}>
-                        {formatCurrency(inv.remainingAmount, inv.currency)}
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant="secondary"
-                          className={
-                            inv.status === "taslak" ? "bg-gray-100 text-gray-700" :
-                            inv.status === "onaylandi" ? "bg-blue-100 text-blue-700" :
-                            inv.status === "kismi_odendi" ? "bg-yellow-100 text-yellow-700" :
-                            inv.status === "odendi" ? "bg-green-100 text-green-700" :
-                            "bg-red-100 text-red-700"
-                          }
-                        >
-                          {STATUS_LABELS[inv.status]}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" asChild>
-                          <Link href={`/cari-odeme/faturalar/${inv.id}`}>
-                            İncele <ArrowRight className="ml-1 h-3 w-3" />
-                          </Link>
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      <div className="rounded-xl border border-border overflow-hidden bg-card shadow-sm">
+        {isLoading ? (
+          <div className="space-y-2 p-6">
+            <Skeleton className="h-10 w-full rounded-md" />
+            <Skeleton className="h-10 w-full rounded-md" />
+            <Skeleton className="h-10 w-full rounded-md" />
+          </div>
+        ) : invoices.length === 0 ? (
+          <div className="text-center py-16">
+            <FileText className="h-12 w-12 mx-auto text-muted-foreground opacity-30 mb-4" />
+            <p className="text-muted-foreground">Henüz hiç fatura bulunmuyor.</p>
+          </div>
+        ) : (
+          <Table>
+            <TableHeader className="bg-muted/50">
+              <TableRow className="border-border hover:bg-transparent">
+                <TableHead className="font-medium h-10">Tarih</TableHead>
+                <TableHead className="font-medium h-10">Fatura No</TableHead>
+                <TableHead className="font-medium h-10">Firma</TableHead>
+                <TableHead className="font-medium h-10">Tip</TableHead>
+                <TableHead className="font-medium h-10">Tutar</TableHead>
+                <TableHead className="font-medium h-10">Kalan</TableHead>
+                <TableHead className="font-medium h-10">Durum</TableHead>
+                <TableHead className="h-10 text-right"><span className="sr-only">İşlemler</span></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {invoices.map((inv, idx) => (
+                <TableRow key={inv.id} className={cn("border-border/50 hover:bg-muted/30 transition-colors", idx === invoices.length - 1 && "border-0")}>
+                  <TableCell className="py-3 text-muted-foreground">{format(new Date(inv.issueDate), "dd.MM.yyyy")}</TableCell>
+                  <TableCell className="py-3 font-medium">{inv.invoiceNo}</TableCell>
+                  <TableCell className="py-3 font-medium">{inv.cariFirmaName}</TableCell>
+                  <TableCell className="py-3">
+                    <Badge variant="outline" className="rounded-full px-2.5 font-normal border-border bg-muted/50">
+                      {TYPE_LABELS[inv.type]}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="py-3">{formatCurrency(inv.grandTotal, inv.currency)}</TableCell>
+                  <TableCell className={cn("py-3", inv.remainingAmount > 0 ? "text-destructive font-medium" : "text-muted-foreground")}>
+                    {formatCurrency(inv.remainingAmount, inv.currency)}
+                  </TableCell>
+                  <TableCell className="py-3">
+                    <Badge
+                      variant="secondary"
+                      className={cn(
+                        "rounded-full px-2.5 font-medium",
+                        inv.status === "taslak" ? "bg-muted text-muted-foreground" :
+                        inv.status === "onaylandi" ? "bg-blue-500/10 text-blue-600" :
+                        inv.status === "kismi_odendi" ? "bg-yellow-500/10 text-yellow-600" :
+                        inv.status === "odendi" ? "bg-emerald-500/10 text-emerald-600" :
+                        "bg-red-500/10 text-red-600"
+                      )}
+                    >
+                      {STATUS_LABELS[inv.status]}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="py-3 text-right">
+                    <Link href={`/cari-odeme/faturalar/${inv.id}`} className="text-sm font-medium text-primary hover:underline inline-flex items-center gap-1">
+                      Görüntüle <ArrowRight className="h-3 w-3" />
+                    </Link>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </div>
     </div>
   );
 }

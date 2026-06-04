@@ -283,14 +283,15 @@ export default function Dashboard() {
   if (loading || !data) return <DashboardSkeleton />;
 
   return (
-    <div className="space-y-6 p-4">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <h1 className="text-3xl font-bold">Cari Ödeme · Gösterge Paneli</h1>
-        <div className="flex w-full md:w-auto items-center gap-2">
+    <div className="space-y-8 p-6 max-w-7xl mx-auto">
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">Gösterge Paneli</h1>
+        <div className="flex items-center gap-3">
           <Popover>
             <PopoverTrigger asChild>
-              <Button id="date" variant={"outline"} className={cn("w-full md:w-[300px] justify-start text-left font-normal", !date && "text-muted-foreground")}>
-                <CalendarIcon className="mr-2 h-4 w-4" />
+              <Button id="date" variant="outline" className={cn("w-full sm:w-auto min-w-[240px] justify-start text-left font-normal bg-card border-border hover:bg-muted/50", !date && "text-muted-foreground")}>
+                <CalendarIcon className="mr-2 h-4 w-4 opacity-70" />
                 {date?.from ? (
                   date.to ? (
                     <>{format(date.from, "LLL dd, y", { locale: tr })} - {format(date.to, "LLL dd, y", { locale: tr })}</>
@@ -307,281 +308,273 @@ export default function Dashboard() {
             </PopoverContent>
           </Popover>
           {date && (
-            <Button variant="ghost" size="icon" onClick={() => setDate(undefined)}>
+            <Button variant="ghost" size="icon" onClick={() => setDate(undefined)} className="h-9 w-9">
               <X className="h-4 w-4" /><span className="sr-only">Filtreyi temizle</span>
             </Button>
           )}
         </div>
       </div>
 
-      {/* Alt bölüm hızlı navigasyon */}
-      <div className="flex flex-wrap gap-2">
-        {NAV.map((n) => (
-          <Button key={n.href} asChild variant="outline" size="sm">
-            <Link href={n.href}><n.icon className="mr-2 h-4 w-4" />{n.label}</Link>
-          </Button>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
         <KpiCard title="Toplam Tutar" value={formatTRY(kpi.total)} icon={Sigma} />
         <KpiCard title="Onaylanmış" value={formatTRY(kpi.approved)} icon={Check} />
-
+        
         <Dialog open={isPendingModalOpen} onOpenChange={setPendingModalOpen}>
           <DialogTrigger asChild>
-            <div className="relative cursor-pointer">
-              <KpiCard title="Beklemede" value={formatTRY(kpi.pending)} icon={Hourglass} />
-              {kpi.pending > 0 && <div className="absolute top-2 right-2 h-3 w-3 rounded-full bg-red-500" />}
+            <div className="cursor-pointer h-full">
+              <KpiCard title="Beklemede" value={formatTRY(kpi.pending)} icon={Hourglass} showBadge={kpi.pending > 0} />
             </div>
           </DialogTrigger>
-          <DialogContent className="max-w-4xl">
+          <DialogContent className="max-w-4xl bg-card border-border">
             <DialogHeader>
-              <DialogTitle>Beklemedeki Ödemeler</DialogTitle>
+              <DialogTitle className="font-medium">Beklemedeki Ödemeler</DialogTitle>
               <DialogDescription>Onay veya ödeme bekleyen tüm ödemelerin listesi.</DialogDescription>
             </DialogHeader>
-            <div className="max-h-[60vh] overflow-y-auto">
-              <Table>
+            <div className="max-h-[60vh] overflow-y-auto mt-4">
+              <Table className="border-b border-border">
                 <TableHeader>
-                  <TableRow>
-                    <TableHead>Firma</TableHead>
-                    <TableHead>Talep Eden</TableHead>
-                    <TableHead className="text-right">Tutar</TableHead>
-                    <TableHead>Vade Tarihi</TableHead>
-                    <TableHead>İşlem Yap</TableHead>
+                  <TableRow className="hover:bg-transparent border-border">
+                    <TableHead className="font-medium">Firma</TableHead>
+                    <TableHead className="font-medium">Talep Eden</TableHead>
+                    <TableHead className="font-medium text-right">Tutar</TableHead>
+                    <TableHead className="font-medium">Vade Tarihi</TableHead>
+                    <TableHead className="font-medium text-right">İşlem Yap</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {pendingPayments.length > 0 ? (
                     pendingPayments.map((payment) => (
-                      <TableRow key={payment.id}>
+                      <TableRow key={payment.id} className="border-border/50">
                         <TableCell className="font-medium">{payment.companyName}</TableCell>
-                        <TableCell>{payment.requesterName}</TableCell>
-                        <TableCell className="text-right">{formatTRY(payment.amount)}</TableCell>
-                        <TableCell>{new Date(payment.dueDate).toLocaleDateString("tr-TR")}</TableCell>
+                        <TableCell className="text-muted-foreground">{payment.requesterName}</TableCell>
+                        <TableCell className="text-right font-medium">{formatTRY(payment.amount)}</TableCell>
+                        <TableCell className="text-muted-foreground">{new Date(payment.dueDate).toLocaleDateString("tr-TR")}</TableCell>
                         <TableCell className="text-right">
                           {canApprove ? (
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" size="icon"><MoreHorizontal className="h-4 w-4" /></Button>
+                                <Button variant="ghost" size="sm" className="h-8 hover:bg-muted/50 text-primary">İşlem <MoreHorizontal className="ml-2 h-3 w-3" /></Button>
                               </DropdownMenuTrigger>
-                              <DropdownMenuContent>
+                              <DropdownMenuContent align="end" className="w-48">
                                 <DropdownMenuItem onClick={() => handleOpenBankSelection(payment.id, "approved")}>Onayla</DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => handleOpenBankSelection(payment.id, "paid")}>Ödendi Olarak İşaretle</DropdownMenuItem>
                               </DropdownMenuContent>
                             </DropdownMenu>
                           ) : (
-                            <span className="text-xs text-muted-foreground">Onay yetkisi yok</span>
+                            <span className="text-xs text-muted-foreground">Yetkisiz</span>
                           )}
                         </TableCell>
                       </TableRow>
                     ))
                   ) : (
-                    <TableRow><TableCell colSpan={5} className="h-24 text-center">Beklemede ödeme bulunmuyor.</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={5} className="h-24 text-center text-muted-foreground">Beklemede ödeme bulunmuyor.</TableCell></TableRow>
                   )}
                 </TableBody>
               </Table>
             </div>
           </DialogContent>
         </Dialog>
-
+        
         <KpiCard title="Ödenmiş" value={formatTRY(kpi.paid)} icon={CreditCard} />
       </div>
 
+      {/* Graphs */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader><CardTitle>Aylık Toplam Ödemeler</CardTitle></CardHeader>
-          <CardContent>
-            <ChartContainer config={monthlyChartConfig} className="h-64">
-              <LineChart data={monthlyPaymentData}>
-                <CartesianGrid vertical={false} />
-                <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} />
-                <YAxis width={80} tickFormatter={(value) => formatTRY(value)} />
-                <Tooltip content={<ChartTooltipContent indicator="line" />} />
-                <Line dataKey="total" type="monotone" stroke="var(--color-total)" strokeWidth={2} dot={false} />
-              </LineChart>
-            </ChartContainer>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader><CardTitle>Departman Bütçe vs. Harcama</CardTitle></CardHeader>
-          <CardContent>
-            <ChartContainer config={departmentChartConfig} className="h-64">
-              <BarChart data={departmentChartData} barGap={4}>
-                <CartesianGrid vertical={false} />
-                <XAxis dataKey="name" tickLine={false} axisLine={false} tickMargin={8} />
-                <YAxis width={80} tickFormatter={(value) => formatTRY(value)} />
-                <Tooltip content={<ChartTooltipContent />} />
-                <Legend />
-                <Bar dataKey="bütçe" fill="var(--color-bütçe)" radius={4} barSize={30} />
-                <Bar dataKey="harcama" fill="var(--color-harcama)" radius={4} barSize={15} />
-              </BarChart>
-            </ChartContainer>
-          </CardContent>
-        </Card>
+        <div className="p-5 rounded-xl bg-card border border-border shadow-sm flex flex-col gap-4">
+          <h2 className="text-sm font-medium text-muted-foreground">Aylık Toplam Ödemeler</h2>
+          <ChartContainer config={monthlyChartConfig} className="h-64 w-full">
+            <LineChart data={monthlyPaymentData}>
+              <CartesianGrid vertical={false} stroke="hsl(var(--border))" strokeDasharray="4 4" />
+              <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={10} fontSize={12} fill="hsl(var(--muted-foreground))" />
+              <YAxis width={65} tickFormatter={(value) => formatTRY(value).replace(',00', '')} tickLine={false} axisLine={false} fontSize={12} fill="hsl(var(--muted-foreground))" />
+              <Tooltip content={<ChartTooltipContent indicator="line" />} />
+              <Line dataKey="total" type="monotone" stroke="hsl(var(--primary))" strokeWidth={3} dot={{ r: 4, fill: "hsl(var(--primary))" }} activeDot={{ r: 6 }} />
+            </LineChart>
+          </ChartContainer>
+        </div>
+        
+        <div className="p-5 rounded-xl bg-card border border-border shadow-sm flex flex-col gap-4">
+          <h2 className="text-sm font-medium text-muted-foreground">Departman Bütçe vs. Harcama</h2>
+          <ChartContainer config={departmentChartConfig} className="h-64 w-full">
+            <BarChart data={departmentChartData} barGap={4}>
+              <CartesianGrid vertical={false} stroke="hsl(var(--border))" strokeDasharray="4 4" />
+              <XAxis dataKey="name" tickLine={false} axisLine={false} tickMargin={10} fontSize={12} fill="hsl(var(--muted-foreground))" />
+              <YAxis width={65} tickFormatter={(value) => formatTRY(value).replace(',00', '')} tickLine={false} axisLine={false} fontSize={12} fill="hsl(var(--muted-foreground))" />
+              <Tooltip content={<ChartTooltipContent />} />
+              <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} iconType="circle" />
+              <Bar dataKey="bütçe" fill="hsl(221 83% 53%)" radius={[4, 4, 0, 0]} barSize={24} />
+              <Bar dataKey="harcama" fill="hsl(25 95% 53%)" radius={[4, 4, 0, 0]} barSize={12} />
+            </BarChart>
+          </ChartContainer>
+        </div>
       </div>
 
-      <div className="flex justify-center gap-2">
+      {/* Filters (Center Aligned as requested) */}
+      <div className="flex justify-center gap-2 pt-2">
         {(["all", "approved", "paid"] as StatusFilter[]).map((filter) => (
-          <Button key={filter} variant={statusFilter === filter ? "secondary" : "outline"} onClick={() => setStatusFilter(filter)}>
+          <Button 
+            key={filter} 
+            variant={statusFilter === filter ? "default" : "outline"} 
+            className={cn("rounded-full px-6", statusFilter !== filter && "bg-transparent border-border hover:bg-muted")}
+            onClick={() => setStatusFilter(filter)}
+          >
             {filter === "all" ? "Tümü" : filter === "approved" ? "Onaylanmış" : "Ödenmiş"}
           </Button>
         ))}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <Dialog open={isBankTotalsModalOpen} onOpenChange={setBankTotalsModalOpen}>
-            <CardHeader className="flex flex-row items-center justify-between">
-              <CardTitle>Banka Toplamları</CardTitle>
-              <DialogTrigger asChild><Button variant="ghost" size="icon"><Expand className="h-4 w-4" /></Button></DialogTrigger>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Banka</TableHead>
-                    <TableHead className="text-right">Adet</TableHead>
-                    <TableHead className="text-right">Tutar</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {bankTotals.length > 0 ? (
-                    bankTotals.slice(0, 5).map((b) => (
-                      <TableRow key={b.name}>
-                        <TableCell className="font-medium">{b.name}</TableCell>
-                        <TableCell className="text-right">{b.count}</TableCell>
-                        <TableCell className="text-right">{formatTRY(b.amount)}</TableCell>
-                      </TableRow>
-                    ))
-                  ) : (
-                    <TableRow><TableCell colSpan={3} className="h-24 text-center">Filtreye uygun ödeme yok.</TableCell></TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </CardContent>
-            <DialogContent className="max-w-4xl">
-              {selectedBankDetails ? (
-                <>
-                  <DialogHeader>
-                    <div className="flex items-center gap-2">
-                      <Button variant="outline" size="icon" className="h-8 w-8" onClick={() => setSelectedBankDetails(null)}><ArrowLeft className="h-4 w-4" /></Button>
-                      <div>
-                        <DialogTitle>{selectedBankDetails.name} - Ödeme Detayları</DialogTitle>
-                        <DialogDescription>Bu bankadan yapılan tüm ödemeler.</DialogDescription>
+      {/* Bottom Lists */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pb-12">
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between px-1">
+            <h3 className="text-sm font-medium text-muted-foreground">Banka Toplamları</h3>
+            <Dialog open={isBankTotalsModalOpen} onOpenChange={setBankTotalsModalOpen}>
+              <DialogTrigger asChild><Button variant="ghost" size="sm" className="h-8 text-primary hover:bg-primary/10">Tümünü Gör</Button></DialogTrigger>
+              <DialogContent className="max-w-4xl bg-card border-border">
+                {selectedBankDetails ? (
+                  <>
+                    <DialogHeader className="pb-4 border-b border-border/50">
+                      <div className="flex items-center gap-3">
+                        <Button variant="outline" size="icon" className="h-8 w-8 rounded-full border-border hover:bg-muted" onClick={() => setSelectedBankDetails(null)}>
+                          <ArrowLeft className="h-4 w-4" />
+                        </Button>
+                        <div>
+                          <DialogTitle className="font-medium text-lg">{selectedBankDetails.name}</DialogTitle>
+                          <DialogDescription>Ödeme Detayları</DialogDescription>
+                        </div>
                       </div>
-                    </div>
-                  </DialogHeader>
-                  <div className="max-h-[60vh] overflow-y-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Firma</TableHead>
-                          <TableHead>Talep Eden</TableHead>
-                          <TableHead>Açıklama</TableHead>
-                          <TableHead className="text-right">Tutar</TableHead>
-                          <TableHead>Ödeme Tarihi</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {selectedBankDetails.payments.map((p) => (
-                          <TableRow key={p.id}>
-                            <TableCell>{p.companyName}</TableCell>
-                            <TableCell>{p.requesterName}</TableCell>
-                            <TableCell>{p.description || "—"}</TableCell>
-                            <TableCell className="text-right">{formatTRY(p.amount)}</TableCell>
-                            <TableCell>{new Date(p.updatedAt).toLocaleDateString("tr-TR")}</TableCell>
+                    </DialogHeader>
+                    <div className="max-h-[60vh] overflow-y-auto mt-2">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="border-border">
+                            <TableHead className="font-medium">Firma</TableHead>
+                            <TableHead className="font-medium">Talep Eden</TableHead>
+                            <TableHead className="font-medium">Açıklama</TableHead>
+                            <TableHead className="font-medium text-right">Tutar</TableHead>
+                            <TableHead className="font-medium">Ödeme Tarihi</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <DialogHeader>
-                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                      <div>
-                        <DialogTitle>Tüm Banka Toplamları</DialogTitle>
-                        <DialogDescription>Bankalara göre tamamlanmış ödemelerin tam listesi. Detayları görmek için bir satıra tıklayın.</DialogDescription>
+                        </TableHeader>
+                        <TableBody>
+                          {selectedBankDetails.payments.map((p) => (
+                            <TableRow key={p.id} className="border-border/50">
+                              <TableCell className="font-medium">{p.companyName}</TableCell>
+                              <TableCell className="text-muted-foreground">{p.requesterName}</TableCell>
+                              <TableCell className="text-muted-foreground text-xs truncate max-w-[150px]">{p.description || "—"}</TableCell>
+                              <TableCell className="text-right font-medium">{formatTRY(p.amount)}</TableCell>
+                              <TableCell className="text-muted-foreground">{new Date(p.updatedAt).toLocaleDateString("tr-TR")}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <DialogHeader className="pb-4 border-b border-border/50">
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                        <div>
+                          <DialogTitle className="font-medium text-lg">Tüm Banka Toplamları</DialogTitle>
+                          <DialogDescription>Detayları görmek için bir bankaya tıklayın.</DialogDescription>
+                        </div>
+                        <Button onClick={handleExportBankTotals} className="w-full sm:w-auto rounded-full bg-primary text-primary-foreground hover:bg-primary/90">
+                          <Download className="mr-2 h-4 w-4" /> Excel'e Aktar
+                        </Button>
                       </div>
-                      <Button variant="outline" onClick={handleExportBankTotals} className="w-full sm:w-auto"><Download className="mr-2 h-4 w-4" />Excel'e Aktar</Button>
-                    </div>
-                  </DialogHeader>
-                  <div className="max-h-[60vh] overflow-y-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Banka</TableHead>
-                          <TableHead className="text-right">Adet</TableHead>
-                          <TableHead className="text-right">Tutar</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {bankTotals.map((b) => (
-                          <TableRow key={b.name} onClick={() => handleBankRowClick(b.name)} className="cursor-pointer">
-                            <TableCell className="font-medium">{b.name}</TableCell>
-                            <TableCell className="text-right">{b.count}</TableCell>
-                            <TableCell className="text-right">{formatTRY(b.amount)}</TableCell>
+                    </DialogHeader>
+                    <div className="max-h-[60vh] overflow-y-auto mt-2">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="border-border">
+                            <TableHead className="font-medium">Banka</TableHead>
+                            <TableHead className="font-medium text-right">Adet</TableHead>
+                            <TableHead className="font-medium text-right">Tutar</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </>
-              )}
-            </DialogContent>
-          </Dialog>
-        </Card>
-        <Card>
-          <CardHeader><CardTitle>En Çok Ödeme Yapılan Firmalar</CardTitle></CardHeader>
-          <CardContent>
+                        </TableHeader>
+                        <TableBody>
+                          {bankTotals.map((b) => (
+                            <TableRow key={b.name} onClick={() => handleBankRowClick(b.name)} className="cursor-pointer border-border/50 hover:bg-muted/30">
+                              <TableCell className="font-medium">{b.name}</TableCell>
+                              <TableCell className="text-right text-muted-foreground">{b.count}</TableCell>
+                              <TableCell className="text-right font-medium">{formatTRY(b.amount)}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </>
+                )}
+              </DialogContent>
+            </Dialog>
+          </div>
+          <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
             <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Firma</TableHead>
-                  <TableHead className="text-right">Tutar</TableHead>
-                </TableRow>
-              </TableHeader>
               <TableBody>
-                {topCompanies.length > 0 ? (
-                  topCompanies.map((c) => (
-                    <TableRow key={c.name}>
-                      <TableCell className="font-medium">{c.name}</TableCell>
-                      <TableCell className="text-right">{formatTRY(c.amount)}</TableCell>
+                {bankTotals.length > 0 ? (
+                  bankTotals.slice(0, 5).map((b, i) => (
+                    <TableRow key={b.name} className={cn("border-border/50 hover:bg-transparent", i === bankTotals.slice(0, 5).length - 1 && "border-0")}>
+                      <TableCell className="font-medium py-4">{b.name}</TableCell>
+                      <TableCell className="text-right text-muted-foreground py-4">{b.count} adet</TableCell>
+                      <TableCell className="text-right font-medium py-4">{formatTRY(b.amount)}</TableCell>
                     </TableRow>
                   ))
                 ) : (
-                  <TableRow><TableCell colSpan={2} className="h-24 text-center">Filtreye uygun ödeme yok.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={3} className="h-24 text-center text-muted-foreground border-0">Filtreye uygun veri yok.</TableCell></TableRow>
                 )}
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
+        
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between px-1">
+            <h3 className="text-sm font-medium text-muted-foreground">En Çok Ödeme Yapılan Firmalar</h3>
+          </div>
+          <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+            <Table>
+              <TableBody>
+                {topCompanies.length > 0 ? (
+                  topCompanies.map((c, i) => (
+                    <TableRow key={c.name} className={cn("border-border/50 hover:bg-transparent", i === topCompanies.length - 1 && "border-0")}>
+                      <TableCell className="font-medium py-4">{c.name}</TableCell>
+                      <TableCell className="text-right font-medium py-4">{formatTRY(c.amount)}</TableCell>
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow><TableCell colSpan={2} className="h-24 text-center text-muted-foreground border-0">Filtreye uygun veri yok.</TableCell></TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
       </div>
 
       {/* Bank Selection Modal */}
       <Dialog open={bankSelectionModalState.open} onOpenChange={(isOpen) => setBankSelectionModalState((prev) => ({ ...prev, open: isOpen }))}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-md bg-card border-border">
           <DialogHeader>
-            <DialogTitle>Banka Seçimi</DialogTitle>
-            <DialogDescription>Bu ödeme işlemini onaylamak veya ödemek için bir banka hesabı seçin.</DialogDescription>
+            <DialogTitle className="font-medium">Banka Seçimi</DialogTitle>
+            <DialogDescription>İşlemi tamamlamak için bir banka hesabı seçin.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="bank-select" className="text-right">Banka</Label>
+            <div className="grid gap-2">
+              <Label htmlFor="bank-select">Banka Hesabı</Label>
               <Select value={selectedBank} onValueChange={setSelectedBank}>
-                <SelectTrigger id="bank-select" className="col-span-3"><SelectValue placeholder="Bir banka seçin..." /></SelectTrigger>
-                <SelectContent>
+                <SelectTrigger id="bank-select" className="bg-transparent border-border">
+                  <SelectValue placeholder="Bir banka seçin..." />
+                </SelectTrigger>
+                <SelectContent className="bg-card border-border">
                   {bankAccounts.map((account) => (
-                    <SelectItem key={account.id} value={account.bankName}>{account.bankName} - {account.iban}</SelectItem>
+                    <SelectItem key={account.id} value={account.bankName}>{account.bankName} - <span className="text-muted-foreground text-xs">{account.iban}</span></SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setBankSelectionModalState({ open: false, paymentId: null, targetStatus: null })}>İptal</Button>
-            <Button onClick={handleConfirmBankSelection}>Kaydet</Button>
+          <DialogFooter className="sm:justify-end gap-2">
+            <Button variant="outline" onClick={() => setBankSelectionModalState({ open: false, paymentId: null, targetStatus: null })} className="rounded-full border-border">İptal</Button>
+            <Button onClick={handleConfirmBankSelection} className="rounded-full">Kaydet</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -591,14 +584,20 @@ export default function Dashboard() {
 
 function DashboardSkeleton() {
   return (
-    <div className="space-y-6 p-4">
-      <h1 className="text-3xl font-bold">Cari Ödeme · Gösterge Paneli</h1>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Skeleton className="h-28" /><Skeleton className="h-28" /><Skeleton className="h-28" /><Skeleton className="h-28" />
+    <div className="space-y-8 p-6 max-w-7xl mx-auto">
+      <div className="flex justify-between items-center">
+        <Skeleton className="h-8 w-64 bg-muted" />
+        <Skeleton className="h-10 w-48 rounded-md bg-muted" />
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
+        <Skeleton className="h-28 rounded-xl bg-card border border-border" />
+        <Skeleton className="h-28 rounded-xl bg-card border border-border" />
+        <Skeleton className="h-28 rounded-xl bg-card border border-border" />
+        <Skeleton className="h-28 rounded-xl bg-card border border-border" />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card><CardHeader><Skeleton className="h-6 w-1/3" /></CardHeader><CardContent className="space-y-2"><Skeleton className="h-56 w-full" /></CardContent></Card>
-        <Card><CardHeader><Skeleton className="h-6 w-1/3" /></CardHeader><CardContent className="space-y-2"><Skeleton className="h-56 w-full" /></CardContent></Card>
+        <Skeleton className="h-80 rounded-xl bg-card border border-border" />
+        <Skeleton className="h-80 rounded-xl bg-card border border-border" />
       </div>
     </div>
   );

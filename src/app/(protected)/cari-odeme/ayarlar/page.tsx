@@ -262,209 +262,260 @@ export default function SettingsPage() {
   const formatTRY = (n: number) => n.toLocaleString("tr-TR", { style: "currency", currency: "TRY" });
 
   return (
-    <div className="space-y-6 p-4">
-      <BackButton fallback="/cari-odeme" />
-      <h1 className="text-3xl font-bold">Cari Ödeme · Ayarlar</h1>
-      <Accordion type="single" collapsible className="w-full" defaultValue="item-1">
-        <AccordionItem value="item-1">
-          <AccordionTrigger className="text-xl">Döviz Kuru Ayarları</AccordionTrigger>
-          <AccordionContent>
-            <div className="space-y-6 pt-4">
-              <p className="text-muted-foreground">Uygulamada kullanılacak döviz kuru türünü seçin.</p>
-              <RadioGroup value={currencyMode} onValueChange={(value: "fixed" | "live") => setCurrencyMode(value)}>
-                <div className="flex items-center space-x-2"><RadioGroupItem value="fixed" id="r-fixed" /><Label htmlFor="r-fixed">Sabit Kur</Label></div>
-                <div className="flex items-center space-x-2"><RadioGroupItem value="live" id="r-live" /><Label htmlFor="r-live">Canlı Kur (API)</Label></div>
-              </RadioGroup>
+    <div className="space-y-6 max-w-5xl mx-auto px-2 py-4">
+      {/* Header Area */}
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-4">
+        <div className="flex items-center gap-2">
+          <BackButton fallback="/cari-odeme" className="border-border hover:bg-muted" />
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">Ayarlar</h1>
+        </div>
+      </div>
+
+      <Accordion type="single" collapsible className="w-full space-y-4" defaultValue="item-1">
+        <AccordionItem value="item-1" className="border border-border bg-card rounded-xl px-4 py-2 shadow-sm">
+          <AccordionTrigger className="text-lg font-medium hover:no-underline">Döviz Kuru Ayarları</AccordionTrigger>
+          <AccordionContent className="pt-4 pb-2">
+            <div className="space-y-6">
+              <div className="flex flex-col sm:flex-row gap-4 justify-between items-start sm:items-center">
+                <p className="text-sm text-muted-foreground">Sistem genelinde kullanılacak döviz kurunu belirleyin.</p>
+                <div className="flex items-center gap-1 bg-muted p-1 rounded-full border border-border">
+                  <button
+                    onClick={() => setCurrencyMode("fixed")}
+                    className={cn(
+                      "px-4 py-1.5 rounded-full text-sm font-medium transition-all",
+                      currencyMode === "fixed" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    Sabit Kur
+                  </button>
+                  <button
+                    onClick={() => setCurrencyMode("live")}
+                    className={cn(
+                      "px-4 py-1.5 rounded-full text-sm font-medium transition-all",
+                      currencyMode === "live" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    Canlı Kur (API)
+                  </button>
+                </div>
+              </div>
+
               {currencyMode === "fixed" && (
-                <Card className="bg-muted/40">
-                  <CardHeader><CardTitle className="text-lg">Sabit Kurları Tanımla</CardTitle><CardDescription>Türk Lirası'nın (TRY) yabancı para birimleri karşısındaki değerini girin.</CardDescription></CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <div><Label htmlFor="usd-fixed">1 Amerikan Doları (USD)</Label><Input id="usd-fixed" type="number" placeholder="örn. 32.50" value={fixedRates.USD || ""} onChange={(e) => handleFixedRateChange("USD", e.target.value)} /></div>
-                      <div><Label htmlFor="eur-fixed">1 Euro (EUR)</Label><Input id="eur-fixed" type="number" placeholder="örn. 35.20" value={fixedRates.EUR || ""} onChange={(e) => handleFixedRateChange("EUR", e.target.value)} /></div>
-                      <div><Label htmlFor="gbp-fixed">1 İngiliz Sterlini (GBP)</Label><Input id="gbp-fixed" type="number" placeholder="örn. 41.10" value={fixedRates.GBP || ""} onChange={(e) => handleFixedRateChange("GBP", e.target.value)} /></div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="bg-muted/30 p-4 rounded-xl border border-border space-y-2">
+                    <Label htmlFor="usd-fixed" className="text-muted-foreground text-xs uppercase tracking-wider">USD / TRY</Label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-2.5 text-muted-foreground">₺</span>
+                      <Input id="usd-fixed" type="number" className="pl-7 bg-background border-border rounded-lg shadow-none" placeholder="32.50" value={fixedRates.USD || ""} onChange={(e) => handleFixedRateChange("USD", e.target.value)} />
                     </div>
-                  </CardContent>
-                </Card>
+                  </div>
+                  <div className="bg-muted/30 p-4 rounded-xl border border-border space-y-2">
+                    <Label htmlFor="eur-fixed" className="text-muted-foreground text-xs uppercase tracking-wider">EUR / TRY</Label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-2.5 text-muted-foreground">₺</span>
+                      <Input id="eur-fixed" type="number" className="pl-7 bg-background border-border rounded-lg shadow-none" placeholder="35.20" value={fixedRates.EUR || ""} onChange={(e) => handleFixedRateChange("EUR", e.target.value)} />
+                    </div>
+                  </div>
+                  <div className="bg-muted/30 p-4 rounded-xl border border-border space-y-2">
+                    <Label htmlFor="gbp-fixed" className="text-muted-foreground text-xs uppercase tracking-wider">GBP / TRY</Label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-2.5 text-muted-foreground">₺</span>
+                      <Input id="gbp-fixed" type="number" className="pl-7 bg-background border-border rounded-lg shadow-none" placeholder="41.10" value={fixedRates.GBP || ""} onChange={(e) => handleFixedRateChange("GBP", e.target.value)} />
+                    </div>
+                  </div>
+                </div>
               )}
               {currencyMode === "live" && (
-                <Card className="bg-muted/40">
-                  <CardHeader className="flex flex-row items-center justify-between">
-                    <div><CardTitle className="text-lg">Canlı Kurlar (Frankfurter.app)</CardTitle><CardDescription>Anlık olarak güncellenen Türk Lirası (TRY) karşılıkları.</CardDescription></div>
-                    <Button variant="outline" size="sm" onClick={fetchLiveRates} disabled={isLoading}>{isLoading ? "Yenileniyor..." : "Yenile"}</Button>
-                  </CardHeader>
-                  <CardContent>
-                    {isLoading ? (
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4"><Skeleton className="h-16 w-full" /><Skeleton className="h-16 w-full" /><Skeleton className="h-16 w-full" /></div>
-                    ) : (
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                        <div className="p-4 bg-background rounded-lg"><p className="text-sm text-muted-foreground">Amerikan Doları (USD)</p><p className="text-2xl font-bold">₺{liveRates.USD?.toFixed(4) || "..."}</p></div>
-                        <div className="p-4 bg-background rounded-lg"><p className="text-sm text-muted-foreground">Euro (EUR)</p><p className="text-2xl font-bold">₺{liveRates.EUR?.toFixed(4) || "..."}</p></div>
-                        <div className="p-4 bg-background rounded-lg"><p className="text-sm text-muted-foreground">İngiliz Sterlini (GBP)</p><p className="text-2xl font-bold">₺{liveRates.GBP?.toFixed(4) || "..."}</p></div>
+                <div className="space-y-4">
+                  <div className="flex justify-end">
+                    <Button variant="outline" size="sm" onClick={fetchLiveRates} disabled={isLoading} className="rounded-full shadow-none border-border">
+                      {isLoading ? "Yenileniyor..." : "Güncel Kurları Çek"}
+                    </Button>
+                  </div>
+                  {isLoading ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4"><Skeleton className="h-24 w-full rounded-xl" /><Skeleton className="h-24 w-full rounded-xl" /><Skeleton className="h-24 w-full rounded-xl" /></div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div className="flex flex-col justify-center items-center p-6 bg-muted/30 rounded-xl border border-border">
+                        <p className="text-xs text-muted-foreground uppercase tracking-wider mb-2">USD / TRY</p>
+                        <p className="text-2xl font-bold text-foreground">₺{liveRates.USD?.toFixed(4) || "..."}</p>
                       </div>
-                    )}
-                  </CardContent>
-                </Card>
+                      <div className="flex flex-col justify-center items-center p-6 bg-muted/30 rounded-xl border border-border">
+                        <p className="text-xs text-muted-foreground uppercase tracking-wider mb-2">EUR / TRY</p>
+                        <p className="text-2xl font-bold text-foreground">₺{liveRates.EUR?.toFixed(4) || "..."}</p>
+                      </div>
+                      <div className="flex flex-col justify-center items-center p-6 bg-muted/30 rounded-xl border border-border">
+                        <p className="text-xs text-muted-foreground uppercase tracking-wider mb-2">GBP / TRY</p>
+                        <p className="text-2xl font-bold text-foreground">₺{liveRates.GBP?.toFixed(4) || "..."}</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
-              <Button onClick={handleSaveSettings}>Döviz Ayarlarını Kaydet</Button>
+              <div className="flex justify-end pt-2">
+                <Button onClick={handleSaveSettings} className="rounded-full px-8">Kaydet</Button>
+              </div>
             </div>
           </AccordionContent>
         </AccordionItem>
 
-        <AccordionItem value="item-2">
-          <AccordionTrigger className="text-xl">Ödeme Yapan Banka Hesapları</AccordionTrigger>
-          <AccordionContent>
-            <div className="space-y-6 pt-4">
-              <p className="text-muted-foreground">Ödeme taleplerinde kullanılacak banka hesaplarını yönetin.</p>
+        <AccordionItem value="item-2" className="border border-border bg-card rounded-xl px-4 py-2 shadow-sm">
+          <AccordionTrigger className="text-lg font-medium hover:no-underline">Ödeme Yapan Banka Hesapları</AccordionTrigger>
+          <AccordionContent className="pt-4 pb-2">
+            <div className="space-y-6">
               <Form {...bankForm}>
-                <form onSubmit={bankForm.handleSubmit(onBankSubmit)} className="grid md:grid-cols-5 gap-4 mb-6 items-start">
-                  <FormField control={bankForm.control} name="bankName" render={({ field }) => (<FormItem><FormLabel>Banka Adı</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>)} />
-                  <FormField control={bankForm.control} name="iban" render={({ field }) => (<FormItem><FormLabel>IBAN</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>)} />
-                  <FormField control={bankForm.control} name="accountNumber" render={({ field }) => (<FormItem><FormLabel>Hesap No</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>)} />
-                  <FormField control={bankForm.control} name="branch" render={({ field }) => (<FormItem><FormLabel>Şube</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>)} />
-                  <Button type="submit" className="self-end" disabled={isBankLoading}>{isBankLoading ? "Ekleniyor..." : "Banka Ekle"}</Button>
+                <form onSubmit={bankForm.handleSubmit(onBankSubmit)} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end p-4 bg-muted/30 rounded-xl border border-border">
+                  <FormField control={bankForm.control} name="bankName" render={({ field }) => (<FormItem><FormLabel className="text-xs">Banka Adı</FormLabel><FormControl><Input {...field} className="bg-background border-border" /></FormControl><FormMessage /></FormItem>)} />
+                  <FormField control={bankForm.control} name="iban" render={({ field }) => (<FormItem><FormLabel className="text-xs">IBAN</FormLabel><FormControl><Input {...field} className="bg-background border-border" /></FormControl><FormMessage /></FormItem>)} />
+                  <FormField control={bankForm.control} name="accountNumber" render={({ field }) => (<FormItem><FormLabel className="text-xs">Hesap No</FormLabel><FormControl><Input {...field} className="bg-background border-border" /></FormControl><FormMessage /></FormItem>)} />
+                  <FormField control={bankForm.control} name="branch" render={({ field }) => (<FormItem><FormLabel className="text-xs">Şube</FormLabel><FormControl><Input {...field} className="bg-background border-border" /></FormControl><FormMessage /></FormItem>)} />
+                  <Button type="submit" disabled={isBankLoading} className="rounded-full">{isBankLoading ? "Ekleniyor..." : "Hesap Ekle"}</Button>
                 </form>
               </Form>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Banka Adı</TableHead><TableHead>IBAN</TableHead><TableHead>Hesap No</TableHead><TableHead>Şube</TableHead><TableHead><span className="sr-only">İşlemler</span></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {isBankLoading ? (
-                    <TableRow><TableCell colSpan={5}><Skeleton className="h-10" /></TableCell></TableRow>
-                  ) : bankAccounts.length > 0 ? (
-                    bankAccounts.map((account) => (
-                      <TableRow key={account.id}>
-                        <TableCell>{account.bankName}</TableCell>
-                        <TableCell className="font-mono">{account.iban}</TableCell>
-                        <TableCell>{account.accountNumber || "—"}</TableCell>
-                        <TableCell>{account.branch || "—"}</TableCell>
-                        <TableCell className="text-right">
-                          <Button variant="ghost" size="icon" onClick={() => handleDeleteBankAccount(account.id)} disabled={isBankLoading}><Trash2 className="h-4 w-4" /><span className="sr-only">Sil</span></Button>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  ) : (
-                    <TableRow><TableCell colSpan={5} className="h-24 text-center">Henüz banka hesabı eklenmemiş.</TableCell></TableRow>
-                  )}
-                </TableBody>
-              </Table>
+              <div className="rounded-xl border border-border overflow-hidden">
+                <Table>
+                  <TableHeader className="bg-muted/50">
+                    <TableRow className="border-border hover:bg-transparent">
+                      <TableHead className="font-medium h-10">Banka Adı</TableHead><TableHead className="font-medium h-10">IBAN</TableHead><TableHead className="font-medium h-10">Hesap No</TableHead><TableHead className="font-medium h-10">Şube</TableHead><TableHead className="h-10 text-right"><span className="sr-only">İşlemler</span></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {isBankLoading ? (
+                      <TableRow><TableCell colSpan={5}><div className="h-8 animate-pulse bg-muted rounded-md" /></TableCell></TableRow>
+                    ) : bankAccounts.length > 0 ? (
+                      bankAccounts.map((account, idx) => (
+                        <TableRow key={account.id} className={cn("border-border/50 hover:bg-muted/30", idx === bankAccounts.length - 1 && "border-0")}>
+                          <TableCell className="py-3 font-medium">{account.bankName}</TableCell>
+                          <TableCell className="py-3 font-mono text-muted-foreground">{account.iban}</TableCell>
+                          <TableCell className="py-3 text-muted-foreground">{account.accountNumber || "—"}</TableCell>
+                          <TableCell className="py-3 text-muted-foreground">{account.branch || "—"}</TableCell>
+                          <TableCell className="py-3 text-right">
+                            <button onClick={() => handleDeleteBankAccount(account.id)} disabled={isBankLoading} className="text-sm font-medium text-destructive hover:underline">Sil</button>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow><TableCell colSpan={5} className="h-24 text-center text-muted-foreground border-0">Henüz banka hesabı eklenmemiş.</TableCell></TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
           </AccordionContent>
         </AccordionItem>
 
-        <AccordionItem value="item-3">
-          <AccordionTrigger className="text-xl">Departman Yönetimi</AccordionTrigger>
-          <AccordionContent>
-            <div className="space-y-6 pt-4">
-              <p className="text-muted-foreground">Departmanları ve bütçelerini yönetin.</p>
-              <Card>
-                <CardHeader className="flex-row items-center justify-between">
-                  <CardTitle>Yeni Departman Ekle</CardTitle>
-                  <Dialog open={isHistoryModalOpen} onOpenChange={setHistoryModalOpen}>
-                    <DialogTrigger asChild><Button variant="outline"><History className="mr-2 h-4 w-4" />Departman Bütçe Geçmişi</Button></DialogTrigger>
-                    <DialogContent className="max-w-2xl">
-                      <DialogHeader>
-                        <DialogTitle>Departman Bütçe Geçmişi</DialogTitle>
-                        <DialogDescription>Bir departman seçerek geçmiş bütçe değişikliklerini görüntüleyin.</DialogDescription>
-                      </DialogHeader>
-                      <div className="space-y-4">
-                        <Select onValueChange={setSelectedDeptForHistory}>
-                          <SelectTrigger><SelectValue placeholder="Bir departman seçin..." /></SelectTrigger>
-                          <SelectContent>{departments.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}</SelectContent>
-                        </Select>
-                        <div className="max-h-96 overflow-y-auto">
-                          <Table>
-                            <TableHeader><TableRow><TableHead>Değişiklik Tarihi</TableHead><TableHead>Eski Bütçe</TableHead><TableHead>Yeni Bütçe</TableHead></TableRow></TableHeader>
-                            <TableBody>
-                              {isHistoryLoading ? (
-                                <TableRow><TableCell colSpan={3} className="text-center p-4"><Skeleton className="h-8 w-full" /></TableCell></TableRow>
-                              ) : budgetHistory.length > 0 ? (
-                                budgetHistory.map((h) => (
-                                  <TableRow key={h.id}>
-                                    <TableCell>{new Date(h.changedAt).toLocaleString("tr-TR")}</TableCell>
-                                    <TableCell>{formatTRY(h.oldBudget)}</TableCell>
-                                    <TableCell>{formatTRY(h.newBudget)}</TableCell>
-                                  </TableRow>
-                                ))
-                              ) : (
-                                <TableRow><TableCell colSpan={3} className="text-center p-8">Seçilen departman için geçmiş bulunamadı.</TableCell></TableRow>
-                              )}
-                            </TableBody>
-                          </Table>
-                        </div>
+        <AccordionItem value="item-3" className="border border-border bg-card rounded-xl px-4 py-2 shadow-sm">
+          <AccordionTrigger className="text-lg font-medium hover:no-underline">Departmanlar & Bütçeler</AccordionTrigger>
+          <AccordionContent className="pt-4 pb-2">
+            <div className="space-y-6">
+              <div className="flex justify-end">
+                <Dialog open={isHistoryModalOpen} onOpenChange={setHistoryModalOpen}>
+                  <DialogTrigger asChild><Button variant="outline" className="rounded-full shadow-none border-border"><History className="mr-2 h-4 w-4" />Bütçe Geçmişi</Button></DialogTrigger>
+                  <DialogContent className="max-w-2xl bg-card border-border">
+                    <DialogHeader>
+                      <DialogTitle>Departman Bütçe Geçmişi</DialogTitle>
+                      <DialogDescription>Bir departman seçerek geçmiş bütçe değişikliklerini görüntüleyin.</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 mt-2">
+                      <Select onValueChange={setSelectedDeptForHistory}>
+                        <SelectTrigger className="border-border bg-background"><SelectValue placeholder="Bir departman seçin..." /></SelectTrigger>
+                        <SelectContent className="bg-card border-border">{departments.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}</SelectContent>
+                      </Select>
+                      <div className="max-h-96 overflow-y-auto border border-border rounded-xl">
+                        <Table>
+                          <TableHeader className="bg-muted/50"><TableRow className="border-border"><TableHead>Tarih</TableHead><TableHead>Eski Bütçe</TableHead><TableHead>Yeni Bütçe</TableHead></TableRow></TableHeader>
+                          <TableBody>
+                            {isHistoryLoading ? (
+                              <TableRow className="border-0"><TableCell colSpan={3} className="text-center p-4"><div className="h-8 animate-pulse bg-muted rounded-md" /></TableCell></TableRow>
+                            ) : budgetHistory.length > 0 ? (
+                              budgetHistory.map((h, i) => (
+                                <TableRow key={h.id} className={cn("border-border/50", i === budgetHistory.length - 1 && "border-0")}>
+                                  <TableCell className="text-muted-foreground text-sm">{new Date(h.changedAt).toLocaleString("tr-TR")}</TableCell>
+                                  <TableCell className="font-semibold text-muted-foreground line-through">{formatTRY(h.oldBudget)}</TableCell>
+                                  <TableCell className="font-semibold text-primary">{formatTRY(h.newBudget)}</TableCell>
+                                </TableRow>
+                              ))
+                            ) : (
+                              <TableRow><TableCell colSpan={3} className="text-center p-8 text-muted-foreground border-0">Seçilen departman için geçmiş bulunamadı.</TableCell></TableRow>
+                            )}
+                          </TableBody>
+                        </Table>
                       </div>
-                    </DialogContent>
-                  </Dialog>
-                </CardHeader>
-                <CardContent>
-                  <Form {...departmentForm}>
-                    <form onSubmit={departmentForm.handleSubmit(onDepartmentSubmit)} className="grid md:grid-cols-3 gap-4 items-end">
-                      <FormField control={departmentForm.control} name="name" render={({ field }) => (<FormItem><FormLabel>Departman Adı</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>)} />
-                      <FormField control={departmentForm.control} name="budget" render={({ field }) => (<FormItem><FormLabel>Bütçe (TRY)</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>)} />
-                      <Button type="submit" disabled={isDepartmentLoading}>{isDepartmentLoading ? "Ekleniyor..." : "Departman Ekle"}</Button>
-                    </form>
-                  </Form>
-                </CardContent>
-              </Card>
-              <Table>
-                <TableHeader>
-                  <TableRow><TableHead>Departman Adı</TableHead><TableHead>Bütçe</TableHead><TableHead className="text-right">İşlemler</TableHead></TableRow>
-                </TableHeader>
-                <TableBody>
-                  {isDepartmentLoading ? (
-                    <TableRow><TableCell colSpan={3}><Skeleton className="h-10" /></TableCell></TableRow>
-                  ) : departments.length > 0 ? (
-                    departments.map((dep) => (
-                      <TableRow key={dep.id}>
-                        <TableCell>{editingDepartmentId === dep.id ? <Input value={editingData?.name ?? ""} onChange={(e) => handleEditingDataChange("name", e.target.value)} /> : dep.name}</TableCell>
-                        <TableCell>{editingDepartmentId === dep.id ? <Input type="number" value={editingData?.budget ?? 0} onChange={(e) => handleEditingDataChange("budget", e.target.value)} /> : formatTRY(dep.budget)}</TableCell>
-                        <TableCell className="text-right">
-                          {editingDepartmentId === dep.id ? (
-                            <div className="flex gap-2 justify-end">
-                              <Button variant="ghost" size="icon" onClick={handleSaveDepartment}><Check className="h-4 w-4" /></Button>
-                              <Button variant="ghost" size="icon" onClick={handleCancelEdit}><X className="h-4 w-4" /></Button>
-                            </div>
-                          ) : (
-                            <div className="flex gap-2 justify-end">
-                              <Button variant="ghost" size="icon" onClick={() => openBudgetUpdateModal(dep)} disabled={isDepartmentLoading}><PlusCircle className="h-4 w-4" /><span className="sr-only">Bütçe Arttır</span></Button>
-                              <Button variant="ghost" size="icon" onClick={() => handleEditDepartment(dep)} disabled={isDepartmentLoading}><Pencil className="h-4 w-4" /><span className="sr-only">Düzenle</span></Button>
-                              <Button variant="ghost" size="icon" onClick={() => handleDeleteDepartment(dep.id)} disabled={isDepartmentLoading}><Trash2 className="h-4 w-4" /><span className="sr-only">Sil</span></Button>
-                            </div>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  ) : (
-                    <TableRow><TableCell colSpan={3} className="h-24 text-center">Hiç departman bulunamadı.</TableCell></TableRow>
-                  )}
-                </TableBody>
-              </Table>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </div>
+
+              <Form {...departmentForm}>
+                <form onSubmit={departmentForm.handleSubmit(onDepartmentSubmit)} className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end p-4 bg-muted/30 rounded-xl border border-border">
+                  <FormField control={departmentForm.control} name="name" render={({ field }) => (<FormItem><FormLabel className="text-xs">Departman Adı</FormLabel><FormControl><Input {...field} className="bg-background border-border" /></FormControl><FormMessage /></FormItem>)} />
+                  <FormField control={departmentForm.control} name="budget" render={({ field }) => (<FormItem><FormLabel className="text-xs">Aylık Bütçe (TRY)</FormLabel><FormControl><Input type="number" {...field} className="bg-background border-border" /></FormControl><FormMessage /></FormItem>)} />
+                  <Button type="submit" disabled={isDepartmentLoading} className="rounded-full">{isDepartmentLoading ? "Ekleniyor..." : "Departman Ekle"}</Button>
+                </form>
+              </Form>
+
+              <div className="rounded-xl border border-border overflow-hidden">
+                <Table>
+                  <TableHeader className="bg-muted/50">
+                    <TableRow className="border-border hover:bg-transparent"><TableHead className="font-medium h-10">Departman Adı</TableHead><TableHead className="font-medium h-10">Bütçe</TableHead><TableHead className="text-right h-10">İşlemler</TableHead></TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {isDepartmentLoading ? (
+                      <TableRow><TableCell colSpan={3}><div className="h-8 animate-pulse bg-muted rounded-md" /></TableCell></TableRow>
+                    ) : departments.length > 0 ? (
+                      departments.map((dep, idx) => (
+                        <TableRow key={dep.id} className={cn("border-border/50 hover:bg-muted/30 transition-colors", idx === departments.length - 1 && "border-0")}>
+                          <TableCell className="py-3">
+                            {editingDepartmentId === dep.id ? <Input value={editingData?.name ?? ""} onChange={(e) => handleEditingDataChange("name", e.target.value)} className="h-8 border-border" /> : <span className="font-medium">{dep.name}</span>}
+                          </TableCell>
+                          <TableCell className="py-3">
+                            {editingDepartmentId === dep.id ? <Input type="number" value={editingData?.budget ?? 0} onChange={(e) => handleEditingDataChange("budget", e.target.value)} className="h-8 border-border" /> : <span className="font-semibold text-muted-foreground">{formatTRY(dep.budget)}</span>}
+                          </TableCell>
+                          <TableCell className="py-3 text-right">
+                            {editingDepartmentId === dep.id ? (
+                              <div className="flex gap-4 justify-end">
+                                <button onClick={handleSaveDepartment} className="text-sm font-medium text-primary hover:underline">Kaydet</button>
+                                <button onClick={handleCancelEdit} className="text-sm font-medium text-muted-foreground hover:underline">Vazgeç</button>
+                              </div>
+                            ) : (
+                              <div className="flex gap-4 justify-end">
+                                <button onClick={() => openBudgetUpdateModal(dep)} disabled={isDepartmentLoading} className="text-sm font-medium text-primary hover:underline">Bütçe Artır</button>
+                                <button onClick={() => handleEditDepartment(dep)} disabled={isDepartmentLoading} className="text-sm font-medium text-primary hover:underline">Düzenle</button>
+                                <button onClick={() => handleDeleteDepartment(dep.id)} disabled={isDepartmentLoading} className="text-sm font-medium text-destructive hover:underline">Sil</button>
+                              </div>
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow><TableCell colSpan={3} className="h-24 text-center text-muted-foreground border-0">Hiç departman bulunamadı.</TableCell></TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
           </AccordionContent>
         </AccordionItem>
       </Accordion>
 
       <Dialog open={isBudgetUpdateModalOpen} onOpenChange={setBudgetUpdateModalOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-md bg-card border-border">
           <DialogHeader>
-            <DialogTitle>{selectedDepartmentForUpdate?.name} - Bütçe Artır</DialogTitle>
-            <DialogDescription>Mevcut bütçe: {formatTRY(selectedDepartmentForUpdate?.budget || 0)}. Eklenecek tutarı girin.</DialogDescription>
+            <DialogTitle className="font-medium text-lg">{selectedDepartmentForUpdate?.name} - Bütçe Artır</DialogTitle>
+            <DialogDescription>Mevcut bütçe: {formatTRY(selectedDepartmentForUpdate?.budget || 0)}</DialogDescription>
           </DialogHeader>
           <Form {...budgetUpdateForm}>
-            <form onSubmit={budgetUpdateForm.handleSubmit(onBudgetUpdateSubmit)} className="space-y-4">
+            <form onSubmit={budgetUpdateForm.handleSubmit(onBudgetUpdateSubmit)} className="space-y-4 mt-2">
               <FormField control={budgetUpdateForm.control} name="increaseAmount" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Artış Miktarı (TRY)</FormLabel>
-                  <FormControl><Input type="number" placeholder="5000" {...field} /></FormControl>
+                  <FormControl><Input type="number" placeholder="5000" {...field} className="bg-transparent border-border" /></FormControl>
                   <FormMessage />
                 </FormItem>
               )} />
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setBudgetUpdateModalOpen(false)}>Vazgeç</Button>
-                <Button type="submit" disabled={isDepartmentLoading}>{isDepartmentLoading ? "Güncelleniyor..." : "Bütçeyi Güncelle"}</Button>
+              <DialogFooter className="pt-4">
+                <Button type="button" variant="outline" onClick={() => setBudgetUpdateModalOpen(false)} className="rounded-full border-border">Vazgeç</Button>
+                <Button type="submit" disabled={isDepartmentLoading} className="rounded-full">{isDepartmentLoading ? "Güncelleniyor..." : "Uygula"}</Button>
               </DialogFooter>
             </form>
           </Form>

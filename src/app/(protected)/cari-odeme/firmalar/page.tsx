@@ -18,12 +18,13 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Trash2, Pencil, Landmark, PlusCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import BackButton from "@/components/BackButton";
 import { useAuth } from "@/contexts/auth-context";
+import { cn } from "@/lib/utils";
 
 const FirmaSchema = z.object({
   code: z.string().min(1, "Cari kodu zorunludur."),
@@ -179,99 +180,129 @@ export default function CariFirmalarPage() {
     }
   };
 
+  const [searchTerm, setSearchTerm] = useState("");
+  const filteredFirmalar = firmalar.filter(f => 
+    f.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    f.code.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
-    <div className="space-y-6 p-4">
-      <BackButton fallback="/cari-odeme" />
-      <h1 className="text-3xl font-bold">Cari Firmalar</h1>
+    <div className="space-y-6 max-w-7xl mx-auto px-2 py-4">
+      {/* Header Area */}
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-4">
+        <div className="flex items-center gap-2">
+          <BackButton fallback="/cari-odeme" className="border-border hover:bg-muted" />
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">Cari Firmalar</h1>
+        </div>
+        <Dialog>
+          <DialogTrigger asChild>
+            <Button className="w-full md:w-auto rounded-full px-6 shadow-sm">
+              <PlusCircle className="mr-2 h-4 w-4" />
+              Yeni Firma
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-3xl bg-card border-border">
+            <DialogHeader>
+              <DialogTitle className="font-medium text-lg">Yeni Cari Firma Ekle</DialogTitle>
+              <DialogDescription>Ödeme yapılacak firmaları (cari hesapları) sisteme tanımlayın.</DialogDescription>
+            </DialogHeader>
+            <Form {...createForm}>
+              <form onSubmit={createForm.handleSubmit(onCreate)} className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start mt-4">
+                <FormField control={createForm.control} name="code" render={({ field }) => (<FormItem><FormLabel>Cari Kodu</FormLabel><FormControl><Input {...field} className="bg-transparent border-border" /></FormControl><FormMessage /></FormItem>)} />
+                <FormField control={createForm.control} name="name" render={({ field }) => (<FormItem><FormLabel>Firma Adı</FormLabel><FormControl><Input {...field} className="bg-transparent border-border" /></FormControl><FormMessage /></FormItem>)} />
+                <FormField control={createForm.control} name="taxId" render={({ field }) => (<FormItem><FormLabel>Vergi No</FormLabel><FormControl><Input {...field} className="bg-transparent border-border" /></FormControl><FormMessage /></FormItem>)} />
+                <FormField control={createForm.control} name="taxOffice" render={({ field }) => (<FormItem><FormLabel>Vergi Dairesi</FormLabel><FormControl><Input {...field} className="bg-transparent border-border" /></FormControl><FormMessage /></FormItem>)} />
+                <FormField control={createForm.control} name="contactName" render={({ field }) => (<FormItem><FormLabel>Yetkili</FormLabel><FormControl><Input {...field} className="bg-transparent border-border" /></FormControl><FormMessage /></FormItem>)} />
+                <FormField control={createForm.control} name="phone" render={({ field }) => (<FormItem><FormLabel>Telefon</FormLabel><FormControl><Input {...field} className="bg-transparent border-border" /></FormControl><FormMessage /></FormItem>)} />
+                <FormField control={createForm.control} name="email" render={({ field }) => (<FormItem><FormLabel>E-posta</FormLabel><FormControl><Input {...field} className="bg-transparent border-border" /></FormControl><FormMessage /></FormItem>)} />
+                <FormField control={createForm.control} name="dueDay" render={({ field }) => (<FormItem><FormLabel>Vade Günü</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} className="bg-transparent border-border" /></FormControl><FormMessage /></FormItem>)} />
+                <FormField control={createForm.control} name="budget" render={({ field }) => (<FormItem><FormLabel>Bütçe (TRY)</FormLabel><FormControl><Input type="number" {...field} className="bg-transparent border-border" /></FormControl><FormMessage /></FormItem>)} />
+                <FormField control={createForm.control} name="address" render={({ field }) => (<FormItem className="md:col-span-2"><FormLabel>Adres</FormLabel><FormControl><Input {...field} className="bg-transparent border-border" /></FormControl><FormMessage /></FormItem>)} />
+                <Button type="submit" className="md:col-start-3 self-end rounded-full" disabled={saving}>{saving ? "Ekleniyor..." : "Kaydet"}</Button>
+              </form>
+            </Form>
+          </DialogContent>
+        </Dialog>
+      </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Yeni Cari Firma</CardTitle>
-          <CardDescription>Ödeme yapılacak firmaları (cari hesapları) tanımlayın.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Form {...createForm}>
-            <form onSubmit={createForm.handleSubmit(onCreate)} className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
-              <FormField control={createForm.control} name="code" render={({ field }) => (<FormItem><FormLabel>Cari Kodu</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>)} />
-              <FormField control={createForm.control} name="name" render={({ field }) => (<FormItem><FormLabel>Firma Adı</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>)} />
-              <FormField control={createForm.control} name="taxId" render={({ field }) => (<FormItem><FormLabel>Vergi No</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>)} />
-              <FormField control={createForm.control} name="taxOffice" render={({ field }) => (<FormItem><FormLabel>Vergi Dairesi</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>)} />
-              <FormField control={createForm.control} name="contactName" render={({ field }) => (<FormItem><FormLabel>Yetkili</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>)} />
-              <FormField control={createForm.control} name="phone" render={({ field }) => (<FormItem><FormLabel>Telefon</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>)} />
-              <FormField control={createForm.control} name="email" render={({ field }) => (<FormItem><FormLabel>E-posta</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>)} />
-              <FormField control={createForm.control} name="dueDay" render={({ field }) => (<FormItem><FormLabel>Vade Günü</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} /></FormControl><FormMessage /></FormItem>)} />
-              <FormField control={createForm.control} name="budget" render={({ field }) => (<FormItem><FormLabel>Bütçe (TRY)</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>)} />
-              <FormField control={createForm.control} name="address" render={({ field }) => (<FormItem className="md:col-span-2"><FormLabel>Adres</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>)} />
-              <Button type="submit" className="self-end" disabled={saving}><PlusCircle className="mr-2 h-4 w-4" />{saving ? "Ekleniyor..." : "Firma Ekle"}</Button>
-            </form>
-          </Form>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader><CardTitle>Kayıtlı Firmalar</CardTitle></CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Cari Kodu</TableHead>
-                <TableHead>Firma Adı</TableHead>
-                <TableHead>Vergi No</TableHead>
-                <TableHead>Yetkili</TableHead>
-                <TableHead className="text-right">Bütçe</TableHead>
-                <TableHead className="text-right">İşlemler</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? (
-                <TableRow><TableCell colSpan={6}><Skeleton className="h-10" /></TableCell></TableRow>
-              ) : firmalar.length > 0 ? (
-                firmalar.map((f) => (
-                  <TableRow key={f.id}>
-                    <TableCell className="font-mono">{f.code}</TableCell>
-                    <TableCell className="font-medium">{f.name}</TableCell>
-                    <TableCell>{f.taxId || "—"}</TableCell>
-                    <TableCell>{f.contactName || "—"}</TableCell>
-                    <TableCell className="text-right">{formatTRY(f.budget)}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex gap-2 justify-end">
-                        <Button variant="ghost" size="icon" onClick={() => openIbans(f)} title="IBAN'lar"><Landmark className="h-4 w-4" /></Button>
-                        <Button variant="ghost" size="icon" onClick={() => openEdit(f)} title="Düzenle"><Pencil className="h-4 w-4" /></Button>
-                        <Button variant="ghost" size="icon" onClick={() => onDelete(f)} title="Sil" className="text-destructive hover:text-destructive"><Trash2 className="h-4 w-4" /></Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              ) : (
-                <TableRow><TableCell colSpan={6} className="h-24 text-center">Henüz cari firma eklenmemiş.</TableCell></TableRow>
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
+        <div className="p-4 border-b border-border bg-muted/20">
+          <Input 
+            placeholder="Ada veya koda göre ara..." 
+            value={searchTerm} 
+            onChange={e => setSearchTerm(e.target.value)}
+            className="max-w-md bg-card border-border rounded-full"
+          />
+        </div>
+        <Table>
+          <TableHeader className="bg-muted/50">
+            <TableRow className="border-border hover:bg-transparent">
+              <TableHead className="font-medium h-12">Cari Kodu</TableHead>
+              <TableHead className="font-medium h-12">Firma Adı</TableHead>
+              <TableHead className="font-medium h-12">E-posta</TableHead>
+              <TableHead className="font-medium h-12">Telefon</TableHead>
+              <TableHead className="text-right font-medium h-12">Bütçe</TableHead>
+              <TableHead className="text-right h-12"><span className="sr-only">İşlemler</span></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loading ? (
+              <TableRow className="border-border/50"><TableCell colSpan={6}><div className="h-10 animate-pulse bg-muted rounded-md" /></TableCell></TableRow>
+            ) : filteredFirmalar.length > 0 ? (
+              filteredFirmalar.map((f, i) => (
+                <TableRow key={f.id} className={cn("border-border/50 hover:bg-muted/30 transition-colors", i === filteredFirmalar.length - 1 && "border-0")}>
+                  <TableCell className="py-4 font-mono text-muted-foreground">{f.code}</TableCell>
+                  <TableCell className="py-4 font-medium">{f.name}</TableCell>
+                  <TableCell className="py-4 text-muted-foreground">{f.email || "—"}</TableCell>
+                  <TableCell className="py-4 text-muted-foreground">{f.phone || "—"}</TableCell>
+                  <TableCell className="py-4 text-right font-semibold">{formatTRY(f.budget)}</TableCell>
+                  <TableCell className="py-4 text-right">
+                    <div className="flex gap-4 justify-end items-center">
+                      <button onClick={() => openIbans(f)} className="text-sm font-medium text-primary hover:underline">IBAN'lar</button>
+                      <button onClick={() => openEdit(f)} className="text-sm font-medium text-primary hover:underline">Düzenle</button>
+                      <button onClick={() => onDelete(f)} className="text-sm font-medium text-destructive hover:underline">Sil</button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            ) : (
+              <TableRow><TableCell colSpan={6} className="h-32 text-center text-muted-foreground border-0">Kayıtlı firma bulunamadı.</TableCell></TableRow>
+            )}
+          </TableBody>
+        </Table>
+        {/* Placeholder Pagination just like design */}
+        <div className="flex items-center justify-between p-4 border-t border-border bg-muted/20 text-sm text-muted-foreground">
+          <span>Toplam {filteredFirmalar.length} firma</span>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" className="rounded-full border-border h-8 shadow-none" disabled>İlk</Button>
+            <Button variant="outline" size="sm" className="rounded-full border-border h-8 shadow-none" disabled>Önceki</Button>
+            <Button variant="outline" size="sm" className="rounded-full border-border h-8 shadow-none" disabled>Sonraki</Button>
+          </div>
+        </div>
+      </div>
 
       {/* Edit dialog */}
       <Dialog open={!!editingFirma} onOpenChange={(open) => !open && setEditingFirma(null)}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl bg-card border-border">
           <DialogHeader>
-            <DialogTitle>Cari Firma Düzenle</DialogTitle>
+            <DialogTitle className="font-medium text-lg">Cari Firma Düzenle</DialogTitle>
             <DialogDescription>{editingFirma?.name}</DialogDescription>
           </DialogHeader>
           <Form {...editForm}>
-            <form onSubmit={editForm.handleSubmit(onEdit)} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <FormField control={editForm.control} name="code" render={({ field }) => (<FormItem><FormLabel>Cari Kodu</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>)} />
-              <FormField control={editForm.control} name="name" render={({ field }) => (<FormItem><FormLabel>Firma Adı</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>)} />
-              <FormField control={editForm.control} name="taxId" render={({ field }) => (<FormItem><FormLabel>Vergi No</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>)} />
-              <FormField control={editForm.control} name="taxOffice" render={({ field }) => (<FormItem><FormLabel>Vergi Dairesi</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>)} />
-              <FormField control={editForm.control} name="contactName" render={({ field }) => (<FormItem><FormLabel>Yetkili</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>)} />
-              <FormField control={editForm.control} name="phone" render={({ field }) => (<FormItem><FormLabel>Telefon</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>)} />
-              <FormField control={editForm.control} name="email" render={({ field }) => (<FormItem><FormLabel>E-posta</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>)} />
-              <FormField control={editForm.control} name="dueDay" render={({ field }) => (<FormItem><FormLabel>Vade Günü</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} /></FormControl><FormMessage /></FormItem>)} />
-              <FormField control={editForm.control} name="budget" render={({ field }) => (<FormItem><FormLabel>Bütçe (TRY)</FormLabel><FormControl><Input type="number" {...field} /></FormControl><FormMessage /></FormItem>)} />
-              <FormField control={editForm.control} name="address" render={({ field }) => (<FormItem className="md:col-span-2"><FormLabel>Adres</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>)} />
-              <DialogFooter className="md:col-span-2">
-                <Button type="button" variant="outline" onClick={() => setEditingFirma(null)}>Vazgeç</Button>
-                <Button type="submit" disabled={saving}>{saving ? "Kaydediliyor..." : "Kaydet"}</Button>
+            <form onSubmit={editForm.handleSubmit(onEdit)} className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+              <FormField control={editForm.control} name="code" render={({ field }) => (<FormItem><FormLabel>Cari Kodu</FormLabel><FormControl><Input {...field} className="bg-transparent border-border" /></FormControl><FormMessage /></FormItem>)} />
+              <FormField control={editForm.control} name="name" render={({ field }) => (<FormItem><FormLabel>Firma Adı</FormLabel><FormControl><Input {...field} className="bg-transparent border-border" /></FormControl><FormMessage /></FormItem>)} />
+              <FormField control={editForm.control} name="taxId" render={({ field }) => (<FormItem><FormLabel>Vergi No</FormLabel><FormControl><Input {...field} className="bg-transparent border-border" /></FormControl><FormMessage /></FormItem>)} />
+              <FormField control={editForm.control} name="taxOffice" render={({ field }) => (<FormItem><FormLabel>Vergi Dairesi</FormLabel><FormControl><Input {...field} className="bg-transparent border-border" /></FormControl><FormMessage /></FormItem>)} />
+              <FormField control={editForm.control} name="contactName" render={({ field }) => (<FormItem><FormLabel>Yetkili</FormLabel><FormControl><Input {...field} className="bg-transparent border-border" /></FormControl><FormMessage /></FormItem>)} />
+              <FormField control={editForm.control} name="phone" render={({ field }) => (<FormItem><FormLabel>Telefon</FormLabel><FormControl><Input {...field} className="bg-transparent border-border" /></FormControl><FormMessage /></FormItem>)} />
+              <FormField control={editForm.control} name="email" render={({ field }) => (<FormItem><FormLabel>E-posta</FormLabel><FormControl><Input {...field} className="bg-transparent border-border" /></FormControl><FormMessage /></FormItem>)} />
+              <FormField control={editForm.control} name="dueDay" render={({ field }) => (<FormItem><FormLabel>Vade Günü</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ""} className="bg-transparent border-border" /></FormControl><FormMessage /></FormItem>)} />
+              <FormField control={editForm.control} name="budget" render={({ field }) => (<FormItem><FormLabel>Bütçe (TRY)</FormLabel><FormControl><Input type="number" {...field} className="bg-transparent border-border" /></FormControl><FormMessage /></FormItem>)} />
+              <FormField control={editForm.control} name="address" render={({ field }) => (<FormItem className="md:col-span-2"><FormLabel>Adres</FormLabel><FormControl><Input {...field} className="bg-transparent border-border" /></FormControl><FormMessage /></FormItem>)} />
+              <DialogFooter className="md:col-span-2 pt-4">
+                <Button type="button" variant="outline" onClick={() => setEditingFirma(null)} className="rounded-full border-border">Vazgeç</Button>
+                <Button type="submit" disabled={saving} className="rounded-full">{saving ? "Kaydediliyor..." : "Kaydet"}</Button>
               </DialogFooter>
             </form>
           </Form>
@@ -280,40 +311,40 @@ export default function CariFirmalarPage() {
 
       {/* IBAN dialog */}
       <Dialog open={!!ibanFirma} onOpenChange={(open) => !open && setIbanFirma(null)}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl bg-card border-border">
           <DialogHeader>
-            <DialogTitle>{ibanFirma?.name} · IBAN Hesapları</DialogTitle>
+            <DialogTitle className="font-medium text-lg">{ibanFirma?.name} · IBAN Hesapları</DialogTitle>
             <DialogDescription>Bu cari firmaya ait banka/IBAN bilgilerini yönetin.</DialogDescription>
           </DialogHeader>
           <Form {...ibanForm}>
-            <form onSubmit={ibanForm.handleSubmit(onAddIban)} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-start">
-              <FormField control={ibanForm.control} name="bankName" render={({ field }) => (<FormItem><FormLabel>Banka</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>)} />
-              <FormField control={ibanForm.control} name="iban" render={({ field }) => (<FormItem className="md:col-span-2"><FormLabel>IBAN</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>)} />
-              <FormField control={ibanForm.control} name="branch" render={({ field }) => (<FormItem><FormLabel>Şube</FormLabel><FormControl><Input {...field} /></FormControl><FormMessage /></FormItem>)} />
-              <Button type="submit" className="self-end">Ekle</Button>
+            <form onSubmit={ibanForm.handleSubmit(onAddIban)} className="grid grid-cols-1 md:grid-cols-5 gap-3 items-end mt-4">
+              <FormField control={ibanForm.control} name="bankName" render={({ field }) => (<FormItem><FormLabel>Banka</FormLabel><FormControl><Input {...field} className="bg-transparent border-border" /></FormControl><FormMessage /></FormItem>)} />
+              <FormField control={ibanForm.control} name="iban" render={({ field }) => (<FormItem className="md:col-span-2"><FormLabel>IBAN</FormLabel><FormControl><Input {...field} className="bg-transparent border-border" /></FormControl><FormMessage /></FormItem>)} />
+              <FormField control={ibanForm.control} name="branch" render={({ field }) => (<FormItem><FormLabel>Şube</FormLabel><FormControl><Input {...field} className="bg-transparent border-border" /></FormControl><FormMessage /></FormItem>)} />
+              <Button type="submit" className="rounded-full h-10 w-full">Ekle</Button>
             </form>
           </Form>
-          <div className="max-h-72 overflow-y-auto">
+          <div className="max-h-72 overflow-y-auto border border-border rounded-xl mt-4">
             <Table>
-              <TableHeader>
-                <TableRow><TableHead>Banka</TableHead><TableHead>IBAN</TableHead><TableHead>Şube</TableHead><TableHead></TableHead></TableRow>
+              <TableHeader className="bg-muted/50">
+                <TableRow className="border-border hover:bg-transparent"><TableHead className="font-medium h-10">Banka</TableHead><TableHead className="font-medium h-10">IBAN</TableHead><TableHead className="font-medium h-10">Şube</TableHead><TableHead></TableHead></TableRow>
               </TableHeader>
               <TableBody>
                 {ibansLoading ? (
-                  <TableRow><TableCell colSpan={4}><Skeleton className="h-8" /></TableCell></TableRow>
+                  <TableRow className="border-0"><TableCell colSpan={4}><div className="h-8 animate-pulse bg-muted rounded-md" /></TableCell></TableRow>
                 ) : ibans.length > 0 ? (
-                  ibans.map((i) => (
-                    <TableRow key={i.id}>
-                      <TableCell>{i.bankName}</TableCell>
-                      <TableCell className="font-mono">{i.iban}</TableCell>
-                      <TableCell>{i.branch || "—"}</TableCell>
+                  ibans.map((i, index) => (
+                    <TableRow key={i.id} className={cn("border-border/50 hover:bg-muted/30", index === ibans.length - 1 && "border-0")}>
+                      <TableCell className="font-medium">{i.bankName}</TableCell>
+                      <TableCell className="font-mono text-muted-foreground">{i.iban}</TableCell>
+                      <TableCell className="text-muted-foreground">{i.branch || "—"}</TableCell>
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="icon" onClick={() => onDeleteIban(i.id)} className="text-destructive hover:text-destructive"><Trash2 className="h-4 w-4" /></Button>
+                        <Button variant="ghost" size="icon" onClick={() => onDeleteIban(i.id)} className="text-destructive hover:text-destructive h-8 w-8"><Trash2 className="h-4 w-4" /></Button>
                       </TableCell>
                     </TableRow>
                   ))
                 ) : (
-                  <TableRow><TableCell colSpan={4} className="h-20 text-center">Bu firma için IBAN tanımlı değil.</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={4} className="h-24 text-center text-muted-foreground border-0">Bu firma için IBAN tanımlı değil.</TableCell></TableRow>
                 )}
               </TableBody>
             </Table>
