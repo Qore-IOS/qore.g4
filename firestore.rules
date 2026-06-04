@@ -259,6 +259,18 @@ service cloud.firestore {
       allow read: if inCompany();
       allow write: if writingInCompany();
     }
+    match /cariBankTransactions/{id} {
+      allow read: if inCompany();
+      allow write: if writingInCompany();
+    }
+    match /cariExchangeRates/{id} {
+      allow read: if inCompany();
+      allow write: if writingInCompany();
+    }
+    match /cariBudgetPlans/{id} {
+      allow read: if inCompany();
+      allow write: if writingInCompany();
+    }
     match /cariPaymentTemplates/{id}          { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /cariBankAccounts/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /cariFirmalar/{id} {

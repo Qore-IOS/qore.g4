@@ -15,14 +15,15 @@ import type { Receipt } from "./invoice-types";
 import type { LedgerEntry } from "./finance-types";
 import type { CariFirma } from "./types";
 import { getScopedDocs, scopedQuery } from "../firestore-helpers";
-import { createAuditEvent } from "./firestore";
+import { createAuditEvent, type Scope } from "./firestore";
 
 const RECEIPT_COLLECTION = "cariReceipts";
+const INVOICE_COLLECTION = "cariInvoices";
 const FIRMALAR_COLLECTION = "cariFirmalar";
 const LEDGER_COLLECTION = "cariLedgerEntries";
 
 export async function listReceipts(
-  scope: { companyId?: string; isSuperAdmin?: boolean },
+  scope: Scope,
   limitCount = 10000
 ): Promise<Receipt[]> {
   const docs = await getScopedDocs(RECEIPT_COLLECTION, scope.companyId, scope.isSuperAdmin, orderBy("receiptDate", "desc"));
@@ -38,7 +39,7 @@ export async function listReceipts(
 }
 
 export async function createReceipt(
-  scope: { companyId?: string; isSuperAdmin?: boolean },
+  scope: Scope,
   data: Omit<Receipt, "id" | "createdAt">,
   userId: string,
   userName: string
