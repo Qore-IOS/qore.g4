@@ -51,7 +51,7 @@ export default function FaturalarPage() {
     n.toLocaleString("tr-TR", { style: "currency", currency });
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto px-2 py-4">
+    <div className="space-y-6 w-full p-4 md:p-8">
       {/* Header Area */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
         <div>

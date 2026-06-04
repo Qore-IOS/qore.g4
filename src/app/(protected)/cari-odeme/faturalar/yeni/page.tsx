@@ -134,7 +134,7 @@ export default function YeniFaturaPage() {
   };
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto px-2 py-4">
+    <div className="space-y-6 w-full p-4 md:p-8">
       <div className="flex items-center gap-2 mb-4">
         <BackButton fallback="/cari-odeme/faturalar" className="border-border hover:bg-muted" />
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Yeni Fatura Oluştur</h1>
