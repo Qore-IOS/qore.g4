@@ -30,6 +30,7 @@ import {
 } from "./ui/sidebar";
 import Image from "next/image";
 import { useIconMappings, getIconSrc } from "@/hooks/useIconMappings";
+import { useProductCodes, useBarcodeFormatsQuery, useDepots, useAddressDefinitions, useUsers } from "@/hooks/useFirebaseQueries";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -70,6 +71,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     toggleOrbAnimation,
     toggleNavMode,
   } = useAuth();
+
+  // Prefetch static master-data in the background to speed up panel loading (cached for 30m-1h)
+  useProductCodes();
+  useBarcodeFormatsQuery();
+  useDepots();
+  useAddressDefinitions();
+  useUsers();
+
   const pathname = usePathname();
   const [calendarOpen, setCalendarOpen] = useState(false);
 
