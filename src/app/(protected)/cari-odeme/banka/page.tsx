@@ -67,10 +67,10 @@ export default function BankaPage() {
     setIsLoadingAccounts(true);
     try {
       const data = await listBankAccounts({ companyId: currentCompanyId, isSuperAdmin });
-      setAccounts(data.items);
-      if (data.items.length > 0 && !selectedAccountId) {
-        setSelectedAccountId(data.items[0].id);
-        form.setValue("bankAccountId", data.items[0].id);
+      setAccounts(data);
+      if (data.length > 0 && !selectedAccountId) {
+        setSelectedAccountId(data[0].id);
+        form.setValue("bankAccountId", data[0].id);
       }
     } catch (error) {
       console.error("Banka hesapları yüklenemedi", error);
