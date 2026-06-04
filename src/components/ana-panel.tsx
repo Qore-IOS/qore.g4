@@ -1567,7 +1567,7 @@ export default function AnaPanel(props: AnaPanelProps) {
           title: 'Kabul Tamamlandı',
           description: `${itemsToProcess.length} kalem işlem başarıyla kaydedildi.`,
           action: (
-            <Button variant="default" onClick={() => router.push(`/mal-kabul/gecmis?open=${encodeURIComponent(txId)}`)}>
+            <Button variant="default" onClick={() => router.push(`/mal-kabul/gecmis?depotId=${encodeURIComponent(selectedDepotId)}&open=${encodeURIComponent(txId)}`)}>
               Geçmişte Aç
             </Button>
           ),
@@ -1925,7 +1925,7 @@ export default function AnaPanel(props: AnaPanelProps) {
           </div>
 
           <button
-            onClick={() => router.push('/mal-kabul/gecmis')}
+            onClick={() => router.push(selectedDepotId ? `/mal-kabul/gecmis?depotId=${encodeURIComponent(selectedDepotId)}` : '/mal-kabul/gecmis')}
             className="cihaz-tool-item flex items-center gap-2 px-4 py-2.5 text-sm font-medium self-start sm:self-center sm:ml-auto"
           >
             <History className="h-4 w-4" />

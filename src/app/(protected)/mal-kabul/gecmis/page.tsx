@@ -20,6 +20,7 @@ import {
   limit,
   orderBy,
   query,
+  where,
   onSnapshot,
   type DocumentData,
   type QueryDocumentSnapshot,
@@ -102,6 +103,7 @@ export default function MalKabulGecmisPage() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   const sp = useSearchParams();
   const openId = sp?.get('open') ?? null;
+  const depotId = sp?.get('depotId') ?? null;
 
   const [pageSize, setPageSize] = useState<number>(50);
   const [isLoading, setIsLoading] = useState(true);
@@ -117,12 +119,13 @@ export default function MalKabulGecmisPage() {
   // Real-time listener for transaction history
   useEffect(() => {
     setIsLoading(true);
-    malKabulLogger.debug('Initializing transaction history listener');
+    malKabulLogger.debug('Initializing transaction history listener', { depotId });
 
     const q = scopedQuery(
       COLLECTION_NAME,
       currentCompanyId,
       isSuperAdmin,
+      ...(depotId ? [where('depotId', '==', depotId)] : []),
       orderBy(ORDER_FIELD, 'desc'),
       limit(MAX_RECORDS)
     );
@@ -144,7 +147,7 @@ export default function MalKabulGecmisPage() {
 
         setAllRows(data);
         setIsLoading(false);
-        malKabulLogger.info('Transaction history loaded', { count: data.length });
+        malKabulLogger.info('Transaction history loaded', { count: data.length, depotId });
       },
       (error: Error) => {
         malKabulLogger.error('Failed to listen to transaction history', error);
@@ -161,7 +164,7 @@ export default function MalKabulGecmisPage() {
       malKabulLogger.debug('Cleaning up transaction history listener');
       unsubscribe();
     };
-  }, [toast, currentCompanyId, isSuperAdmin]);
+  }, [toast, currentCompanyId, isSuperAdmin, depotId]);
 
   /**
    * Open transaction details modal
@@ -273,7 +276,7 @@ export default function MalKabulGecmisPage() {
                 Mal Kabul İşlem Geçmişi
               </CardTitle>
               <CardDescription>
-                Tüm işlemler listelenir. Sayfa başına kayıt sayısını seçebilir ve sayfalar arasında gezinebilirsiniz.
+                {depotId ? 'Seçili deponun mal kabul işlemleri listelenir.' : 'Tüm işlemler listelenir.'} Sayfa başına kayıt sayısını seçebilir ve sayfalar arasında gezinebilirsiniz.
               </CardDescription>
             </div>
             <div className="flex items-center gap-3">
