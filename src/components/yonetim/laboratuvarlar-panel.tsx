@@ -39,12 +39,21 @@ const LocationPicker = dynamic(() => import('@/components/LocationPicker'), {
 export default function LaboratuvarPanel() {
   const { toast } = useToast();
   const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
-  const { data: hospitals = [], isLoading: isLoadingHospitals } = useHospitals();
-  const { data: productCodes = [], isLoading: isLoadingProducts } = useProductCodes();
-  const { data: addressDefinitions = [], isLoading: isLoadingAddress } = useAddressDefinitions();
-  const { data: depots = [], isLoading: isLoadingDepots } = useDepots();
-  const { data: labPools = [], isLoading: isLoadingLabPools } = useLabPools();
-  const { data: efficiencyPools = [], isLoading: isLoadingEfficiencyPools } = useEfficiencyPools();
+  const { data: hospitals = [], isLoading: isLoadingHospitals, refetch: refetchHospitals } = useHospitals();
+  const { data: productCodes = [], isLoading: isLoadingProducts, refetch: refetchProducts } = useProductCodes();
+  const { data: addressDefinitions = [], isLoading: isLoadingAddress, refetch: refetchAddress } = useAddressDefinitions();
+  const { data: depots = [], isLoading: isLoadingDepots, refetch: refetchDepots } = useDepots();
+  const { data: labPools = [], isLoading: isLoadingLabPools, refetch: refetchLabPools } = useLabPools();
+  const { data: efficiencyPools = [], isLoading: isLoadingEfficiencyPools, refetch: refetchEfficiencyPools } = useEfficiencyPools();
+
+  const handleRefreshData = () => {
+    refetchHospitals();
+    refetchProducts();
+    refetchAddress();
+    refetchDepots();
+    refetchLabPools();
+    refetchEfficiencyPools();
+  };
 
   const isLoading = isLoadingHospitals || isLoadingProducts || isLoadingAddress || isLoadingDepots || isLoadingLabPools || isLoadingEfficiencyPools;
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -253,7 +262,7 @@ export default function LaboratuvarPanel() {
         toast({ title: 'Başarılı', description: 'Laboratuvar ve alt tüketim noktaları oluşturuldu.' });
       }
       
-      fetchHospitalsAndProducts();
+      handleRefreshData();
       setIsModalOpen(false);
       setCurrentHospital({});
       setResponsibleEmailsInput('');
@@ -270,7 +279,7 @@ export default function LaboratuvarPanel() {
     if (confirm('Bu laboratuvarı silmek istediğinizden emin misiniz?')) {
       await deleteDoc(doc(db, 'hospitals', id));
       toast({ title: 'Silindi', description: 'Laboratuvar silindi.', variant: 'destructive' });
-      fetchHospitalsAndProducts();
+      handleRefreshData();
     }
   };
 
@@ -330,7 +339,7 @@ export default function LaboratuvarPanel() {
     try {
         await updateDoc(doc(db, 'labPools', pool.id), { mainLabId });
         setPoolDetailsModal({ open: true, pool: { ...pool, mainLabId }});
-        fetchHospitalsAndProducts(); // Refresh list to show change immediately
+        handleRefreshData(); // Refresh list to show change immediately
         toast({ title: "Başarılı", description: "Ana laboratuvar güncellendi." });
     } catch (e) {
         toast({ title: 'Hata', description: 'Ana laboratuvar güncellenemedi.', variant: 'destructive' });
@@ -346,7 +355,7 @@ export default function LaboratuvarPanel() {
         await deleteDoc(doc(db, 'efficiencyPools', poolId));
         toast({ title: 'Silindi', description: 'Verimlilik havuzu silindi.' });
         setEfficiencyPoolDetailsModal({ open: false, pool: null });
-        fetchHospitalsAndProducts();
+        handleRefreshData();
       } catch (error) {
         toast({ title: 'Hata', description: 'Havuz silinemedi.', variant: 'destructive' });
       } finally {
@@ -510,7 +519,7 @@ export default function LaboratuvarPanel() {
 
     if (success > 0) {
       toast({ title: 'İçe Aktarma Tamamlandı', description: `${success} laboratuvar başarıyla eklendi.` });
-      fetchHospitalsAndProducts();
+      handleRefreshData();
     }
   };
 
@@ -1102,7 +1111,7 @@ export default function LaboratuvarPanel() {
       <EfficiencyPoolModal
         open={isEfficiencyPoolModalOpen}
         onOpenChange={setIsEfficiencyPoolModalOpen}
-        onPoolCreated={fetchHospitalsAndProducts}
+        onPoolCreated={handleRefreshData}
       />
 
       <Dialog open={isEfficiencyPoolListOpen} onOpenChange={setIsEfficiencyPoolListOpen}>
@@ -1186,7 +1195,7 @@ export default function LaboratuvarPanel() {
           }}
           hospital={productOrderTarget}
           productCodes={productCodes}
-          onSaved={fetchHospitalsAndProducts}
+          onSaved={handleRefreshData}
         />
       )}
 
