@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Bell } from "lucide-react";
+import { X, Bell, Calendar } from "lucide-react";
 import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
 import { MobileProfileButton } from "@/components/ui/MobileProfileButton";
@@ -14,6 +14,7 @@ import { useAI } from "@/contexts/ai-context";
 import type { DockItemData, NotificationItem } from "@/hooks/use-dock";
 import Image from "next/image";
 import { useIconMappings, getIconSrc } from "@/hooks/useIconMappings";
+import { CalendarDockPanel } from "./dock/CalendarDockPanel";
 
 // --- HELPERS ---
 
@@ -42,6 +43,7 @@ const LONG_PRESS_DURATION = 500;
 export default function MobileDock({ items }: { items: DockItemData[] }) {
   const isMobile = useIsMobile();
   const [isOpen, setIsOpen] = useState(false);
+  const [calendarOpen, setCalendarOpen] = useState(false);
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   const { openAI } = useAI();
@@ -241,8 +243,16 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
             items={menuItems}
             onClose={() => setIsOpen(false)}
             isDark={isDark}
+            onCalendarClick={() => {
+              setIsOpen(false);
+              setCalendarOpen(true);
+            }}
           />
         )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {calendarOpen && <CalendarDockPanel onClose={() => setCalendarOpen(false)} />}
       </AnimatePresence>
     </>
   );
@@ -254,9 +264,10 @@ interface FullScreenMenuProps {
   items: DockItemData[];
   onClose: () => void;
   isDark: boolean;
+  onCalendarClick: () => void;
 }
 
-function FullScreenMenu({ items, onClose, isDark }: FullScreenMenuProps) {
+function FullScreenMenu({ items, onClose, isDark, onCalendarClick }: FullScreenMenuProps) {
   const router = useRouter();
   const iconData = useIconMappings();
   const mobileIcons = iconData?.mappings?.mobile || {};
@@ -365,6 +376,46 @@ function FullScreenMenu({ items, onClose, isDark }: FullScreenMenuProps) {
               </button>
             </motion.li>
           ))}
+          {/* Takvim Item */}
+          <motion.li
+            key="calendar"
+            variants={{
+              hidden: { opacity: 0, x: -20 },
+              visible: { opacity: 1, x: 0 },
+            }}
+            transition={{ type: "spring", stiffness: 300, damping: 25 }}
+          >
+            <button
+              onClick={() => {
+                triggerHaptic();
+                onCalendarClick();
+              }}
+              className={cn(
+                "w-full text-left px-1 py-4 transition-all duration-200 flex items-center gap-4",
+                isDark
+                  ? "text-white hover:bg-white/5"
+                  : "text-[#333] hover:bg-black/5"
+              )}
+            >
+              {mobileIcons['calendar'] ? (
+                <Image
+                  src={getIconSrc(mobileIcons['calendar'])}
+                  alt="Takvim"
+                  width={50}
+                  height={50}
+                  className="w-[50px] h-[50px] shrink-0 object-contain"
+                />
+              ) : (
+                <Calendar
+                  className={cn(
+                    "w-[50px] h-[50px] shrink-0",
+                    isDark ? "text-amber-400" : "text-amber-600"
+                  )}
+                />
+              )}
+              <span className="text-lg font-medium">Takvim</span>
+            </button>
+          </motion.li>
         </motion.ul>
       </div>
 

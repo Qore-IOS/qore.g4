@@ -94,7 +94,8 @@ export default function KisisellistirmePanel() {
   ];
   const mobileItems = [
     ...VIEWS.filter(v => v.type === 'nav').map(v => ({ key: v.key, label: v.label })),
-    { key: 'notifications', label: 'Bildirimler' }
+    { key: 'notifications', label: 'Bildirimler' },
+    { key: 'calendar', label: 'Takvim' }
   ];
   const envanterItems = envanterCategories.map(c => ({ key: c.name, label: c.name }));
 
