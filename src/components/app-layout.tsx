@@ -94,6 +94,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const isEdgeToEdgeRoute =
     pathname?.startsWith("/maliyet-gozlem") ||
     pathname?.startsWith("/cihaz-test-dagilimi") ||
+    pathname?.startsWith("/cari-odeme") ||
     // Yönetim ve alt panelleri (envanter yönetimi hariç) yeni tasarım dilinde
     (pathname?.startsWith("/yonetim") && !pathname?.startsWith("/yonetim/envanter-yonetimi")) ||
     pathname === "/dashboard" ||
@@ -310,7 +311,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <PersistentNotificationToast />
         <PageShell
           edgeToEdge={isEdgeToEdgeRoute}
-          className={`w-full flex-1 ${isWideContentRoute ? "max-w-none md:px-3" : ""}`}
+          className={`w-full flex-1 ${isWideContentRoute ? "max-w-none md:px-3" : ""} ${pathname?.startsWith("/cari-odeme") ? "bg-[#f4f6f4]" : ""}`}
         >
           {children}
         </PageShell>
