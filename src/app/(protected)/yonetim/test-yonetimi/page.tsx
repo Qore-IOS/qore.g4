@@ -34,6 +34,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { filterByCompanyScope, normalizeCompanyId } from '@/lib/company-scope';
 import { getExchangeRates } from '@/lib/exchange-rates';
+import { useProductCodes, useTestDefinitions } from '@/hooks/useFirebaseQueries';
 
 const COLLECTION = 'testDefinitions';
 
@@ -54,9 +55,13 @@ export default function HakEdisPage() {
   const { toast } = useToast();
   const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
 
-  const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
-  const [testDefs, setTestDefs] = useState<TestDefinitionGlobal[]>([]);
-  const [loading, setLoading] = useState({ products: true, defs: true });
+  const { data: productCodes = [], isLoading: isLoadingProducts } = useProductCodes();
+  const { data: testDefs = [], isLoading: isLoadingDefs } = useTestDefinitions();
+  
+  const loading = {
+    products: isLoadingProducts,
+    defs: isLoadingDefs
+  };
 
   // Yeni satır ekleme state'leri
   const [newSutKodu, setNewSutKodu] = useState('');
@@ -78,50 +83,6 @@ export default function HakEdisPage() {
 
   // Döviz kurları
   const [exchangeRates, setExchangeRates] = useState<{ EUR: number; USD: number; TRY: number } | null>(null);
-
-  // Master data (productCodes)
-  useEffect(() => {
-    const run = async () => {
-      setLoading((p) => ({ ...p, products: true }));
-      try {
-        const snap = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin, orderBy('stokAdi', 'asc')));
-        setProductCodes(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ProductCode)));
-      } catch (e) {
-        console.error('productCodes fetch error', e);
-        toast({ title: 'Hata', description: 'Ürün kodları yüklenemedi.', variant: 'destructive' });
-      } finally {
-        setLoading((p) => ({ ...p, products: false }));
-      }
-    };
-    run();
-  }, [toast]);
-
-  // Global testDefinitions
-  useEffect(() => {
-    setLoading((p) => ({ ...p, defs: true }));
-    const q = scopedQuery(COLLECTION, currentCompanyId, isSuperAdmin, orderBy('sutKodu', 'asc'));
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        setTestDefs(
-          filterByCompanyScope(
-            snap.docs.map((d) => ({ id: d.id, ...d.data() } as TestDefinitionGlobal)),
-            currentCompanyId,
-            isSuperAdmin,
-          ),
-        );
-        setLoading((p) => ({ ...p, defs: false }));
-      },
-      (e) => {
-        console.error('testDefinitions subscription error', e);
-        toast({ title: 'Hata', description: 'Test tanımları yüklenemedi.', variant: 'destructive' });
-        setLoading((p) => ({ ...p, defs: false }));
-      },
-    );
-    return () => unsub();
-  }, [currentCompanyId, isSuperAdmin, toast]);
-
-  // Exchange rates
   useEffect(() => {
     getExchangeRates()
       .then(setExchangeRates)

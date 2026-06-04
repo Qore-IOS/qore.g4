@@ -43,7 +43,9 @@ import type {
   AddressDefinition,
   User as AppUser,
   DeviceFaultReport,
-  PurchasingTask
+  PurchasingTask,
+  TestDefinitionGlobal,
+  EfficiencyPool
 } from '@/lib/types';
 import { DepotStockCountSession } from '@/lib/mal-kabul/types';
 import { SayimSession } from '@/lib/cost-analytics';
@@ -145,6 +147,26 @@ export function useBorcDepots() {
     gcTime: 2 * 60 * 60 * 1000,
   });
 }
+
+/**
+ * Test Definitions - Global definitions for SUT codes
+ */
+export function useTestDefinitions() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['testDefinitions', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const snap = await getDocs(scopedQuery('testDefinitions', currentCompanyId, isSuperAdmin, orderBy('sutKodu', 'asc')));
+      const defs = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as TestDefinitionGlobal));
+      return filterByCompanyScope(defs, currentCompanyId, isSuperAdmin);
+    },
+    enabled: !!currentCompanyId || isSuperAdmin,
+    staleTime: 60 * 60 * 1000,
+    gcTime: 2 * 60 * 60 * 1000,
+  });
+}
+
+
 
 /**
  * Devices

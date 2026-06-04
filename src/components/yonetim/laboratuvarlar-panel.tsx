@@ -27,6 +27,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { useHospitals, useProductCodes, useAddressDefinitions, useLabPools, useEfficiencyPools, useDepots } from '@/hooks/useFirebaseQueries';
 
 
 const LocationPicker = dynamic(() => import('@/components/LocationPicker'), {
@@ -38,12 +39,14 @@ const LocationPicker = dynamic(() => import('@/components/LocationPicker'), {
 export default function LaboratuvarPanel() {
   const { toast } = useToast();
   const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
-  const [hospitals, setHospitals] = useState<Hospital[]>([]);
-  const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
-  const [addressDefinitions, setAddressDefinitions] = useState<AddressDefinition[]>([]);
-  const [depoStok, setDepoStok] = useState<DepoStokItem[]>([]);
-  const [depots, setDepots] = useState<Depot[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { data: hospitals = [], isLoading: isLoadingHospitals } = useHospitals();
+  const { data: productCodes = [], isLoading: isLoadingProducts } = useProductCodes();
+  const { data: addressDefinitions = [], isLoading: isLoadingAddress } = useAddressDefinitions();
+  const { data: depots = [], isLoading: isLoadingDepots } = useDepots();
+  const { data: labPools = [], isLoading: isLoadingLabPools } = useLabPools();
+  const { data: efficiencyPools = [], isLoading: isLoadingEfficiencyPools } = useEfficiencyPools();
+
+  const isLoading = isLoadingHospitals || isLoadingProducts || isLoadingAddress || isLoadingDepots || isLoadingLabPools || isLoadingEfficiencyPools;
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentHospital, setCurrentHospital] = useState<Partial<Hospital>>({});
   const [responsibleEmailsInput, setResponsibleEmailsInput] = useState('');
@@ -63,15 +66,12 @@ export default function LaboratuvarPanel() {
 
   const [isPoolModalOpen, setIsPoolModalOpen] = useState(false);
   const [isMapEditorOpen, setIsMapEditorOpen] = useState(false);
-  
-  const [labPools, setLabPools] = useState<LabPool[]>([]);
   const [isPoolListModalOpen, setIsPoolListModalOpen] = useState(false);
   const [poolDetailsModal, setPoolDetailsModal] = useState<{ open: boolean; pool: LabPool | null }>({ open: false, pool: null });
-
+  
   // Verimlilik Havuzu State
   const [isEfficiencyPoolModalOpen, setIsEfficiencyPoolModalOpen] = useState(false);
   const [isEfficiencyPoolListOpen, setIsEfficiencyPoolListOpen] = useState(false);
-  const [efficiencyPools, setEfficiencyPools] = useState<EfficiencyPool[]>([]);
   const [efficiencyPoolDetailsModal, setEfficiencyPoolDetailsModal] = useState<{ open: boolean; pool: EfficiencyPool | null }>({ open: false, pool: null });
 
   // Özel Sıralama Modal State
@@ -112,37 +112,7 @@ export default function LaboratuvarPanel() {
   };
 
 
-  const fetchHospitalsAndProducts = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const [hSnap, pSnap, addrSnap, poolsSnap, stokSnap, effPoolsSnap, dSnap] = await Promise.all([
-        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('addressDefinitions', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('labPools', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
-        // Sadece sevk edilmiş stoğu çek — lab dağıtımı analizi için yeterli.
-        getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true))),
-        getDocs(scopedQuery('efficiencyPools', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
-        getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
-      ]);
-      setHospitals(filterByCompanyScope(hSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)), currentCompanyId, isSuperAdmin));
-      setProductCodes(pSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
-      setAddressDefinitions(filterByCompanyScope(addrSnap.docs.map(d => ({ id: d.id, ...d.data() } as AddressDefinition)), currentCompanyId, isSuperAdmin));
-      setLabPools(filterByCompanyScope(poolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as LabPool)), currentCompanyId, isSuperAdmin));
-      setDepoStok(filterByCompanyScope(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)), currentCompanyId, isSuperAdmin));
-      setEfficiencyPools(filterByCompanyScope(effPoolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as EfficiencyPool)), currentCompanyId, isSuperAdmin));
-      setDepots(filterByCompanyScope(dSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)), currentCompanyId, isSuperAdmin));
 
-    } catch (e) {
-      toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
-    } finally {
-      setIsLoading(false);
-    }
-  }, [toast, currentCompanyId, isSuperAdmin]);
-
-  useEffect(() => {
-    fetchHospitalsAndProducts();
-  }, [fetchHospitalsAndProducts]);
 
   const filteredHospitals = useMemo(() => {
     if (!searchQuery) return hospitals;
@@ -387,40 +357,52 @@ export default function LaboratuvarPanel() {
 
   const handlePoolStockExport = async (pool: LabPool | null) => {
     if (!pool) return;
-    const labNamesInPool = new Set(
-      hospitals
-        .filter(h => pool.memberIds.includes(h.id))
-        .map(h => h.name)
-    );
+    
+    // We shouldn't use a global state to track local loading for this button to avoid page freezing UI
+    const loadingToast = toast({ title: 'Rapor Hazırlanıyor', description: 'Stok verileri çekiliyor...', duration: 5000 });
+    
+    try {
+      const labNamesInPool = new Set(
+        hospitals
+          .filter(h => pool.memberIds.includes(h.id))
+          .map(h => h.name)
+      );
 
-    const stockInPool = depoStok.filter(
-      item => item.isShipped && item.hedefKurum && labNamesInPool.has(item.hedefKurum)
-    );
+      // Sadece sevk edilmiş stoğu anlık çekiyoruz
+      const stokSnap = await getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true)));
+      const allShippedStock = filterByCompanyScope(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)), currentCompanyId, isSuperAdmin);
 
-    const stockSummary: Record<string, { stokAdi: string, quantity: number }> = {};
+      const stockInPool = allShippedStock.filter(
+        item => item.hedefKurum && labNamesInPool.has(item.hedefKurum)
+      );
 
-    stockInPool.forEach(item => {
-      if (!stockSummary[item.stokKodu]) {
-        stockSummary[item.stokKodu] = {
-          stokAdi: productCodes.find(p => p.stokKodu === item.stokKodu)?.stokAdi || item.stokAdi,
-          quantity: 0
-        };
+      const stockSummary: Record<string, { stokAdi: string, quantity: number }> = {};
+
+      stockInPool.forEach(item => {
+        if (!stockSummary[item.stokKodu]) {
+          stockSummary[item.stokKodu] = {
+            stokAdi: productCodes.find(p => p.stokKodu === item.stokKodu)?.stokAdi || item.stokAdi,
+            quantity: 0
+          };
+        }
+        stockSummary[item.stokKodu].quantity += 1;
+      });
+
+      const dataToExport = Object.entries(stockSummary).map(([stokKodu, data]) => ({
+        'Stok Kodu': stokKodu,
+        'Stok Adı': data.stokAdi,
+        'Toplam Adet': data.quantity
+      })).sort((a,b) => a['Stok Adı'].localeCompare(b['Stok Adı']));
+
+      if (dataToExport.length === 0) {
+        toast({ title: 'Veri Yok', description: 'Bu havuz için dışa aktarılacak stok verisi bulunamadı.', variant: 'default' });
+        return;
       }
-      stockSummary[item.stokKodu].quantity += 1;
-    });
 
-    const dataToExport = Object.entries(stockSummary).map(([stokKodu, data]) => ({
-      'Stok Kodu': stokKodu,
-      'Stok Adı': data.stokAdi,
-      'Toplam Adet': data.quantity
-    })).sort((a,b) => a['Stok Adı'].localeCompare(b['Stok Adı']));
-
-    if (dataToExport.length === 0) {
-      toast({ title: 'Veri Yok', description: 'Bu havuz için dışa aktarılacak stok verisi bulunamadı.', variant: 'default' });
-      return;
+      exportDataToExcel(dataToExport, `Havuz_Stok_Raporu_${pool.name}`, "HavuzStok", toast);
+    } catch (e) {
+      toast({ title: 'Hata', description: 'Stok raporu alınırken bir hata oluştu.', variant: 'destructive' });
     }
-
-    exportDataToExcel(dataToExport, `Havuz_Stok_Raporu_${pool.name}`, "HavuzStok", toast);
   };
 
   const handleExcelFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
