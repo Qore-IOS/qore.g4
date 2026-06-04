@@ -166,6 +166,24 @@ export function useTestDefinitions() {
   });
 }
 
+/**
+ * Efficiency Pools
+ */
+export function useEfficiencyPools() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['efficiencyPools', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const snap = await getDocs(scopedQuery('efficiencyPools', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc')));
+      const pools = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as EfficiencyPool));
+      return filterByCompanyScope(pools, currentCompanyId, isSuperAdmin);
+    },
+    enabled: !!currentCompanyId || isSuperAdmin,
+    staleTime: 60 * 60 * 1000,
+    gcTime: 2 * 60 * 60 * 1000,
+  });
+}
+
 
 
 /**
