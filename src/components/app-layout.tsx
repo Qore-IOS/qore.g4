@@ -29,6 +29,7 @@ import {
   SidebarTrigger,
 } from "./ui/sidebar";
 import Image from "next/image";
+import { useIconMappings } from "@/hooks/useIconMappings";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -110,6 +111,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     handleMouseEnter,
     handleMouseLeave,
   } = useDock();
+
+  const iconData = useIconMappings();
+  const dockIcons = iconData?.mappings?.dock || {};
 
   // İframe pencere (çıplak mod): yalnızca panel içeriğini render et.
   // (Dock'u açma artık window manager'ın yayınladığı 'qore:dock-show' olayıyla
@@ -261,6 +265,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   unreadCount={notificationItem.unreadCount || 0}
                   loading={notificationItem.loading || false}
                   triggerClassName="w-full justify-start h-8 text-sm gap-2"
+                  customIcon={dockIcons['notifications']}
                 />
               </SidebarMenuItem>
             )}

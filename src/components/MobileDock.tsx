@@ -215,6 +215,7 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
                   items={notificationItem.items || []}
                   unreadCount={notificationItem.unreadCount || 0}
                   loading={notificationItem.loading || false}
+                  customIcon={mobileIcons['notifications']}
                 />
               ) : (
                 <button

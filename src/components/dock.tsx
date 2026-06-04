@@ -486,6 +486,7 @@ const DockItem = ({
           items={item.items || []}
           unreadCount={item.unreadCount || 0}
           loading={item.loading || false}
+          customIcon={customIcon}
         />
       </div>
     );
@@ -803,7 +804,7 @@ const DockLogo = () => {
 };
 
 // Takvim kısayolu — dock'un sağ bölgesinde, basınca takvim panelini açar.
-const CalendarDockButton = ({ open, onToggle }: { open: boolean; onToggle: () => void }) => {
+const CalendarDockButton = ({ open, onToggle, customIcon }: { open: boolean; onToggle: () => void; customIcon?: string }) => {
   const calGradient = {
     background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
     WebkitBackgroundClip: 'text',
@@ -822,7 +823,11 @@ const CalendarDockButton = ({ open, onToggle }: { open: boolean; onToggle: () =>
           aria-label="Takvim"
           aria-expanded={open}
         >
-          <Calendar className="dock-item-icon" style={calGradient} />
+          {customIcon ? (
+            <Image src={getIconSrc(customIcon)} alt="Takvim" width={34} height={34} className="dock-item-icon object-contain" />
+          ) : (
+            <Calendar className="dock-item-icon" style={calGradient} />
+          )}
         </motion.div>
       </TooltipTrigger>
       <TooltipPrimitive.Portal>
@@ -1040,7 +1045,7 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
               ))}
             </div>
             <div className="qdock-sep" />
-            <CalendarDockButton open={calendarOpen} onToggle={() => setCalendarOpen((o) => !o)} />
+            <CalendarDockButton open={calendarOpen} onToggle={() => setCalendarOpen((o) => !o)} customIcon={dockIcons['calendar']} />
             {showDockLogout && logoutItem && (
               <DockItem
                 key={logoutItem.key}
