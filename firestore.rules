@@ -232,11 +232,21 @@ service cloud.firestore {
     match /presence/{id}                      { allow read, write: if isSignedIn(); }
 
     // -----------------------------
-    // Cari Ödeme (tedarikçi ödemeleri) paneli — tenant izolasyonlu.
-    // Onay yetkisi (cari-odeme-onay) UI tarafında uygulanır; bu kurallar
-    // tenant (companyId) bazlı veri izolasyonunu zorunlu kılar.
+    // Cari Ödeme / Qore Finance paneli — Faz 0 güvenlik modeli.
+    //
+    // Tenant izolasyonu: tüm koleksiyonlar inCompany() / writingInCompany()
+    // ile korunur. Durum geçişleri (status field) client-side state-machine
+    // tarafından doğrulanır (src/lib/cari-odeme/state-machine.ts).
+    //
+    // Audit log (cariAuditEvents): immutable — create-only, update/delete
+    // yasak. Finansal işlemlerin tüm geçmişi burada tutulur.
     // -----------------------------
-    match /cariPayments/{id}                  { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /cariPayments/{id} {
+      allow read: if inCompany();
+      allow create: if writingInCompany();
+      allow update: if writingInCompany();
+      allow delete: if isSuperAdmin();
+    }
     match /cariPaymentTemplates/{id}          { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /cariBankAccounts/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /cariFirmalar/{id} {
@@ -250,5 +260,17 @@ service cloud.firestore {
       allow write: if writingInCompany();
       match /history/{historyId}              { allow read: if inCompany(); allow write: if writingInCompany(); }
     }
+
+    // Audit log — immutable: create-only, no update or delete allowed.
+    match /cariAuditEvents/{id} {
+      allow read: if inCompany();
+      allow create: if writingInCompany();
+      allow update, delete: if false;
+    }
+
+    // Faz 1 placeholder — koleksiyonlar oluşturulunca aktifleştirilecek:
+    // match /cariInvoices/{id}      { allow read: if inCompany(); allow write: if writingInCompany(); }
+    // match /cariReceipts/{id}      { allow read: if inCompany(); allow write: if writingInCompany(); }
+    // match /cariLedgerEntries/{id} { allow read: if inCompany(); allow write: if writingInCompany(); }
   }
 }

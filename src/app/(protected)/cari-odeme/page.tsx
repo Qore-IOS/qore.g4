@@ -1,12 +1,14 @@
 'use client';
 import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
-import { getDashboardData, updatePayment, listBankAccounts, listDepartments } from "@/lib/cari-odeme/firestore";
+import { getDashboardData, updatePaymentStatus, listBankAccounts, listDepartments } from "@/lib/cari-odeme/firestore";
+import { resolveFinanceRoles, getNextStates, getTransitionLabel } from "@/lib/cari-odeme/state-machine";
+import type { FinanceRole } from "@/lib/cari-odeme/finance-types";
 import { KpiCard } from "@/components/cari-odeme/KpiCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Hourglass, Sigma, Check, CreditCard, MoreHorizontal, Expand, ArrowLeft, Calendar as CalendarIcon, X, Download, Wallet, FileText, Building2, Settings } from "lucide-react";
+import { Hourglass, Sigma, Check, CreditCard, MoreHorizontal, Expand, ArrowLeft, Calendar as CalendarIcon, X, Download, Wallet, FileText, Building2, Settings, Receipt, BookOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Payment, BankAccount, Department } from "@/lib/cari-odeme/types";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -53,12 +55,18 @@ const NAV = [
   { href: "/cari-odeme/odemeler", label: "Ödemeler", icon: Wallet },
   { href: "/cari-odeme/sablonlar", label: "Talimatlar", icon: FileText },
   { href: "/cari-odeme/firmalar", label: "Cari Firmalar", icon: Building2 },
+  { href: "/cari-odeme/faturalar", label: "Faturalar", icon: Receipt },
+  { href: "/cari-odeme/ekstre", label: "Cari Ekstre", icon: BookOpen },
   { href: "/cari-odeme/ayarlar", label: "Ayarlar", icon: Settings },
 ];
 
 export default function Dashboard() {
-  const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
-  const canApprove = isSuperAdmin || !!currentUserProfile?.accessibleViews?.includes("cari-odeme-onay");
+  const { currentCompanyId, isSuperAdmin, currentUserProfile, currentUser } = useAuth();
+  const financeRoles: FinanceRole[] = resolveFinanceRoles(
+    currentUserProfile?.accessibleViews,
+    isSuperAdmin
+  );
+  const canApprove = financeRoles.includes("approver") || financeRoles.includes("finance_admin");
 
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -208,14 +216,25 @@ export default function Dashboard() {
       return;
     }
     try {
-      await updatePayment(paymentId, { status: targetStatus, bankName: selectedBank });
+      const scope = { companyId: currentCompanyId, isSuperAdmin };
+      const userId = currentUser?.uid ?? "unknown";
+      const userName = currentUserProfile?.name ?? currentUser?.email ?? "Bilinmeyen";
+      await updatePaymentStatus(
+        scope,
+        paymentId,
+        targetStatus,
+        financeRoles,
+        userId,
+        userName,
+        { bankName: selectedBank }
+      );
       toast({ title: "Başarılı", description: `Ödeme durumu güncellendi ve banka atandı.` });
       setBankSelectionModalState({ open: false, paymentId: null, targetStatus: null });
       setSelectedBank("");
       setPendingModalOpen(false);
       await fetchDashboardData();
-    } catch (error) {
-      toast({ variant: "destructive", title: "Hata", description: "Ödeme durumu güncellenemedi." });
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Hata", description: error?.message || "Ödeme durumu güncellenemedi." });
     }
   };
 

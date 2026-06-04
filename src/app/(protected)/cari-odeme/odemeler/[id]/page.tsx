@@ -2,7 +2,7 @@
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { getPayment, updatePayment, listCariFirmalar, listBankAccounts, listDepartments } from "@/lib/cari-odeme/firestore";
+import { getPayment, updatePayment, listCariFirmalar, listBankAccounts, listDepartments, updatePaymentStatus, listAuditEvents } from "@/lib/cari-odeme/firestore";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,12 +11,16 @@ import { Card, CardContent, CardHeader, CardTitle, CardFooter, CardDescription }
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Badge } from "@/components/ui/badge";
-import { CalendarIcon } from "lucide-react";
+import { CalendarIcon, Clock, User, ArrowRight, ShieldCheck, History } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
-import { useEffect, useState } from "react";
+import { tr } from "date-fns/locale";
+import { useEffect, useState, useCallback } from "react";
 import type { CariFirma, Payment, PaymentStatus, BankAccount, Department } from "@/lib/cari-odeme/types";
+import type { AuditEvent } from "@/lib/cari-odeme/finance-types";
+import { resolveFinanceRoles, getNextStates, getTransitionLabel, STATUS_LABELS, STATUS_COLORS } from "@/lib/cari-odeme/state-machine";
+import type { FinanceRole } from "@/lib/cari-odeme/finance-types";
 import { useToast } from "@/hooks/use-toast";
 import Link from "next/link";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -48,8 +52,12 @@ export default function PaymentDetailPage({ params }: { params: { id: string } }
   const { id } = params;
   const router = useRouter();
   const { toast } = useToast();
-  const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
-  const canApprove = isSuperAdmin || !!currentUserProfile?.accessibleViews?.includes("cari-odeme-onay");
+  const { currentCompanyId, isSuperAdmin, currentUserProfile, currentUser } = useAuth();
+  const financeRoles: FinanceRole[] = resolveFinanceRoles(
+    currentUserProfile?.accessibleViews,
+    isSuperAdmin
+  );
+  const canApprove = financeRoles.includes("approver") || financeRoles.includes("finance_admin");
 
   const [payment, setPayment] = useState<Payment | null>(null);
   const [firmalar, setFirmalar] = useState<CariFirma[]>([]);
@@ -57,6 +65,9 @@ export default function PaymentDetailPage({ params }: { params: { id: string } }
   const [departments, setDepartments] = useState<Department[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isPageLoading, setIsPageLoading] = useState(true);
+  const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
+  const [isTransitioning, setIsTransitioning] = useState(false);
+  const [rejectionReason, setRejectionReason] = useState("");
 
   const form = useForm<FormValues>({
     resolver: zodResolver(Schema),
@@ -111,6 +122,53 @@ export default function PaymentDetailPage({ params }: { params: { id: string } }
     fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, currentCompanyId, isSuperAdmin]);
+
+  // Load audit events
+  const fetchAuditEvents = useCallback(async () => {
+    try {
+      const scope = { companyId: currentCompanyId, isSuperAdmin };
+      const events = await listAuditEvents(scope, id, "payment");
+      setAuditEvents(events);
+    } catch {
+      // Audit events are non-critical; fail silently
+    }
+  }, [id, currentCompanyId, isSuperAdmin]);
+
+  useEffect(() => {
+    if (!isPageLoading && payment) fetchAuditEvents();
+  }, [isPageLoading, payment, fetchAuditEvents]);
+
+  // State-machine status transition handler
+  const handleStatusTransition = async (newStatus: PaymentStatus) => {
+    if (!payment) return;
+    setIsTransitioning(true);
+    try {
+      const scope = { companyId: currentCompanyId, isSuperAdmin };
+      const userId = currentUser?.uid ?? "unknown";
+      const userName = currentUserProfile?.name ?? currentUser?.email ?? "Bilinmeyen";
+      await updatePaymentStatus(
+        scope,
+        id,
+        newStatus,
+        financeRoles,
+        userId,
+        userName,
+        {
+          rejectionReason: newStatus === "rejected" ? rejectionReason : undefined,
+        }
+      );
+      toast({ title: "Başarılı", description: `Ödeme durumu "${STATUS_LABELS[newStatus]}" olarak güncellendi.` });
+      // Reload payment data
+      const updated = await getPayment(id);
+      if (updated) setPayment(updated);
+      setRejectionReason("");
+      fetchAuditEvents();
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Hata", description: error?.message || "Durum güncellenemedi." });
+    } finally {
+      setIsTransitioning(false);
+    }
+  };
 
   const onSubmit = async (values: FormValues) => {
     setIsLoading(true);
@@ -218,28 +276,73 @@ export default function PaymentDetailPage({ params }: { params: { id: string } }
                     <FormMessage />
                   </FormItem>
                 )} />
-                {/* Onay alanı — yalnızca onay yetkisi olanlar değiştirebilir */}
-                {canApprove ? (
-                  <FormField control={form.control} name="status" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Durum</FormLabel>
-                      <Select onValueChange={field.onChange} defaultValue={field.value}>
-                        <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                        <SelectContent>
-                          <SelectItem value="pending">Beklemede</SelectItem>
-                          <SelectItem value="approved">Onaylandı</SelectItem>
-                          <SelectItem value="paid">Ödendi</SelectItem>
-                          <SelectItem value="rejected">Reddedildi</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-                ) : (
-                  <FormItem>
-                    <FormLabel>Durum</FormLabel>
-                    <div className="pt-2"><Badge variant="outline">{STATUS_TEXT[payment.status]}</Badge></div>
-                  </FormItem>
+                {/* Status display with state-machine transitions */}
+                <FormItem>
+                  <FormLabel>Durum</FormLabel>
+                  <div className="flex items-center gap-2 pt-2">
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        payment.status === "pending" && "border-yellow-500 text-yellow-600 bg-yellow-50 dark:bg-yellow-950",
+                        payment.status === "approved" && "border-blue-500 text-blue-600 bg-blue-50 dark:bg-blue-950",
+                        payment.status === "paid" && "border-green-500 text-green-600 bg-green-50 dark:bg-green-950",
+                        payment.status === "rejected" && "border-red-500 text-red-600 bg-red-50 dark:bg-red-950",
+                      )}
+                    >
+                      {STATUS_LABELS[payment.status]}
+                    </Badge>
+                    {payment.approvedByName && payment.status !== "rejected" && (
+                      <span className="text-xs text-muted-foreground">
+                        Onaylayan: {payment.approvedByName}
+                      </span>
+                    )}
+                    {payment.paidByName && (
+                      <span className="text-xs text-muted-foreground">
+                        Ödeyen: {payment.paidByName}
+                      </span>
+                    )}
+                    {payment.rejectedByName && (
+                      <span className="text-xs text-muted-foreground">
+                        Reddeden: {payment.rejectedByName}
+                      </span>
+                    )}
+                  </div>
+                  {payment.rejectionReason && (
+                    <p className="text-xs text-red-500 mt-1">Red gerekçesi: {payment.rejectionReason}</p>
+                  )}
+                </FormItem>
+                {/* State-machine transition buttons */}
+                {canApprove && getNextStates(payment.status, financeRoles).length > 0 && (
+                  <div className="md:col-span-2">
+                    <FormLabel>Durum Değiştir</FormLabel>
+                    <div className="flex flex-wrap items-center gap-2 pt-2">
+                      {getNextStates(payment.status, financeRoles).map((targetStatus) => (
+                        <Button
+                          key={targetStatus}
+                          type="button"
+                          size="sm"
+                          variant={targetStatus === "rejected" ? "destructive" : "default"}
+                          disabled={isTransitioning}
+                          onClick={() => handleStatusTransition(targetStatus)}
+                          className="gap-1"
+                        >
+                          <ArrowRight className="h-3.5 w-3.5" />
+                          {getTransitionLabel(payment.status, targetStatus)}
+                        </Button>
+                      ))}
+                    </div>
+                    {/* Rejection reason input — only show when rejected is an option */}
+                    {getNextStates(payment.status, financeRoles).includes("rejected") && (
+                      <div className="mt-2">
+                        <Input
+                          placeholder="Red gerekçesi (isteğe bağlı)"
+                          value={rejectionReason}
+                          onChange={(e) => setRejectionReason(e.target.value)}
+                          className="max-w-md"
+                        />
+                      </div>
+                    )}
+                  </div>
                 )}
                 {canApprove ? (
                   <FormField control={form.control} name="bankName" render={({ field }) => (
@@ -271,6 +374,9 @@ export default function PaymentDetailPage({ params }: { params: { id: string } }
           </Card>
         </form>
       </Form>
+
+      {/* Audit Trail */}
+      <AuditTrail events={auditEvents} />
     </div>
   );
 }
@@ -300,5 +406,93 @@ function PageSkeleton() {
         <CardFooter><Skeleton className="h-10 w-28" /></CardFooter>
       </Card>
     </div>
+  );
+}
+
+/** Audit Trail Timeline — shows immutable history of all status changes. */
+function AuditTrail({ events }: { events: AuditEvent[] }) {
+  if (events.length === 0) return null;
+
+  const actionLabels: Record<string, string> = {
+    payment_created: "Ödeme oluşturuldu",
+    payment_status_changed: "Durum değiştirildi",
+    payment_updated: "Ödeme güncellendi",
+    payment_deleted: "Ödeme silindi",
+    payment_bank_assigned: "Banka atandı",
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-lg">
+          <History className="h-5 w-5" />
+          Denetim İzi
+        </CardTitle>
+        <CardDescription>Bu ödeme kaydına yapılan tüm değişikliklerin kronolojik geçmişi</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <div className="relative space-y-0">
+          {events.map((event, idx) => (
+            <div key={event.id} className="relative flex gap-4 pb-6 last:pb-0">
+              {/* Timeline line */}
+              {idx < events.length - 1 && (
+                <div className="absolute left-[15px] top-8 bottom-0 w-px bg-border" />
+              )}
+              {/* Timeline dot */}
+              <div className="relative flex-shrink-0 mt-1">
+                <div className={cn(
+                  "h-[30px] w-[30px] rounded-full flex items-center justify-center text-white",
+                  event.action === "payment_status_changed" && event.newValue?.status === "approved" && "bg-blue-500",
+                  event.action === "payment_status_changed" && event.newValue?.status === "paid" && "bg-green-500",
+                  event.action === "payment_status_changed" && event.newValue?.status === "rejected" && "bg-red-500",
+                  event.action === "payment_status_changed" && event.newValue?.status === "pending" && "bg-yellow-500",
+                  event.action === "payment_created" && "bg-blue-500",
+                  !event.action.includes("status") && event.action !== "payment_created" && "bg-gray-400",
+                )}>
+                  {event.action === "payment_status_changed" ? (
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  ) : (
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                  )}
+                </div>
+              </div>
+              {/* Content */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-medium text-sm">
+                    {actionLabels[event.action] ?? event.action}
+                  </span>
+                  {event.action === "payment_status_changed" && event.previousValue?.status && event.newValue?.status && (
+                    <span className="text-xs text-muted-foreground">
+                      {STATUS_LABELS[event.previousValue.status as PaymentStatus] ?? event.previousValue.status}
+                      {" → "}
+                      {STATUS_LABELS[event.newValue.status as PaymentStatus] ?? event.newValue.status}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
+                  <span className="flex items-center gap-1">
+                    <User className="h-3 w-3" />
+                    {event.userName}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    {event.timestamp instanceof Date
+                      ? format(event.timestamp, "dd MMM yyyy HH:mm", { locale: tr })
+                      : String(event.timestamp)}
+                  </span>
+                </div>
+                {event.newValue?.rejectionReason && (
+                  <p className="text-xs text-red-500 mt-1">Gerekçe: {event.newValue.rejectionReason}</p>
+                )}
+                {event.reason && (
+                  <p className="text-xs text-muted-foreground mt-1">{event.reason}</p>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
   );
 }

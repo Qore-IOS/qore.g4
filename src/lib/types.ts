@@ -621,6 +621,13 @@ export type AppView =
   | 'maliyet-sayim'
   | 'cari-odeme'
   | 'cari-odeme-onay'
+  // Qore Finance Module — Faz 1+
+  | 'finans-faturalar'
+  | 'finans-tahsilat'
+  | 'finans-cari-ekstre'
+  | 'finans-banka'
+  | 'finans-nakit-akis'
+  | 'finans-karlilik'
   ;
 
 export type CihazYonetimiSubView = 'ana' | 'ayarlar' | 'cihazListesi' | 'teknikServis';
