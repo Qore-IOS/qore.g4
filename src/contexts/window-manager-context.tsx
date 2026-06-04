@@ -35,6 +35,7 @@ interface WindowManagerCtx {
   minimizeWindow: (id: string) => void;
   restoreWindow: (id: string) => void;
   closeWindow: (id: string) => void;
+  windowBack: () => void;
   registerWindowEl: (id: string, el: HTMLElement | null) => void;
   registerDockTarget: (el: HTMLElement | null) => void;
 }
@@ -116,6 +117,9 @@ export function WindowManagerProvider({ children }: { children: React.ReactNode 
       const el = windowEls.current.get(id);
       const targetIndex = minimizedCount(); // yeni sekmenin yuvası
       const finish = () => {
+        // Animasyon biter bitmez senkron gizle — son karede iframe'in torn/yarım
+        // çizilmiş hâlinin 1 kare görünmesini engeller.
+        if (el) el.style.visibility = 'hidden';
         setActiveId((cur) => (cur === id ? null : cur));
         setWindows((prev) => {
           let next = prev.map((w) => (w.id === id ? { ...w, minimized: true } : w));
@@ -178,6 +182,19 @@ export function WindowManagerProvider({ children }: { children: React.ReactNode 
     windowEls.current.delete(id);
   }, []);
 
+  // Aktif pencerenin iframe geçmişinde geri git (panel içi gezinme).
+  const windowBack = useCallback(() => {
+    const id = activeIdRef.current;
+    if (!id) return;
+    const wrap = windowEls.current.get(id);
+    const iframe = wrap?.querySelector('iframe') as HTMLIFrameElement | null;
+    try {
+      iframe?.contentWindow?.history.back();
+    } catch {
+      /* cross-origin / geçmiş yok */
+    }
+  }, []);
+
   const minimizedWindows = useMemo(() => windows.filter((w) => w.minimized), [windows]);
 
   const value = useMemo<WindowManagerCtx>(
@@ -190,6 +207,7 @@ export function WindowManagerProvider({ children }: { children: React.ReactNode 
       minimizeWindow,
       restoreWindow,
       closeWindow,
+      windowBack,
       registerWindowEl,
       registerDockTarget,
     }),
@@ -201,6 +219,7 @@ export function WindowManagerProvider({ children }: { children: React.ReactNode 
       minimizeWindow,
       restoreWindow,
       closeWindow,
+      windowBack,
       registerWindowEl,
       registerDockTarget,
     ],

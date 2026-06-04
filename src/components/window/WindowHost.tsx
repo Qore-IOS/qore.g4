@@ -3,12 +3,19 @@
 import React, { useEffect, useRef } from 'react';
 import { useWindowManager, type WMWindow } from '@/contexts/window-manager-context';
 
+/** Pencere başlık çubuğu yüksekliği (trafik ışıkları + geri + başlık). */
+export const WINDOW_HEADER_H = 44;
+
 /**
  * Açık/küçültülmüş pencereleri iframe olarak render eder. Tüm pencereler tek bir
  * stabil listede tutulur (key=id) — aktif↔küçük geçişlerinde iframe remount
  * OLMAZ, böylece içerideki state (form/scroll/işlemler) korunur. Aktif olan
  * görünür; diğerleri visibility:hidden ile DOM'da canlı kalır. Sarmalayıcı div
  * genie animasyonunun hedefidir (window manager'a kaydedilir).
+ *
+ * Pencereler TAM EKRAN açılır (başlık çubuğunun altı → ekran altı; dock üstte
+ * yüzer). İframe kendi compositing katmanına alınır (translateZ) — böylece
+ * üstündeki clip-path warp'ı yırtılma/yarım çizim olmadan kırpar.
  */
 function WindowItem({ win, active }: { win: WMWindow; active: boolean }) {
   const { registerWindowEl } = useWindowManager();
@@ -25,17 +32,13 @@ function WindowItem({ win, active }: { win: WMWindow; active: boolean }) {
       aria-hidden={!active}
       style={{
         position: 'fixed',
-        left: 8,
-        right: 8,
-        top: 8,
-        bottom: 'calc(var(--dock-gap) + var(--dock-h) + 12px)',
+        left: 0,
+        right: 0,
+        top: WINDOW_HEADER_H,
+        bottom: 0,
         zIndex: 60,
-        borderRadius: 16,
         overflow: 'hidden',
         background: 'hsl(var(--background))',
-        border: '1px solid hsl(var(--border))',
-        boxShadow:
-          '0 30px 80px -24px rgba(0,0,0,.45), 0 8px 24px -12px rgba(0,0,0,.3)',
         visibility: active ? 'visible' : 'hidden',
         pointerEvents: active ? 'auto' : 'none',
       }}
@@ -49,6 +52,10 @@ function WindowItem({ win, active }: { win: WMWindow; active: boolean }) {
           border: 0,
           display: 'block',
           background: 'hsl(var(--background))',
+          // Kendi GPU katmanı → üstteki clip-path warp'ı temiz kırpar (yırtılma yok).
+          transform: 'translateZ(0)',
+          backfaceVisibility: 'hidden',
+          willChange: 'transform',
         }}
         allow="clipboard-read; clipboard-write"
       />
