@@ -1,5 +1,5 @@
 /**
- * Cari Ödeme data-access layer.
+ * Cari Ödeme / Qore Finance data-access layer.
  *
  * Ported from the standalone `cariodeme` app's `src/lib/firestore.ts` and
  * adapted to INV-zen:
@@ -13,6 +13,11 @@
  *   - User-management and expense-report helpers from the source were dropped:
  *     auth comes from `@/contexts/auth-context` and expenses already live in
  *     the existing "masraf-yonetimi" panel.
+ *
+ * Faz 0 additions:
+ *   - Immutable audit log (cariAuditEvents)
+ *   - State-machine based payment status transitions (updatePaymentStatus)
+ *   - Dashboard aggregation fix (no more 500-record cap)
  */
 import {
   collection,
@@ -45,6 +50,9 @@ import type {
   Department,
   BudgetHistory,
 } from "./types";
+import type { AuditEvent, AuditEventAction, AuditEntityType } from "./finance-types";
+import { canTransition } from "./state-machine";
+import type { FinanceRole } from "./finance-types";
 
 /** Tenant scope passed from the calling component (via `useAuth`). */
 export type Scope = { companyId: string | null | undefined; isSuperAdmin?: boolean };
@@ -55,6 +63,7 @@ const CARI_FIRMALAR = "cariFirmalar";
 const CARI_TEMPLATES = "cariPaymentTemplates";
 const CARI_BANK_ACCOUNTS = "cariBankAccounts";
 const CARI_DEPARTMENTS = "cariDepartments";
+const CARI_AUDIT_EVENTS = "cariAuditEvents";
 
 // Generic converter that turns Firestore Timestamps into JS Dates on read.
 function createConverter<T>(): FirestoreDataConverter<T> {
@@ -80,6 +89,7 @@ const bankAccountConverter = createConverter<BankAccount>();
 const paymentTemplateConverter = createConverter<PaymentTemplate>();
 const departmentConverter = createConverter<Department>();
 const budgetHistoryConverter = createConverter<BudgetHistory>();
+const auditEventConverter = createConverter<AuditEvent>();
 
 function currentUid(): string {
   return getAuth().currentUser?.uid ?? "unknown";
@@ -113,6 +123,98 @@ export async function getPayment(id: string): Promise<Payment | null> {
 export async function updatePayment(id: string, data: Partial<Omit<Payment, "id">>) {
   const docRef = doc(db, CARI_PAYMENTS, id);
   await updateDoc(docRef, { ...data, updatedAt: Timestamp.now() });
+}
+
+/* ------------------------------------------------------------------ */
+/* Payment Status Transitions (state-machine enforced)                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Transition a payment's status using the state-machine.
+ * Validates the transition against allowed rules and creates an audit event.
+ *
+ * @throws Error if the transition is not allowed for the given roles.
+ */
+export async function updatePaymentStatus(
+  scope: Scope,
+  paymentId: string,
+  newStatus: PaymentStatus,
+  userRoles: FinanceRole[],
+  userId: string,
+  userName: string,
+  opts?: {
+    bankName?: string;
+    rejectionReason?: string;
+  }
+): Promise<void> {
+  const payment = await getPayment(paymentId);
+  if (!payment) throw new Error("Ödeme bulunamadı.");
+
+  if (!canTransition(payment.status, newStatus, userRoles)) {
+    throw new Error(
+      `Bu durum geçişi (${payment.status} → ${newStatus}) yetkiniz dahilinde değil.`
+    );
+  }
+
+  const batch = writeBatch(db);
+  const paymentRef = doc(db, CARI_PAYMENTS, paymentId);
+
+  // Build the update payload with audit trail fields
+  const updateData: Record<string, any> = {
+    status: newStatus,
+    updatedAt: Timestamp.now(),
+  };
+
+  if (opts?.bankName) {
+    updateData.bankName = opts.bankName;
+  }
+
+  if (newStatus === "approved") {
+    updateData.approvedBy = userId;
+    updateData.approvedByName = userName;
+    updateData.approvedAt = Timestamp.now();
+  } else if (newStatus === "paid") {
+    updateData.paidBy = userId;
+    updateData.paidByName = userName;
+    updateData.paidAt = Timestamp.now();
+  } else if (newStatus === "rejected") {
+    updateData.rejectedBy = userId;
+    updateData.rejectedByName = userName;
+    updateData.rejectedAt = Timestamp.now();
+    if (opts?.rejectionReason) {
+      updateData.rejectionReason = opts.rejectionReason;
+    }
+  }
+
+  batch.update(paymentRef, updateData);
+
+  // Create audit event in the same batch
+  const auditRef = doc(collection(db, CARI_AUDIT_EVENTS));
+  batch.set(
+    auditRef,
+    withCompanyScope(
+      {
+        action: "payment_status_changed" as AuditEventAction,
+        entityType: "payment" as AuditEntityType,
+        entityId: paymentId,
+        userId,
+        userName,
+        timestamp: Timestamp.now(),
+        previousValue: {
+          status: payment.status,
+          bankName: payment.bankName,
+        },
+        newValue: {
+          status: newStatus,
+          bankName: opts?.bankName ?? payment.bankName,
+          ...(opts?.rejectionReason ? { rejectionReason: opts.rejectionReason } : {}),
+        },
+      },
+      scope.companyId
+    )
+  );
+
+  await batch.commit();
 }
 
 /**
@@ -452,15 +554,13 @@ export async function getDashboardData(scope: Scope) {
     CARI_PAYMENTS,
     scope.companyId,
     scope.isSuperAdmin,
-    orderBy("createdAt", "desc"),
-    limit(500)
+    orderBy("createdAt", "desc")
   ).withConverter(paymentConverter);
   const firmalarQuery = scopedQuery(
     CARI_FIRMALAR,
     scope.companyId,
     scope.isSuperAdmin,
-    orderBy("createdAt", "desc"),
-    limit(500)
+    orderBy("createdAt", "desc")
   ).withConverter(cariFirmaConverter);
 
   const [paymentsSnap, firmalarSnap] = await Promise.all([
@@ -483,4 +583,72 @@ export async function getDashboardData(scope: Scope) {
   );
 
   return { allPayments, kpi: { ...kpi, companies: firmalar.length } };
+}
+
+/* ------------------------------------------------------------------ */
+/* Audit Events (immutable log)                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Create an audit event. This is a general-purpose audit log writer.
+ * For payment status changes, prefer `updatePaymentStatus` which creates
+ * the audit event atomically in a batch.
+ */
+export async function createAuditEvent(
+  scope: Scope,
+  event: Omit<AuditEvent, "id" | "timestamp" | "companyId">
+): Promise<string> {
+  const ref = collection(db, CARI_AUDIT_EVENTS);
+  const docRef = await addDoc(
+    ref,
+    withCompanyScope(
+      { ...event, timestamp: Timestamp.now() },
+      scope.companyId
+    )
+  );
+  return docRef.id;
+}
+
+/**
+ * List audit events for a specific entity (e.g. a payment or firma).
+ * Returns events ordered by timestamp descending.
+ */
+export async function listAuditEvents(
+  scope: Scope,
+  entityId: string,
+  entityType?: AuditEntityType
+): Promise<AuditEvent[]> {
+  const constraints: QueryConstraint[] = [
+    where("entityId", "==", entityId),
+    orderBy("timestamp", "desc"),
+  ];
+  if (entityType) {
+    constraints.unshift(where("entityType", "==", entityType));
+  }
+  const q = scopedQuery(
+    CARI_AUDIT_EVENTS,
+    scope.companyId,
+    scope.isSuperAdmin,
+    ...constraints
+  ).withConverter(auditEventConverter);
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => d.data());
+}
+
+/**
+ * List recent audit events across all entities (for the dashboard).
+ */
+export async function listRecentAuditEvents(
+  scope: Scope,
+  maxItems: number = 50
+): Promise<AuditEvent[]> {
+  const q = scopedQuery(
+    CARI_AUDIT_EVENTS,
+    scope.companyId,
+    scope.isSuperAdmin,
+    orderBy("timestamp", "desc"),
+    limit(maxItems)
+  ).withConverter(auditEventConverter);
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => d.data());
 }
