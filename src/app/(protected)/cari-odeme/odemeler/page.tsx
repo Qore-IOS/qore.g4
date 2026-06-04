@@ -141,136 +141,140 @@ function PaymentsPageContent() {
   };
 
   return (
-    <div className="space-y-6">
-      <BackButton fallback="/cari-odeme" />
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <h1 className="text-3xl font-bold">Ödemeler</h1>
-        <div className="flex flex-col sm:flex-row w-full md:w-auto gap-2">
-          <Link href="/cari-odeme/odemeler/yeni" passHref className="w-full">
-            <Button className="w-full">
+    <div className="space-y-6 max-w-7xl mx-auto px-2 py-4">
+      {/* Header Area */}
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-4">
+        <div className="flex items-center gap-2">
+          <BackButton fallback="/cari-odeme" className="border-border hover:bg-muted" />
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">Ödemeler</h1>
+        </div>
+        <div className="flex flex-col sm:flex-row w-full md:w-auto gap-3">
+          <Link href="/cari-odeme/odemeler/yeni" passHref className="w-full sm:w-auto">
+            <Button className="w-full rounded-full px-6 shadow-sm">
               <PlusCircle className="mr-2 h-4 w-4" />
               Yeni Ödeme
             </Button>
           </Link>
-          <Button variant="outline" onClick={handleExport} disabled={exporting} className="w-full">
+          <Button variant="outline" onClick={handleExport} disabled={exporting} className="w-full sm:w-auto rounded-full border-border shadow-sm">
             <Download className="mr-2 h-4 w-4" />
             {exporting ? "Aktarılıyor..." : "Excel'e Aktar"}
           </Button>
         </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:flex md:flex-row items-center gap-2">
-            <Select value={requesterName} onValueChange={(value) => handleFilterChange("requesterName", value)}>
-              <SelectTrigger className="w-full"><SelectValue placeholder="Tüm Talep Edenler" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Tüm Talep Edenler</SelectItem>
-                {requesters.map((r) => (<SelectItem key={r} value={r}>{r}</SelectItem>))}
-              </SelectContent>
-            </Select>
-            <Select value={cariFirmaId} onValueChange={(value) => handleFilterChange("cariFirmaId", value)}>
-              <SelectTrigger className="w-full"><SelectValue placeholder="Tüm Firmalar" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Tüm Firmalar</SelectItem>
-                {firmalar.map((c) => (<SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>))}
-              </SelectContent>
-            </Select>
-            <Select value={status} onValueChange={(value) => handleFilterChange("status", value)}>
-              <SelectTrigger className="w-full"><SelectValue placeholder="Tüm Durumlar" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Tüm Durumlar</SelectItem>
-                <SelectItem value="pending">Beklemede</SelectItem>
-                <SelectItem value="approved">Onaylandı</SelectItem>
-                <SelectItem value="paid">Ödendi</SelectItem>
-                <SelectItem value="rejected">Reddedildi</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={bank} onValueChange={(value) => handleFilterChange("bank", value)}>
-              <SelectTrigger className="w-full"><SelectValue placeholder="Tüm Bankalar" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Tüm Bankalar</SelectItem>
-                {bankAccounts.map((account) => (<SelectItem key={account.id} value={account.bankName}>{account.bankName}</SelectItem>))}
-              </SelectContent>
-            </Select>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {/* Desktop Table View */}
-          <div className="hidden md:block">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Talep Eden</TableHead>
-                  <TableHead>Firma</TableHead>
-                  <TableHead className="text-right">Tutar</TableHead>
-                  <TableHead>Vade Tarihi</TableHead>
-                  <TableHead>Banka</TableHead>
-                  <TableHead>Durum</TableHead>
-                  <TableHead><span className="sr-only">İşlemler</span></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {loading ? (
-                  Array.from({ length: 10 }).map((_, i) => (
-                    <TableRow key={i}><TableCell colSpan={7}><div className="h-8 animate-pulse bg-muted rounded-md" /></TableCell></TableRow>
-                  ))
-                ) : rows.length > 0 ? (
-                  rows.map((r) => (
-                    <TableRow key={r.id}>
-                      <TableCell>{r.requesterName}</TableCell>
-                      <TableCell>{r.companyName}</TableCell>
-                      <TableCell className="text-right font-mono">{r.amount.toLocaleString("tr-TR", { style: "currency", currency: "TRY" })}</TableCell>
-                      <TableCell>{new Date(r.dueDate).toLocaleDateString("tr-TR")}</TableCell>
-                      <TableCell>{r.bankName ?? "—"}</TableCell>
-                      <TableCell><Badge variant={getStatusVariant(r.status)}>{getStatusText(r.status)}</Badge></TableCell>
-                      <TableCell className="text-right">
-                        <Button asChild variant="ghost" size="sm"><Link href={`/cari-odeme/odemeler/${r.id}`}>Görüntüle</Link></Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                ) : (
-                  <TableRow><TableCell colSpan={7} className="h-24 text-center">Ödeme bulunamadı.</TableCell></TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </div>
-          {/* Mobile Card View */}
-          <div className="block md:hidden">
-            <div className="space-y-4">
+      {/* Filters */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 bg-card p-2 rounded-xl border border-border shadow-sm">
+        <Select value={requesterName} onValueChange={(value) => handleFilterChange("requesterName", value)}>
+          <SelectTrigger className="w-full border-none bg-transparent focus:ring-0 shadow-none"><SelectValue placeholder="Tüm Talep Edenler" /></SelectTrigger>
+          <SelectContent className="bg-card border-border">
+            <SelectItem value="all">Tüm Talep Edenler</SelectItem>
+            {requesters.map((r) => (<SelectItem key={r} value={r}>{r}</SelectItem>))}
+          </SelectContent>
+        </Select>
+        <Select value={cariFirmaId} onValueChange={(value) => handleFilterChange("cariFirmaId", value)}>
+          <SelectTrigger className="w-full border-none bg-transparent focus:ring-0 shadow-none border-t sm:border-t-0 sm:border-l border-border rounded-none"><SelectValue placeholder="Tüm Firmalar" /></SelectTrigger>
+          <SelectContent className="bg-card border-border">
+            <SelectItem value="all">Tüm Firmalar</SelectItem>
+            {firmalar.map((c) => (<SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>))}
+          </SelectContent>
+        </Select>
+        <Select value={status} onValueChange={(value) => handleFilterChange("status", value)}>
+          <SelectTrigger className="w-full border-none bg-transparent focus:ring-0 shadow-none border-t md:border-t-0 md:border-l border-border rounded-none"><SelectValue placeholder="Tüm Durumlar" /></SelectTrigger>
+          <SelectContent className="bg-card border-border">
+            <SelectItem value="all">Tüm Durumlar</SelectItem>
+            <SelectItem value="pending">Beklemede</SelectItem>
+            <SelectItem value="approved">Onaylandı</SelectItem>
+            <SelectItem value="paid">Ödendi</SelectItem>
+            <SelectItem value="rejected">Reddedildi</SelectItem>
+          </SelectContent>
+        </Select>
+        <Select value={bank} onValueChange={(value) => handleFilterChange("bank", value)}>
+          <SelectTrigger className="w-full border-none bg-transparent focus:ring-0 shadow-none border-t sm:border-t-0 sm:border-l border-border rounded-none"><SelectValue placeholder="Tüm Bankalar" /></SelectTrigger>
+          <SelectContent className="bg-card border-border">
+            <SelectItem value="all">Tüm Bankalar</SelectItem>
+            {bankAccounts.map((account) => (<SelectItem key={account.id} value={account.bankName}>{account.bankName}</SelectItem>))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Main Table */}
+      <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
+        {/* Desktop View */}
+        <div className="hidden md:block">
+          <Table>
+            <TableHeader className="bg-muted/50">
+              <TableRow className="border-border hover:bg-transparent">
+                <TableHead className="font-medium h-12">Talep Eden</TableHead>
+                <TableHead className="font-medium h-12">Firma</TableHead>
+                <TableHead className="text-right font-medium h-12">Tutar</TableHead>
+                <TableHead className="font-medium h-12">Vade Tarihi</TableHead>
+                <TableHead className="font-medium h-12">Banka</TableHead>
+                <TableHead className="font-medium h-12">Durum</TableHead>
+                <TableHead className="h-12"><span className="sr-only">İşlemler</span></TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {loading ? (
-                Array.from({ length: 5 }).map((_, i) => (
-                  <Card key={i}><CardContent className="p-4"><div className="h-32 animate-pulse bg-muted rounded-md" /></CardContent></Card>
+                Array.from({ length: 10 }).map((_, i) => (
+                  <TableRow key={i} className="border-border/50"><TableCell colSpan={7}><div className="h-8 animate-pulse bg-muted rounded-md" /></TableCell></TableRow>
                 ))
               ) : rows.length > 0 ? (
-                rows.map((r) => (
-                  <Card key={r.id}>
-                    <CardHeader>
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <CardTitle className="text-base">{r.companyName}</CardTitle>
-                          <CardDescription>Talep: {r.requesterName}</CardDescription>
-                        </div>
-                        <Badge variant={getStatusVariant(r.status)}>{getStatusText(r.status)}</Badge>
-                      </div>
-                    </CardHeader>
-                    <CardContent className="text-sm space-y-2">
-                      <p className="font-bold text-lg">{r.amount.toLocaleString("tr-TR", { style: "currency", currency: "TRY" })}</p>
-                      <p><strong>Vade:</strong> {new Date(r.dueDate).toLocaleDateString("tr-TR")}</p>
-                      <p><strong>Banka:</strong> {r.bankName ?? "—"}</p>
-                    </CardContent>
-                    <CardFooter>
-                      <Button asChild variant="secondary" className="w-full"><Link href={`/cari-odeme/odemeler/${r.id}`}>Detayları Görüntüle</Link></Button>
-                    </CardFooter>
-                  </Card>
+                rows.map((r, index) => (
+                  <TableRow key={r.id} className={cn("border-border/50 hover:bg-muted/30 transition-colors", index === rows.length - 1 && "border-0")}>
+                    <TableCell className="py-4 text-muted-foreground">{r.requesterName}</TableCell>
+                    <TableCell className="py-4 font-medium">{r.companyName}</TableCell>
+                    <TableCell className="py-4 text-right font-semibold">{r.amount.toLocaleString("tr-TR", { style: "currency", currency: "TRY" })}</TableCell>
+                    <TableCell className="py-4 text-muted-foreground">{new Date(r.dueDate).toLocaleDateString("tr-TR")}</TableCell>
+                    <TableCell className="py-4 text-muted-foreground">{r.bankName ?? "—"}</TableCell>
+                    <TableCell className="py-4">
+                      <Badge variant={getStatusVariant(r.status)} className="rounded-full px-3 font-medium shadow-none">
+                        {getStatusText(r.status)}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="py-4 text-right">
+                      <Link href={`/cari-odeme/odemeler/${r.id}`} className="text-sm text-primary hover:underline font-medium">Görüntüle</Link>
+                    </TableCell>
+                  </TableRow>
                 ))
               ) : (
-                <div className="text-center p-8 text-muted-foreground">Ödeme bulunamadı.</div>
+                <TableRow><TableCell colSpan={7} className="h-32 text-center text-muted-foreground border-0">Filtrelere uygun ödeme bulunamadı.</TableCell></TableRow>
               )}
-            </div>
+            </TableBody>
+          </Table>
+        </div>
+        
+        {/* Mobile View */}
+        <div className="block md:hidden">
+          <div className="divide-y divide-border">
+            {loading ? (
+              Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="p-4"><div className="h-24 animate-pulse bg-muted rounded-md" /></div>
+              ))
+            ) : rows.length > 0 ? (
+              rows.map((r) => (
+                <div key={r.id} className="p-4 flex flex-col gap-3 hover:bg-muted/30 transition-colors">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h4 className="font-medium text-foreground">{r.companyName}</h4>
+                      <p className="text-xs text-muted-foreground mt-1">Talep: {r.requesterName}</p>
+                    </div>
+                    <Badge variant={getStatusVariant(r.status)} className="rounded-full shadow-none">{getStatusText(r.status)}</Badge>
+                  </div>
+                  <div className="flex justify-between items-end mt-2">
+                    <div className="space-y-1">
+                      <p className="font-semibold text-lg">{r.amount.toLocaleString("tr-TR", { style: "currency", currency: "TRY" })}</p>
+                      <p className="text-xs text-muted-foreground">{r.bankName ?? "Banka atanmadı"} • Vade: {new Date(r.dueDate).toLocaleDateString("tr-TR")}</p>
+                    </div>
+                    <Link href={`/cari-odeme/odemeler/${r.id}`} className="text-sm text-primary font-medium">Detay</Link>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="text-center p-8 text-muted-foreground">Ödeme bulunamadı.</div>
+            )}
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {!loading && <Pager nextCursor={next} />}
     </div>
