@@ -266,15 +266,17 @@ export function runGenie(
   });
 
   anim.onfinish = () => {
+    // Önce WAAPI animasyonunu iptal et — fill:'forwards' ile tutulan son kareyi
+    // DOM'dan kaldır. Yoksa clearGenie() inline stilleri temizlese bile WAAPI'nin
+    // fill efekti bunları ezer ve clip-path/transform takılı kalır.
+    try {
+      anim.cancel();
+    } catch {
+      /* yoksay */
+    }
+    // Şimdi tüm inline genie stillerini güvenle temizle.
     if (reverse) {
-      // Önce inline'ı temizle, sonra animasyonu iptal et — yoksa fill:forwards
-      // ile tutulan son kare inline temizliği ezer ve yırtık bırakır.
       clearGenie(el);
-      try {
-        anim.cancel();
-      } catch {
-        /* yoksay */
-      }
     }
     onDone?.();
   };

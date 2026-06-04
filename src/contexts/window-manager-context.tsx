@@ -119,7 +119,10 @@ export function WindowManagerProvider({ children }: { children: React.ReactNode 
       const finish = () => {
         // Animasyon biter bitmez senkron gizle — son karede iframe'in torn/yarım
         // çizilmiş hâlinin 1 kare görünmesini engeller.
-        if (el) el.style.visibility = 'hidden';
+        if (el) {
+          el.style.visibility = 'hidden';
+          el.style.pointerEvents = 'none';
+        }
         setActiveId((cur) => (cur === id ? null : cur));
         setWindows((prev) => {
           let next = prev.map((w) => (w.id === id ? { ...w, minimized: true } : w));
@@ -130,7 +133,8 @@ export function WindowManagerProvider({ children }: { children: React.ReactNode 
           }
           return next;
         });
-        if (el) requestAnimationFrame(() => requestAnimationFrame(() => clearGenie(el)));
+        // clearGenie'yi burada çağırma — element minimize hâlinde kalmalı.
+        // Restore sırasında temizlenecek.
       };
       if (!el) return finish();
       requestAnimationFrame(() =>
@@ -161,8 +165,17 @@ export function WindowManagerProvider({ children }: { children: React.ReactNode 
         setActiveId(id);
       };
       if (el) {
+        // Önceki minimize animasyonunun fill:'forwards' kalıntısını temizle.
+        // Bu yapılmazsa WAAPI'nin frozen son karesi tüm inline stil değişikliklerini ezer.
+        try {
+          if (typeof el.getAnimations === 'function') {
+            el.getAnimations().forEach((a) => a.cancel());
+          }
+        } catch { /* yoksay */ }
+
         const tgt = dockSlot(idx);
         if (tgt) applyGenieCollapsed(el, tgt.x, tgt.y, tgt.w); // flash önleme
+
         // Minimize sırasında DOM'a doğrudan yazılan visibility:'hidden' inline
         // stilini temizle — React'ın style prop'u bunu ezemez çünkü aynı
         // property'yi inline olarak yazmıştı.
