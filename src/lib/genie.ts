@@ -198,6 +198,10 @@ export function clearGenie(el: HTMLElement) {
   el.style.opacity = '';
   el.style.filter = '';
   el.style.willChange = '';
+  // Minimize sırasında ayarlanan visibility/pointerEvents'i de temizle
+  // (React'ın inline style prop'unun tekrar kontrolü almasını sağlar).
+  el.style.visibility = '';
+  el.style.pointerEvents = '';
 }
 
 /* ================================================================
