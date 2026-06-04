@@ -163,11 +163,30 @@ export function WindowManagerProvider({ children }: { children: React.ReactNode 
       if (el) {
         const tgt = dockSlot(idx);
         if (tgt) applyGenieCollapsed(el, tgt.x, tgt.y, tgt.w); // flash önleme
+        // Minimize sırasında DOM'a doğrudan yazılan visibility:'hidden' inline
+        // stilini temizle — React'ın style prop'u bunu ezemez çünkü aynı
+        // property'yi inline olarak yazmıştı.
+        el.style.visibility = 'visible';
+        el.style.pointerEvents = 'auto';
         apply();
         requestAnimationFrame(() => {
           const t2 = dockSlot(idx);
-          if (t2) runGenie(el, t2.x, t2.y, { reverse: true, slotW: t2.w });
-          else clearGenie(el);
+          if (t2) {
+            runGenie(el, t2.x, t2.y, {
+              reverse: true,
+              slotW: t2.w,
+              onDone: () => {
+                // Animasyon bittikten sonra tüm genie kalıntılarını temizle
+                clearGenie(el);
+                el.style.visibility = 'visible';
+                el.style.pointerEvents = 'auto';
+              },
+            });
+          } else {
+            clearGenie(el);
+            el.style.visibility = 'visible';
+            el.style.pointerEvents = 'auto';
+          }
         });
       } else {
         apply();

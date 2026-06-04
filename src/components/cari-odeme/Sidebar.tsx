@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useWindowManager } from "@/contexts/window-manager-context";
+import { useAuth } from "@/contexts/auth-context";
 import { 
   LayoutDashboard, 
   CreditCard, 
@@ -40,8 +41,12 @@ export function CariOdemeSidebar() {
   const [isCollapsed, setIsCollapsed] = useState(false);
   
   const { windows, activeId, closeWindow, minimizeWindow, windowBack } = useWindowManager();
+  const { currentUserProfile } = useAuth();
   const active = windows.find((w) => w.id === activeId);
   const title = active?.title || "Cari Ödeme";
+
+  // user rolündeki kullanıcılardan trafik ışıklarını gizle
+  const isUserRole = currentUserProfile?.role === 'user';
 
   return (
     <aside 
@@ -53,51 +58,57 @@ export function CariOdemeSidebar() {
       {/* Header Area (Window Chrome) */}
       <div className={cn(
         "flex pt-6 pb-4 w-full transition-all duration-300",
-        isCollapsed ? "flex-col items-center gap-5" : "flex-row items-center gap-3 px-4"
+        isCollapsed 
+          ? "flex-col items-center gap-5" 
+          : "flex-row items-center gap-3 px-4"
       )}>
-        {/* Traffic Lights */}
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            type="button"
-            onClick={() => activeId && closeWindow(activeId)}
-            className="group/light relative h-[13px] w-[13px] rounded-full bg-[#ff5f57] border border-black/10 grid place-items-center transition active:brightness-90"
-          >
-            <svg className="opacity-0 transition-opacity duration-150 group-hover/light:opacity-100" width="7" height="7" viewBox="0 0 8 8" stroke="rgba(80,0,0,.55)" strokeWidth="1.3" strokeLinecap="round">
-              <path d="M1.5 1.5l5 5M6.5 1.5l-5 5" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            onClick={() => activeId && minimizeWindow(activeId)}
-            className="group/light relative h-[13px] w-[13px] rounded-full bg-[#febc2e] border border-black/10 grid place-items-center transition active:brightness-90"
-          >
-            <svg className="opacity-0 transition-opacity duration-150 group-hover/light:opacity-100" width="8" height="8" viewBox="0 0 8 8" stroke="rgba(110,70,0,.6)" strokeWidth="1.3" strokeLinecap="round">
-              <path d="M1.5 4h5" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            disabled
-            className="group/light relative h-[13px] w-[13px] rounded-full bg-[#28c840] border border-black/10 grid place-items-center opacity-90 cursor-default"
-          >
-            <svg className="opacity-0 transition-opacity duration-150 group-hover/light:opacity-100" width="8" height="8" viewBox="0 0 8 8" fill="rgba(0,80,0,.5)">
-              <path d="M1.6 1.6h2.2L1.6 3.8zM6.4 6.4H4.2L6.4 4.2z" />
-            </svg>
-          </button>
-        </div>
+        {/* Traffic Lights — user rolünde gizlenir */}
+        {!isUserRole && (
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => activeId && closeWindow(activeId)}
+              className="group/light relative h-[13px] w-[13px] rounded-full bg-[#ff5f57] border border-black/10 grid place-items-center transition active:brightness-90"
+            >
+              <svg className="opacity-0 transition-opacity duration-150 group-hover/light:opacity-100" width="7" height="7" viewBox="0 0 8 8" stroke="rgba(80,0,0,.55)" strokeWidth="1.3" strokeLinecap="round">
+                <path d="M1.5 1.5l5 5M6.5 1.5l-5 5" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={() => activeId && minimizeWindow(activeId)}
+              className="group/light relative h-[13px] w-[13px] rounded-full bg-[#febc2e] border border-black/10 grid place-items-center transition active:brightness-90"
+            >
+              <svg className="opacity-0 transition-opacity duration-150 group-hover/light:opacity-100" width="8" height="8" viewBox="0 0 8 8" stroke="rgba(110,70,0,.6)" strokeWidth="1.3" strokeLinecap="round">
+                <path d="M1.5 4h5" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              disabled
+              className="group/light relative h-[13px] w-[13px] rounded-full bg-[#28c840] border border-black/10 grid place-items-center opacity-90 cursor-default"
+            >
+              <svg className="opacity-0 transition-opacity duration-150 group-hover/light:opacity-100" width="8" height="8" viewBox="0 0 8 8" fill="rgba(0,80,0,.5)">
+                <path d="M1.6 1.6h2.2L1.6 3.8zM6.4 6.4H4.2L6.4 4.2z" />
+              </svg>
+            </button>
+          </div>
+        )}
 
-        {/* Global Back Button */}
-        <button
-          type="button"
-          onClick={windowBack}
-          title="Geri Dön"
-          className={cn(
-            "grid h-7 w-7 shrink-0 place-items-center rounded-full border border-black/5 bg-white/75 text-slate-800 shadow-[0_8px_22px_rgba(15,23,42,0.10),inset_0_1px_0_rgba(255,255,255,0.75)] backdrop-blur-md transition hover:bg-white active:scale-95",
-            isCollapsed && "mt-1"
-          )}
-        >
-          <ChevronLeft className="h-4 w-4" strokeWidth={2.4} />
-        </button>
+        {/* Global Back Button — user rolünde gizlenir */}
+        {!isUserRole && (
+          <button
+            type="button"
+            onClick={windowBack}
+            title="Geri Dön"
+            className={cn(
+              "grid h-7 w-7 shrink-0 place-items-center rounded-full border border-black/5 bg-white/75 text-slate-800 shadow-[0_8px_22px_rgba(15,23,42,0.10),inset_0_1px_0_rgba(255,255,255,0.75)] backdrop-blur-md transition hover:bg-white active:scale-95",
+              isCollapsed && "mt-1"
+            )}
+          >
+            <ChevronLeft className="h-4 w-4" strokeWidth={2.4} />
+          </button>
+        )}
 
         {/* Title */}
         {!isCollapsed && (
