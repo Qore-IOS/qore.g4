@@ -142,7 +142,7 @@ function PaymentsPageContent() {
   };
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto px-2 py-4">
+    <div className="space-y-6 w-full p-4 md:p-8">
       {/* Header Area */}
       <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 mb-4">
         <div className="flex items-center gap-2">

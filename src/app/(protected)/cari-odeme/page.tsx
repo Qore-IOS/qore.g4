@@ -283,7 +283,7 @@ export default function Dashboard() {
   if (loading || !data) return <DashboardSkeleton />;
 
   return (
-    <div className="space-y-8 p-6 max-w-7xl mx-auto">
+    <div className="space-y-8 p-6 w-full">
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Gösterge Paneli</h1>
@@ -584,7 +584,7 @@ export default function Dashboard() {
 
 function DashboardSkeleton() {
   return (
-    <div className="space-y-8 p-6 max-w-7xl mx-auto">
+    <div className="space-y-8 p-6 w-full">
       <div className="flex justify-between items-center">
         <Skeleton className="h-8 w-64 bg-muted" />
         <Skeleton className="h-10 w-48 rounded-md bg-muted" />

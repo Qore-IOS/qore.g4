@@ -53,7 +53,7 @@ export default function FaturaDetayPage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-6 p-4 max-w-5xl mx-auto">
+      <div className="space-y-6 p-4 w-full md:p-8">
         <Skeleton className="h-10 w-32" />
         <Skeleton className="h-32 w-full" />
         <Skeleton className="h-64 w-full" />
@@ -63,7 +63,7 @@ export default function FaturaDetayPage() {
 
   if (!invoice) {
     return (
-      <div className="p-4 max-w-5xl mx-auto text-center">
+      <div className="p-4 w-full md:p-8 text-center">
         <BackButton fallback="/cari-odeme/faturalar" />
         <h2 className="text-2xl font-bold mt-10">Fatura Bulunamadı</h2>
       </div>
@@ -71,7 +71,7 @@ export default function FaturaDetayPage() {
   }
 
   return (
-    <div className="space-y-6 max-w-5xl mx-auto px-2 py-4">
+    <div className="space-y-6 w-full p-4 md:p-8">
       <div className="flex items-center gap-2 mb-4">
         <BackButton fallback="/cari-odeme/faturalar" className="border-border hover:bg-muted" />
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Fatura Detayı</h1>
