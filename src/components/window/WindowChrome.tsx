@@ -4,6 +4,8 @@ import React from 'react';
 import { ChevronLeft } from 'lucide-react';
 import { useWindowManager } from '@/contexts/window-manager-context';
 
+import { usePathname } from 'next/navigation';
+
 /**
  * macOS-vari global pencere başlığı — sol üstte YÜZER (ayrı şerit/arka plan yok;
  * masaüstü arka planıyla aynı). Boştayken küçülüp soluklaşır, mouse gelince
@@ -12,8 +14,11 @@ import { useWindowManager } from '@/contexts/window-manager-context';
  */
 export function WindowChrome() {
   const { windows, activeId, minimizeWindow, closeWindow, windowBack } = useWindowManager();
+  const pathname = usePathname();
 
   if (!activeId) return null;
+  if (pathname?.startsWith('/cari-odeme')) return null;
+
   const active = windows.find((w) => w.id === activeId);
 
   return (
