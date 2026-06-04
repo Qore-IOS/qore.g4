@@ -16,6 +16,8 @@ import {
 } from '@/components/ui/popover';
 import { useDock } from '@/hooks/use-dock';
 import type { NotificationItem } from '@/hooks/use-dock';
+import Image from 'next/image';
+import { getIconSrc } from '@/hooks/useIconMappings';
 
 type Props = {
   label?: string;
@@ -23,6 +25,7 @@ type Props = {
   items: NotificationItem[];
   unreadCount: number;
   loading: boolean;
+  customIcon?: string;
 };
 
 export default function NotificationsBell({
@@ -31,6 +34,7 @@ export default function NotificationsBell({
   items,
   unreadCount,
   loading,
+  customIcon,
 }: Props) {
   const { currentUserProfile } = useAuth();
   const { markAllAsRead } = useDock();
@@ -96,7 +100,17 @@ export default function NotificationsBell({
           'relative cursor-default dock-item-wrapper hover:scale-150 hover:-translate-y-2 transition'
       )}
     >
-      <Bell className={triggerClassName ? 'w-5 h-5' : 'dock-item-icon'} />
+      {customIcon ? (
+        <Image
+          src={getIconSrc(customIcon)}
+          alt={label}
+          width={triggerClassName ? 20 : 34}
+          height={triggerClassName ? 20 : 34}
+          className={cn(triggerClassName ? 'w-5 h-5 object-contain' : 'dock-item-icon object-contain')}
+        />
+      ) : (
+        <Bell className={triggerClassName ? 'w-5 h-5' : 'dock-item-icon'} />
+      )}
       {unreadCount > 0 && (
         <span className={cn(
           'absolute -top-1 -right-1 inline-flex items-center justify-center text-[10px] font-bold rounded-full px-1.5 h-4 bg-red-600 text-white min-w-[16px]',

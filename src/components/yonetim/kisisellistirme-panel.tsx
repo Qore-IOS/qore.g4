@@ -87,8 +87,15 @@ export default function KisisellistirmePanel() {
   ];
 
   // Items for each icon tab
-  const dockItems = VIEWS.filter(v => v.type === 'nav').map(v => ({ key: v.key, label: v.label }));
-  const mobileItems = VIEWS.filter(v => v.type === 'nav').map(v => ({ key: v.key, label: v.label }));
+  const dockItems = [
+    ...VIEWS.filter(v => v.type === 'nav').map(v => ({ key: v.key, label: v.label })),
+    { key: 'notifications', label: 'Bildirimler' },
+    { key: 'calendar', label: 'Takvim' }
+  ];
+  const mobileItems = [
+    ...VIEWS.filter(v => v.type === 'nav').map(v => ({ key: v.key, label: v.label })),
+    { key: 'notifications', label: 'Bildirimler' }
+  ];
   const envanterItems = envanterCategories.map(c => ({ key: c.name, label: c.name }));
 
   const currentTabItems = iconTab === 'dock' ? dockItems : iconTab === 'mobile' ? mobileItems : envanterItems;
