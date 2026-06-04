@@ -128,11 +128,13 @@ export default function SiparislerPanel(): JSX.Element {
   const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   useRowFocus('focus');
 
-  // Optimized Fetching
-  const { data: allDepotsData = [], isLoading: depotsLoading } = useDepots();
-  const { data: hospitals = [], isLoading: hospitalsLoading } = useHospitals();
-  const { data: productCodes = [], isLoading: productsLoading } = useProductCodes();
-  const { data: depoStok = [], isLoading: stokLoading } = useDepoStok();
+  // Optimized Fetching — isPending: sadece hiç cache yoksa true.
+  // Prefetch (AppLayout) sayesinde depots/hospitals/productCodes zaten cache'de olur.
+  // stokLoading KASIT LI olarak çıkarıldı: tüm depo stoğu yüklenmeden panel açılabilmeli.
+  const { data: allDepotsData = [] } = useDepots();
+  const { data: hospitals = [] } = useHospitals();
+  const { data: productCodes = [] } = useProductCodes();
+  const { data: depoStok = [] } = useDepoStok();
 
   const depots = useMemo(() => filterOperationalSourceDepots(allDepotsData, currentUserProfile), [allDepotsData, currentUserProfile]);
 
@@ -145,7 +147,6 @@ export default function SiparislerPanel(): JSX.Element {
   const [manualStockCode, setManualStockCode] = useState<string>('');
   const [manualQty, setManualQty] = useState<number | string>(1);
 
-  const isLoading = depotsLoading || hospitalsLoading || productsLoading || stokLoading;
   const [isProcessing, setIsProcessing] = useState(false);
 
   const [showBulk, setShowBulk] = useState(false);
@@ -675,13 +676,13 @@ export default function SiparislerPanel(): JSX.Element {
     hasItems: orderItems.length > 0,
   }), [selectedDepotId, selectedLabId, orderItems]);
 
-  // ── Lojistik Sorumlusu: completely different UI ──
+  // Lojistik sorumlusu rolü: sipariş oluşturma ve depo seçim akışları gizlenir,
+  // yalnızca kendisine atanan laboratuvarların perifer siparişlerini görür.
+  const isLojistikSorumlusu = currentUserProfile?.role === 'lojistik_sorumlusu';
+
+  // ── Lojistik Sorumlusu: completely different UI (skeleton yok, anında açılır) ──
   if (isLojistikSorumlusu) {
     return <LojistikSiparisView />;
-  }
-
-  if (isLoading && pendingOrders.length === 0 && orderItems.length === 0) {
-    return <SiparislerSkeleton />;
   }
 
   return (

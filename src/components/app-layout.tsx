@@ -30,7 +30,7 @@ import {
 } from "./ui/sidebar";
 import Image from "next/image";
 import { useIconMappings, getIconSrc } from "@/hooks/useIconMappings";
-import { useProductCodes, useBarcodeFormatsQuery, useDepots, useAddressDefinitions, useUsers } from "@/hooks/useFirebaseQueries";
+import { useProductCodes, useBarcodeFormatsQuery, useDepots, useAddressDefinitions, useUsers, useHospitals } from "@/hooks/useFirebaseQueries";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -78,6 +78,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   useDepots();
   useAddressDefinitions();
   useUsers();
+  useHospitals(); // Siparisler paneli ve LojistikSiparisView için
 
   const pathname = usePathname();
   const [calendarOpen, setCalendarOpen] = useState(false);

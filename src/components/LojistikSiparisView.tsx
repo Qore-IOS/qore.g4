@@ -16,6 +16,7 @@ import {
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import { getScopedDocs, scopedQuery } from '@/lib/firestore-helpers';
+import { useHospitals, useProductCodes, useDepots } from '@/hooks/useFirebaseQueries';
 import { useToast } from '@/hooks/use-toast';
 import type { Order, Hospital, ProductCode, DepoStokItem, PeripheralFulfillmentItem, Depot } from '@/lib/types';
 import { format as formatDate, compareAsc, parse as parseDate } from 'date-fns';
@@ -101,14 +102,15 @@ export default function LojistikSiparisView() {
   const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const [peripheralOrders, setPeripheralOrders] = useState<Order[]>([]);
   const [completedOrders, setCompletedOrders] = useState<Order[]>([]);
-  const [hospitals, setHospitals] = useState<Hospital[]>([]);
-  const [depots, setDepots] = useState<Depot[]>([]);
-  const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
+  // TanStack Query — AppLayout prefetch sayesinde anında cache'den gelir, 0ms bekleme
+  const { data: hospitals = [] } = useHospitals();
+  const { data: productCodes = [] } = useProductCodes();
+  const { data: depots = [] } = useDepots();
+
   const [maxByStokKodu, setMaxByStokKodu] = useState<Map<string, { max: number; maxGun?: number }>>(new Map());
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [filter, setFilter] = useState<LojFilter>('all');
   const [search, setSearch] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
 
   const [rows, setRows] = useState<RowState[]>([]);
@@ -172,44 +174,20 @@ export default function LojistikSiparisView() {
     [groupFilteringActive, stokKoduToGrup, userGroupNames]
   );
 
-  // Fetch hospitals, products, depots and lab groups
+  // def_labGroups: sadece lab grup isimleri için hâlâ manuel çekme (TanStack Query'de yok)
   useEffect(() => {
     let cancelled = false;
-
     (async () => {
-      const [hResult, pResult, dResult, lgResult] = await Promise.allSettled([
-        getScopedDocs('hospitals', currentCompanyId, isSuperAdmin),
-        getScopedDocs('productCodes', currentCompanyId, isSuperAdmin),
-        getScopedDocs('depots', currentCompanyId, isSuperAdmin),
-        getScopedDocs('def_labGroups', currentCompanyId, isSuperAdmin),
-      ]);
-
-      if (cancelled) return;
-
-      if (hResult.status === 'fulfilled') {
-        setHospitals(hResult.value.map((d) => ({ id: d.id, ...d.data() } as Hospital)));
-      }
-      if (pResult.status === 'fulfilled') {
-        setProductCodes(pResult.value.map((d) => ({ id: d.id, ...d.data() } as ProductCode)));
-      }
-      if (dResult.status === 'fulfilled') {
-        setDepots(dResult.value.map((d) => ({ id: d.id, ...d.data() } as Depot)));
-      }
-      if (lgResult.status === 'fulfilled') {
-        const lgMap = new Map<string, string>();
-        lgResult.value.forEach((d) => {
-          const name = (d.data() as any)?.name;
-          if (name) lgMap.set(d.id, String(name).trim());
-        });
-        setLabGroupNamesById(lgMap);
-      } else {
-        console.error('Lojistik lab grupları yüklenemedi:', lgResult.reason);
-      }
+      const lgResult = await getScopedDocs('def_labGroups', currentCompanyId, isSuperAdmin).catch(() => null);
+      if (cancelled || !lgResult) return;
+      const lgMap = new Map<string, string>();
+      lgResult.forEach((d) => {
+        const name = (d.data() as any)?.name;
+        if (name) lgMap.set(d.id, String(name).trim());
+      });
+      setLabGroupNamesById(lgMap);
     })();
-
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [currentCompanyId, isSuperAdmin]);
 
   // Listen peripheral orders
@@ -253,11 +231,9 @@ export default function LojistikSiparisView() {
         );
         setPeripheralOrders(active);
         setCompletedOrders(completed);
-        setIsLoading(false);
       },
       (error) => {
         console.error('Lojistik sipariş dinleyici hatası:', error);
-        setIsLoading(false);
         toast({
           title: 'Siparişler yüklenemedi',
           description: 'Yetki veya bağlantı nedeniyle sipariş verileri alınamadı.',
@@ -793,13 +769,8 @@ export default function LojistikSiparisView() {
     return (fulfilled / rows.length) * 100;
   }, [rows]);
 
-  if (isLoading) {
-    return (
-      <div className="loj-shell flex items-center justify-center" style={{ minHeight: '100dvh' }}>
-        <Loader2 className="h-8 w-8 animate-spin" style={{ color: 'var(--loj-accent)' }} />
-      </div>
-    );
-  }
+  // isLoading spinner kaldırıldı — artık TanStack Query cache'den anında geliyor.
+  // Siparişler listesi onSnapshot ile birkaç 100ms içinde dolar; bekleme ekranı yok.
 
   return (
     <div className="loj-shell min-h-screen">
