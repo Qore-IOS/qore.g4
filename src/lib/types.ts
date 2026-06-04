@@ -1089,6 +1089,8 @@ export interface Asset {
   kiraTutari?: number;
   /** Kira dönemi (mulkiyet='kira' ise; varsayılan 'aylik') */
   kiraDonemi?: 'aylik' | 'yillik';
+  /** Kira bitiş tarihi (mulkiyet='kira' ise) */
+  kiraBitisTarihi?: string;
   /** Maliyet para birimi (varsayılan TRY) */
   maliyetCurrency?: 'EUR' | 'USD' | 'TRY';
   hurdaTarihi?: string;

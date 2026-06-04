@@ -25,7 +25,29 @@ import Link from 'next/link';
 import NextImage from 'next/image';
 import { useIconMappings, getIconSrc } from '@/hooks/useIconMappings';
 
-type FilterableColumn = keyof Omit<Asset, 'id' | 'aciklama'>;
+type FilterableColumn = keyof Pick<Asset, 'demirbasNo' | 'urunKodu' | 'urunAdi' | 'marka' | 'model' | 'seriNumarasi' | 'durum' | 'konum' | 'teslimEdilenPersonel' | 'manuelKonum' | 'category' | 'mulkiyet'>;
+
+const OWNERSHIP_OPTIONS = {
+  satin_alma: 'Satılık',
+  kira: 'Kiralık',
+} as const;
+
+const formatTry = (value?: number) =>
+  typeof value === 'number' && Number.isFinite(value)
+    ? `${value.toLocaleString('tr-TR')} ₺`
+    : '-';
+
+const getOwnershipLabel = (asset: Partial<Asset>) =>
+  OWNERSHIP_OPTIONS[asset.mulkiyet || 'satin_alma'];
+
+const getCostLabel = (asset: Partial<Asset>) => {
+  if (asset.mulkiyet === 'kira') {
+    const amount = formatTry(asset.kiraTutari);
+    const period = asset.kiraDonemi === 'yillik' ? 'yıl' : 'ay';
+    return amount === '-' ? '-' : `${amount} / ${period}`;
+  }
+  return formatTry(asset.alimFiyatiTl);
+};
 
 const FilterPopover: React.FC<{
   column: FilterableColumn;
@@ -114,7 +136,7 @@ export default function AssetCategoryPage() {
     demirbasNo: new Set(), urunKodu: new Set(), urunAdi: new Set(),
     marka: new Set(), model: new Set(), seriNumarasi: new Set(),
     durum: new Set(), konum: new Set(), teslimEdilenPersonel: new Set(),
-    manuelKonum: new Set(), category: new Set(),
+    manuelKonum: new Set(), category: new Set(), mulkiyet: new Set(),
   });
 
   const fetchData = useCallback(async () => {
@@ -220,10 +242,13 @@ export default function AssetCategoryPage() {
       demirbasNo: new Set(), urunKodu: new Set(), urunAdi: new Set(),
       marka: new Set(), model: new Set(), seriNumarasi: new Set(),
       durum: new Set(), konum: new Set(), teslimEdilenPersonel: new Set(),
-      manuelKonum: new Set(), category: new Set(),
+      manuelKonum: new Set(), category: new Set(), mulkiyet: new Set(),
     };
     assets.forEach(a => {
-      (Object.keys(opts) as FilterableColumn[]).forEach(k => { if (a[k]) opts[k].add(a[k]!); });
+      (Object.keys(opts) as FilterableColumn[]).forEach(k => {
+        const value = k === 'mulkiyet' ? getOwnershipLabel(a) : a[k];
+        if (value) opts[k].add(String(value));
+      });
     });
     const out: Record<string, string[]> = {};
     (Object.keys(opts) as string[]).forEach(k => { out[k] = Array.from((opts as any)[k]).sort(); });
@@ -240,7 +265,10 @@ export default function AssetCategoryPage() {
       );
     }
     if (activeKeys.length === 0) return scoped;
-    return scoped.filter(a => activeKeys.every(k => filters[k].has(a[k]!)));
+    return scoped.filter(a => activeKeys.every(k => {
+      const value = k === 'mulkiyet' ? getOwnershipLabel(a) : a[k];
+      return filters[k].has(String(value));
+    }));
   }, [assets, filters, globalSearch]);
 
   const statusColors: Record<string, string> = {
@@ -254,7 +282,13 @@ export default function AssetCategoryPage() {
     total: assets.length,
     assigned: assets.filter(a => Boolean(a.zimmetliKisi || a.teslimEdilenPersonel)).length,
     unassigned: assets.filter(a => !a.zimmetliKisi && !a.teslimEdilenPersonel).length,
-    totalCost: assets.reduce((sum, a) => sum + (Number(a.alimFiyatiTl) || 0), 0),
+    totalCost: assets.reduce((sum, a) => {
+      if (a.mulkiyet === 'kira') {
+        const rent = Number(a.kiraTutari) || 0;
+        return sum + (a.kiraDonemi === 'yillik' ? rent : rent * 12);
+      }
+      return sum + (Number(a.alimFiyatiTl) || 0);
+    }, 0),
   }), [assets]);
 
   const set = (field: string, value: any) => setEditingAsset(prev => ({ ...prev, [field]: value }));
@@ -273,8 +307,12 @@ export default function AssetCategoryPage() {
         Model: '',
         Konum: '',
         'Teslim Edilen Personel': '',
+        'Mülkiyet Tipi': 'Satılık',
         'Alım Fiyatı (TL)': '',
         'Satın Alma Tarihi': '',
+        'Kira Tutarı (TL)': '',
+        'Kira Dönemi': 'Aylık',
+        'Kira Bitiş Tarihi': '',
         'Garanti Bitiş Tarihi': '',
         'Planlı Kullanım Ömrü (Yıl)': '',
         'Amortisman Yöntemi': 'dogrusal',
@@ -301,7 +339,9 @@ export default function AssetCategoryPage() {
     const locationNames = locations.filter(l => l.value !== 'Diğer').map(l => l.value);
     const durumOptions = ['iyi', 'orta', 'kötü', 'çok kötü'];
     const amortismanOptions = ['dogrusal', 'azalan_bakiye'];
-    const maxLen = Math.max(allCategories.length, locationNames.length, durumOptions.length, amortismanOptions.length);
+    const mulkiyetOptions = ['Satılık', 'Kiralık'];
+    const kiraDonemiOptions = ['Aylık', 'Yıllık'];
+    const maxLen = Math.max(allCategories.length, locationNames.length, durumOptions.length, amortismanOptions.length, mulkiyetOptions.length, kiraDonemiOptions.length);
     const refData: any[] = [];
     for (let i = 0; i < maxLen; i++) {
       refData.push({
@@ -309,6 +349,8 @@ export default function AssetCategoryPage() {
         'Konumlar': locationNames[i] || '',
         'Durum Seçenekleri': durumOptions[i] || '',
         'Amortisman Yöntemleri': amortismanOptions[i] || '',
+        'Mülkiyet Tipleri': mulkiyetOptions[i] || '',
+        'Kira Dönemleri': kiraDonemiOptions[i] || '',
         'Aktif Kategori': i === 0 ? categoryName : '',
       });
     }
@@ -334,8 +376,12 @@ export default function AssetCategoryPage() {
       Model: asset.model || '',
       Konum: asset.konum || '',
       'Teslim Edilen Personel': asset.teslimEdilenPersonel || '',
+      'Mülkiyet Tipi': getOwnershipLabel(asset),
       'Alım Fiyatı (TL)': typeof asset.alimFiyatiTl === 'number' ? asset.alimFiyatiTl : '',
       'Satın Alma Tarihi': asset.satinAlmaTarihi || '',
+      'Kira Tutarı (TL)': typeof asset.kiraTutari === 'number' ? asset.kiraTutari : '',
+      'Kira Dönemi': asset.kiraDonemi === 'yillik' ? 'Yıllık' : 'Aylık',
+      'Kira Bitiş Tarihi': asset.kiraBitisTarihi || '',
       'Garanti Bitiş Tarihi': asset.garantiBitisTarihi || '',
       'Planlı Kullanım Ömrü (Yıl)': asset.planliKullanimOmruYil ?? '',
       'Amortisman Yöntemi': asset.amortismanYontemi || '',
@@ -378,8 +424,12 @@ export default function AssetCategoryPage() {
           model: String(row['Model'] || row['model'] || '').trim(),
           konum: konumVal,
           teslimEdilenPersonel: String(row['Teslim Edilen Personel'] || row['teslimedilenpersonel'] || '').trim(),
+          mulkiyet: String(row['Mülkiyet Tipi'] || row['mulkiyettipi'] || row['Mülkiyet'] || row['mulkiyet'] || '').toLocaleLowerCase('tr').includes('kira') ? 'kira' : 'satin_alma',
           alimFiyatiTl: Number(row['Alım Fiyatı (TL)'] || row['alimfiyatitl'] || 0) || 0,
           satinAlmaTarihi: String(row['Satın Alma Tarihi'] || row['satinalmatarihi'] || '').trim(),
+          kiraTutari: Number(row['Kira Tutarı (TL)'] || row['kiratutaritl'] || row['Kira Tutarı'] || row['kiratutari'] || 0) || 0,
+          kiraDonemi: String(row['Kira Dönemi'] || row['kiradonemi'] || '').toLocaleLowerCase('tr').includes('yıl') ? 'yillik' : 'aylik',
+          kiraBitisTarihi: String(row['Kira Bitiş Tarihi'] || row['kirabitistarihi'] || '').trim(),
           garantiBitisTarihi: String(row['Garanti Bitiş Tarihi'] || row['garantibitistarihi'] || '').trim(),
           planliKullanimOmruYil: Number(row['Planlı Kullanım Ömrü (Yıl)'] || row['planlikullanimomruyil'] || 0) || 0,
           amortismanYontemi: String(row['Amortisman Yöntemi'] || row['amortismanyontemi'] || 'dogrusal').trim() as 'dogrusal' | 'azalan_bakiye',
@@ -536,13 +586,14 @@ export default function AssetCategoryPage() {
                       <th className="text-left py-2 px-3"><FilterPopover column="marka" title="Marka" options={uniqueFilterOptions.marka} selectedValues={filters.marka} onSelectionChange={handleFilterChange} /></th>
                       <th className="text-left py-2 px-3"><FilterPopover column="konum" title="Konum" options={uniqueFilterOptions.konum} selectedValues={filters.konum} onSelectionChange={handleFilterChange} /></th>
                       <th className="text-left py-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--dashboard-muted)]">Personel</th>
-                      <th className="text-left py-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--dashboard-muted)]">Fiyat</th>
+                      <th className="text-left py-2 px-3"><FilterPopover column="mulkiyet" title="Tip" options={uniqueFilterOptions.mulkiyet} selectedValues={filters.mulkiyet} onSelectionChange={handleFilterChange} /></th>
+                      <th className="text-left py-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--dashboard-muted)]">Maliyet</th>
                       <th className="text-right py-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--dashboard-muted)]">İşlem</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredAssets.length === 0 ? (
-                      <tr><td colSpan={8} className="text-center py-12 text-sm text-[var(--dashboard-muted)]">Kayıtlı ürün yok veya filtre ile eşleşmiyor.</td></tr>
+                      <tr><td colSpan={9} className="text-center py-12 text-sm text-[var(--dashboard-muted)]">Kayıtlı ürün yok veya filtre ile eşleşmiyor.</td></tr>
                     ) : filteredAssets.map(asset => (
                       <tr
                         key={asset.id}
@@ -559,7 +610,12 @@ export default function AssetCategoryPage() {
                         <td className="py-2.5 px-3 text-[var(--dashboard-text)]">{asset.marka || '-'}</td>
                         <td className="py-2.5 px-3 text-[var(--dashboard-text)]">{asset.konum || '-'}</td>
                         <td className="py-2.5 px-3 text-[var(--dashboard-muted)]">{asset.zimmetliKisi || asset.teslimEdilenPersonel || '-'}</td>
-                        <td className="py-2.5 px-3 text-[var(--dashboard-accent)] font-medium">{typeof asset.alimFiyatiTl === 'number' ? `${asset.alimFiyatiTl.toLocaleString('tr-TR')} ₺` : '-'}</td>
+                        <td className="py-2.5 px-3">
+                          <span className={cn("text-xs font-medium px-2 py-0.5 rounded-lg", asset.mulkiyet === 'kira' ? 'bg-sky-500/10 text-sky-600' : 'bg-emerald-500/10 text-emerald-600')}>
+                            {getOwnershipLabel(asset)}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-[var(--dashboard-accent)] font-medium">{getCostLabel(asset)}</td>
                         <td className="py-2.5 px-3 text-right">
                           <div className="flex items-center justify-end gap-0.5">
                             <button onClick={e => { e.stopPropagation(); router.push(`/yonetim/envanter-yonetimi/${categoryName}/${asset.id}`); }} className="w-7 h-7 rounded-lg flex items-center justify-center text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] hover:bg-[var(--dashboard-surface-2)] transition-colors">
@@ -649,12 +705,43 @@ export default function AssetCategoryPage() {
               {/* === MALİ BİLGİLER === */}
               <p className="text-[11px] font-semibold text-[var(--dashboard-accent)] uppercase tracking-wider pt-2">Mali Bilgiler</p>
               <div className="grid grid-cols-2 gap-3">
-                <FormField label="Alım Fiyatı (₺)">
-                  <input className={inputClass} type="number" min={0} step="0.01" placeholder="0" value={editingAsset.alimFiyatiTl ?? ''} onChange={e => set('alimFiyatiTl', Number(e.target.value) || 0)} />
+                <FormField label="Mülkiyet Tipi">
+                  <Select value={editingAsset.mulkiyet || 'satin_alma'} onValueChange={v => set('mulkiyet', v)}>
+                    <SelectTrigger className="h-9 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] border-0"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="satin_alma">Satılık</SelectItem>
+                      <SelectItem value="kira">Kiralık</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </FormField>
-                <FormField label="Satın Alma Tarihi">
-                  <input className={inputClass} type="date" value={editingAsset.satinAlmaTarihi || ''} onChange={e => set('satinAlmaTarihi', e.target.value)} />
-                </FormField>
+                {editingAsset.mulkiyet === 'kira' ? (
+                  <>
+                    <FormField label="Kira Tutarı (₺)">
+                      <input className={inputClass} type="number" min={0} step="0.01" placeholder="0" value={editingAsset.kiraTutari ?? ''} onChange={e => set('kiraTutari', Number(e.target.value) || 0)} />
+                    </FormField>
+                    <FormField label="Kira Dönemi">
+                      <Select value={editingAsset.kiraDonemi || 'aylik'} onValueChange={v => set('kiraDonemi', v)}>
+                        <SelectTrigger className="h-9 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] border-0"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="aylik">Aylık</SelectItem>
+                          <SelectItem value="yillik">Yıllık</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </FormField>
+                    <FormField label="Kira Bitiş Tarihi">
+                      <input className={inputClass} type="date" value={editingAsset.kiraBitisTarihi || ''} onChange={e => set('kiraBitisTarihi', e.target.value)} />
+                    </FormField>
+                  </>
+                ) : (
+                  <>
+                    <FormField label="Alım Fiyatı (₺)">
+                      <input className={inputClass} type="number" min={0} step="0.01" placeholder="0" value={editingAsset.alimFiyatiTl ?? ''} onChange={e => set('alimFiyatiTl', Number(e.target.value) || 0)} />
+                    </FormField>
+                    <FormField label="Satın Alma Tarihi">
+                      <input className={inputClass} type="date" value={editingAsset.satinAlmaTarihi || ''} onChange={e => set('satinAlmaTarihi', e.target.value)} />
+                    </FormField>
+                  </>
+                )}
                 <FormField label="Garanti Bitiş">
                   <input className={inputClass} type="date" value={editingAsset.garantiBitisTarihi || ''} onChange={e => set('garantiBitisTarihi', e.target.value)} />
                 </FormField>
