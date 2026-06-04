@@ -74,6 +74,31 @@
       ]
     },
     {
+      "collectionGroup": "cariInvoices",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "companyId", "order": "ASCENDING" },
+        { "fieldPath": "issueDate", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "cariReceipts",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "companyId", "order": "ASCENDING" },
+        { "fieldPath": "receiptDate", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "cariLedgerEntries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "companyId", "order": "ASCENDING" },
+        { "fieldPath": "cariFirmaId", "order": "ASCENDING" },
+        { "fieldPath": "entryDate", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "overtimeRequests",
       "queryScope": "COLLECTION",
       "fields": [
