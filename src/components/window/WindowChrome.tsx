@@ -3,6 +3,7 @@
 import React from 'react';
 import { ChevronLeft } from 'lucide-react';
 import { useWindowManager } from '@/contexts/window-manager-context';
+import { useAuth } from '@/contexts/auth-context';
 
 import { usePathname } from 'next/navigation';
 
@@ -14,10 +15,13 @@ import { usePathname } from 'next/navigation';
  */
 export function WindowChrome() {
   const { windows, activeId, minimizeWindow, closeWindow, windowBack } = useWindowManager();
+  const { currentUserProfile } = useAuth();
   const pathname = usePathname();
 
   if (!activeId) return null;
   if (pathname?.startsWith('/cari-odeme')) return null;
+  // user rolündeki kullanıcılar hiçbir panelde trafik ışıklarını göremez
+  if (currentUserProfile?.role === 'user') return null;
 
   const active = windows.find((w) => w.id === activeId);
 
