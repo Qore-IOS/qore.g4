@@ -526,8 +526,10 @@ export default function AnaPanel(props: AnaPanelProps) {
   const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
 
   // Use TanStack Query for static data - shared cache, 1 hour stale time
-  const { data: depots = [], isLoading: depotsLoading } = useDepots();
-  const { data: productCodes = [], isLoading: productsLoading } = useProductCodes();
+  // isPending: veri hiç cache'de yoksa true. isLoading: isPending && isFetching.
+  // Prefetch (AppLayout) sayesinde cache'de veri varsa isPending bile false döner → anında açılır.
+  const { data: depots = [], isPending: depotsPending } = useDepots();
+  const { data: productCodes = [], isPending: productsPending } = useProductCodes();
   const { data: addressDefinitions = [] } = useAddressDefinitions();
   const { data: barcodeFormats = [] } = useBarcodeFormatsQuery();
   const { data: users = [] } = useUsers();
@@ -538,7 +540,9 @@ export default function AnaPanel(props: AnaPanelProps) {
   // Use TanStack Query for depot stock with polling
   const { data: depotStockData = [] } = useDepoStokByDepot(selectedDepotId);
 
-  const isLoading = depotsLoading || productsLoading;
+  // Skeleton yalnızca veri gerçekten hiç cache'de yoksa (isPending) gösterilir.
+  // Arka planda yenileme (isFetching) sırasında UI bloke edilmez.
+  const isLoading = depotsPending || productsPending;
   const [isProcessingScan, setIsProcessingScan] = useState(false);
 
   const [scannedItems, setScannedItems] = useState<ScanRow[]>([]);
@@ -1872,6 +1876,8 @@ export default function AnaPanel(props: AnaPanelProps) {
     [scannedItems]
   );
 
+  // Skeleton: veri hiç cache'de yoksa (ilk yüklemede, prefetch başlamamışsa) göster.
+  // Prefetch (AppLayout) tamamlanmışsa cache var → isPending false → skeleton atlanır → anında açılır.
   if (isLoading && scannedItems.length === 0) {
     return <AnaPanelSkeleton />;
   }
