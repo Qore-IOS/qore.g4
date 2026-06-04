@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardFooter, CardDescription, CardTitle }
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { PlusCircle, Download } from "lucide-react";
+import { cn } from "@/lib/utils";
 import type { Payment, PaymentStatus, BankAccount, CariFirma } from "@/lib/cari-odeme/types";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/auth-context";
