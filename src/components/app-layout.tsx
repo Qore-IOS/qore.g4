@@ -115,6 +115,34 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   //  use-dock içinde yapılıyor.)
   const isWindowMode = useIsWindowMode();
 
+  // Çıplak modda, panelin global pencere başlık paketiyle uyumlu görünmesi için
+  // gövdeye qore-global-window-chrome sınıfını ekle (arka plan standart + içerik
+  // üst boşluğu + panelin kendi başlık/geri butonunu gizleme — globals.css). İlk
+  // h1'in başlık bloğunu işaretleyerek yerel başlığın gizlenmesini sağlar.
+  useEffect(() => {
+    if (!isWindowMode) return;
+    document.body.classList.add('qore-global-window-chrome');
+    const mark = () => {
+      const content = document.querySelector('[data-qore-window-content="true"]');
+      const h1 = content?.querySelector('h1');
+      if (!h1) return;
+      const block = h1.parentElement;
+      block?.setAttribute('data-qore-global-title-block', 'true');
+      const deco = block?.previousElementSibling as HTMLElement | null;
+      if (deco && deco.querySelector('svg') && !deco.textContent?.trim()) {
+        deco.setAttribute('data-qore-global-title-decorator', 'true');
+      }
+    };
+    mark();
+    const content = document.querySelector('[data-qore-window-content="true"]');
+    const obs = content ? new MutationObserver(mark) : null;
+    if (content && obs) obs.observe(content, { childList: true, subtree: true });
+    return () => {
+      document.body.classList.remove('qore-global-window-chrome');
+      obs?.disconnect();
+    };
+  }, [isWindowMode]);
+
   useEffect(() => {
     if (!isLoadingAuth && !currentUser) {
       router.replace("/login");
@@ -134,7 +162,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // İframe pencere (çıplak mod): kabuk/dock olmadan yalnızca panel içeriği.
   if (isWindowMode) {
     return (
-      <main className="flex min-h-screen w-full flex-col bg-background">
+      <main data-qore-window-content="true" className="flex min-h-screen w-full flex-col bg-background">
         <PageShell edgeToEdge={isEdgeToEdgeRoute} className="w-full flex-1">
           {children}
         </PageShell>
