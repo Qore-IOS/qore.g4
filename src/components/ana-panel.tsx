@@ -1876,11 +1876,9 @@ export default function AnaPanel(props: AnaPanelProps) {
     [scannedItems]
   );
 
-  // Skeleton: veri hiç cache'de yoksa (ilk yüklemede, prefetch başlamamışsa) göster.
-  // Prefetch (AppLayout) tamamlanmışsa cache var → isPending false → skeleton atlanır → anında açılır.
-  if (isLoading && scannedItems.length === 0) {
-    return <AnaPanelSkeleton />;
-  }
+  // Skeleton kaldırıldı: panel artık anında açılır.
+  // Prefetch (AppLayout) sayesinde cache doluysa depolar anında gelir;
+  // cache boşsa depo dropdown'ı birkaç 100ms sonra dolar — kullanıcı bekleme ekranı görmez.
 
   return (
     <div className="cihaz-shell px-3 py-4 sm:px-5 sm:py-6 space-y-4 sm:space-y-5 min-h-screen">
