@@ -728,7 +728,7 @@ export default function SiparislerPanel(): JSX.Element {
       {!isLojistikSorumlusu && (
         <div className="cihaz-card p-3 sm:p-4">
           <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1.5">Çalışma Deposu</label>
-          <Select value={selectedDepotId} onValueChange={setSelectedDepotId} disabled={isLoading}>
+          <Select value={selectedDepotId} onValueChange={setSelectedDepotId}>
             <SelectTrigger className="w-full bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl h-10">
               <SelectValue placeholder="Depo seçin..." />
             </SelectTrigger>
