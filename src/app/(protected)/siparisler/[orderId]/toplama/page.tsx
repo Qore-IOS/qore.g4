@@ -27,7 +27,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation';
 import type { Order, OrderItem, DepoStokItem, ProductCode, PickingListItem as PickingListItemType, Shipment, ShipmentItem, DeviceGroup, Hospital, Depot, ConsumptionRecord } from '@/lib/types';
 import { db } from '@/lib/firebase';
-import { collection, doc, getDoc, writeBatch, serverTimestamp, query, where, getDocs, Timestamp, setDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, writeBatch, serverTimestamp, query, where, getDocs, Timestamp, setDoc, limit } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import useHidScanner from '@/hooks/useHidScanner';
 import { useAuth } from '@/contexts/auth-context';
@@ -416,6 +416,10 @@ export default function ToplamaPage() {
               const pickItem = pickingList.find(it => it.stokKodu === stockItem.stokKodu);
               if (!pickItem) {
                    pushScanEvent(false, `${stockItem.stokAdi || code} – listede değil`);
+                   return;
+              }
+              if (Object.values(scannedSerials).flat().includes(code)) {
+                   pushScanEvent(false, `Seri ${code} – zaten okutulmuş`);
                    return;
               }
               siparisToplamaLogger.info('Ham barkod seri eşleşmesi ile ürün okutuldu', {

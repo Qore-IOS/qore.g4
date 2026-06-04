@@ -46,7 +46,7 @@ import { Trash2, CheckSquare, PlusCircle, Loader2, Search, History, Camera, Scan
 
 // Firebase
 import { db } from '@/lib/firebase';
-import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, orderBy } from 'firebase/firestore';
+import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, orderBy, limit } from 'firebase/firestore';
 
 // Utilities
 import { cn, generateId, playFeedback } from '@/lib/utils';
@@ -819,6 +819,39 @@ export default function AnaPanel(props: AnaPanelProps) {
               return;
             }
 
+            // Geçmiş oturumlarda tüketilmiş/işlem görmüş mü kontrolü (serialHistory sorgusu)
+            let hasHistory = false;
+            try {
+              const historySnap = await getDocs(
+                query(
+                  collection(db, `serialHistory/${seriNumarasi}/events`),
+                  limit(1)
+                )
+              );
+              if (!historySnap.empty) {
+                // Herhangi bir geçmiş olayda aynı stokKodu kullanılmış mı?
+                const matchedEvent = historySnap.docs.some(doc => doc.data().details?.stokKodu === stokKodu);
+                if (matchedEvent) {
+                  hasHistory = true;
+                }
+              }
+            } catch (e) {
+              console.error("History serial check error", e);
+            }
+
+            if (hasHistory) {
+              playFeedback(true);
+              malKabulLogger.warn('Geçmişte işlem görmüş/tüketilmiş seri tespit edildi', {
+                stokKodu,
+                stokAdi: matchedProduct.stokAdi,
+                seriNumarasi,
+              }, { correlationId: scanCorrelationId });
+              flashScanFeedback('error', `SN ${seriNumarasi} (${matchedProduct.stokAdi}) geçmişte işlem görmüş veya tüketilmiş.`);
+              if (source === 'barcode') { setScanStatus('error'); setTimeout(() => setScanStatus('idle'), 3000); }
+              setIsProcessingScan(false);
+              return;
+            }
+
             const newItem: ScanRow = {
               id: generateId(), barkod: trimmedData, stokKodu: stokKodu, stokAdi: matchedProduct.stokAdi,
               lotNumarasi: lotNumarasi || '', miad: miadFormatted || '', seriNumarasi: seriNumarasi || '',
@@ -1414,15 +1447,56 @@ export default function AnaPanel(props: AnaPanelProps) {
         // filtresiz bir Firestore sorgusu vardı; sonucu hiçbir yerde
         // okunmuyordu (ölü kod) ve çağrı başına gereksiz okuma üretiyordu.
 
+        // Check history of all serials to process to avoid duplicates of consumed/processed serials
+        const serialsToCheck: { serial: string; stokKodu: string }[] = [];
+        itemsToProcess.forEach(item => {
+          if (!item.isGroup && item.seriNumarasi && item.stokKodu) {
+            serialsToCheck.push({ serial: item.seriNumarasi, stokKodu: item.stokKodu });
+          } else if (item.isGroup && item.scannedSerials && item.stokKodu) {
+            item.scannedSerials.forEach(s => {
+              if (s) {
+                serialsToCheck.push({ serial: s, stokKodu: item.stokKodu! });
+              }
+            });
+          }
+        });
+
+        const consumedSerials = new Set<string>();
+        if (serialsToCheck.length > 0) {
+          await Promise.all(
+            serialsToCheck.map(async ({ serial, stokKodu }) => {
+              try {
+                const historySnap = await getDocs(
+                  query(
+                    collection(db, `serialHistory/${serial}/events`),
+                    limit(1)
+                  )
+                );
+                if (!historySnap.empty) {
+                  const matchedEvent = historySnap.docs.some(doc => doc.data().details?.stokKodu === stokKodu);
+                  if (matchedEvent) {
+                    consumedSerials.add(`${stokKodu}||${serial}`);
+                  }
+                }
+              } catch (e) {
+                console.error("Error checking history in commit", e);
+              }
+            })
+          );
+        }
+
         const docsToCreate: Array<{ ref: ReturnType<typeof doc>; data: any; serial?: string; item: ScanRow }> = [];
 
         for (const item of itemsToProcess) {
           const depotProductSerials = item.stokKodu ? existingDepotSerials.get(serialProductKey(item.stokKodu)) : undefined;
-          if (item.seriNumarasi && depotProductSerials?.has(item.seriNumarasi)) {
+          if (item.seriNumarasi && (depotProductSerials?.has(item.seriNumarasi) || consumedSerials.has(`${item.stokKodu}||${item.seriNumarasi}`))) {
             continue;
           }
 
           const serialsToProcess = item.isGroup ? (item.scannedSerials || []) : [item.seriNumarasi];
+          const filteredSerials = (serialsToProcess.filter(Boolean) as string[]).filter(serial => {
+            return !consumedSerials.has(`${item.stokKodu}||${serial}`);
+          });
 
           const createDocData = (serial = '') => ({
             depotId: selectedDepotId,
@@ -1440,7 +1514,7 @@ export default function AnaPanel(props: AnaPanelProps) {
             createdByUid: currentUser?.uid || null,
           });
 
-          if (item.isGroup && serialsToProcess.length === 0) {
+          if (item.isGroup && filteredSerials.length === 0) {
             // OPTIMIZED: Create ONE document with 'adet' instead of 1000 separate ones
             docsToCreate.push({
               ref: doc(collection(db, 'depoStok')),
@@ -1451,7 +1525,7 @@ export default function AnaPanel(props: AnaPanelProps) {
               item,
             });
           } else {
-            for (const serial of (serialsToProcess.filter(Boolean) as string[])) {
+            for (const serial of filteredSerials) {
               docsToCreate.push({
                 ref: doc(collection(db, 'depoStok')),
                 data: withCompanyScope({ 
