@@ -12,6 +12,7 @@ import { db } from '@/lib/firebase';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
 import { matchesCompanyScope } from '@/lib/company-scope';
+import { useOpenDeviceFaultReports } from '@/hooks/useFirebaseQueries';
 
 /* ─── Types ─── */
 
@@ -64,26 +65,15 @@ export default function TeknikServisPanel({
   const { currentCompanyId, isSuperAdmin } = useAuth();
 
   /* ── Open fault reports ── */
-  const [faultyDeviceIds, setFaultyDeviceIds] = useState<Set<string>>(new Set());
+  const { data: openFaults } = useOpenDeviceFaultReports();
 
-  useEffect(() => {
-    const q = query(
-      collection(db, 'deviceFaultReports'),
-      where('status', 'in', ['atama_bekliyor', 'mudahale_bekliyor', 'mudahale_ediliyor', 'open'])
-    );
-    const unsub = onSnapshot(q, (snap) => {
-      const ids = new Set<string>();
-      snap.docs.forEach((d) => {
-        const data = d.data();
-        if (!matchesCompanyScope(data as any, currentCompanyId, isSuperAdmin)) return;
-        if (data.deviceId) ids.add(data.deviceId);
-      });
-      setFaultyDeviceIds(ids);
-    }, (err) => {
-      console.error('Error listening open fault reports:', err);
+  const faultyDeviceIds = useMemo(() => {
+    const ids = new Set<string>();
+    openFaults?.forEach(f => {
+      if (f.deviceId) ids.add(f.deviceId);
     });
-    return () => unsub();
-  }, [currentCompanyId, isSuperAdmin]);
+    return ids;
+  }, [openFaults]);
 
   /* ── Device helpers ── */
 
