@@ -426,7 +426,15 @@ export default function DirektTransferPanel() {
 
   const alreadyQueued = useCallback((stokKodu: string, lot?: string, seri?: string) => {
     return directTransferItems
-      .filter(r => r.stokKodu === stokKodu && (lot ? r.lotNumarasi === lot : !r.lotNumarasi) && (seri ? r.seriNumarasi === seri : true))
+      .filter(r => {
+        if (r.stokKodu !== stokKodu) return false;
+        if (seri) {
+          return r.seriNumarasi === seri;
+        }
+        // Non-serial items
+        if (r.seriNumarasi) return false;
+        return lot ? r.lotNumarasi === lot : !r.lotNumarasi;
+      })
       .reduce((n, r) => n + getStockItemQuantity(r), 0);
   }, [directTransferItems]);
   

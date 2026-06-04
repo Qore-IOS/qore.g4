@@ -29,7 +29,7 @@ import {
   SidebarTrigger,
 } from "./ui/sidebar";
 import Image from "next/image";
-import { useIconMappings } from "@/hooks/useIconMappings";
+import { useIconMappings, getIconSrc } from "@/hooks/useIconMappings";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,13 +39,15 @@ import {
   DropdownMenuPortal,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Sun, Moon, Laptop, Eye, EyeOff, Star, Columns } from "lucide-react";
+import { Sun, Moon, Laptop, Eye, EyeOff, Star, Columns, Calendar } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { AnimatePresence } from "framer-motion";
+import { CalendarDockPanel } from "./dock/CalendarDockPanel";
 import { PushNotificationsErrorBoundary } from "./PushNotificationsErrorBoundary";
 import dynamic from 'next/dynamic';
 
@@ -69,6 +71,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     toggleNavMode,
   } = useAuth();
   const pathname = usePathname();
+  const [calendarOpen, setCalendarOpen] = useState(false);
+
+  useEffect(() => {
+    setCalendarOpen(false);
+  }, [pathname]);
 
   // Check if user is a teknisyen - hide dock for them
   const isTeknisyen = currentUserProfile?.role === 'teknisyen';
@@ -257,6 +264,26 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </SidebarMenu>
           </SidebarContent>
           <SidebarFooter>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                tooltip="Takvim"
+                onClick={() => setCalendarOpen(prev => !prev)}
+                className="w-full justify-start h-8 text-sm gap-2"
+              >
+                {dockIcons['calendar'] ? (
+                  <Image
+                    src={getIconSrc(dockIcons['calendar'])}
+                    alt="Takvim"
+                    width={20}
+                    height={20}
+                    className="w-5 h-5 object-contain"
+                  />
+                ) : (
+                  <Calendar className="w-5 h-5" />
+                )}
+                <span className="group-data-[collapsible=icon]:hidden">Takvim</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
             {notificationItem && (
               <SidebarMenuItem>
                 <NotificationsBell
@@ -295,6 +322,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
           {children}
         </main>
+        <AnimatePresence>
+          {calendarOpen && <CalendarDockPanel key="cal" onClose={() => setCalendarOpen(false)} />}
+        </AnimatePresence>
         <TaskPlannerPanel
           open={isPlannerPanelOpen}
           onClose={() => setIsPlannerPanelOpen(false)}

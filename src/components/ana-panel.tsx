@@ -577,9 +577,10 @@ export default function AnaPanel(props: AnaPanelProps) {
   const [showUnverified, setShowUnverified] = useState(false);
   const [commitInfo, setCommitInfo] = useState<{ commits: number; pending: number } | null>(null);
   
-  // Map: stokKodu||lot -> Set<seriNumarasi> - oturum içi mükerrer kontrolü ürün+lot bazında
+  // Map: stokKodu -> Set<seriNumarasi> - oturum içi mükerrer kontrolü sadece ürün bazında
+  // Seri numarası aynı ürün için lot fark etmeksizin benzersiz olmalıdır.
   const scannedSerialsRef = useRef(new Map<string, Set<string>>());
-  const serialLotKey = useCallback((stokKodu?: string, lotNumarasi?: string) => `${stokKodu || ''}||${lotNumarasi || ''}`, []);
+  const serialProductKey = useCallback((stokKodu?: string) => stokKodu || '', []);
 
 
   const incomingQuantities = useMemo(() => {
@@ -693,23 +694,23 @@ export default function AnaPanel(props: AnaPanelProps) {
   }, [selectedDepot]);
 
   // Build existing serials map from TanStack Query data (polling instead of real-time listener)
+  // Key: stokKodu -> Set<seriNumarasi>  (lot dahil edilmez, aynı ürün+seri her durumda mükerrer)
   // This reduces Firestore reads dramatically
   const existingDepotSerials = useMemo(() => {
-    const serialsByProductLot = new Map<string, Set<string>>();
+    const serialsByProduct = new Map<string, Set<string>>();
     depotStockData.forEach(item => {
       const serial = item.seriNumarasi;
       const stokKodu = item.stokKodu;
-      const lot = item.lotNumarasi || '';
       if (serial && stokKodu) {
-        const key = serialLotKey(stokKodu, lot);
-        if (!serialsByProductLot.has(key)) {
-          serialsByProductLot.set(key, new Set());
+        const key = serialProductKey(stokKodu);
+        if (!serialsByProduct.has(key)) {
+          serialsByProduct.set(key, new Set());
         }
-        serialsByProductLot.get(key)!.add(serial);
+        serialsByProduct.get(key)!.add(serial);
       }
     });
-    return serialsByProductLot;
-  }, [depotStockData, serialLotKey]);
+    return serialsByProduct;
+  }, [depotStockData, serialProductKey]);
   
   const processScan = useCallback(async (barcodeData: string, source: 'barcode' | 'bulk_item' = 'barcode') => {
     const scanCorrelationId = createCorrelationId();
@@ -791,8 +792,8 @@ export default function AnaPanel(props: AnaPanelProps) {
         if ((mode === 'serial') && !isLotOnlyBarcode) {
             if (!seriNumarasi) throw new Error('Bu ürün seri numarası ile takip edilir, barkod seri içermiyor.');
 
-            // Mükerrer kontrolü: aynı ürün için aynı seri numarası kontrol edilir
-            const serialKey = serialLotKey(stokKodu, lotNumarasi || '');
+            // Mükerrer kontrolü: aynı ürün + seri no eşleşmesi (lot fark etmez)
+            const serialKey = serialProductKey(stokKodu);
             const sessionSerials = scannedSerialsRef.current.get(serialKey);
             const depotSerials = existingDepotSerials.get(serialKey);
             const isInSession = sessionSerials?.has(seriNumarasi) ?? false;
@@ -825,7 +826,7 @@ export default function AnaPanel(props: AnaPanelProps) {
               adet: 1, isGroup: false, bulkQrAssigned: false
             };
             newItem.key = `${newItem.stokKodu}-${newItem.lotNumarasi}-${newItem.miad}`;
-            // Oturum içi mükerrer takibi: stokKodu -> Set<seriNumarasi>
+            // Oturum içi mükerrer takibi: stokKodu -> Set<seriNumarasi> (lot dahil değil)
             if (!scannedSerialsRef.current.has(serialKey)) {
               scannedSerialsRef.current.set(serialKey, new Set());
             }
@@ -990,8 +991,8 @@ export default function AnaPanel(props: AnaPanelProps) {
 
       // If serial number exists, add as individual serial-tracked item
       if (seriNumarasi) {
-        // Duplicate check
-        const serialKey = serialLotKey(stokKodu, lotNumarasi || '');
+        // Duplicate check: stokKodu + seriNumarasi (lot fark etmez)
+        const serialKey = serialProductKey(stokKodu);
         const sessionSerials = scannedSerialsRef.current.get(serialKey);
         const depotSerials = existingDepotSerials.get(serialKey);
         if (sessionSerials?.has(seriNumarasi) || depotSerials?.has(seriNumarasi)) {
@@ -1117,7 +1118,7 @@ export default function AnaPanel(props: AnaPanelProps) {
         const itemsToRemove = prev.filter(item => item.key === groupKey);
         itemsToRemove.forEach(item => {
             if(item.seriNumarasi && item.stokKodu) {
-                const productSerials = scannedSerialsRef.current.get(serialLotKey(item.stokKodu, item.lotNumarasi || ''));
+                const productSerials = scannedSerialsRef.current.get(serialProductKey(item.stokKodu));
                 productSerials?.delete(item.seriNumarasi);
             }
         });
@@ -1383,7 +1384,7 @@ export default function AnaPanel(props: AnaPanelProps) {
     scannedSerialsRef.current.clear();
     scannedItems.forEach(item => {
         if (item.id && !processedIds.has(item.id) && item.seriNumarasi && item.stokKodu) {
-        const serialKey = serialLotKey(item.stokKodu, item.lotNumarasi || '');
+        const serialKey = serialProductKey(item.stokKodu);
         if (!scannedSerialsRef.current.has(serialKey)) {
           scannedSerialsRef.current.set(serialKey, new Set());
         }
@@ -1416,7 +1417,7 @@ export default function AnaPanel(props: AnaPanelProps) {
         const docsToCreate: Array<{ ref: ReturnType<typeof doc>; data: any; serial?: string; item: ScanRow }> = [];
 
         for (const item of itemsToProcess) {
-          const depotProductSerials = item.stokKodu ? existingDepotSerials.get(serialLotKey(item.stokKodu, item.lotNumarasi || '')) : undefined;
+          const depotProductSerials = item.stokKodu ? existingDepotSerials.get(serialProductKey(item.stokKodu)) : undefined;
           if (item.seriNumarasi && depotProductSerials?.has(item.seriNumarasi)) {
             continue;
           }
