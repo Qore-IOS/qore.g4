@@ -274,7 +274,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <OnlyUsageAutoRedirect />
       <main className="flex w-full flex-1 flex-col items-center">
         <PersistentNotificationToast />
-        {!isMobile && !isTeknisyen && <WindowChrome />}
+        {showGlobalWindowChrome && <WindowChrome />}
         <WindowFrame>
           <PageShell
             edgeToEdge={isEdgeToEdgeRoute}

@@ -536,6 +536,18 @@ export function useDock() {
     );
   };
 
+  useEffect(() => {
+    const onShow = () => {
+      setIsVisible(true);
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      timeoutRef.current = setTimeout(() => setIsVisible(false), 3000);
+    };
+    window.addEventListener('qore:dock-show', onShow);
+    return () => window.removeEventListener('qore:dock-show', onShow);
+  }, []);
+
   const currentViewKey = VIEWS.find((v) => v.href === pathname)?.key || "";
 
   const hasOnlyProductUsagePermission = (perms?: AppView[] | null): boolean => {

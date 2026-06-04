@@ -95,7 +95,32 @@ export function WindowManagerProvider({ children }: { children: React.ReactNode 
     const slot = (t.firstElementChild as HTMLElement) || t;
     const r = slot.getBoundingClientRect();
     if (!r.width) return null;
-    return { x: r.left + r.width / 2, y: r.top, w: r.width };
+
+    // Dock gizliyken framer-motion translateY(20px) uygular.
+    // getBoundingClientRect bu transform'u içerir, biz "açık" konumu istiyoruz.
+    let yOffset = 0;
+    let scaleCompensation = 1;
+    const dockEl = t.closest('[data-qore-dock]') as HTMLElement | null;
+    if (dockEl) {
+      const style = window.getComputedStyle(dockEl);
+      const transform = style.transform;
+      if (transform && transform !== 'none') {
+        try {
+          const matrix = new DOMMatrixReadOnly(transform);
+          yOffset = matrix.f; // translateY bileşeni
+          // fitScale de transform matrisinde. a ve d ölçek bileşenleri.
+          if (matrix.a > 0 && matrix.a < 1) {
+            scaleCompensation = matrix.a;
+          }
+        } catch (_e) { /* ignore */ }
+      }
+    }
+
+    return {
+      x: r.left + r.width / 2,
+      y: r.top - yOffset,
+      w: r.width / scaleCompensation, // scale'den arındırılmış gerçek genişlik
+    };
   }, []);
 
   const minimizeCurrent = useCallback(() => {
@@ -121,7 +146,13 @@ export function WindowManagerProvider({ children }: { children: React.ReactNode 
 
   const restore = useCallback(() => {
     const el = contentRef.current;
-    const tgt = dockTarget();
+    
+    // Yüzeyi göster (Dock'u aç)
+    window.dispatchEvent(new CustomEvent('qore:dock-show'));
+
+    // Geri getirme animasyonu dock'ta bulunan var olan (minimized) ikondan çıkar.
+    // Şimdilik sadece 1 pencere desteklediğimizden index 0'dır.
+    const tgt = dockTarget(0);
     // Flash'ı önlemek için göstermeden önce büzülmüş kareye sabitle.
     if (el && tgt) applyGenieCollapsed(el, tgt.x, tgt.y, tgt.w);
     setIsMinimized(false);

@@ -43,6 +43,8 @@ interface GenerateVisionOptions {
 }
 
 const DEFAULT_GEMINI_MODELS = [
+  'gemini-3.5-flash',
+  'gemini-3.5-pro',
   'gemini-2.5-flash',
   'gemini-3-flash-preview',
   'gemini-2.0-flash',
@@ -54,11 +56,17 @@ const DEFAULT_GEMINI_MODELS = [
 ];
 
 const DEFAULT_VISION_MODELS = [
+  'gemini-3.5-flash',
+  'gemini-3.5-pro',
   'gemini-2.5-flash',
   'gemini-2.0-flash',
   'gemini-2.0-flash-001',
   'gemini-2.5-pro',
 ];
+
+// Module-level cache to memorize working models across calls (speeds up execution/avoids timeouts)
+let lastSuccessfulModel: string | null = null;
+let lastSuccessfulVisionModel: string | null = null;
 
 function toGeminiContents(messages: GeminiMessage[]) {
   return messages.map((m) => ({
@@ -84,7 +92,11 @@ export async function generateWithGemini(options: GenerateOptions): Promise<{ te
   const apiKey = getGeminiApiKey();
   if (!apiKey) throw new Error('GEMINI_API_KEY environment variable ayarlanmamis');
 
-  const models = getCandidateModels();
+  const baseModels = getCandidateModels();
+  const models = lastSuccessfulModel
+    ? [lastSuccessfulModel, ...baseModels.filter((m) => m !== lastSuccessfulModel)]
+    : baseModels;
+
   let lastDebug = 'gemini_no_attempt';
 
   for (const model of models) {
@@ -113,7 +125,7 @@ export async function generateWithGemini(options: GenerateOptions): Promise<{ te
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
       lastDebug = `gemini_http_${res.status}:${model}:${errText.slice(0, 180)}`;
-      if (res.status === 400 || res.status === 404 || res.status === 429 || res.status === 503) continue;
+      if (res.status === 400 || res.status === 403 || res.status === 404 || res.status === 422 || res.status === 429 || res.status === 503) continue;
       throw new Error(lastDebug);
     }
 
@@ -132,6 +144,7 @@ export async function generateWithGemini(options: GenerateOptions): Promise<{ te
       continue;
     }
 
+    lastSuccessfulModel = model;
     return { text, functionCalls, model };
   }
 
@@ -157,9 +170,13 @@ export async function generateVisionWithGemini(
   if (!apiKey) throw new Error('GEMINI_API_KEY environment variable ayarlanmamis');
 
   const envModel = process.env.GEMINI_VISION_MODEL?.trim() || process.env.GEMINI_MODEL?.trim();
-  const models = envModel
+  const baseModels = envModel
     ? [envModel, ...DEFAULT_VISION_MODELS.filter((m) => m !== envModel)]
     : DEFAULT_VISION_MODELS;
+
+  const models = lastSuccessfulVisionModel
+    ? [lastSuccessfulVisionModel, ...baseModels.filter((m) => m !== lastSuccessfulVisionModel)]
+    : baseModels;
 
   let lastDebug = 'gemini_vision_no_attempt';
 
@@ -193,7 +210,7 @@ export async function generateVisionWithGemini(
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
       lastDebug = `gemini_vision_http_${res.status}:${model}:${errText.slice(0, 180)}`;
-      if (res.status === 400 || res.status === 404 || res.status === 429 || res.status === 503) continue;
+      if (res.status === 400 || res.status === 403 || res.status === 404 || res.status === 422 || res.status === 429 || res.status === 503) continue;
       throw new Error(lastDebug);
     }
 
@@ -209,6 +226,7 @@ export async function generateVisionWithGemini(
       lastDebug = `gemini_vision_empty_response:${model}`;
       continue;
     }
+    lastSuccessfulVisionModel = model;
     return { text, model };
   }
 

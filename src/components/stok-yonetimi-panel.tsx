@@ -1612,10 +1612,7 @@ export default function StokYonetimiPanel() {
       {/* ── HEADER ── */}
       <div className="flex items-center justify-between gap-3">
         <div className="flex-1 min-w-0">
-          <h1 className="text-lg sm:text-xl font-bold text-[var(--dashboard-text)] flex items-center gap-2">
-            <PackageSearch className="h-5 w-5 text-orange-500" />
-            Depo Stoğu
-          </h1>
+          <h1 className="sr-only">Depo Stoğu</h1>
           <p className="text-[11px] sm:text-xs text-[var(--dashboard-muted)] truncate">
             {depotName || 'Depo seçin'} · Depodaki tüm sevk edilmemiş ürünler
           </p>

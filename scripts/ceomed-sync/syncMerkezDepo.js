@@ -107,6 +107,17 @@ async function syncOnce() {
       const prevItems = existing.exists ? (existing.get('items') || []) : [];
       const diff = computeDiff(prevItems, items);
 
+      // Multi-tenancy: yazdığımız ceomedDepoStok dokümanı kaynağı olan depot'un
+      // companyId'sini taşımalı; panel scopedQuery'leri bu tag'e göre filtreliyor.
+      // Depot tag'i yoksa env CEOMED_COMPANY_ID fallback'i devreye girer.
+      const tenantId = (depot.companyId || process.env.CEOMED_COMPANY_ID || '').trim();
+      if (!tenantId) {
+        console.error(
+          `  HATA ${depot.name}: companyId çözümlenemedi (depot doc'unda yok, CEOMED_COMPANY_ID env de boş).`
+        );
+        continue;
+      }
+
       await docRef.set({
         depotId: depot.id,
         depotName: depot.name,
@@ -115,6 +126,7 @@ async function syncOnce() {
         previousItems: prevItems,
         lastDiff: diff,
         previousSyncedAt: existing.exists ? existing.get('syncedAt') || null : null,
+        companyId: tenantId,
         syncedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
 

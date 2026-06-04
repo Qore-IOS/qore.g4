@@ -1,7 +1,7 @@
 'use client';
 import { extractTextFromPdf, renderPdfPagesToImages } from '@/lib/pdf';
 import type { BekleyenIrsaliyeItem, ProductCode } from '@/lib/types';
-import { addDoc, collection, Timestamp } from 'firebase/firestore';
+import { addDoc, collection, Timestamp, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { withCompanyScope } from '@/lib/company-scope';
 
@@ -163,6 +163,19 @@ export async function autoScanIrsaliyeFile(input: AutoScanInput): Promise<AutoSc
         autoScanned: true,
       }, input.companyId),
     );
+
+    // Stoğa aktarılan irsaliyenin orijinal dosyasını veritabanından ve depolamadan otomatik sil
+    try {
+      await fetch('/api/storage/delete-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storagePath: input.storagePath }),
+      }).catch((e) => console.warn('[auto-scan] Storage delete failed:', e));
+
+      await deleteDoc(doc(db, 'irsaliyeDosyalari', input.fileId));
+    } catch (delErr) {
+      console.error('[auto-scan] delete doc failed:', delErr);
+    }
 
     return {
       ok: true,

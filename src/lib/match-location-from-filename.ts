@@ -59,6 +59,10 @@ const STOP_TOKENS = new Set([
   'eah', 'sbu', 'sb', // Eğitim ve Araştırma Hastanesi, SBÜ vs (kısaltma stopword)
   // Türkçe bağlaçlar (NFD sonrası 2-3 harflik connective'ler)
   've', 'ile', 'ya', 'veya', 'icin',
+  // Ortak sağlık/kurum stop kelimeleri (yanlış eşleşmeleri/akronimleri engellemek için)
+  'devlet', 'tip', 'merkezi', 'dernegi', 'vakfi', 'ozel', 'prof', 'dr', 'acil', 'durum',
+  'saglik', 'ocagi', 'hizmetleri', 'baskanligi', 'mudurlugu', 'universitesi',
+  'ortakligi', 'limited', 'sirketi', 'ltd', 'sti', 'as',
 ]);
 
 interface NormalizedCandidate {
@@ -85,10 +89,14 @@ function buildCandidate(c: LocationCandidate): NormalizedCandidate | null {
   const acronyms = new Set<string>();
   if (meaningful.length >= 2) {
     const allInits = meaningful.map(t => t[0]).join('');
-    if (allInits.length >= 2 && allInits.length <= 6) acronyms.add(allInits);
+    if (allInits.length >= 2 && allInits.length <= 6 && !STOP_TOKENS.has(allInits)) {
+      acronyms.add(allInits);
+    }
     for (let n = 2; n <= Math.min(meaningful.length, 4); n++) {
       const prefix = meaningful.slice(0, n).map(t => t[0]).join('');
-      if (prefix.length >= 2) acronyms.add(prefix);
+      if (prefix.length >= 2 && !STOP_TOKENS.has(prefix)) {
+        acronyms.add(prefix);
+      }
     }
   }
 
@@ -118,11 +126,20 @@ function scoreCandidate(
     return { cand, score: 0.95, reason: 'kod' };
   }
 
-  // 2. Akronim eşleşmesi (zk, zkc, se, vb.). Dosya adında tek başına geçiyorsa
-  //    çok güçlü işaret — başka adayla karışma riski düşük (0.9).
+  // 2. Akronim / kısaltma eşleşmesi (zk, zkc, se, vb.). Dosya adında tek başına veya
+  //    kısmi akronim olarak (örn. "zkm" -> "zk") geçiyorsa güçlü işaret.
   for (const acr of cand.acronyms) {
+    // 2a. Tam akronim eşleşmesi
     if (haystackTokens.has(acr)) {
-      return { cand, score: 0.9, reason: 'akronim' };
+      return { cand, score: 0.95, reason: 'akronim' };
+    }
+    // 2b. Kısmi akronim/kısaltma eşleşmesi (örn. dosyadaki "zkm" tokenı aday "zk" akronimini içeriyor/başlıyor)
+    for (const token of meaningfulHaystackTokens) {
+      if (token.length >= 2 && acr.length >= 2) {
+        if (token.startsWith(acr) || acr.startsWith(token)) {
+          return { cand, score: 0.90, reason: 'akronim' };
+        }
+      }
     }
   }
 

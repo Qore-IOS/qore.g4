@@ -54,7 +54,13 @@ Firebase service account JSON'unu indir (Firebase Console → Project Settings �
 ```
 GOOGLE_APPLICATION_CREDENTIALS=C:\path\to\firebase-service-account.json
 FIREBASE_PROJECT_ID=your-firebase-project-id
+CEOMED_COMPANY_ID=your-company-id
 ```
+
+`CEOMED_COMPANY_ID` zorunludur — multi-tenancy katmanında yazılan tüm
+Ceomed dokümanları bu firma id'siyle tag'lenir. Firma id'sini Firestore
+`companies` koleksiyonundan veya kullanıcının `companyId` claim'inden
+alabilirsin (her tenant kendi sync kurulumunu çalıştırır).
 
 Çalıştır (3 durumun hepsini çekip Firestore `pendingCeomedIrsaliye` koleksiyonuna yazar):
 ```bash
@@ -68,8 +74,29 @@ Yazılan doküman şeması:
 pendingCeomedIrsaliye/{ceomedId}
   ceomedId, irsaliyeNo, tarih, cariKodu, cariUnvan, evrakSeq,
   durumAciklama, items: [{BARKOD_SERI, BARKOD, STOK_KODU, LOT, MIYAT, MIKTAR}],
-  status: 'pending' | 'approved' | 'rejected', syncedAt
+  status: 'pending' | 'approved' | 'rejected',
+  companyId,    // CEOMED_COMPANY_ID env'inden — multi-tenancy filtresi için zorunlu
+  syncedAt
 ```
+
+### Adım 4c — Eski (companyId'siz) kayıtlar için tek seferlik backfill
+
+Multi-tenancy katmanından önce yazılmış `pendingCeomedIrsaliye` ve
+`ceomedDepoStok` dokümanları companyId taşımıyorsa panel onları
+göstermez. Aşağıdaki script bu eski kayıtlara `CEOMED_COMPANY_ID`
+tag'ini ekler (idempotent; doğru tag'li olanları atlar, farklı firmaya
+ait olanları uyarı ile geçer):
+
+```powershell
+set -a; source .env; set +a
+node backfillCompanyId.js
+```
+
+`ceomedDepoStok` için önce ilgili `depots/{depotId}` dokümanının
+`companyId`'si kullanılır; depot tag'li değilse `CEOMED_COMPANY_ID`
+env'i fallback olur. Backfill bir kere çalıştırıldıktan sonra
+`syncToFirestore.js`/`syncMerkezDepo.js` artık yeni kayıtları
+otomatik tag'ler — backfill'i tekrar çalıştırmaya gerek yoktur.
 
 ## Adım 4b — Merkez depo stok sync (günlük)
 
@@ -87,17 +114,22 @@ Task Scheduler'a günde 1 kez çalışacak şekilde ayrı bir görev ekle (örn.
 
 ## Adım 5 — Windows Task Scheduler ile Otomasyon
 
-`run-sync.bat` hazır — `.env` dosyasını yükler, dünden bugüne tarih aralığıyla 3 durumu da çeker, `sync.log`'a yazar.
+`run-sync.bat` hazır — varsa önce `set-env.bat`, sonra `.env` dosyasını yükler; `.env` değerleri `set-env.bat` değerlerini ezer. İçinde bulunduğumuz haftanın tarih aralığıyla izinli durumları çeker ve `sync.log`'a yazar. Batch dosyası eksik zorunlu ayar veya Node hatasında non-zero exit code döndürür; böylece Task Scheduler gerçek hatayı “başarılı” gibi göstermez.
 
 ### Önce `.env` oluştur
-`scripts/ceomed-sync/.env` dosyası (gitignore'da):
-```
+`scripts/ceomed-sync/.env` dosyası (gitignore'da) düz `KEY=VALUE` satırları içermeli:
+```env
 CEOMED_BASE_URL=http://192.168.1.5:8081
 CEOMED_EPOSTA=merkez
 CEOMED_PAROLA=12345
 GOOGLE_APPLICATION_CREDENTIALS=C:\Users\btuba\firebase-sa.json
 FIREBASE_PROJECT_ID=your-project-id
+CEOMED_COMPANY_ID=your-company-id
 ```
+
+İstersen aynı değerleri `set-env.bat` ile de verebilirsin; fakat `.env` varsa en son o okunur ve değerleri geçerli olur.
+
+`CEOMED_COMPANY_ID` özellikle önemlidir: bu değer boşsa sync script'i yazma işlemini durdurur; çünkü panel `pendingCeomedIrsaliye` kayıtlarını firma kapsamına göre okur ve companyId'siz yeni kayıtlar arayüzde görünmez.
 
 ### Test et
 ```powershell
@@ -128,3 +160,5 @@ Artık her 15 dakikada bir Firestore otomatik güncelleniyor. Logu görmek için
 ```powershell
 type C:\Users\btuba\Desktop\qore.g4\scripts\ceomed-sync\sync.log
 ```
+
+Logda `[HATA] CEOMED_COMPANY_ID tanimli degil` veya `FATAL: CEOMED_COMPANY_ID env değişkeni zorunlu` görürsen `.env` dosyasına `CEOMED_COMPANY_ID=...` satırını ekleyip bir kere `node backfillCompanyId.js` çalıştır; ardından `run-sync.bat` yeni irsaliyeleri tekrar yazacaktır.
