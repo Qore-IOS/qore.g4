@@ -36,6 +36,11 @@ interface Asset {
   planliKullanimOmruYil?: number;
   amortismanYontemi?: 'dogrusal' | 'azalan_bakiye';
   amortismanBaslangicTarihi?: string;
+  mulkiyet?: 'satin_alma' | 'kira';
+  kiraTutari?: number;
+  kiraDonemi?: 'aylik' | 'yillik';
+  kiraBitisTarihi?: string;
+  maliyetCurrency?: 'EUR' | 'USD' | 'TRY';
   hurdaTarihi?: string;
   imhaTarihi?: string;
   satisTarihi?: string;
@@ -53,6 +58,25 @@ interface Asset {
 }
 
 interface Location { id: string; name: string; }
+
+const inputClass = "w-full h-9 px-3 rounded-xl text-sm bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-text)] placeholder:text-[var(--dashboard-muted)] outline-none focus:ring-2 focus:ring-[var(--dashboard-accent)]/30";
+
+const formatTry = (value?: number) =>
+  typeof value === 'number' && Number.isFinite(value)
+    ? `${value.toLocaleString('tr-TR')} ₺`
+    : '-';
+
+const getOwnershipLabel = (asset: Partial<Asset>) =>
+  asset.mulkiyet === 'kira' ? 'Kiralık' : 'Satılık';
+
+const getCostLabel = (asset: Partial<Asset>) => {
+  if (asset.mulkiyet === 'kira') {
+    const amount = formatTry(asset.kiraTutari);
+    const period = asset.kiraDonemi === 'yillik' ? 'yıl' : 'ay';
+    return amount === '-' ? '-' : `${amount} / ${period}`;
+  }
+  return formatTry(asset.alimFiyatiTl);
+};
 
 interface AssetHistoryEntry {
   id: string;
@@ -72,8 +96,6 @@ interface CustodyEntry {
   timestamp: any;
   changedBy: string;
 }
-
-const inputClass = "w-full h-9 px-3 rounded-xl text-sm bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-text)] placeholder:text-[var(--dashboard-muted)] outline-none focus:ring-2 focus:ring-[var(--dashboard-accent)]/30";
 
 function InfoRow({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
@@ -105,7 +127,11 @@ export default function AssetDetailPage() {
   const [assignmentSignature, setAssignmentSignature] = useState('');
   const [assignmentNote, setAssignmentNote] = useState('');
   // Editable financial/maintenance fields
+  const [editMulkiyet, setEditMulkiyet] = useState<'satin_alma' | 'kira'>('satin_alma');
   const [editAlimFiyati, setEditAlimFiyati] = useState<number | ''>('');
+  const [editKiraTutari, setEditKiraTutari] = useState<number | ''>('');
+  const [editKiraDonemi, setEditKiraDonemi] = useState<'aylik' | 'yillik'>('aylik');
+  const [editKiraBitis, setEditKiraBitis] = useState('');
   const [editPlanliOmur, setEditPlanliOmur] = useState<number | ''>('');
   const [editGarantiBitis, setEditGarantiBitis] = useState('');
   const [editSonrakiBakim, setEditSonrakiBakim] = useState('');
@@ -134,7 +160,11 @@ export default function AssetDetailPage() {
           setNewPersonel(data.teslimEdilenPersonel);
           setAssignmentPerson(data.zimmetliKisi || data.teslimEdilenPersonel || '');
           setAssignmentSignature(data.dijitalImza || '');
+          setEditMulkiyet(data.mulkiyet || 'satin_alma');
           setEditAlimFiyati(data.alimFiyatiTl ?? '');
+          setEditKiraTutari(data.kiraTutari ?? '');
+          setEditKiraDonemi(data.kiraDonemi || 'aylik');
+          setEditKiraBitis(data.kiraBitisTarihi || '');
           setEditPlanliOmur(data.planliKullanimOmruYil ?? '');
           setEditGarantiBitis(data.garantiBitisTarihi || '');
           setEditSonrakiBakim(data.sonrakiBakimTarihi || '');
@@ -205,7 +235,11 @@ export default function AssetDetailPage() {
     setIsSavingFinancial(true);
     try {
       const updates: Record<string, any> = {
+        mulkiyet: editMulkiyet,
         alimFiyatiTl: editAlimFiyati === '' ? 0 : editAlimFiyati,
+        kiraTutari: editKiraTutari === '' ? 0 : editKiraTutari,
+        kiraDonemi: editKiraDonemi,
+        kiraBitisTarihi: editKiraBitis,
         planliKullanimOmruYil: editPlanliOmur === '' ? 0 : editPlanliOmur,
         garantiBitisTarihi: editGarantiBitis,
         sonrakiBakimTarihi: editSonrakiBakim,
@@ -271,7 +305,7 @@ export default function AssetDetailPage() {
   };
 
   const depreciationInfo = useMemo(() => {
-    if (!asset?.alimFiyatiTl || !asset?.planliKullanimOmruYil || !asset?.amortismanBaslangicTarihi) return null;
+    if (asset?.mulkiyet === 'kira' || !asset?.alimFiyatiTl || !asset?.planliKullanimOmruYil || !asset?.amortismanBaslangicTarihi) return null;
     const start = new Date(asset.amortismanBaslangicTarihi);
     if (Number.isNaN(start.getTime())) return null;
     const elapsed = Math.max(0, (Date.now() - start.getTime()) / (1000 * 60 * 60 * 24 * 365.25));
@@ -338,7 +372,9 @@ export default function AssetDetailPage() {
             <InfoRow label="Konum" value={asset.konum || '-'} />
             <InfoRow label="Personel" value={asset.teslimEdilenPersonel || '-'} />
             <InfoRow label="Aktif Zimmet" value={asset.zimmetliKisi || '-'} />
-            <InfoRow label="Alım Fiyatı" value={`${(asset.alimFiyatiTl || 0).toLocaleString('tr-TR')} ₺`} accent />
+            <InfoRow label="Mülkiyet Tipi" value={getOwnershipLabel(asset)} />
+            <InfoRow label={asset.mulkiyet === 'kira' ? 'Kira Tutarı' : 'Alım Fiyatı'} value={getCostLabel(asset)} accent />
+            {asset.mulkiyet === 'kira' && <InfoRow label="Kira Bitişi" value={asset.kiraBitisTarihi || '-'} />}
             <InfoRow label="Planlı Ömür" value={`${asset.planliKullanimOmruYil || 0} yıl`} />
             <InfoRow label="Garanti Bitişi" value={asset.garantiBitisTarihi || '-'} />
             <InfoRow label="Sonraki Bakım" value={asset.sonrakiBakimTarihi || '-'} />
@@ -437,12 +473,45 @@ export default function AssetDetailPage() {
         {/* FINANCIAL & MAINTENANCE EDITABLE */}
         <div className="cihaz-card p-5 sm:p-6 mb-5">
           <p className="text-[11px] font-semibold text-[var(--dashboard-accent)] uppercase tracking-wider mb-1">Mali & Bakım Bilgileri</p>
-          <p className="text-[10px] text-[var(--dashboard-muted)] mb-4">Alım fiyatı, garanti, bakım ve kalibrasyon tarihlerini güncelleyin.</p>
+          <p className="text-[10px] text-[var(--dashboard-muted)] mb-4">Satılık/kiralık bilgisi, garanti, bakım ve kalibrasyon tarihlerini güncelleyin.</p>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             <div>
-              <label className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider mb-1 block">Alım Fiyatı (₺)</label>
-              <input className={inputClass} type="number" min={0} step="0.01" placeholder="0" value={editAlimFiyati} onChange={e => setEditAlimFiyati(e.target.value === '' ? '' : Number(e.target.value))} />
+              <label className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider mb-1 block">Mülkiyet Tipi</label>
+              <Select value={editMulkiyet} onValueChange={v => setEditMulkiyet(v as 'satin_alma' | 'kira')}>
+                <SelectTrigger className="h-9 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] border-0"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="satin_alma">Satılık</SelectItem>
+                  <SelectItem value="kira">Kiralık</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
+            {editMulkiyet === 'kira' ? (
+              <>
+                <div>
+                  <label className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider mb-1 block">Kira Tutarı (₺)</label>
+                  <input className={inputClass} type="number" min={0} step="0.01" placeholder="0" value={editKiraTutari} onChange={e => setEditKiraTutari(e.target.value === '' ? '' : Number(e.target.value))} />
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider mb-1 block">Kira Dönemi</label>
+                  <Select value={editKiraDonemi} onValueChange={v => setEditKiraDonemi(v as 'aylik' | 'yillik')}>
+                    <SelectTrigger className="h-9 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] border-0"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="aylik">Aylık</SelectItem>
+                      <SelectItem value="yillik">Yıllık</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider mb-1 block">Kira Bitiş</label>
+                  <input className={inputClass} type="date" value={editKiraBitis} onChange={e => setEditKiraBitis(e.target.value)} />
+                </div>
+              </>
+            ) : (
+              <div>
+                <label className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider mb-1 block">Alım Fiyatı (₺)</label>
+                <input className={inputClass} type="number" min={0} step="0.01" placeholder="0" value={editAlimFiyati} onChange={e => setEditAlimFiyati(e.target.value === '' ? '' : Number(e.target.value))} />
+              </div>
+            )}
             <div>
               <label className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider mb-1 block">Planlı Ömür (Yıl)</label>
               <input className={inputClass} type="number" min={0} placeholder="0" value={editPlanliOmur} onChange={e => setEditPlanliOmur(e.target.value === '' ? '' : Number(e.target.value))} />
