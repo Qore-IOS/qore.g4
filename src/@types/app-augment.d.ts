@@ -111,6 +111,11 @@ declare module "@/lib/types" {
     planliKullanimOmruYil?: number;
     amortismanYontemi?: 'dogrusal' | 'azalan_bakiye';
     amortismanBaslangicTarihi?: string;
+    mulkiyet?: 'satin_alma' | 'kira';
+    kiraTutari?: number;
+    kiraDonemi?: 'aylik' | 'yillik';
+    kiraBitisTarihi?: string;
+    maliyetCurrency?: 'EUR' | 'USD' | 'TRY';
     hurdaTarihi?: string;
     imhaTarihi?: string;
     satisTarihi?: string;
