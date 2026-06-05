@@ -549,7 +549,6 @@ export default function AnaPanel(props: AnaPanelProps) {
   // Skeleton yalnızca veri gerçekten hiç cache'de yoksa (isPending) gösterilir.
   // Arka planda yenileme (isFetching) sırasında UI bloke edilmez.
   const isLoading = depotsPending || productsPending;
-  const [isProcessingScan, setIsProcessingScan] = useState(false);
 
   const [scannedItems, setScannedItems] = useState<ScanRow[]>([]);
   const [lastScannedProduct, setLastScannedProduct] = useState<ScanRow | null>(null);
@@ -756,7 +755,6 @@ export default function AnaPanel(props: AnaPanelProps) {
       return;
     }
 
-    setIsProcessingScan(true);
     try {
         const resolveResult = parseAndResolveBarcode(trimmedData, barcodeFormats, productCodes as any);
         if (!resolveResult || !resolveResult.parsed) {
@@ -812,7 +810,6 @@ export default function AnaPanel(props: AnaPanelProps) {
               }, { correlationId: scanCorrelationId });
               flashScanFeedback('error', `SN ${seriNumarasi} (${matchedProduct.stokAdi}) ${location} zaten mevcut.`);
               if (source === 'barcode') { setScanStatus('error'); setTimeout(() => setScanStatus('idle'), 3000); }
-              setIsProcessingScan(false);
               return;
             }
 
@@ -888,13 +885,17 @@ export default function AnaPanel(props: AnaPanelProps) {
         setScanStatus('error');
         setTimeout(() => setScanStatus('idle'), 3000);
       }
-    } finally {
-      setIsProcessingScan(false);
     }
   }, [flashScanFeedback, productCodes, barcodeFormats, existingDepotSerials, productTracking, isBulkScanMode]);
 
+  // Direkt transfer paneliyle aynı davranış: tarayıcı yalnızca modal/kamera/manuel
+  // giriş açıkken devre dışı. Eskiden buradaki `!isProcessingScan` koşulu HER
+  // okutmada window keydown dinleyicisini söküp yeniden ekliyordu (re-subscribe
+  // churn) ve okutma işlenirken tarayıcıyı kapatıyordu. Okutma yolu artık tamamen
+  // bellek-içi olduğundan (per-scan Firestore sorgusu kaldırıldı) bu kapıya gerek
+  // yok; kaldırılması anlık, kesintisiz okutma sağlar.
   useHidScanner({
-    enabled: !isPreCheckModalOpen && !isProcessingScan && !isCameraScannerOpen && !showManualInline,
+    enabled: !isPreCheckModalOpen && !isCameraScannerOpen && !showManualInline,
     onScan: ({ raw }) => {
       if (raw) processScan(raw, 'barcode');
     },
