@@ -21,7 +21,7 @@ export default function LoginPage() {
   const { login, currentUser, isLoadingAuth, currentUserProfile } = useAuth();
   const { toast } = useToast();
   const { resolvedTheme } = useTheme();
-  const logoSrc = resolvedTheme === 'light' ? '/blk.png' : '/wt.png';
+  const logoSrc = resolvedTheme === 'light' ? '/blk.png' : '/wt.webp';
 
   useEffect(() => {
     if (!isLoadingAuth && currentUser) {

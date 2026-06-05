@@ -50,8 +50,8 @@
 
     /* Dashboard neumorphic tokens (light mode) */
     --dashboard-bg: #eae9e5;
-    --dashboard-surface: #F3F2EF;
-    --dashboard-surface-2: #EEECE7;
+    --dashboard-surface: #eae9e5;
+    --dashboard-surface-2: #eae9e5;
     --dashboard-stroke: rgba(0, 0, 0, .045);
     --dashboard-text: #2B2F33;
     --dashboard-muted: #6C727A;
@@ -63,8 +63,8 @@
 
     /* Device management module tokens */
     --device-bg: #eae9e5;
-    --device-surface: #F3F4F6;
-    --device-surface-2: #E7E9ED;
+    --device-surface: #eae9e5;
+    --device-surface-2: #eae9e5;
     --device-border: rgba(20, 23, 28, 0.08);
     --device-text: #1F2328;
     --device-muted: #6B7280;

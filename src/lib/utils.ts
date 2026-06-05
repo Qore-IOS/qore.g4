@@ -800,23 +800,18 @@ export async function exportDevicesToPdf(
   }
 }
 
-// Preloaded notification sound for instant playback
+// Notification sound cache
 let notificationAudio: HTMLAudioElement | null = null;
 
 const getNotificationAudio = () => {
   if (typeof window === 'undefined') return null;
   if (!notificationAudio) {
-    notificationAudio = new Audio('/notif.wav');
+    notificationAudio = new Audio('/notif.mp3');
     notificationAudio.volume = 0.5;
-    notificationAudio.preload = 'auto';
+    // Removed preload='auto' to avoid aggressive early loading
   }
   return notificationAudio;
 };
-
-// Preload on first import (client-side only)
-if (typeof window !== 'undefined') {
-  getNotificationAudio();
-}
 
 export const playNotificationSound = () => {
   if (typeof window === 'undefined') return;
