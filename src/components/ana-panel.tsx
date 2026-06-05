@@ -8,7 +8,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef, Suspense, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef, Suspense, useMemo, useDeferredValue } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 
@@ -555,6 +555,14 @@ export default function AnaPanel(props: AnaPanelProps) {
   const isLoading = depotsPending || productsPending;
 
   const [scannedItems, setScannedItems] = useState<ScanRow[]>([]);
+
+  // A scan must stay on the urgent input path. Grouping and sorting thousands of
+  // rows synchronously here used to block the next HID/keyboard event for a few
+  // milliseconds on every read. React may now coalesce this deferred snapshot
+  // during rapid scanning while counters and duplicate detection keep using the
+  // authoritative, up-to-date array above.
+  const deferredScannedItems = useDeferredValue(scannedItems);
+
   const [lastScannedProduct, setLastScannedProduct] = useState<ScanRow | null>(null);
   const [scanStatus, setScanStatus] = useState<'idle'|'success'|'error'>('idle');
 
@@ -1130,7 +1138,7 @@ export default function AnaPanel(props: AnaPanelProps) {
 
   const groupedScannedItems = useMemo(() => {
     const grouped: Record<string, ScanRow> = {};
-    scannedItems.forEach(item => {
+    deferredScannedItems.forEach(item => {
       const key = item.key ?? `${item.stokKodu}-${item.lotNumarasi}-${item.miad}`;
       if (!grouped[key]) {
         grouped[key] = {
@@ -1156,7 +1164,7 @@ export default function AnaPanel(props: AnaPanelProps) {
       const bTime = b.timestamp instanceof Date ? b.timestamp.getTime() : (b.timestamp as any)?.toDate?.()?.getTime?.() || 0;
       return bTime - aTime;
     });
-  }, [scannedItems]);
+  }, [deferredScannedItems]);
   
   const toggleGroupSelection = (groupKey: string | undefined) => {
     if (!groupKey) return;
