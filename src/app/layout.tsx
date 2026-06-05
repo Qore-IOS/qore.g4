@@ -1,5 +1,6 @@
 
 import { Urbanist } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AuthProvider } from "@/contexts/auth-context";
@@ -8,7 +9,6 @@ import { Toaster } from "@/components/ui/toaster";
 import MobileResponsiveFix from "@/components/responsive/MobileResponsiveFix";
 import WebVitalsReporter from "@/components/perf/WebVitalsReporter";
 import React from "react";
-
 
 const urbanist = Urbanist({
   subsets: ["latin"],
@@ -61,6 +61,22 @@ export default function RootLayout({
           </AuthProvider>
         </ThemeProvider>
         {/* PDF.js is loaded lazily where needed - see src/lib/pdf.ts */}
+        
+        {/* Google Analytics via next/script lazyOnload */}
+        <Script
+          src="https://www.googletagmanager.com/gtag/js?id=G-TGHCKJKWEZ"
+          strategy="lazyOnload"
+        />
+        <Script id="google-analytics" strategy="lazyOnload">
+          {`
+            window.dataLayer = window.dataLayer || [];
+            function gtag(){dataLayer.push(arguments);}
+            gtag('js', new Date());
+            gtag('config', 'G-TGHCKJKWEZ', {
+              page_path: window.location.pathname,
+            });
+          `}
+        </Script>
       </body>
     </html>
   );
