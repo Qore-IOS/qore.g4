@@ -23,7 +23,7 @@ import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
 
 // Hooks
 import { useToast } from "@/hooks/use-toast";
-import { useDepots, useProductCodes, useAddressDefinitions, useBarcodeFormatsQuery, useUsers, useDepoStokByDepot, useInvalidateQueries, touchStockMetadata, useDepotCountSessions, useScannedItems, useIrsaliyeFiles } from '@/hooks/useFirebaseQueries';
+import { useDepots, useProductCodes, useAddressDefinitions, useBarcodeFormatsQuery, useUsers, useDepotSerialIndex, useInvalidateQueries, touchStockMetadata, useDepotCountSessions, useScannedItems, useIrsaliyeFiles } from '@/hooks/useFirebaseQueries';
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import useHidScanner from '@/hooks/useHidScanner';
 import { useAuth } from '@/contexts/auth-context';
@@ -520,6 +520,11 @@ const enqueueSerialHistory = (
 };
 
 
+// Stable empty reference for the depot serial index so that, while the query is
+// loading (data === undefined), the fallback doesn't allocate a new Map every
+// render and retrigger memos/callbacks that depend on `existingDepotSerials`.
+const EMPTY_SERIAL_INDEX: ReadonlyMap<string, Set<string>> = new Map();
+
 export default function AnaPanel(props: AnaPanelProps) {
   const { toast } = useToast();
   const router = useRouter();
@@ -537,8 +542,9 @@ export default function AnaPanel(props: AnaPanelProps) {
 
   const [selectedDepotId, setSelectedDepotId] = useState<string>('');
 
-  // Use TanStack Query for depot stock with polling
-  const { data: depotStockData = [] } = useDepoStokByDepot(selectedDepotId);
+  // Mükerrer seri kontrolü için depo seri indeksi (tüm depoStok'u indirmeden,
+  // sunucu tarafında özetlenmiş `Map<stokKodu, Set<seriNumarasi>>`).
+  const { data: existingDepotSerials = EMPTY_SERIAL_INDEX } = useDepotSerialIndex(selectedDepotId);
 
   // Skeleton yalnızca veri gerçekten hiç cache'de yoksa (isPending) gösterilir.
   // Arka planda yenileme (isFetching) sırasında UI bloke edilmez.
@@ -697,25 +703,12 @@ export default function AnaPanel(props: AnaPanelProps) {
     return () => unsub();
   }, [selectedDepot]);
 
-  // Build existing serials map from TanStack Query data (polling instead of real-time listener)
-  // Key: stokKodu -> Set<seriNumarasi>  (lot dahil edilmez, aynı ürün+seri her durumda mükerrer)
-  // This reduces Firestore reads dramatically
-  const existingDepotSerials = useMemo(() => {
-    const serialsByProduct = new Map<string, Set<string>>();
-    depotStockData.forEach(item => {
-      const serial = item.seriNumarasi;
-      const stokKodu = item.stokKodu;
-      if (serial && stokKodu) {
-        const key = serialProductKey(stokKodu);
-        if (!serialsByProduct.has(key)) {
-          serialsByProduct.set(key, new Set());
-        }
-        serialsByProduct.get(key)!.add(serial);
-      }
-    });
-    return serialsByProduct;
-  }, [depotStockData, serialProductKey]);
-  
+  // `existingDepotSerials` artık doğrudan `useDepotSerialIndex` üzerinden geliyor
+  // (yukarıda). Eskiden burada tüm `depoStok` istemciye indirilip
+  // `Map<stokKodu, Set<seriNumarasi>>` olarak yeniden kuruluyordu; bu, panelin
+  // yavaş açılmasının ve okutma sırasında ana iş parçacığının tıkanmasının
+  // başlıca nedeniydi. Anahtarlama hâlâ stokKodu bazlı (lot dahil değil).
+
   const processScan = useCallback(async (barcodeData: string, source: 'barcode' | 'bulk_item' = 'barcode') => {
     const scanCorrelationId = createCorrelationId();
     const trimmedData = (barcodeData || '').trim();

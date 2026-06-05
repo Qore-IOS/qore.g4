@@ -21,7 +21,7 @@ import {
 } from 'firebase/firestore';
 import { safeCompareByMiad, toDateSafe } from "@/lib/date";
 import { differenceInDays, parse, isValid, compareAsc } from 'date-fns';
-import { filterByCompanyScope } from '@/lib/company-scope';
+import { filterByCompanyScope, matchesCompanyScope } from '@/lib/company-scope';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -57,6 +57,74 @@ export async function getFullDepotStock(
   } catch (err) {
     console.error('Error fetching full depot stock:', err);
     throw new Error('Failed to fetch full depot stock.');
+  }
+}
+
+/**
+ * Compact serial index for a depot — used by Mal Kabul duplicate detection.
+ *
+ * Mal Kabul only needs the SET of serial numbers already present in a depot to
+ * reject duplicate scans; it does not need the full DepoStokItem documents.
+ * Previously the panel downloaded the entire `depoStok` collection for the
+ * selected depot (via the `useDepoStokByDepot` client hook) just to build this
+ * set. Running thousands of docs through the Firestore web SDK + IndexedDB
+ * persistence layer was the main cause of the panel's slow open and per-scan
+ * main-thread contention.
+ *
+ * This server action instead:
+ *   1. Reads `depoStok` with the Admin SDK (no client persistence layer), and
+ *   2. Projects ONLY `stokKodu` / `seriNumarasi` / `companyId` via `.select()`,
+ *      so Firestore returns a fraction of each document, and
+ *   3. Returns a de-duplicated `Record<stokKodu, string[]>` map — a tiny
+ *      payload compared to the full dataset.
+ *
+ * Behaviour matches the old client query (all stock for the depot, regardless
+ * of `isShipped`) so duplicate detection is unchanged.
+ */
+export type DepotSerialIndex = Record<string, string[]>;
+
+export async function getDepotSerialIndex(
+  depotId: string,
+  companyId?: string | null,
+  isSuperAdmin?: boolean,
+): Promise<DepotSerialIndex> {
+  if (!depotId) return {};
+  try {
+    const snap = await adminDb
+      .collection('depoStok')
+      .where('depotId', '==', depotId)
+      .select('stokKodu', 'seriNumarasi', 'companyId')
+      .get();
+
+    const serialsByProduct = new Map<string, Set<string>>();
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() as {
+        stokKodu?: string;
+        seriNumarasi?: string;
+        companyId?: string | null;
+      };
+      // Defense-in-depth company scoping (mirrors filterByCompanyScope, but
+      // per-item so we never materialize an intermediate array).
+      if (!matchesCompanyScope(data, companyId, isSuperAdmin)) return;
+      const stokKodu = data.stokKodu;
+      const serial = data.seriNumarasi;
+      if (!stokKodu || !serial) return;
+      let set = serialsByProduct.get(stokKodu);
+      if (!set) {
+        set = new Set<string>();
+        serialsByProduct.set(stokKodu, set);
+      }
+      set.add(serial);
+    });
+
+    const index: DepotSerialIndex = {};
+    for (const [stokKodu, serials] of serialsByProduct) {
+      index[stokKodu] = Array.from(serials);
+    }
+    return index;
+  } catch (err) {
+    console.error('[getDepotSerialIndex] Error for depot', depotId, ':', err);
+    return {};
   }
 }
 
