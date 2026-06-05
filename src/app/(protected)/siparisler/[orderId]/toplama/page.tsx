@@ -48,6 +48,12 @@ import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { siparisToplamaLogger } from '@/lib/logger';
 import { getStockItemQuantity, sumStockItemQuantities } from '@/lib/stock-quantity';
+import {
+  aggregateOrderItemsByProduct,
+  decodeLotPickingIdentifier,
+  encodeLotPickingIdentifier,
+  findAvailableStockForQuantityScan,
+} from '@/lib/siparisler/picking';
 
 
 function LastTransferLine({
@@ -284,9 +290,10 @@ export default function ToplamaPage() {
         const pickingListItems: PickingListItemType[] = [];
         const availableWarehouseStock = depoStokData;
 
-        for (const orderItem of (orderData.items || [])) {
+        const requestedByProduct = aggregateOrderItemsByProduct(orderData.items || []);
+
+        for (const orderItem of requestedByProduct) {
           const productInfo = productsData.find(p => p.stokKodu === orderItem.stokKodu);
-          let neededForThisOrderItem = orderItem.adet ?? 0;
           const availableItemsForProduct = availableWarehouseStock
             .filter(ds => ds.stokKodu === orderItem.stokKodu)
             .sort((a,b) => {
@@ -294,45 +301,22 @@ export default function ToplamaPage() {
                   return compareAsc(parseDate(a.miad as string, 'dd.MM.yyyy', new Date()), parseDate(b.miad as string, 'dd.MM.yyyy', new Date()))
               } catch { return 0; }
             });
-          
-          if (availableItemsForProduct.length === 0) {
-            const dgMatch = deviceGroupsData.find(dg => dg.name === productInfo?.cihazGrubu);
-            pickingListItems.push({
-              id: generateId(), orderId: orderData.id, stokKodu: orderItem.stokKodu || '', stokAdi: orderItem.stokAdi || '', lotNumarasi: 'STOK YOK', miad: '-', rafAdresiOnerilen: '-', adetIstenen: orderItem.adet ?? 0, toplananSeriNumaralari: [], cihazGrubu: productInfo?.cihazGrubu || 'Diğer', cihazGrubuImageUrl: (dgMatch as any)?.imageUrl,
-            } as any);
-            continue;
-          }
-          
-          const stockGroups = availableItemsForProduct.reduce((acc, item) => {
-            const key = `${item.lotNumarasi || ''}-${item.miad || ''}`;
-            if (!acc[key]) acc[key] = [];
-            acc[key].push(item);
-            return acc;
-          }, {} as Record<string, DepoStokItem[]>);
+          const suggestedStock = availableItemsForProduct[0];
+          const dgMatch = deviceGroupsData.find(dg => dg.name === productInfo?.cihazGrubu);
 
-          const sortedGroupKeys = Object.keys(stockGroups).sort((a, b) => {
-            const miadA = a.split('-')[1];
-            const miadB = b.split('-')[1];
-            try {
-              return compareAsc(parseDate(miadA, 'dd.MM.yyyy', new Date()), parseDate(miadB, 'dd.MM.yyyy', new Date()));
-            } catch { return 0; }
-          });
-            
-          for (const groupKey of sortedGroupKeys) {
-            if ((neededForThisOrderItem ?? 0) <= 0) break;
-            const itemsInGroup = stockGroups[groupKey];
-            const availableQuantityInGroup = sumStockItemQuantities(itemsInGroup);
-            const itemsToTakeCount = Math.min(neededForThisOrderItem ?? 0, availableQuantityInGroup);
-
-            if (itemsToTakeCount > 0) {
-              const firstItem = itemsInGroup[0];
-              const dgMatch = deviceGroupsData.find(dg => dg.name === productInfo?.cihazGrubu);
-              pickingListItems.push({
-                id: generateId(), orderId: orderData.id, stokKodu: firstItem.stokKodu || '', stokAdi: productInfo?.stokAdi || firstItem.stokAdi || '', lotNumarasi: firstItem.lotNumarasi || '', miad: (firstItem.miad as string) || '', rafAdresiOnerilen: firstItem.rafAdresi || '', adetIstenen: itemsToTakeCount, toplananSeriNumaralari: [], cihazGrubu: productInfo?.cihazGrubu || 'Diğer', cihazGrubuImageUrl: (dgMatch as any)?.imageUrl,
-              } as any);
-              neededForThisOrderItem = (neededForThisOrderItem ?? 0) - itemsToTakeCount;
-            }
-          }
+          pickingListItems.push({
+            id: generateId(),
+            orderId: orderData.id,
+            stokKodu: orderItem.stokKodu || '',
+            stokAdi: productInfo?.stokAdi || orderItem.stokAdi || suggestedStock?.stokAdi || '',
+            lotNumarasi: suggestedStock ? (suggestedStock.lotNumarasi || '') : 'STOK YOK',
+            miad: (suggestedStock?.miad as string) || '-',
+            rafAdresiOnerilen: suggestedStock?.rafAdresi || '-',
+            adetIstenen: orderItem.adet ?? 0,
+            toplananSeriNumaralari: [],
+            cihazGrubu: productInfo?.cihazGrubu || 'Diğer',
+            cihazGrubuImageUrl: (dgMatch as any)?.imageUrl,
+          } as any);
         }
         
         // Get target hospital for custom sorting
@@ -511,26 +495,43 @@ export default function ToplamaPage() {
             return;
           }
 
-          const groupToIncrement = pickingList.find(pl =>
-              pl.stokKodu === stokKodu &&
-              currentScannedForProduct.filter(s => s.startsWith(`${pl.lotNumarasi}-`)).length < (pl.adetIstenen ?? 0)
+          const availableStockForProduct = depoStok
+            .filter(item =>
+              item.stokKodu === stokKodu &&
+              item.depotId === order?.depotId &&
+              !item.isShipped &&
+              (!lotNumarasi || item.lotNumarasi === lotNumarasi)
+            )
+            .sort((a, b) => {
+              try {
+                return compareAsc(parseDate(a.miad as string, 'dd.MM.yyyy', new Date()), parseDate(b.miad as string, 'dd.MM.yyyy', new Date()));
+              } catch { return 0; }
+            });
+          const stockToPick = findAvailableStockForQuantityScan(
+            availableStockForProduct,
+            currentScannedForProduct,
+            lotNumarasi,
           );
 
-          if (!groupToIncrement) {
-              pushScanEvent(false, `${product.stokAdi} – uygun toplama grubu yok`);
+          if (!stockToPick) {
+              pushScanEvent(false, lotNumarasi
+                ? `${product.stokAdi} – ${lotNumarasi} lotunda yeterli stok yok`
+                : `${product.stokAdi} – depoda yeterli stok yok`);
               return;
           }
 
-          const scannedCount = currentScannedForProduct.filter(s => s.startsWith(`${groupToIncrement.lotNumarasi}-`)).length;
+          const actualLot = stockToPick.lotNumarasi || '';
+          const scannedCountForLot = currentScannedForProduct.filter(identifier => decodeLotPickingIdentifier(identifier) === actualLot).length;
           siparisToplamaLogger.info('Lot/adet takipli ürün okutuldu', {
             orderId: order?.id,
             stokKodu,
             stokAdi: product.stokAdi,
-            lotNumarasi: groupToIncrement.lotNumarasi,
-            okutulanAdet: scannedCount + 1,
+            lotNumarasi: actualLot,
+            suggestedLot: pickItemForProduct.lotNumarasi,
+            okutulanAdet: scannedCountForLot + 1,
             trackingMode: mode,
           });
-          addScannedSerial(stokKodu, `${groupToIncrement.lotNumarasi}-${scannedCount + 1}`);
+          addScannedSerial(stokKodu, encodeLotPickingIdentifier(actualLot, scannedCountForLot + 1));
       }
     } finally {
       scanLockRef.current = false;
@@ -542,14 +543,14 @@ export default function ToplamaPage() {
     onScan: ({raw}) => handleScan(raw)
   });
 
-  const deletePickingItem = (itemStokKodu: string, itemLot: string) => {
-    setPickingList(prev => prev.filter(item => !(item.stokKodu === itemStokKodu && item.lotNumarasi === itemLot)));
+  const deletePickingItem = (itemStokKodu: string) => {
+    setPickingList(prev => prev.filter(item => item.stokKodu !== itemStokKodu));
     setScannedSerials(prev => {
         const newScanned = { ...prev };
         delete newScanned[itemStokKodu];
         return newScanned;
     });
-    toast({ title: 'Ürün Kaldırıldı', description: `${itemStokKodu} (${itemLot}) toplama listesinden çıkarıldı.` });
+    toast({ title: 'Ürün Kaldırıldı', description: `${itemStokKodu} toplama listesinden çıkarıldı.` });
   };
 
   const commitTransfer = async () => {
@@ -634,8 +635,7 @@ export default function ToplamaPage() {
               getRemainingQuantity(item) > 0
             );
           } else if (trackingMode === 'lot_barcode' || trackingMode === 'lot_manual') {
-            const lastDashIdx = serialOrIdentifier.lastIndexOf('-');
-            const lot = lastDashIdx > 0 ? serialOrIdentifier.substring(0, lastDashIdx) : serialOrIdentifier;
+            const lot = decodeLotPickingIdentifier(serialOrIdentifier);
             stockItem = depoStok.find(item =>
               item.lotNumarasi === lot &&
               item.stokKodu === stokKodu &&
@@ -644,8 +644,7 @@ export default function ToplamaPage() {
               getRemainingQuantity(item) > 0
             );
           } else {
-            const lastDashIdx = serialOrIdentifier.lastIndexOf('-');
-            const lotFromScan = lastDashIdx > 0 ? serialOrIdentifier.substring(0, lastDashIdx) : null;
+            const lotFromScan = decodeLotPickingIdentifier(serialOrIdentifier);
             stockItem = depoStok.find(item =>
               item.stokKodu === stokKodu &&
               item.depotId === order.depotId &&
@@ -1108,24 +1107,15 @@ export default function ToplamaPage() {
   const totalScanned = useMemo(() => Object.values(scannedSerials).flat().length, [scannedSerials]);
   const overallPct = totalNeeded > 0 ? Math.round((totalScanned / totalNeeded) * 100) : 0;
 
-  // PERF (Faz 4b): enrichedList her taramada (scannedSerials değişince) çalışıyor ve her
-  // picking satırı için tüm depoStok'u 2 kez .filter ediyordu → O(pickingList×|depoStok|)
-  // tarama-başı yük. Stok, taramadan BAĞIMSIZ ([depoStok, order?.depotId]) bir kez Map'lere
-  // indekslenir; enrichedList artık satır başına O(1) Map.get yapar. Lot eşleşmesi nested
-  // Map ile birebir korunur (undefined ↔ '' ayrımı; Map SameValueZero, === ile eşdeğer).
-  const depotStockQtyMaps = useMemo(() => {
+  // Stok yeterliliği lot önerisinden bağımsız olarak ürünün depodaki toplam miktarıdır.
+  const depotStockQtyByProduct = useMemo(() => {
     const byStok = new Map<string, number>();
-    const byStokLot = new Map<string, Map<unknown, number>>();
     const depotId = order?.depotId;
-    for (const s of depoStok) {
-      if (s.isShipped || !s.stokKodu || s.depotId !== depotId) continue;
-      const qty = getStockItemQuantity(s);
-      byStok.set(s.stokKodu, (byStok.get(s.stokKodu) ?? 0) + qty);
-      let lotMap = byStokLot.get(s.stokKodu);
-      if (!lotMap) { lotMap = new Map<unknown, number>(); byStokLot.set(s.stokKodu, lotMap); }
-      lotMap.set(s.lotNumarasi, (lotMap.get(s.lotNumarasi) ?? 0) + qty);
+    for (const stockItem of depoStok) {
+      if (stockItem.isShipped || !stockItem.stokKodu || stockItem.depotId !== depotId) continue;
+      byStok.set(stockItem.stokKodu, (byStok.get(stockItem.stokKodu) ?? 0) + getStockItemQuantity(stockItem));
     }
-    return { byStok, byStokLot };
+    return byStok;
   }, [depoStok, order?.depotId]);
 
   const enrichedList = useMemo(() => pickingList.map(item => {
@@ -1134,13 +1124,12 @@ export default function ToplamaPage() {
     const needed = item.adetIstenen ?? 0;
     const isComplete = scannedCount >= needed;
     const isOutOfStock = item.lotNumarasi === 'STOK YOK';
-    const availableInLot = depotStockQtyMaps.byStokLot.get(item.stokKodu)?.get(item.lotNumarasi) ?? 0;
-    const totalInDepot = depotStockQtyMaps.byStok.get(item.stokKodu) ?? 0;
-    const isInsufficient = !isOutOfStock && availableInLot < needed;
+    const totalInDepot = depotStockQtyByProduct.get(item.stokKodu) ?? 0;
+    const isInsufficient = !isOutOfStock && totalInDepot < needed;
     const status: 'done' | 'blocked' | 'active' | 'idle' = isComplete ? 'done' : isOutOfStock ? 'blocked' : scannedCount > 0 ? 'active' : 'idle';
     const pct = needed > 0 ? Math.round((scannedCount / needed) * 100) : 0;
-    return { ...item, scannedCount, needed, isComplete, isOutOfStock, availableInLot, totalInDepot, isInsufficient, status, pct, cihazGrubu: (item as any).cihazGrubu, cihazGrubuImageUrl: (item as any).cihazGrubuImageUrl };
-  }), [pickingList, scannedSerials, depotStockQtyMaps]);
+    return { ...item, scannedCount, needed, isComplete, isOutOfStock, totalInDepot, isInsufficient, status, pct, cihazGrubu: (item as any).cihazGrubu, cihazGrubuImageUrl: (item as any).cihazGrubuImageUrl };
+  }), [pickingList, scannedSerials, depotStockQtyByProduct]);
 
   const filteredList = useMemo(() => {
     if (groupFilter === 'remaining') return enrichedList.filter(i => !i.isComplete);
@@ -1364,7 +1353,7 @@ export default function ToplamaPage() {
                               <p className="text-xs font-medium" style={{ color: 'var(--dashboard-text)' }}>Bu grubu kaldır?</p>
                               <div className="flex gap-2">
                                 <button
-                                  onClick={() => { deletePickingItem(item.stokKodu, item.lotNumarasi); setConfirmDeleteId(null); }}
+                                  onClick={() => { deletePickingItem(item.stokKodu); setConfirmDeleteId(null); }}
                                   className="flex-1 px-2 py-1.5 rounded-xl text-xs font-semibold text-white"
                                   style={{ background: '#B91C1C' }}
                                 >
@@ -1431,14 +1420,12 @@ export default function ToplamaPage() {
 
                         {/* Recommendation chips */}
                         <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
-                          {item.lotNumarasi && item.lotNumarasi !== 'STOK YOK' && (
+                          {item.lotNumarasi !== 'STOK YOK' && (item.lotNumarasi || (item.miad && item.miad !== '-')) && (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium" style={{ background: 'rgba(245,158,11,.10)', color: '#B45309' }}>
-                              Lot: {item.lotNumarasi}
-                            </span>
-                          )}
-                          {item.miad && item.miad !== '-' && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium" style={{ background: 'rgba(37,99,235,.08)', color: '#2563EB' }}>
-                              Miad: {formatMiad(item.miad)}
+                              Öneri:
+                              {item.lotNumarasi && ` Lot ${item.lotNumarasi}`}
+                              {item.lotNumarasi && item.miad && item.miad !== '-' && ' • '}
+                              {item.miad && item.miad !== '-' && `Miad ${formatMiad(item.miad)}`}
                             </span>
                           )}
                           {item.rafAdresiOnerilen && item.rafAdresiOnerilen !== '-' && (
@@ -1448,7 +1435,7 @@ export default function ToplamaPage() {
                           )}
                           {item.isInsufficient && (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-semibold" style={{ background: 'rgba(185,28,28,.10)', color: '#B91C1C' }}>
-                              <AlertTriangle className="w-3 h-3" /> Yetersiz: {item.availableInLot}
+                              <AlertTriangle className="w-3 h-3" /> Yetersiz: {item.totalInDepot}
                             </span>
                           )}
                         </div>
@@ -1515,7 +1502,7 @@ export default function ToplamaPage() {
                 {enrichedList.filter(i => i.isInsufficient && !i.isOutOfStock).map(i => (
                   <div key={`issue-${i.id}`} className="flex items-center gap-2 px-2 py-1.5 rounded-xl" style={{ background: 'rgba(245,158,11,.08)' }}>
                     <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#D97706' }} />
-                    <span className="text-xs font-medium truncate" style={{ color: '#D97706' }}>{i.stokAdi} – Yetersiz ({i.availableInLot}/{i.needed})</span>
+                    <span className="text-xs font-medium truncate" style={{ color: '#D97706' }}>{i.stokAdi} – Yetersiz ({i.totalInDepot}/{i.needed})</span>
                   </div>
                 ))}
               </div>
