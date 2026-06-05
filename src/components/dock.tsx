@@ -421,6 +421,7 @@ const DockItem = ({
   const [activeSubMenu, setActiveSubMenu] = useState<string | null>(null);
   const hoverTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
   const subMenuTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+  const [tooltipOpen, setTooltipOpen] = useState(false);
 
   // Doğrudan sayfaya yönlendir
   const handleNavigate = (
@@ -679,7 +680,7 @@ const DockItem = ({
         </AnimatePresence>
 
         {/* Tooltip wraps ONLY the icon - HIDDEN when submenu is open */}
-        <Tooltip open={!isLiquidMode && !isHovered ? undefined : false}>
+        <Tooltip open={(!isLiquidMode && !isHovered) ? tooltipOpen : false} onOpenChange={setTooltipOpen}>
           <TooltipTrigger asChild>
             <motion.div
               ref={(el) => { if (onRefSet) onRefSet(el); (iconRef as React.MutableRefObject<HTMLDivElement | null>).current = el; }}
@@ -745,7 +746,7 @@ const DockItem = ({
   );
 
   return (
-    <Tooltip>
+    <Tooltip open={isLiquidMode ? false : tooltipOpen} onOpenChange={setTooltipOpen}>
       <TooltipTrigger asChild>
         {itemContent}
       </TooltipTrigger>
@@ -770,9 +771,10 @@ const DockItem = ({
 // koruyan turuncu gradyan kutu + beyaz Qore logosu.
 const DockLogo = () => {
   const { toggle, isOpen } = useStartMenu();
+  const [tooltipOpen, setTooltipOpen] = useState(false);
 
   return (
-    <Tooltip>
+    <Tooltip open={isOpen ? false : tooltipOpen} onOpenChange={setTooltipOpen}>
       <TooltipTrigger asChild>
         <motion.button
           whileHover={{ scale: 1.08, y: -3 }}
@@ -802,6 +804,7 @@ const DockLogo = () => {
 
 // Takvim kısayolu — dock'un sağ bölgesinde, basınca takvim panelini açar.
 const CalendarDockButton = ({ open, onToggle, customIcon }: { open: boolean; onToggle: () => void; customIcon?: string }) => {
+  const [tooltipOpen, setTooltipOpen] = useState(false);
   const calGradient = {
     background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
     WebkitBackgroundClip: 'text',
@@ -810,7 +813,7 @@ const CalendarDockButton = ({ open, onToggle, customIcon }: { open: boolean; onT
     filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.15))',
   } as React.CSSProperties;
   return (
-    <Tooltip open={open ? false : undefined}>
+    <Tooltip open={open ? false : tooltipOpen} onOpenChange={setTooltipOpen}>
       <TooltipTrigger asChild>
         <motion.div
           whileHover={{ scale: 1.55, y: -8 }}
