@@ -116,6 +116,127 @@ function SiparislerSkeleton() {
   );
 }
 
+const MemoizedOrderCard = React.memo(function OrderCard({
+  order,
+  isProcessing,
+  openPeripheralOrder,
+  startPickingProcess,
+  handleDeleteOrder,
+}: {
+  order: Order;
+  isProcessing: boolean;
+  openPeripheralOrder: (o: Order) => void;
+  startPickingProcess: (o: Order) => void;
+  handleDeleteOrder: (id: string) => void;
+}) {
+  const isOrderPeripheral = (o: Order) => o.isPeripheral === true || o.perifer === true;
+  const totalAdet = (order.items ?? []).reduce((sum, it) => sum + (Number(it.adet) || 0), 0);
+  const totalKalem = (order.items ?? []).length;
+  const isPicking = order.status === 'toplaniyor';
+  const isEksik = order.status === 'eksik';
+  const isPerifer = isOrderPeripheral(order);
+
+  const statusLabel = isEksik
+    ? 'Eksik'
+    : isPicking
+      ? 'Toplanıyor'
+      : isPerifer
+        ? 'Perifer'
+        : 'Bekliyor';
+  const statusClass = isEksik
+    ? "bg-red-100 text-red-700"
+    : isPicking
+      ? "bg-blue-100 text-blue-700"
+      : isPerifer
+        ? "bg-purple-100 text-purple-700"
+        : "bg-amber-100 text-amber-700";
+
+  return (
+    <article
+      data-row-id={order.id}
+      className="cihaz-card-strong overflow-hidden"
+    >
+      <div className="p-4 sm:p-5 space-y-3">
+        {/* Header row */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <h3 className="text-sm sm:text-base font-bold text-[var(--dashboard-text)] truncate">{order.kurumAdi}</h3>
+            <p className="text-[11px] text-[var(--dashboard-muted)]">
+              {order.createdBy || '-'} · {order.createdAt ? formatDate(order.createdAt as Date, 'dd.MM.yyyy HH:mm', { locale: tr }) : '-'}
+            </p>
+          </div>
+          {/* Status badge */}
+          <span className={cn(
+            "shrink-0 inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] sm:text-xs font-semibold",
+            statusClass
+          )}>
+            {statusLabel}
+          </span>
+        </div>
+
+        {/* KPI chips */}
+        <div className="flex gap-3">
+          <div className="cihaz-pressed px-3 py-1.5 rounded-lg">
+            <span className="text-[10px] text-[var(--dashboard-muted)] block">Kalem</span>
+            <span className="text-sm font-bold text-[var(--dashboard-text)]">{totalKalem}</span>
+          </div>
+          <div className="cihaz-pressed px-3 py-1.5 rounded-lg">
+            <span className="text-[10px] text-[var(--dashboard-muted)] block">Adet</span>
+            <span className="text-sm font-bold text-[var(--dashboard-text)]">{totalAdet}</span>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="flex items-center gap-2 pt-1">
+          {isPerifer ? (
+            <button
+              onClick={() => openPeripheralOrder(order)}
+              disabled={isProcessing}
+              className={cn(
+                "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all",
+                !isProcessing
+                  ? "bg-purple-600 text-white shadow-[var(--dashboard-raised-soft)] hover:-translate-y-0.5 active:translate-y-0 active:shadow-[var(--dashboard-pressed)]"
+                  : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] cursor-not-allowed"
+              )}
+            >
+              <ArrowRight className="h-4 w-4" />
+              Siparişi Gör
+            </button>
+          ) : (
+            <button
+              onClick={() => startPickingProcess(order)}
+              disabled={isProcessing}
+              className={cn(
+                "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all",
+                !isProcessing
+                  ? "bg-[var(--dashboard-accent)] text-white shadow-[var(--dashboard-raised-soft)] hover:-translate-y-0.5 active:translate-y-0 active:shadow-[var(--dashboard-pressed)]"
+                  : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] cursor-not-allowed"
+              )}
+            >
+              {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+              {isPicking ? 'Toplamaya Devam Et' : 'Toplamayı Başlat'}
+            </button>
+          )}
+          <button
+            onClick={() => handleDeleteOrder(order.id ?? '')}
+            disabled={isProcessing}
+            className="w-10 h-10 rounded-xl flex items-center justify-center hover:bg-red-100 transition-colors cihaz-tool-item"
+          >
+            <Trash2 className="h-4 w-4 text-red-500" />
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}, (prevProps, nextProps) => {
+  return prevProps.order.id === nextProps.order.id &&
+         prevProps.order.status === nextProps.order.status &&
+         prevProps.order.updatedAt === nextProps.order.updatedAt &&
+         prevProps.isProcessing === nextProps.isProcessing &&
+         (prevProps.order.items?.length ?? 0) === (nextProps.order.items?.length ?? 0);
+});
+
+
 /**
  * Orders Panel Component
  * @description Main panel for order management including creation, viewing,
@@ -1089,107 +1210,16 @@ export default function SiparislerPanel(): JSX.Element {
               <p className="text-xs text-[var(--dashboard-muted)]">Yeni sipariş oluşturmak için &quot;Oluştur&quot; sekmesine geçin.</p>
             </div>
           ) : (
-            pendingOrders.map(order => {
-              const totalAdet = (order.items ?? []).reduce((sum, it) => sum + (Number(it.adet) || 0), 0);
-              const totalKalem = (order.items ?? []).length;
-              const isPicking = order.status === 'toplaniyor';
-              const isEksik = order.status === 'eksik';
-              const isPerifer = isOrderPeripheral(order);
-
-              const statusLabel = isEksik
-                ? 'Eksik'
-                : isPicking
-                  ? 'Toplanıyor'
-                  : isPerifer
-                    ? 'Perifer'
-                    : 'Bekliyor';
-              const statusClass = isEksik
-                ? "bg-red-100 text-red-700"
-                : isPicking
-                  ? "bg-blue-100 text-blue-700"
-                  : isPerifer
-                    ? "bg-purple-100 text-purple-700"
-                    : "bg-amber-100 text-amber-700";
-
-              return (
-                <article
-                  key={order.id}
-                  data-row-id={order.id}
-                  className="cihaz-card-strong overflow-hidden"
-                >
-                  <div className="p-4 sm:p-5 space-y-3">
-                    {/* Header row */}
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <h3 className="text-sm sm:text-base font-bold text-[var(--dashboard-text)] truncate">{order.kurumAdi}</h3>
-                        <p className="text-[11px] text-[var(--dashboard-muted)]">
-                          {order.createdBy || '-'} · {order.createdAt ? formatDate(order.createdAt as Date, 'dd.MM.yyyy HH:mm', { locale: tr }) : '-'}
-                        </p>
-                      </div>
-                      {/* Status badge */}
-                      <span className={cn(
-                        "shrink-0 inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] sm:text-xs font-semibold",
-                        statusClass
-                      )}>
-                        {statusLabel}
-                      </span>
-                    </div>
-
-                    {/* KPI chips */}
-                    <div className="flex gap-3">
-                      <div className="cihaz-pressed px-3 py-1.5 rounded-lg">
-                        <span className="text-[10px] text-[var(--dashboard-muted)] block">Kalem</span>
-                        <span className="text-sm font-bold text-[var(--dashboard-text)]">{totalKalem}</span>
-                      </div>
-                      <div className="cihaz-pressed px-3 py-1.5 rounded-lg">
-                        <span className="text-[10px] text-[var(--dashboard-muted)] block">Adet</span>
-                        <span className="text-sm font-bold text-[var(--dashboard-text)]">{totalAdet}</span>
-                      </div>
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex items-center gap-2 pt-1">
-                      {isPerifer ? (
-                        <button
-                          onClick={() => openPeripheralOrder(order)}
-                          disabled={isProcessing}
-                          className={cn(
-                            "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all",
-                            !isProcessing
-                              ? "bg-purple-600 text-white shadow-[var(--dashboard-raised-soft)] hover:-translate-y-0.5 active:translate-y-0 active:shadow-[var(--dashboard-pressed)]"
-                              : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] cursor-not-allowed"
-                          )}
-                        >
-                          <ArrowRight className="h-4 w-4" />
-                          Siparişi Gör
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => startPickingProcess(order)}
-                          disabled={isProcessing}
-                          className={cn(
-                            "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all",
-                            !isProcessing
-                              ? "bg-[var(--dashboard-accent)] text-white shadow-[var(--dashboard-raised-soft)] hover:-translate-y-0.5 active:translate-y-0 active:shadow-[var(--dashboard-pressed)]"
-                              : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] cursor-not-allowed"
-                          )}
-                        >
-                          {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-                          {isPicking ? 'Toplamaya Devam Et' : 'Toplamayı Başlat'}
-                        </button>
-                      )}
-                      <button
-                        onClick={() => handleDeleteOrder(order.id ?? '')}
-                        disabled={isProcessing}
-                        className="w-10 h-10 rounded-xl flex items-center justify-center hover:bg-red-100 transition-colors cihaz-tool-item"
-                      >
-                        <Trash2 className="h-4 w-4 text-red-500" />
-                      </button>
-                    </div>
-                  </div>
-                </article>
-              );
-            })
+            pendingOrders.map(order => (
+              <MemoizedOrderCard
+                key={order.id}
+                order={order}
+                isProcessing={isProcessing}
+                openPeripheralOrder={openPeripheralOrder}
+                startPickingProcess={startPickingProcess}
+                handleDeleteOrder={handleDeleteOrder}
+              />
+            ))
           )}
         </div>
       )}

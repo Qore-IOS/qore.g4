@@ -96,6 +96,79 @@ function safeParseMiad(value: unknown): Date | null {
   return toDateFromAny(value as any) ?? null;
 }
 
+const MemoizedLojOrderCard = React.memo(function LojOrderCard({
+  order,
+  isSelected,
+  productNameMap,
+  onSelect,
+}: {
+  order: Order;
+  isSelected: boolean;
+  productNameMap: Map<string, string>;
+  onSelect: () => void;
+}) {
+  const s = order.status;
+  const status = s === 'pending'
+    ? { label: 'Beklemede', cls: 'loj-status-badge loj-status-badge--warning', Icon: Hourglass }
+    : s === 'eksik'
+      ? { label: 'Eksik', cls: 'loj-status-badge loj-status-badge--danger', Icon: AlertCircle }
+      : s === 'toplaniyor'
+        ? { label: 'Hazırlanıyor', cls: 'loj-status-badge loj-status-badge--info', Icon: Truck }
+        : s === 'completed'
+          ? { label: 'Teslim', cls: 'loj-status-badge loj-status-badge--success', Icon: CheckCircle2 }
+          : s === 'cancelled'
+            ? { label: 'İptal', cls: 'loj-status-badge loj-status-badge--danger', Icon: XCircle }
+            : { label: 'İşlemde', cls: 'loj-status-badge loj-status-badge--info', Icon: Clock3 };
+
+  const StatusIcon = status.Icon;
+  const totalAdet = (order.items ?? []).reduce((sum, i) => sum + (Number(i.adet) || 0), 0);
+  const firstItem = order.items?.[0];
+
+  return (
+    <button
+      key={order.id}
+      onClick={onSelect}
+      className={cn('loj-order-item', isSelected && 'loj-selected')}
+    >
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-bold truncate flex items-center gap-1.5" style={{ color: 'var(--loj-text)' }}>
+          <Building2 className="h-3.5 w-3.5 opacity-70 shrink-0" />
+          <span className="truncate">{order.kurumAdi}</span>
+        </p>
+        <p className="text-[11px] truncate mt-0.5" style={{ color: 'var(--loj-muted)' }}>
+          {firstItem
+            ? productNameMap.get(firstItem.stokKodu ?? '') ??
+              firstItem.stokAdi ??
+              firstItem.stokKodu
+            : '-'}
+          {(order.items?.length ?? 0) > 1 &&
+            ` +${(order.items?.length ?? 1) - 1}`}
+        </p>
+        <span className={cn(status.cls, 'mt-1.5')}>
+          <StatusIcon className="h-3 w-3" />
+          {status.label}
+        </span>
+      </div>
+      <div className="text-right shrink-0 w-14 sm:w-16">
+        <p className="text-base font-extrabold" style={{ color: 'var(--loj-accent)' }}>
+          {totalAdet}
+        </p>
+        <p
+          className="text-[10px] uppercase tracking-wide whitespace-nowrap"
+          style={{ color: 'var(--loj-muted)' }}
+        >
+          adet
+        </p>
+      </div>
+    </button>
+  );
+}, (prevProps, nextProps) => {
+  return prevProps.order.id === nextProps.order.id &&
+         prevProps.order.status === nextProps.order.status &&
+         prevProps.isSelected === nextProps.isSelected &&
+         (prevProps.order.items?.length ?? 0) === (nextProps.order.items?.length ?? 0);
+});
+
 export default function LojistikSiparisView() {
   const router = useRouter();
   const { toast } = useToast();
@@ -988,54 +1061,15 @@ export default function LojistikSiparisView() {
                 </p>
               </div>
             ) : (
-              filteredOrders.map((order) => {
-                const status = getStatusInfo(order);
-                const StatusIcon = status.Icon;
-                const totalAdet = (order.items ?? []).reduce(
-                  (s, i) => s + (Number(i.adet) || 0),
-                  0
-                );
-                const isSelected = selectedOrderId === order.id;
-                const firstItem = order.items?.[0];
-                return (
-                  <button
-                    key={order.id}
-                    onClick={() => setSelectedOrderId(order.id ?? null)}
-                    className={cn('loj-order-item', isSelected && 'loj-selected')}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-bold truncate flex items-center gap-1.5" style={{ color: 'var(--loj-text)' }}>
-                        <Building2 className="h-3.5 w-3.5 opacity-70 shrink-0" />
-                        <span className="truncate">{order.kurumAdi}</span>
-                      </p>
-                      <p className="text-[11px] truncate mt-0.5" style={{ color: 'var(--loj-muted)' }}>
-                        {firstItem
-                          ? productNameMap.get(firstItem.stokKodu ?? '') ??
-                            firstItem.stokAdi ??
-                            firstItem.stokKodu
-                          : '-'}
-                        {(order.items?.length ?? 0) > 1 &&
-                          ` +${(order.items?.length ?? 1) - 1}`}
-                      </p>
-                      <span className={cn(status.cls, 'mt-1.5')}>
-                        <StatusIcon className="h-3 w-3" />
-                        {status.label}
-                      </span>
-                    </div>
-                    <div className="text-right shrink-0 w-14 sm:w-16">
-                      <p className="text-base font-extrabold" style={{ color: 'var(--loj-accent)' }}>
-                        {totalAdet}
-                      </p>
-                      <p
-                        className="text-[10px] uppercase tracking-wide whitespace-nowrap"
-                        style={{ color: 'var(--loj-muted)' }}
-                      >
-                        adet
-                      </p>
-                    </div>
-                  </button>
-                );
-              })
+              filteredOrders.map((order) => (
+                <MemoizedLojOrderCard
+                  key={order.id}
+                  order={order}
+                  isSelected={selectedOrderId === order.id}
+                  productNameMap={productNameMap}
+                  onSelect={() => setSelectedOrderId(order.id ?? null)}
+                />
+              ))
             )}
           </ScrollArea>
         </div>

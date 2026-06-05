@@ -14,18 +14,15 @@ interface AIContextType {
 
 const AIContext = createContext<AIContextType | undefined>(undefined);
 
-// Preload audio for instant playback
+// Lazy loaded audio
 const useAISound = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  useEffect(() => {
-    // Create and preload audio
-    audioRef.current = new Audio('/ai-open.wav');
-    audioRef.current.volume = 0.5;
-    audioRef.current.preload = 'auto';
-  }, []);
-
   const play = useCallback(() => {
+    if (!audioRef.current && typeof window !== 'undefined') {
+      audioRef.current = new Audio('/ai-open.mp3');
+      audioRef.current.volume = 0.5;
+    }
     if (audioRef.current) {
       audioRef.current.currentTime = 0;
       audioRef.current.play().catch(() => {
