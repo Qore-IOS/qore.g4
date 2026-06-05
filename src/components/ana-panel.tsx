@@ -850,48 +850,17 @@ export default function AnaPanel(props: AnaPanelProps) {
             }
             if (source === 'barcode') setLastScannedProduct(newItem);
 
-            // Geçmiş oturumlarda tüketilmiş/işlem görmüş mü kontrolü (Asenkron - UI'ı bloklamaz)
-            (async () => {
-              try {
-                const historySnap = await getDocs(
-                  query(
-                    collection(db, `serialHistory/${seriNumarasi}/events`),
-                    limit(1)
-                  )
-                );
-                if (!historySnap.empty) {
-                  // Herhangi bir geçmiş olayda aynı stokKodu kullanılmış mı?
-                  const matchedEvent = historySnap.docs.some(doc => doc.data().details?.stokKodu === stokKodu);
-                  if (matchedEvent) {
-                    playFeedback(true);
-                    malKabulLogger.warn('Geçmişte işlem görmüş/tüketilmiş seri tespit edildi', {
-                      stokKodu,
-                      stokAdi: matchedProduct.stokAdi,
-                      seriNumarasi,
-                    }, { correlationId: scanCorrelationId });
-                    
-                    flashScanFeedback('error', `SN ${seriNumarasi} (${matchedProduct.stokAdi}) geçmişte işlem görmüş veya tüketilmiş.`);
-                    if (source === 'barcode') { setScanStatus('error'); setTimeout(() => setScanStatus('idle'), 3000); }
-                    
-                    // Geçersiz olduğu için ekrandan ve state'den geri çek
-                    setScannedItems(prev => prev.filter(item => item.id !== newItem.id));
-                    scannedSerialsRef.current.get(serialKey)?.delete(seriNumarasi);
-                    if (selectedPendingIrs) {
-                      const verifyKey = `${stokKodu}||${lotNumarasi || ''}||${miadFormatted || ''}`;
-                      setCeomedVerifyMap((prev) => {
-                        const v = prev[verifyKey];
-                        if (!v) return prev;
-                        const nextSet = new Set(v.verifiedSerials);
-                        nextSet.delete(seriNumarasi);
-                        return { ...prev, [verifyKey]: { ...v, verifiedSerials: nextSet } };
-                      });
-                    }
-                  }
-                }
-              } catch (e) {
-                console.error("History serial check error", e);
-              }
-            })();
+            // PERFORMANS: Geçmişte tüketilmiş/işlem görmüş seri kontrolü artık her
+            // okutmada Firestore'a sorgu atmıyor. Eskiden burada her seri için
+            // `getDocs(serialHistory/{seri}/events)` çağrısı yapılıyordu; "fire and
+            // forget" olsa bile her okutmada Firestore IndexedDB persistence katmanını
+            // ve ağı tetikliyordu. Hızlı okutmalarda bu sorgular birikip ana iş
+            // parçacığını boğuyor, her tuşa basıştan sonra boyamayı (paint) geciktiriyordu
+            // (INP "keyboard" ~1.2sn). Aynı kontrol zaten "Mal Kabul" anında
+            // (commit) TÜM seriler için tek bir batch halinde yapılıyor ve tüketilmiş
+            // seriler yazımdan önce eleniyor — dolayısıyla doğruluk kaybı yok, sadece
+            // uyarı okutma anı yerine kayıt anında görünür. Bu sayede okutma yolu
+            // tamamen bellek-içi (in-memory) kalır ve <10ms hedefine ulaşır.
 
         } else {
           // It's a lot-based or quantity-based item
@@ -1503,16 +1472,22 @@ export default function AnaPanel(props: AnaPanelProps) {
         }
 
         const docsToCreate: Array<{ ref: ReturnType<typeof doc>; data: any; serial?: string; item: ScanRow }> = [];
+        // Okutma anındaki Firestore sorgusu kaldırıldığı için, geçmişte tüketilmiş
+        // serileri burada (commit) eleyip kullanıcıya kaç tanesinin atlandığını bildiriyoruz.
+        let skippedConsumed = 0;
 
         for (const item of itemsToProcess) {
           const depotProductSerials = item.stokKodu ? existingDepotSerials.get(serialProductKey(item.stokKodu)) : undefined;
           if (item.seriNumarasi && (depotProductSerials?.has(item.seriNumarasi) || consumedSerials.has(`${item.stokKodu}||${item.seriNumarasi}`))) {
+            if (consumedSerials.has(`${item.stokKodu}||${item.seriNumarasi}`)) skippedConsumed++;
             continue;
           }
 
           const serialsToProcess = item.isGroup ? (item.scannedSerials || []) : [item.seriNumarasi];
           const filteredSerials = (serialsToProcess.filter(Boolean) as string[]).filter(serial => {
-            return !consumedSerials.has(`${item.stokKodu}||${serial}`);
+            const isConsumed = consumedSerials.has(`${item.stokKodu}||${serial}`);
+            if (isConsumed) skippedConsumed++;
+            return !isConsumed;
           });
 
           const createDocData = (serial = '') => ({
@@ -1578,7 +1553,7 @@ export default function AnaPanel(props: AnaPanelProps) {
         const txId = await recordMalKabulTransaction(itemsToProcess, 'unverified');
         toast({
           title: 'Kabul Tamamlandı',
-          description: `${itemsToProcess.length} kalem işlem başarıyla kaydedildi.`,
+          description: `${itemsToProcess.length} kalem işlem başarıyla kaydedildi.${skippedConsumed > 0 ? ` ${skippedConsumed} seri geçmişte işlem görmüş/tüketilmiş olduğu için atlandı.` : ''}`,
           action: (
             <Button variant="default" onClick={() => router.push(`/mal-kabul/gecmis?depotId=${encodeURIComponent(selectedDepotId)}&open=${encodeURIComponent(txId)}`)}>
               Geçmişte Aç
