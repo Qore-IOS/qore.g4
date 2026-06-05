@@ -542,9 +542,13 @@ export default function AnaPanel(props: AnaPanelProps) {
 
   const [selectedDepotId, setSelectedDepotId] = useState<string>('');
 
-  // Mükerrer seri kontrolü için depo seri indeksi (tüm depoStok'u indirmeden,
-  // sunucu tarafında özetlenmiş `Map<stokKodu, Set<seriNumarasi>>`).
-  const { data: existingDepotSerials = EMPTY_SERIAL_INDEX } = useDepotSerialIndex(selectedDepotId);
+  // Depo seri indeksi ARTIK otomatik yüklenmiyor (auto: false). Okutma yolu
+  // tamamen bellek-içi kalsın diye depo sorgusu yalnızca kullanıcı "Depoda
+  // Kontrol Et" butonuna bastığında (refetch) yapılır. Oturum içi mükerrer
+  // kontrolü ise sorgu gerektirmediği için her zaman aktiftir (scannedSerialsRef).
+  const depotSerialIndexQuery = useDepotSerialIndex(selectedDepotId, { auto: false });
+  const existingDepotSerials = depotSerialIndexQuery.data ?? EMPTY_SERIAL_INDEX;
+  const [isCheckingDepotSerials, setIsCheckingDepotSerials] = useState(false);
 
   // Skeleton yalnızca veri gerçekten hiç cache'de yoksa (isPending) gösterilir.
   // Arka planda yenileme (isFetching) sırasında UI bloke edilmez.
@@ -702,11 +706,49 @@ export default function AnaPanel(props: AnaPanelProps) {
     return () => unsub();
   }, [selectedDepot]);
 
-  // `existingDepotSerials` artık doğrudan `useDepotSerialIndex` üzerinden geliyor
-  // (yukarıda). Eskiden burada tüm `depoStok` istemciye indirilip
-  // `Map<stokKodu, Set<seriNumarasi>>` olarak yeniden kuruluyordu; bu, panelin
-  // yavaş açılmasının ve okutma sırasında ana iş parçacığının tıkanmasının
-  // başlıca nedeniydi. Anahtarlama hâlâ stokKodu bazlı (lot dahil değil).
+  // Kullanıcı "Depoda Kontrol Et" butonuna bastığında depo seri indeksini çeker
+  // ve listedeki serileri depoyla karşılaştırır. Depoda zaten mevcut serileri
+  // listeden çıkarır ve özet gösterir. Buton bir kez kullanıldığında indeks
+  // cache'e gireceğinden, sonraki okutmalar da ekstra sorgu olmadan depo
+  // mükerrerini anında yakalar (processScan içindeki `existingDepotSerials`).
+  const handleDepotSerialCheck = useCallback(async () => {
+    if (!selectedDepotId) {
+      toast({ title: 'Depo seçili değil', description: 'Önce bir depo seçin.', variant: 'destructive' });
+      return;
+    }
+    setIsCheckingDepotSerials(true);
+    try {
+      const res = await depotSerialIndexQuery.refetch();
+      const index = res.data ?? new Map<string, Set<string>>();
+      // Listedeki seri-takipli (gruplanmamış) satırlar
+      const dupRows = scannedItems.filter(r =>
+        !r.isProcessed && !r.isGroup && r.seriNumarasi && r.stokKodu &&
+        (index.get(serialProductKey(r.stokKodu)) as Set<string> | undefined)?.has(r.seriNumarasi)
+      );
+      if (dupRows.length === 0) {
+        flashScanFeedback('success', 'Listedeki seriler depoda mevcut değil — temiz.');
+        toast({ title: 'Depo Kontrolü', description: 'Listedeki hiçbir seri depoda bulunmuyor.' });
+        return;
+      }
+      const dupIds = new Set(dupRows.map(r => r.id));
+      setScannedItems(prev => prev.filter(r => !dupIds.has(r.id)));
+      // Oturum içi mükerrer takibinden de düş
+      dupRows.forEach(r => {
+        scannedSerialsRef.current.get(serialProductKey(r.stokKodu))?.delete(r.seriNumarasi!);
+      });
+      flashScanFeedback('error', `${dupRows.length} seri zaten depoda mevcut — listeden çıkarıldı.`);
+      toast({
+        title: 'Depo Kontrolü',
+        description: `${dupRows.length} seri depoda zaten mevcut olduğu için listeden çıkarıldı.`,
+        variant: 'destructive',
+      });
+    } catch (e) {
+      malKabulLogger.error('Depo seri kontrolü başarısız', e);
+      toast({ title: 'Depo Kontrolü Hatası', description: 'Depo serileri sorgulanamadı.', variant: 'destructive' });
+    } finally {
+      setIsCheckingDepotSerials(false);
+    }
+  }, [selectedDepotId, scannedItems, depotSerialIndexQuery, serialProductKey, toast, flashScanFeedback]);
 
   const processScan = useCallback(async (barcodeData: string, source: 'barcode' | 'bulk_item' = 'barcode') => {
     const scanCorrelationId = createCorrelationId();
@@ -717,7 +759,11 @@ export default function AnaPanel(props: AnaPanelProps) {
     }
 
     const isBulkItem = source === 'bulk_item';
-    malKabulLogger.info('Scan received', {
+    // PERFORMANS: Okutma hot-path'indeki bilgi logları `debug` seviyesinde —
+    // production'da (minLevel: 'info') bastırılır, böylece her okutmada gereksiz
+    // JSON.stringify + console maliyeti olmaz (direkt transfer paneliyle aynı
+    // hafiflik). Uyarı/hata logları korunur.
+    malKabulLogger.debug('Scan received', {
       source,
       isBulkItem,
       isBulkScanMode,
@@ -727,7 +773,7 @@ export default function AnaPanel(props: AnaPanelProps) {
     }, { correlationId: scanCorrelationId });
 
     const bulkBarcodes = decodeBulkSerialQrPayload(trimmedData);
-    malKabulLogger.info('Bulk decode result', {
+    malKabulLogger.debug('Bulk decode result', {
       source,
       isBulkMode: isBulkScanMode,
       decodedCount: bulkBarcodes?.length || 0,
@@ -739,7 +785,7 @@ export default function AnaPanel(props: AnaPanelProps) {
         await processScan(serialBarcode, 'bulk_item');
       }
       setIsBulkScanMode(false);
-      malKabulLogger.info('Bulk scan processed successfully', {
+      malKabulLogger.debug('Bulk scan processed successfully', {
         itemCount: bulkBarcodes.length,
       }, { correlationId: scanCorrelationId });
       flashScanFeedback('success', `${bulkBarcodes.length} ürün tek seferde işlendi.`);
@@ -2050,6 +2096,20 @@ export default function AnaPanel(props: AnaPanelProps) {
               )}
             </button>
           </div>
+          {/* Depo seri kontrolü — yalnızca basıldığında depoyu sorgular */}
+          <button
+            onClick={handleDepotSerialCheck}
+            disabled={isCheckingDepotSerials || !selectedDepotId}
+            className="cihaz-action-tile mt-2 w-full flex items-center justify-center gap-2 py-2.5 text-center disabled:opacity-50"
+            title="Listedeki serileri seçili depodaki stokla karşılaştır. Depoda zaten mevcut serileri listeden çıkarır. Sorgu yalnızca bu butona basınca yapılır."
+          >
+            {isCheckingDepotSerials
+              ? <Loader2 className="h-4 w-4 animate-spin text-[var(--dashboard-accent)]" />
+              : <Search className="h-4 w-4 text-[var(--dashboard-accent)]" />}
+            <span className="text-[11px] sm:text-xs font-medium text-[var(--dashboard-text)]">
+              {isCheckingDepotSerials ? 'Depo Sorgulanıyor…' : 'Depoda Kontrol Et'}
+            </span>
+          </button>
         </div>
       </div>
 
