@@ -11,8 +11,6 @@ import { ChevronRight, Calendar } from 'lucide-react';
 import NotificationsBell from '@/components/notifications/NotificationsBell';
 import type { DockItemData } from '@/hooks/use-dock';
 import { useAuth } from '@/contexts/auth-context';
-import { useStartMenu } from '@/contexts/start-menu-context';
-import { useWindowManager } from '@/contexts/window-manager-context';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { CalendarDockPanel } from '@/components/dock/CalendarDockPanel';
@@ -418,14 +416,12 @@ const DockItem = ({
 
   const { isOrbAnimationEnabled, toggleOrbAnimation, toggleNavMode, navMode } = useAuth();
   const router = useRouter();
-  const { openWindow } = useWindowManager();
   const [isHovered, setIsHovered] = useState(false);
   const [activeSubMenu, setActiveSubMenu] = useState<string | null>(null);
   const hoverTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
   const subMenuTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 
-  // Panelleri iframe pencere olarak aç (route'a gitmek yerine) — böylece
-  // küçültülünce state korunur ve aynı anda birden fazla panel canlı kalabilir.
+  // Doğrudan sayfaya yönlendir
   const handleNavigate = (
     e: React.MouseEvent,
     path?: string,
@@ -434,7 +430,7 @@ const DockItem = ({
   ) => {
     if (path) {
       e.stopPropagation();
-      openWindow(path, label || item.label, icon || item.icon);
+      router.push(path);
     } else if (item.onClick) {
       item.onClick();
     }
@@ -772,7 +768,7 @@ const DockItem = ({
 // Windows-vari "Başlat" düğmesi — Qore Start menüsünü açar. Marka kimliğini
 // koruyan turuncu gradyan kutu + beyaz Qore logosu.
 const DockLogo = () => {
-  const { toggle, isOpen } = useStartMenu();
+  const router = useRouter();
 
   return (
     <Tooltip>
@@ -781,14 +777,12 @@ const DockLogo = () => {
           whileHover={{ scale: 1.08, y: -3 }}
           whileTap={{ scale: 0.94 }}
           transition={{ type: 'spring', stiffness: 600, damping: 25 }}
-          onClick={toggle}
-          aria-label="Başlat"
-          aria-expanded={isOpen}
+          onClick={() => router.push('/dashboard')}
+          aria-label="Dashboard"
           className={cn(
             'flex items-center justify-center h-11 w-11 cursor-pointer rounded-2xl text-white transition-shadow',
             'bg-gradient-to-br from-[#f99a52] to-[#f06f2c]',
-            'shadow-[0_8px_16px_-5px_rgba(240,111,44,0.7),inset_0_1px_1px_rgba(255,255,255,0.4)]',
-            isOpen && 'ring-2 ring-orange-300/70'
+            'shadow-[0_8px_16px_-5px_rgba(240,111,44,0.7),inset_0_1px_1px_rgba(255,255,255,0.4)]'
           )}
         >
           <Image src="/wt.png" alt="Qore" width={24} height={24} className="object-contain" />
@@ -796,7 +790,7 @@ const DockLogo = () => {
       </TooltipTrigger>
       <TooltipPrimitive.Portal>
         <TooltipContent side="top" align="center" sideOffset={12} className="dock-tooltip" style={{ zIndex: 'var(--z-float)' } as React.CSSProperties}>
-          <p>Başlat</p>
+          <p>Dashboard</p>
         </TooltipContent>
       </TooltipPrimitive.Portal>
     </Tooltip>
@@ -860,13 +854,7 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
   const [calendarOpen, setCalendarOpen] = useState(false);
   useEffect(() => { setCalendarOpen(false); }, [currentView]);
 
-  // Window manager — minimized-tab zone (genie target) + restore.
-  const { registerDockTarget, minimizedWindows, restoreWindow, activeId } = useWindowManager();
-  const minZoneRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    registerDockTarget(minZoneRef.current);
-    return () => registerDockTarget(null);
-  }, [registerDockTarget]);
+
 
   // Auto-fit: shrink the whole dock proportionally if it would overflow the
   // viewport (many panels). offsetWidth is the layout width — unaffected by the
@@ -1004,7 +992,7 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
               <DockItem
                 key={item.key}
                 item={item}
-                isActive={(item.key === currentView && item.type === 'nav') || (!!item.href && item.href === activeId)}
+                isActive={item.key === currentView && item.type === 'nav'}
                 setTheme={setTheme}
                 isLiquidMode={isLiquidMode}
                 isLiquidHovered={isLiquidMode && activeItemKey === item.key}
@@ -1013,37 +1001,6 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
               />
             ))}
 
-            {/* ---- right zone: hairline-separated utilities ---- */}
-            <div className="qdock-sep" />
-            {/* Minimized-tab zone — küçültülmüş paneller buraya genie ile iner.
-                Sekme yoksa ≥2 rezerve yuva görünür, sekme geldikçe büyür. */}
-            <div ref={minZoneRef} className="flex items-center gap-1">
-              {minimizedWindows.map((m) => (
-                <Tooltip key={m.id}>
-                  <TooltipTrigger asChild>
-                    <motion.button
-                      whileHover={{ scale: 1.35, y: -8 }}
-                      transition={{ type: 'spring', stiffness: 600, damping: 25 }}
-                      onClick={() => restoreWindow(m.id)}
-                      className="dock-item-wrapper flex items-center justify-center cursor-pointer"
-                      aria-label={`${m.title} — geri getir`}
-                    >
-                      <span className="grid place-items-center w-full h-full rounded-2xl bg-black/[0.05] dark:bg-white/[0.06] border border-black/[0.06] dark:border-white/10">
-                        <m.icon className="w-7 h-7 text-foreground/70" />
-                      </span>
-                    </motion.button>
-                  </TooltipTrigger>
-                  <TooltipPrimitive.Portal>
-                    <TooltipContent side="top" align="center" sideOffset={12} className="dock-tooltip" style={{ zIndex: 'var(--z-float)' } as React.CSSProperties}>
-                      <p>{m.title}</p>
-                    </TooltipContent>
-                  </TooltipPrimitive.Portal>
-                </Tooltip>
-              ))}
-              {Array.from({ length: Math.max(0, 2 - minimizedWindows.length) }).map((_, i) => (
-                <span key={`mslot-${i}`} className="qdock-minslot" />
-              ))}
-            </div>
             <div className="qdock-sep" />
             <CalendarDockButton open={calendarOpen} onToggle={() => setCalendarOpen((o) => !o)} customIcon={dockIcons['calendar']} />
             {showDockLogout && logoutItem && (
