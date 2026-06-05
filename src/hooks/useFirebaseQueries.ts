@@ -901,8 +901,19 @@ export function useDepoStokByDepot(depotId: string | null) {
  * Keyed under the `['depoStok', ...]` prefix so it is invalidated by the same
  * `invalidateDepoStok()` calls and the `useStockUpdateListener` metadata
  * listener that refresh the rest of the depot stock data.
+ *
+ * Pass `{ auto: false }` to make the fetch on-demand only: the query stays
+ * disabled (no read on mount / depot change) and the caller triggers it with
+ * `refetch()`. Mal kabul uses this so the depot is queried only when the user
+ * explicitly presses the "depo seri kontrolü" button — keeping the scan path
+ * purely in-memory (in-session duplicate detection), matching direkt-transfer
+ * speed.
  */
-export function useDepotSerialIndex(depotId: string | null) {
+export function useDepotSerialIndex(
+  depotId: string | null,
+  options?: { auto?: boolean },
+) {
+  const auto = options?.auto ?? true;
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['depoStok', 'serialIndex', depotId, currentCompanyId, isSuperAdmin],
@@ -916,7 +927,7 @@ export function useDepotSerialIndex(depotId: string | null) {
       }
       return map;
     },
-    enabled: !!depotId && (!!currentCompanyId || isSuperAdmin),
+    enabled: auto && !!depotId && (!!currentCompanyId || isSuperAdmin),
     staleTime: 5 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
   });
