@@ -316,7 +316,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <PersistentNotificationToast />
         <PageShell
           edgeToEdge={isEdgeToEdgeRoute}
-          className={`w-full flex-1 ${isWideContentRoute ? "max-w-none md:px-3" : ""} ${pathname?.startsWith("/cari-odeme") ? "bg-[#f4f6f4]" : ""}`}
+          className={`w-full flex-1 ${isWideContentRoute ? "max-w-none md:px-3" : ""} ${pathname?.startsWith("/cari-odeme") ? "bg-transparent" : ""}`}
         >
           {children}
         </PageShell>
