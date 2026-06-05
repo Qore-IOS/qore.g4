@@ -823,39 +823,6 @@ export default function AnaPanel(props: AnaPanelProps) {
               return;
             }
 
-            // Geçmiş oturumlarda tüketilmiş/işlem görmüş mü kontrolü (serialHistory sorgusu)
-            let hasHistory = false;
-            try {
-              const historySnap = await getDocs(
-                query(
-                  collection(db, `serialHistory/${seriNumarasi}/events`),
-                  limit(1)
-                )
-              );
-              if (!historySnap.empty) {
-                // Herhangi bir geçmiş olayda aynı stokKodu kullanılmış mı?
-                const matchedEvent = historySnap.docs.some(doc => doc.data().details?.stokKodu === stokKodu);
-                if (matchedEvent) {
-                  hasHistory = true;
-                }
-              }
-            } catch (e) {
-              console.error("History serial check error", e);
-            }
-
-            if (hasHistory) {
-              playFeedback(true);
-              malKabulLogger.warn('Geçmişte işlem görmüş/tüketilmiş seri tespit edildi', {
-                stokKodu,
-                stokAdi: matchedProduct.stokAdi,
-                seriNumarasi,
-              }, { correlationId: scanCorrelationId });
-              flashScanFeedback('error', `SN ${seriNumarasi} (${matchedProduct.stokAdi}) geçmişte işlem görmüş veya tüketilmiş.`);
-              if (source === 'barcode') { setScanStatus('error'); setTimeout(() => setScanStatus('idle'), 3000); }
-              setIsProcessingScan(false);
-              return;
-            }
-
             const newItem: ScanRow = {
               id: generateId(), barkod: trimmedData, stokKodu: stokKodu, stokAdi: matchedProduct.stokAdi,
               lotNumarasi: lotNumarasi || '', miad: miadFormatted || '', seriNumarasi: seriNumarasi || '',
@@ -868,6 +835,8 @@ export default function AnaPanel(props: AnaPanelProps) {
               scannedSerialsRef.current.set(serialKey, new Set());
             }
             scannedSerialsRef.current.get(serialKey)!.add(seriNumarasi);
+            
+            // UI'ı anında güncelle (Optimistic UI)
             setScannedItems(prev => [newItem, ...prev]);
             if (selectedPendingIrs) {
               const verifyKey = `${stokKodu}||${lotNumarasi || ''}||${miadFormatted || ''}`;
@@ -880,6 +849,49 @@ export default function AnaPanel(props: AnaPanelProps) {
               });
             }
             if (source === 'barcode') setLastScannedProduct(newItem);
+
+            // Geçmiş oturumlarda tüketilmiş/işlem görmüş mü kontrolü (Asenkron - UI'ı bloklamaz)
+            (async () => {
+              try {
+                const historySnap = await getDocs(
+                  query(
+                    collection(db, `serialHistory/${seriNumarasi}/events`),
+                    limit(1)
+                  )
+                );
+                if (!historySnap.empty) {
+                  // Herhangi bir geçmiş olayda aynı stokKodu kullanılmış mı?
+                  const matchedEvent = historySnap.docs.some(doc => doc.data().details?.stokKodu === stokKodu);
+                  if (matchedEvent) {
+                    playFeedback(true);
+                    malKabulLogger.warn('Geçmişte işlem görmüş/tüketilmiş seri tespit edildi', {
+                      stokKodu,
+                      stokAdi: matchedProduct.stokAdi,
+                      seriNumarasi,
+                    }, { correlationId: scanCorrelationId });
+                    
+                    flashScanFeedback('error', `SN ${seriNumarasi} (${matchedProduct.stokAdi}) geçmişte işlem görmüş veya tüketilmiş.`);
+                    if (source === 'barcode') { setScanStatus('error'); setTimeout(() => setScanStatus('idle'), 3000); }
+                    
+                    // Geçersiz olduğu için ekrandan ve state'den geri çek
+                    setScannedItems(prev => prev.filter(item => item.id !== newItem.id));
+                    scannedSerialsRef.current.get(serialKey)?.delete(seriNumarasi);
+                    if (selectedPendingIrs) {
+                      const verifyKey = `${stokKodu}||${lotNumarasi || ''}||${miadFormatted || ''}`;
+                      setCeomedVerifyMap((prev) => {
+                        const v = prev[verifyKey];
+                        if (!v) return prev;
+                        const nextSet = new Set(v.verifiedSerials);
+                        nextSet.delete(seriNumarasi);
+                        return { ...prev, [verifyKey]: { ...v, verifiedSerials: nextSet } };
+                      });
+                    }
+                  }
+                }
+              } catch (e) {
+                console.error("History serial check error", e);
+              }
+            })();
 
         } else {
           // It's a lot-based or quantity-based item
