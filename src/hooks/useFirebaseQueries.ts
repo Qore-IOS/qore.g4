@@ -883,6 +883,38 @@ export function useDepoStokByDepot(depotId: string | null) {
 }
 
 /**
+ * Lightweight serial index for a depot (Mal Kabul duplicate detection).
+ *
+ * Returns a `Map<stokKodu, Set<seriNumarasi>>` built from a compact server-side
+ * projection (`getDepotSerialIndex`) instead of downloading the entire depoStok
+ * collection. This is what restores instant panel open + <10ms scans — the
+ * client no longer ships/parses the full dataset through the Firestore web SDK.
+ *
+ * Keyed under the `['depoStok', ...]` prefix so it is invalidated by the same
+ * `invalidateDepoStok()` calls and the `useStockUpdateListener` metadata
+ * listener that refresh the rest of the depot stock data.
+ */
+export function useDepotSerialIndex(depotId: string | null) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['depoStok', 'serialIndex', depotId, currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const map = new Map<string, Set<string>>();
+      if (!depotId) return map;
+      const { getDepotSerialIndex } = await import('@/actions/stokActions');
+      const index = await getDepotSerialIndex(depotId, currentCompanyId, isSuperAdmin);
+      for (const [stokKodu, serials] of Object.entries(index)) {
+        map.set(stokKodu, new Set(serials));
+      }
+      return map;
+    },
+    enabled: !!depotId && (!!currentCompanyId || isSuperAdmin),
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+}
+
+/**
  * Server-side paginated grouped depot stock.
  *
  * Calls the `getPaginatedDepotStock` server action so that only the requested
