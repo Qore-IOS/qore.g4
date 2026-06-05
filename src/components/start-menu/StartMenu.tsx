@@ -20,7 +20,7 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { useAI } from '@/contexts/ai-context';
 import { useStartMenu } from '@/contexts/start-menu-context';
-import { useWindowManager } from '@/contexts/window-manager-context';
+
 import { VIEWS } from '@/lib/constants';
 import {
   TONE_CHIP,
@@ -63,7 +63,7 @@ export function StartMenu() {
   const { isOpen, close, toggle } = useStartMenu();
   const { currentUser, currentUserProfile, logout, setUserTheme } = useAuth();
   const { openAI } = useAI();
-  const { openWindow } = useWindowManager();
+
   const { theme, resolvedTheme } = useTheme();
   const router = useRouter();
 
@@ -130,10 +130,10 @@ export function StartMenu() {
     setShowAllPins(false);
   }, [isOpen]);
 
-  // Panelleri iframe pencere olarak aç (route'a gitmek yerine).
+  // Panelleri doğrudan sayfaya yönlendir
   const go = (href?: string, title?: string, icon?: React.ElementType) => {
     if (!href) return;
-    openWindow(href, title || href, icon || AppWindow);
+    router.push(href);
     close();
   };
 
