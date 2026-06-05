@@ -50,7 +50,7 @@ export function CariOdemeSidebar() {
   return (
     <aside 
       className={cn(
-        "min-h-full h-full flex flex-col bg-[#f4f6f4] border-r border-border/40 transition-all duration-300 relative",
+        "min-h-full h-full flex flex-col bg-transparent border-r border-border/40 transition-all duration-300 relative",
         isCollapsed ? "w-[80px]" : "w-[280px]"
       )}
     >
