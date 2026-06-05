@@ -869,10 +869,18 @@ export function useDepoStokByDepot(depotId: string | null) {
     queryKey: ['depoStok', depotId, currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       if (!depotId) return [];
-      const snap = await getDocs(
-        scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('depotId', '==', depotId)),
+      // Legacy-aware fetch: include __legacy__/untagged depoStok docs so company
+      // users see the same stock super-admins do. A plain scopedQuery applies a
+      // server-side `where(companyId == X)` that silently drops legacy/untagged
+      // docs — e.g. goods received by a super-admin (currentCompanyId null →
+      // tagged '__legacy__') or before company tagging existed. Those items then
+      // vanish from the direkt-transfer / mal-kabul panels for regular users even
+      // though the box is physically in the depot, while super-admins (unscoped
+      // query) still see and can transfer them.
+      const docs = await getScopedDocs(
+        'depoStok', currentCompanyId, isSuperAdmin, where('depotId', '==', depotId),
       );
-      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
+      const items = docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
       return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
     },
     enabled: !!depotId && (!!currentCompanyId || isSuperAdmin),
@@ -994,16 +1002,17 @@ export function useUnshippedDepoStokByDepot(depotId: string | null) {
     queryKey: ['depoStok', 'unshipped', depotId, currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       if (!depotId) return [];
-      const snap = await getDocs(
-        scopedQuery(
-          'depoStok',
-          currentCompanyId,
-          isSuperAdmin,
-          where('depotId', '==', depotId),
-          where('isShipped', '==', false),
-        ),
+      // Legacy-aware fetch — see useDepoStokByDepot. Keeps __legacy__/untagged
+      // depot stock visible to company users instead of being dropped by the
+      // server-side companyId filter.
+      const docs = await getScopedDocs(
+        'depoStok',
+        currentCompanyId,
+        isSuperAdmin,
+        where('depotId', '==', depotId),
+        where('isShipped', '==', false),
       );
-      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
+      const items = docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
       return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
     },
     enabled: !!depotId && (!!currentCompanyId || isSuperAdmin),
