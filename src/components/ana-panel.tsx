@@ -1176,8 +1176,8 @@ export default function AnaPanel(props: AnaPanelProps) {
   const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
   const [isIrsaliyeModalOpen, setIsIrsaliyeModalOpen] = useState(false);
   const [selectedAddressBarcode, setSelectedAddressBarcode] = useState<string>('');
-  const [addressAssignmentInput, setAddressAssignmentInput] = useState<string>('');
-  const [irsaliyeNoInput, setIrsaliyeNoInput] = useState<string>('');
+  const addressInputRef = useRef<HTMLInputElement>(null);
+  const irsaliyeInputRef = useRef<HTMLInputElement>(null);
   const [malKabulIsLoading, setMalKabulIsLoading] = useState(false);
   const [isGeneratingBulkQr, setIsGeneratingBulkQr] = useState(false);
 
@@ -1295,13 +1295,13 @@ export default function AnaPanel(props: AnaPanelProps) {
   };
   
   const handleAssignAddress = () => {
-    const address = (addressDefinitions || []).find(ad => ad.addressBarcode === selectedAddressBarcode);
-    if (!address && addressAssignmentInput.trim() === '') {
-      toast({ title: 'Hata', description: 'Lütfen geçerli bir adres barkodu seçin veya manuel adres girin.', variant: 'destructive' });
+    const manualVal = addressInputRef.current?.value || '';
+    const address = addressDefinitions.find(ad => ad.addressBarcode === selectedAddressBarcode);
+    if (!address && manualVal.trim() === '') {
+      toast({ title: 'Hata', description: 'Lütfen listeden bir adres seçin veya manuel girin', variant: 'destructive' });
       return;
     }
-    const targetAddressName = address ? address.addressName : addressAssignmentInput.trim();
-
+    const targetAddressName = address ? address.addressName : manualVal.trim();
     setScannedItems(prev =>
       prev.map(item =>
         item.isSelected && !item.isProcessed
@@ -1309,9 +1309,9 @@ export default function AnaPanel(props: AnaPanelProps) {
           : item
       )
     );
-    toast({ title: 'Başarılı', description: `Seçili ürünlere "${targetAddressName}" adresi atandı.` });
+    toast({ title: 'Başarılı', description: `Seçili ürünlere adres atandı.` });
     setSelectedAddressBarcode('');
-    setAddressAssignmentInput('');
+    if (addressInputRef.current) addressInputRef.current.value = '';
     setIsAddressModalOpen(false);
   };
 
@@ -1325,19 +1325,20 @@ export default function AnaPanel(props: AnaPanelProps) {
   };
   
   const handleAssignIrsaliyeNo = () => {
-    if (irsaliyeNoInput.trim() === '') {
-      toast({ title: 'Hata', description: 'İrsaliye numarası boş olamaz.', variant: 'destructive' });
+    const val = irsaliyeInputRef.current?.value || '';
+    if (val.trim() === '') {
+      toast({ title: 'Hata', description: 'Lütfen irsaliye numarası girin', variant: 'destructive' });
       return;
     }
     setScannedItems(prev =>
       prev.map(item =>
         item.isSelected && !item.isProcessed
-          ? { ...item, irsaliyeNumarasi: irsaliyeNoInput.trim(), isSelected: false }
+          ? { ...item, irsaliyeNumarasi: val.trim(), isSelected: false }
           : item
       )
     );
-    toast({ title: 'Başarılı', description: `Seçili ürünlere "${irsaliyeNoInput.trim()}" irsaliye no atandı.` });
-    setIrsaliyeNoInput('');
+    toast({ title: 'Başarılı', description: `Seçili ürünlere "${val.trim()}" irsaliye no atandı.` });
+    if (irsaliyeInputRef.current) irsaliyeInputRef.current.value = '';
     setIsIrsaliyeModalOpen(false);
   };
 
@@ -2566,7 +2567,7 @@ export default function AnaPanel(props: AnaPanelProps) {
             </div>
             <div>
               <Label className="text-xs font-semibold text-[var(--dashboard-muted)] uppercase tracking-wide">Manuel Adres</Label>
-              <Input value={addressAssignmentInput} onChange={e => setAddressAssignmentInput(e.target.value)} placeholder="Veya manuel adres girin" className="mt-1" />
+              <Input ref={addressInputRef} placeholder="Veya manuel adres girin" className="mt-1" />
             </div>
           </div>
           <DialogFooter>
@@ -2587,7 +2588,7 @@ export default function AnaPanel(props: AnaPanelProps) {
           </DialogHeader>
           <div className="py-4">
             <Label className="text-xs font-semibold text-[var(--dashboard-muted)] uppercase tracking-wide">İrsaliye Numarası</Label>
-            <Input value={irsaliyeNoInput} onChange={e => setIrsaliyeNoInput(e.target.value)} placeholder="İrsaliye numarasını girin" className="mt-1" />
+            <Input ref={irsaliyeInputRef} placeholder="İrsaliye numarasını girin" className="mt-1" />
           </div>
           <DialogFooter>
             <DialogClose asChild><Button variant="outline">İptal</Button></DialogClose>
