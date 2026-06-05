@@ -49,7 +49,7 @@
     --z-float: 1200;
 
     /* Dashboard neumorphic tokens (light mode) */
-    --dashboard-bg: #E9E7E3;
+    --dashboard-bg: #eae9e5;
     --dashboard-surface: #F3F2EF;
     --dashboard-surface-2: #EEECE7;
     --dashboard-stroke: rgba(0, 0, 0, .045);
@@ -62,7 +62,7 @@
     --dashboard-pressed: inset -8px -8px 16px rgba(255,255,255,.80), inset 8px 8px 16px rgba(120,120,120,.16);
 
     /* Device management module tokens */
-    --device-bg: #ECEDEF;
+    --device-bg: #eae9e5;
     --device-surface: #F3F4F6;
     --device-surface-2: #E7E9ED;
     --device-border: rgba(20, 23, 28, 0.08);
