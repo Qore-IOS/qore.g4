@@ -11,6 +11,7 @@ import { ChevronRight, Calendar } from 'lucide-react';
 import NotificationsBell from '@/components/notifications/NotificationsBell';
 import type { DockItemData } from '@/hooks/use-dock';
 import { useAuth } from '@/contexts/auth-context';
+import { useStartMenu } from '@/contexts/start-menu-context';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { CalendarDockPanel } from '@/components/dock/CalendarDockPanel';
@@ -768,7 +769,7 @@ const DockItem = ({
 // Windows-vari "Başlat" düğmesi — Qore Start menüsünü açar. Marka kimliğini
 // koruyan turuncu gradyan kutu + beyaz Qore logosu.
 const DockLogo = () => {
-  const router = useRouter();
+  const { toggle, isOpen } = useStartMenu();
 
   return (
     <Tooltip>
@@ -777,12 +778,14 @@ const DockLogo = () => {
           whileHover={{ scale: 1.08, y: -3 }}
           whileTap={{ scale: 0.94 }}
           transition={{ type: 'spring', stiffness: 600, damping: 25 }}
-          onClick={() => router.push('/dashboard')}
-          aria-label="Dashboard"
+          onClick={toggle}
+          aria-label="Başlat"
+          aria-expanded={isOpen}
           className={cn(
             'flex items-center justify-center h-11 w-11 cursor-pointer rounded-2xl text-white transition-shadow',
             'bg-gradient-to-br from-[#f99a52] to-[#f06f2c]',
-            'shadow-[0_8px_16px_-5px_rgba(240,111,44,0.7),inset_0_1px_1px_rgba(255,255,255,0.4)]'
+            'shadow-[0_8px_16px_-5px_rgba(240,111,44,0.7),inset_0_1px_1px_rgba(255,255,255,0.4)]',
+            isOpen && 'ring-2 ring-orange-300/70'
           )}
         >
           <Image src="/wt.png" alt="Qore" width={24} height={24} className="object-contain" />
@@ -790,7 +793,7 @@ const DockLogo = () => {
       </TooltipTrigger>
       <TooltipPrimitive.Portal>
         <TooltipContent side="top" align="center" sideOffset={12} className="dock-tooltip" style={{ zIndex: 'var(--z-float)' } as React.CSSProperties}>
-          <p>Dashboard</p>
+          <p>Başlat</p>
         </TooltipContent>
       </TooltipPrimitive.Portal>
     </Tooltip>
