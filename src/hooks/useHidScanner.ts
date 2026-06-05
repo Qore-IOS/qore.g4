@@ -91,7 +91,12 @@ export default function useHidScanner({
       }
 
       reset();
-      onScanRef.current({ raw });
+      
+      // Defer the execution to allow the browser to paint and register the keypress as completed.
+      // This prevents React state updates from blocking the Main Thread during the INP measurement window.
+      setTimeout(() => {
+        onScanRef.current({ raw });
+      }, 0);
     };
 
     const schedule = () => {

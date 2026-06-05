@@ -1958,10 +1958,10 @@ export default function AnaPanel(props: AnaPanelProps) {
       )}
 
       {/* ── KPI Row – Son Okutulan Detay + Okuma Adetleri + Ürün Ekle ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 min-h-[180px]">
         {/* Col 1: Son Okutulan Detay (with scan feedback) */}
         <div className={cn(
-          "cihaz-card-strong px-4 py-4 sm:px-5 sm:py-5 transition-all duration-300",
+          "cihaz-card-strong px-4 py-4 sm:px-5 sm:py-5 transition-all duration-300 min-h-[180px]",
           scanFeedback?.type === 'success' && "ring-2 ring-green-500/60",
           scanFeedback?.type === 'error' && "ring-2 ring-red-500/60"
         )}>
@@ -2018,7 +2018,7 @@ export default function AnaPanel(props: AnaPanelProps) {
         </div>
 
         {/* Col 2: Okuma Adetleri (bigger fonts) */}
-        <div className="cihaz-card px-3 py-3 sm:px-4 sm:py-4">
+        <div className="cihaz-card px-3 py-3 sm:px-4 sm:py-4 min-h-[180px]">
           <p className="cihaz-overline text-[10px] sm:text-xs mb-2">Okuma Adetleri</p>
           <div className="flex items-baseline gap-1.5">
             <span className="text-2xl sm:text-3xl font-bold text-[var(--dashboard-accent)]">{lotCount}</span>
@@ -2031,7 +2031,7 @@ export default function AnaPanel(props: AnaPanelProps) {
         </div>
 
         {/* Col 3: Ürün Ekle (action tiles) */}
-        <div className="cihaz-card-strong px-3 py-3 sm:px-4 sm:py-4">
+        <div className="cihaz-card-strong px-3 py-3 sm:px-4 sm:py-4 min-h-[180px]">
           <p className="cihaz-overline text-[10px] sm:text-xs mb-2">Ürün Ekle</p>
           <div className="grid grid-cols-2 gap-2">
             <button
@@ -2111,7 +2111,7 @@ export default function AnaPanel(props: AnaPanelProps) {
       )}
 
       {/* ── STEP 3: Okutulan Ürünler Tablosu ── */}
-      <div className="cihaz-card-strong flex-1 flex flex-col overflow-hidden">
+      <div className="cihaz-card-strong flex-1 flex flex-col overflow-hidden min-h-[460px]">
         {/* ── Selection mode sticky bar ── */}
         {isSelectionMode && (
           <div className="sticky top-0 z-10 flex items-center gap-2 sm:gap-3 px-4 py-2.5 bg-[var(--dashboard-accent)] text-white rounded-t-[18px]">
