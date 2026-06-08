@@ -2,9 +2,14 @@
 # https://firebase.google.com/docs/app-hosting/configure
 
 runConfig:
-  # Increase this value if you'd like to automatically spin up
-  # more instances in response to increased traffic.
-  maxInstances: 1
+  # En az 1 örnek her zaman SICAK kalsın → Cloud Run cold-start ortadan kalkar.
+  # Sayfa açılışındaki ~7s'lik gecikmenin (statik JS/CSS chunk'larının TTFB'si)
+  # asıl sebebi buydu: backend boştayken sıfıra iniyor, ilk istekte container
+  # yeniden ayağa kalkıyor ve tüm istekleri ısınana kadar tutuyordu.
+  minInstances: 1
+  # Tek örnek tüm kullanıcıları + bir sayfada açılan ~40 eşzamanlı chunk
+  # isteğini darboğaza sokuyordu. Yük altında yatay ölçeklenmeye izin ver.
+  maxInstances: 10
 # Set the startup timeout to 180 seconds to allow for longer build/start times.
 startupTimeoutSeconds: 180
 
