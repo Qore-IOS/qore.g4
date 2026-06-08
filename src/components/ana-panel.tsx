@@ -559,6 +559,9 @@ export default function AnaPanel(props: AnaPanelProps) {
   // kareye kadar geçen gerçek süre (ms). Cihaz üstünde gerçek INP'yi gösterir —
   // trace almadan darboğazı (JS mi, render mi) anlamak için.
   const [lastScanMs, setLastScanMs] = useState<number | null>(null);
+  // JS (parse + state) süresi ayrı: senkron gövde bitince mikrotask'ta ölçülür.
+  // "JS" düşük ama toplam yüksekse darboğaz render/paint; "JS" yüksekse parse.
+  const [lastScanJsMs, setLastScanJsMs] = useState<number | null>(null);
 
   // A scan must stay on the urgent input path. Grouping and sorting thousands of
   // rows synchronously here used to block the next HID/keyboard event for a few
@@ -770,6 +773,10 @@ export default function AnaPanel(props: AnaPanelProps) {
     // gerçek gecikme. Bulk alt-okutmalar (source==='bulk_item') ölçülmez.
     if (source === 'barcode' && typeof performance !== 'undefined') {
       const scanStartedAt = performance.now();
+      // JS süresi: senkron processScan gövdesi (parse + state queue) bitince
+      // çalışan mikrotask → saf JS maliyeti (render/paint hariç).
+      queueMicrotask(() => setLastScanJsMs(performance.now() - scanStartedAt));
+      // Toplam scan→paint: tüm setState'ler boyandıktan sonra (çift rAF).
       requestAnimationFrame(() => requestAnimationFrame(() => {
         setLastScanMs(performance.now() - scanStartedAt);
       }));
@@ -2025,8 +2032,11 @@ export default function AnaPanel(props: AnaPanelProps) {
                       : lastScanMs < 200 ? "bg-amber-500/15 text-amber-600"
                       : "bg-red-500/15 text-red-600"
                   )}
-                  title="Son okutmadan ekrana boyamaya kadar geçen gerçek süre (okutma→paint)."
+                  title="JS = parse + state (saf JS). Toplam = okutma→paint (render dahil). JS düşük + toplam yüksek ⇒ darboğaz render."
                 >
+                  {lastScanJsMs !== null && (
+                    <span className="opacity-60 font-normal">JS {Math.round(lastScanJsMs)} · </span>
+                  )}
                   {Math.round(lastScanMs)} ms
                 </span>
               )}
