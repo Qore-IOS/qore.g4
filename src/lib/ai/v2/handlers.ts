@@ -959,13 +959,34 @@ export async function getOrders(
     if (args.hospitalId && !canSeeLab(ctx, args.hospitalId)) {
       return { ok: false, label: 'get_orders', data: null, notice: 'Lab yetkin dışında.' };
     }
-    let q: Query<DocumentData> = adminDb.collection('orders');
-    q = applyCompanyScope(q, ctx);
-    if (args.hospitalId) q = q.where('hedefKurumId', '==', args.hospitalId);
-    if (args.status && args.status !== 'all') q = whereAliased(q, 'orders', 'status', args.status);
-    if (args.days) q = q.where('createdAt', '>=', daysAgo(args.days));
-    const snap = await q.limit(args.limit ?? 100).get();
-    const rows = snap.docs
+    // Tamamlanan siparişler `orders`'tan `ordersArchive`'a taşınır. Bu yüzden:
+    //  - status === 'completed'  → yalnızca arşiv
+    //  - status verilmemiş/'all' → her iki koleksiyon (birleştir)
+    //  - diğer (aktif) statüler   → yalnızca canlı `orders`
+    const ORDERS_ARCHIVE = 'ordersArchive';
+    const wantCompleted = args.status === 'completed';
+    const wantAll = !args.status || args.status === 'all';
+    const buildQuery = (collectionName: string): Query<DocumentData> => {
+      let q: Query<DocumentData> = adminDb.collection(collectionName);
+      q = applyCompanyScope(q, ctx);
+      if (args.hospitalId) q = q.where('hedefKurumId', '==', args.hospitalId);
+      // Statü filtresi yalnızca canlı koleksiyona uygulanır; arşivdeki her şey
+      // zaten 'completed'.
+      if (collectionName === 'orders' && args.status && args.status !== 'all' && args.status !== 'completed') {
+        q = whereAliased(q, 'orders', 'status', args.status);
+      }
+      if (args.days) q = q.where('createdAt', '>=', daysAgo(args.days));
+      return q.limit(args.limit ?? 100);
+    };
+    const collections: string[] = wantCompleted
+      ? [ORDERS_ARCHIVE]
+      : wantAll
+        ? ['orders', ORDERS_ARCHIVE]
+        : ['orders'];
+    const snaps = await Promise.all(collections.map((c) => buildQuery(c).get()));
+    const scannedCount = snaps.reduce((sum, s) => sum + s.size, 0);
+    const rows = snaps
+      .flatMap((s) => s.docs)
       .map((d) => ({ id: d.id, ...d.data() }))
       .filter((d) => canSeeLab(ctx, (d as { hedefKurumId?: string }).hedefKurumId))
       .map((d) => {
@@ -985,7 +1006,7 @@ export async function getOrders(
       ok: true,
       label: 'get_orders',
       data: rows,
-      scanned: snap.size,
+      scanned: scannedCount,
       notice: rows.length === 0 ? 'Sipariş kaydı yok.' : undefined,
     };
   } catch (e) {

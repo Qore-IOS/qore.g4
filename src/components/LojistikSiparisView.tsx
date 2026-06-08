@@ -16,6 +16,7 @@ import {
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import { getScopedDocs, scopedQuery } from '@/lib/firestore-helpers';
+import { ORDERS_ARCHIVE_COLLECTION, mergeOrdersById } from '@/lib/orders-archive';
 import { useHospitals, useProductCodes, useDepots } from '@/hooks/useFirebaseQueries';
 import { useToast } from '@/hooks/use-toast';
 import type { Order, Hospital, ProductCode, DepoStokItem, PeripheralFulfillmentItem, Depot } from '@/lib/types';
@@ -174,7 +175,13 @@ export default function LojistikSiparisView() {
   const { toast } = useToast();
   const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const [peripheralOrders, setPeripheralOrders] = useState<Order[]>([]);
-  const [completedOrders, setCompletedOrders] = useState<Order[]>([]);
+  // Tamamlananlar `ordersArchive`'tan (+ backfill öncesi canlı kalanlar) gelir.
+  const [liveCompleted, setLiveCompleted] = useState<Order[]>([]);
+  const [archivedCompleted, setArchivedCompleted] = useState<Order[]>([]);
+  const completedOrders = useMemo(
+    () => mergeOrdersById(archivedCompleted, liveCompleted),
+    [archivedCompleted, liveCompleted],
+  );
   // TanStack Query — AppLayout prefetch sayesinde anında cache'den gelir, 0ms bekleme
   const { data: hospitals = [] } = useHospitals();
   const { data: productCodes = [] } = useProductCodes();
@@ -263,58 +270,55 @@ export default function LojistikSiparisView() {
     return () => { cancelled = true; };
   }, [currentCompanyId, isSuperAdmin]);
 
-  // Listen peripheral orders
+  // Listen peripheral orders. Aktif siparişler canlı `orders`'tan; tamamlananlar
+  // `ordersArchive`'tan (+ backfill öncesi canlı kalanlar) okunur.
   useEffect(() => {
-    const q = scopedQuery('orders', currentCompanyId, isSuperAdmin, where('isPeripheral', '==', true));
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const rowsData = snap.docs.map((d) => {
-          const data = d.data();
-          return {
-            ...data,
-            id: d.id,
-            createdAt: (data.createdAt as Timestamp)?.toDate?.() ?? new Date(),
-          } as Order;
-        });
-        const active: Order[] = [];
-        const completed: Order[] = [];
-        rowsData.forEach((o) => {
-          // Visibility rules:
-          // - Lojistik users with assignedLabGroups: show orders that contain at least
-          //   one item whose product is in one of their groups.
-          // - Otherwise fall back to legacy lab-ID-based filtering.
-          if (groupFilteringActive) {
-            const items = Array.isArray(o.items) ? o.items : [];
-            const hasMatchingItem = items.some((it: any) => itemBelongsToUserGroup(it?.stokKodu));
-            if (!hasMatchingItem) return;
-          } else {
-            if (!o.labId || !assignedLabIds.has(o.labId)) return;
-          }
-          if (o.status === 'completed') completed.push(o);
-          else active.push(o);
-        });
-        active.sort(
-          (a, b) =>
-            ((b.createdAt as Date)?.getTime?.() ?? 0) - ((a.createdAt as Date)?.getTime?.() ?? 0)
-        );
-        completed.sort(
-          (a, b) =>
-            ((b.createdAt as Date)?.getTime?.() ?? 0) - ((a.createdAt as Date)?.getTime?.() ?? 0)
-        );
-        setPeripheralOrders(active);
-        setCompletedOrders(completed);
-      },
-      (error) => {
-        console.error('Lojistik sipariş dinleyici hatası:', error);
-        toast({
-          title: 'Siparişler yüklenemedi',
-          description: 'Yetki veya bağlantı nedeniyle sipariş verileri alınamadı.',
-          variant: 'destructive',
-        });
+    // Visibility rules:
+    // - Lojistik users with assignedLabGroups: show orders that contain at least
+    //   one item whose product is in one of their groups.
+    // - Otherwise fall back to legacy lab-ID-based filtering.
+    const isVisible = (o: Order): boolean => {
+      if (groupFilteringActive) {
+        const items = Array.isArray(o.items) ? o.items : [];
+        return items.some((it: any) => itemBelongsToUserGroup(it?.stokKodu));
       }
+      return !!o.labId && assignedLabIds.has(o.labId);
+    };
+    const byCreatedDesc = (a: Order, b: Order) =>
+      ((b.createdAt as Date)?.getTime?.() ?? 0) - ((a.createdAt as Date)?.getTime?.() ?? 0);
+    const mapDocs = (snap: any): Order[] =>
+      snap.docs.map((d: any) => {
+        const data = d.data();
+        return { ...data, id: d.id, createdAt: (data.createdAt as Timestamp)?.toDate?.() ?? new Date() } as Order;
+      });
+    const onError = (error: unknown) => {
+      console.error('Lojistik sipariş dinleyici hatası:', error);
+      toast({
+        title: 'Siparişler yüklenemedi',
+        description: 'Yetki veya bağlantı nedeniyle sipariş verileri alınamadı.',
+        variant: 'destructive',
+      });
+    };
+
+    // Canlı `orders`: aktif (+ backfill öncesi kalan completed) ayrıştırılır.
+    const unsubLive = onSnapshot(
+      scopedQuery('orders', currentCompanyId, isSuperAdmin, where('isPeripheral', '==', true)),
+      (snap) => {
+        const visible = mapDocs(snap).filter(isVisible);
+        setPeripheralOrders(visible.filter((o) => o.status !== 'completed').sort(byCreatedDesc));
+        setLiveCompleted(visible.filter((o) => o.status === 'completed').sort(byCreatedDesc));
+      },
+      onError,
     );
-    return () => unsub();
+    // Arşiv: tüm tamamlananlar.
+    const unsubArchive = onSnapshot(
+      scopedQuery(ORDERS_ARCHIVE_COLLECTION, currentCompanyId, isSuperAdmin, where('isPeripheral', '==', true)),
+      (snap) => {
+        setArchivedCompleted(mapDocs(snap).filter(isVisible).sort(byCreatedDesc));
+      },
+      onError,
+    );
+    return () => { unsubLive(); unsubArchive(); };
   }, [assignedLabIds, currentCompanyId, groupFilteringActive, isSuperAdmin, itemBelongsToUserGroup, toast]);
 
   const selectedOrder = useMemo(() => {
