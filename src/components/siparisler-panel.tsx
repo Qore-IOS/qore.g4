@@ -238,6 +238,19 @@ const MemoizedOrderCard = React.memo(function OrderCard({
 
 
 /**
+ * Aktif sipariş dinleyicisinin çekeceği en fazla (en yeni) sipariş sayısı.
+ * `orders` koleksiyonu, tamamlanan siparişler de aynı koleksiyonda
+ * (`status: 'completed'`) kaldığı için süresiz büyür. Panel ise tamamlananları
+ * zaten istemci tarafında gizler (bkz. merged list `status === 'completed'`
+ * filtresi), yani tüm geçmişi canlı dinlemek saf israftır ve panel açılışını
+ * yavaşlatır. createdAt'e göre en yeni N kaydı dinlemek aktif siparişlerin
+ * tamamını kapsar (bir sipariş açıldıktan kısa süre sonra işlenir) ve indirilen
+ * veriyi köklü biçimde küçültür. Mevcut (companyId, depotId, createdAt) index'i
+ * kullanır — yeni index gerektirmez.
+ */
+const ACTIVE_ORDERS_LISTEN_LIMIT = 300;
+
+/**
  * Orders Panel Component
  * @description Main panel for order management including creation, viewing,
  * and processing of orders in the medical supply chain system
@@ -307,7 +320,8 @@ export default function SiparislerPanel(): JSX.Element {
           currentCompanyId,
           isSuperAdmin,
           where('depotId', '==', selectedDepotId),
-          orderBy('createdAt', 'desc')
+          orderBy('createdAt', 'desc'),
+          limit(ACTIVE_ORDERS_LISTEN_LIMIT)
         );
         unsubscribe = onSnapshot(
           q1,
@@ -318,7 +332,7 @@ export default function SiparislerPanel(): JSX.Element {
               errorMessage: error instanceof Error ? error.message : String(error),
             });
             if (unsubscribe) unsubscribe();
-            const q2 = scopedQuery('orders', currentCompanyId, isSuperAdmin, where('depotId', '==', selectedDepotId));
+            const q2 = scopedQuery('orders', currentCompanyId, isSuperAdmin, where('depotId', '==', selectedDepotId), limit(ACTIVE_ORDERS_LISTEN_LIMIT));
             unsubscribe = onSnapshot(q2, (snapshot) => mapSnapshot(snapshot));
           }
         );
@@ -327,7 +341,7 @@ export default function SiparislerPanel(): JSX.Element {
           depotId: selectedDepotId,
           error: e instanceof Error ? e.message : String(e),
         });
-        const q2 = scopedQuery('orders', currentCompanyId, isSuperAdmin, where('depotId', '==', selectedDepotId));
+        const q2 = scopedQuery('orders', currentCompanyId, isSuperAdmin, where('depotId', '==', selectedDepotId), limit(ACTIVE_ORDERS_LISTEN_LIMIT));
         unsubscribe = onSnapshot(q2, (snapshot) => mapSnapshot(snapshot));
       }
     };
