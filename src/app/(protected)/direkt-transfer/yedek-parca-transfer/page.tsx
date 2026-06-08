@@ -422,85 +422,93 @@ export default function YedekParcaTransferPage() {
 
     const fetchData = async () => {
       try {
-        // Fetch product codes for cihazGrubu reference
-        const [productsSnap, brandsSnap] = await Promise.all([
-          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin, where('urunGrubu', '==', 'yedek_parca'))),
-          getDocs(scopedQuery('def_brands', currentCompanyId, isSuperAdmin)),
-        ]);
-        const sparePartProducts = productsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
-        const brands = brandsSnap.docs
-          .map(d => String(d.data().name || '').trim())
-          .filter(Boolean)
-          .sort((a, b) => a.localeCompare(b, 'tr'));
-        setProductCodes(sparePartProducts);
-        setBrandOptions(brands);
-
-        // Fetch depot stock - only products in the depot
-        const stokSnap = await getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
-        const stokItems = filterByCompanyScope(stokSnap.docs.map(d => {
-          const data = d.data();
-          return {
-            id: d.id,
-            ...data,
-            createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
-          } as YedekParcaDepoStokItem;
-        }), currentCompanyId, isSuperAdmin);
-        setDepoStok(stokItems);
-
-        // Fetch technicians and application specialists
-        const usersSnap = await getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin));
-        const allUsers = filterByCompanyScope(
-          usersSnap.docs.map(d => ({ uid: d.id, ...d.data() }) as User),
-          currentCompanyId, isSuperAdmin
-        );
-        setUsers(allUsers.filter(u => u.role === 'teknik_servis' || u.role === 'aplikasyon'));
-
-        // Fetch pending returns (status === 'pending')
+        // Tüm bağımsız sorgular tek seferde paralel — daha önce 7 ardışık
+        // round-trip (waterfall) panel açılışını ~1sn+ geciktiriyordu. Bunlar
+        // birbirini beklemediği için hepsi aynı anda gider. Log yüklemesi de
+        // (kendi içinde paralel) eşzamanlı çalışır.
         const pendingQuery = scopedQuery(
           'pendingReturns',
           currentCompanyId,
           isSuperAdmin,
           where('status', '==', 'pending')
         );
-        const pendingSnap = await getDocs(pendingQuery);
-        const pending = filterByCompanyScope(pendingSnap.docs.map(d => {
-          const data = d.data();
-          return {
-            id: d.id,
-            ...data,
-            requestedAt: data.requestedAt?.toDate ? data.requestedAt.toDate() : new Date(),
-          } as PendingReturn;
-        }), currentCompanyId, isSuperAdmin);
-        pending.sort((a, b) => new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime());
-        setPendingReturns(pending);
-
-        // Fetch borrowed spare parts (status === 'pending')
         const borrowedQuery = query(
           collection(db, 'borrowedSpareParts'),
           where('status', '==', 'pending')
         );
-        const borrowedSnap = await getDocs(borrowedQuery);
-        const borrowed = filterByCompanyScope(borrowedSnap.docs.map(d => {
-          const data = d.data();
-          return {
-            id: d.id,
-            ...data,
-            borrowedAt: data.borrowedAt?.toDate ? data.borrowedAt.toDate() : new Date(),
-          };
-        }), currentCompanyId, isSuperAdmin);
-        borrowed.sort((a, b) => new Date(b.borrowedAt).getTime() - new Date(a.borrowedAt).getTime());
-        setBorrowedParts(borrowed);
 
-        // Fetch pool warehouses (depots with isPoolWarehouse = true)
-        const depotsSnap = await getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin));
-        const allDepots = filterByCompanyScope(
-          depotsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as Depot),
-          currentCompanyId, isSuperAdmin
-        );
-        setPoolWarehouses(allDepots.filter(d => d.isPoolWarehouse === true));
+        const fetchMainData = async () => {
+          const [productsSnap, brandsSnap, stokSnap, usersSnap, pendingSnap, borrowedSnap, depotsSnap] = await Promise.all([
+            getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin, where('urunGrubu', '==', 'yedek_parca'))),
+            getDocs(scopedQuery('def_brands', currentCompanyId, isSuperAdmin)),
+            getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin)),
+            getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin)),
+            getDocs(pendingQuery),
+            getDocs(borrowedQuery),
+            getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+          ]);
 
-        // Fetch recent transfer logs
-        await loadRecentTransferLogs();
+          // Product codes + brands
+          const sparePartProducts = productsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
+          const brands = brandsSnap.docs
+            .map(d => String(d.data().name || '').trim())
+            .filter(Boolean)
+            .sort((a, b) => a.localeCompare(b, 'tr'));
+          setProductCodes(sparePartProducts);
+          setBrandOptions(brands);
+
+          // Depot stock
+          const stokItems = filterByCompanyScope(stokSnap.docs.map(d => {
+            const data = d.data();
+            return {
+              id: d.id,
+              ...data,
+              createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+            } as YedekParcaDepoStokItem;
+          }), currentCompanyId, isSuperAdmin);
+          setDepoStok(stokItems);
+
+          // Technicians + application specialists
+          const allUsers = filterByCompanyScope(
+            usersSnap.docs.map(d => ({ uid: d.id, ...d.data() }) as User),
+            currentCompanyId, isSuperAdmin
+          );
+          setUsers(allUsers.filter(u => u.role === 'teknik_servis' || u.role === 'aplikasyon'));
+
+          // Pending returns (status === 'pending')
+          const pending = filterByCompanyScope(pendingSnap.docs.map(d => {
+            const data = d.data();
+            return {
+              id: d.id,
+              ...data,
+              requestedAt: data.requestedAt?.toDate ? data.requestedAt.toDate() : new Date(),
+            } as PendingReturn;
+          }), currentCompanyId, isSuperAdmin);
+          pending.sort((a, b) => new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime());
+          setPendingReturns(pending);
+
+          // Borrowed spare parts (status === 'pending')
+          const borrowed = filterByCompanyScope(borrowedSnap.docs.map(d => {
+            const data = d.data();
+            return {
+              id: d.id,
+              ...data,
+              borrowedAt: data.borrowedAt?.toDate ? data.borrowedAt.toDate() : new Date(),
+            };
+          }), currentCompanyId, isSuperAdmin);
+          borrowed.sort((a, b) => new Date(b.borrowedAt).getTime() - new Date(a.borrowedAt).getTime());
+          setBorrowedParts(borrowed);
+
+          // Pool warehouses (depots with isPoolWarehouse = true)
+          const allDepots = filterByCompanyScope(
+            depotsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as Depot),
+            currentCompanyId, isSuperAdmin
+          );
+          setPoolWarehouses(allDepots.filter(d => d.isPoolWarehouse === true));
+        };
+
+        // Ana veri ile transfer log'larını eşzamanlı yükle.
+        await Promise.all([fetchMainData(), loadRecentTransferLogs()]);
       } catch (err) {
         console.error('Error fetching data:', err);
         toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
@@ -719,7 +727,15 @@ export default function YedekParcaTransferPage() {
         collection(db, 'personalStock'),
         where('ownerUid', '==', uid)
       );
-      const stockSnap = await getDocs(stockQuery);
+      const usageLogQuery = query(
+        collection(db, 'sparePartTransferLogs'),
+        where('action', '==', 'use_on_device')
+      );
+      // Stok ve kullanım logları birbirinden bağımsız — paralel çek (waterfall yok).
+      const [stockSnap, usageSnap] = await Promise.all([
+        getDocs(stockQuery),
+        getDocs(usageLogQuery),
+      ]);
       const stockItems = filterByCompanyScope(stockSnap.docs.map(d => {
         const data = d.data();
         return {
@@ -729,12 +745,6 @@ export default function YedekParcaTransferPage() {
           usedAt: data.usedAt?.toDate ? data.usedAt.toDate() : undefined,
         } as PersonalStockItem;
       }), currentCompanyId, isSuperAdmin);
-
-      const usageLogQuery = query(
-        collection(db, 'sparePartTransferLogs'),
-        where('action', '==', 'use_on_device')
-      );
-      const usageSnap = await getDocs(usageLogQuery);
       const usageByPersonalStockId = new Map<string, { labName: string; deviceName: string }>();
 
       usageSnap.docs.forEach(d => {
