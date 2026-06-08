@@ -33,6 +33,7 @@ import useHidScanner from '@/hooks/useHidScanner';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { getScopedDocs, scopedQuery } from '@/lib/firestore-helpers';
+import { archiveCompletedOrderInBatch, getOrderDocWithArchiveFallback } from '@/lib/orders-archive';
 import { useLoading } from '@/contexts/loading-context';
 import { parse as parseDate, compareAsc } from 'date-fns';
 import { useBarcodeParser } from '@/hooks/useBarcodeParser';
@@ -876,11 +877,14 @@ export default function ToplamaPage() {
       });
 
       if (remainingItems.length === 0 && order.id) {
-          batch.update(doc(db, 'orders', order.id), {
-              status: 'completed',
+          // Tamamlanan sipariş canlı `orders`'ta bırakılmaz; aynı batch içinde
+          // `ordersArchive`'a taşınır (kopyala + sil). `orders` yalnızca aktif
+          // siparişleri tutar, süresiz büyümez.
+          archiveCompletedOrderInBatch(batch, order.id, order as unknown as Record<string, unknown>, {
               transferredAt: serverTimestamp(),
               transferredById: currentUser?.uid,
-              transferredBy: currentUserProfile?.name || currentUser?.email || 'Bilinmeyen Kullanıcı'
+              transferredBy: currentUserProfile?.name || currentUser?.email || 'Bilinmeyen Kullanıcı',
+              completedAt: serverTimestamp(),
           });
       } else if (order.id) {
           batch.update(doc(db, 'orders', order.id), {
@@ -992,9 +996,10 @@ export default function ToplamaPage() {
         }
       }
 
-      // Step 2: Verify order was properly updated
+      // Step 2: Verify order was properly updated. Tamamlanmışsa sipariş artık
+      // `ordersArchive`'tadır; fallback okuyucu canlı→arşiv sırasıyla bulur.
       if (order.id) {
-        const orderVerifySnap = await getDoc(doc(db, 'orders', order.id));
+        const orderVerifySnap = await getOrderDocWithArchiveFallback(order.id);
         if (orderVerifySnap.exists()) {
           const orderVerifyData = orderVerifySnap.data();
           if (remainingItems.length === 0 && orderVerifyData.status !== 'completed') {

@@ -574,6 +574,22 @@
       ]
     },
     {
+      "collectionGroup": "ordersArchive",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "companyId", "order": "ASCENDING" },
+        { "fieldPath": "isPeripheral", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "ordersArchive",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "companyId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "personalStock",
       "queryScope": "COLLECTION",
       "fields": [

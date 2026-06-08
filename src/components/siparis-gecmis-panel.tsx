@@ -30,6 +30,7 @@ import { db } from '@/lib/firebase';
 import { collection, query, where, getDocs, orderBy, Timestamp, onSnapshot, limit } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
+import { ORDERS_ARCHIVE_COLLECTION } from '@/lib/orders-archive';
 import { useDateRangeFilter } from '@/hooks/useDateRangeFilter';
 import { DateRangeFilterBar } from '@/components/common/DateRangeFilterBar';
 import { format as formatDate } from 'date-fns';
@@ -108,7 +109,12 @@ export default function SiparisGecmisPanel(): JSX.Element {
             for (let i = 0; i < uniqueOrderIds.length; i += 30) {
                 orderChunks.push(uniqueOrderIds.slice(i, i + 30));
             }
-            const orderPromises = orderChunks.map(chunk => getDocs(scopedQuery('orders', currentCompanyId, isSuperAdmin, where('id', 'in', chunk))));
+            // Sevkiyatların atıfta bulunduğu siparişler tamamlanıp arşive
+            // taşınmış olabilir → hem `orders` hem `ordersArchive` sorgulanır.
+            const orderPromises = orderChunks.flatMap(chunk => [
+                getDocs(scopedQuery('orders', currentCompanyId, isSuperAdmin, where('id', 'in', chunk))),
+                getDocs(scopedQuery(ORDERS_ARCHIVE_COLLECTION, currentCompanyId, isSuperAdmin, where('id', 'in', chunk))),
+            ]);
             const orderSnaps = await Promise.all(orderPromises);
             
             const ordersData: Record<string, Order> = {};
