@@ -3812,9 +3812,6 @@ export default function TotalVerimlilikPanel({
             );
           })()}
         </div>
-        <span className="text-[10.5px] text-zinc-400 font-mono shrink-0">
-          {groupedRows.length} lab · {totalVisibleRows} satır · {visibleCols.length} sütun
-        </span>
       </div>
 
       {/* ─── DATA TABLE ─────────────────────────────────────────────── */}
