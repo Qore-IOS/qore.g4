@@ -28,7 +28,9 @@ export default function LoginPage() {
       const target =
         currentUserProfile?.role === 'lojistik_sorumlusu'
           ? '/siparisler'
-          : '/dashboard';
+          : currentUserProfile?.role === 'sarf_dagitim_personeli'
+            ? '/sarf-teslimat'
+            : '/dashboard';
       router.replace(target);
     }
   }, [isLoadingAuth, currentUser, currentUserProfile?.role, router]);

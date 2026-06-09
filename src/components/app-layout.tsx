@@ -93,6 +93,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const isQoreTechnicRole =
     currentUserProfile?.role === 'teknik_servis' ||
     currentUserProfile?.role === 'aplikasyon';
+  // Sarf dağıtım personeli: tek ekran (QR ile teslim al / teslim et) — dock yok.
+  const isSarfDagitimPersonel = currentUserProfile?.role === 'sarf_dagitim_personeli';
   // Lojistik terminal: lojistik_sorumlusu gets a dedicated work terminal
   // shell (its own collapsible sidebar, no global dock).
   const isLojistikTerminalRole = currentUserProfile?.role === 'lojistik_sorumlusu';
@@ -113,6 +115,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     pathname?.startsWith("/maliyet-gozlem") ||
     pathname?.startsWith("/cihaz-test-dagilimi") ||
     pathname?.startsWith("/cari-odeme") ||
+    pathname?.startsWith("/sarf-dagitim") ||
+    pathname?.startsWith("/sarf-teslimat") ||
     // Yönetim ve alt panelleri (envanter yönetimi hariç) yeni tasarım dilinde
     (pathname?.startsWith("/yonetim") && !pathname?.startsWith("/yonetim/envanter-yonetimi")) ||
     pathname === "/dashboard" ||
@@ -151,6 +155,22 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   }
 
 
+
+  // Sarf dağıtım personeli — tek ekranlık teslimat arayüzü.
+  // Dock / sidebar yok; sayfa kendi başlığını ve çıkışını barındırır.
+  if (isSarfDagitimPersonel) {
+    return (
+      <>
+        <PushNotificationsErrorBoundary>
+          <PushNotificationsClient />
+        </PushNotificationsErrorBoundary>
+        <PresenceManager />
+        <AutoRedirectOnLogin />
+        <PersistentNotificationToast />
+        {children}
+      </>
+    );
+  }
 
   // Lojistik terminal — dedicated shell for lojistik_sorumlusu role.
   // No global dock / sidebar / mobile dock. The shell provides its own navigation.

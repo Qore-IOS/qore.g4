@@ -1,382 +1,339 @@
-
 'use client';
+
+/* Hastane Sarf Dağıtım — sekmeli ana panel.
+   Poliklinikler (mahaller) · Kabul Bekleyenler · Teslim Edilenler.
+   Krem/bej claymorphism — demo sarf-app.jsx Home ekranının uygulama içi karşılığı. */
+
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Package, Building, Search, History, CheckCircle, Loader2 } from 'lucide-react';
-import { collection, getDocs, query, where, onSnapshot, doc, writeBatch, serverTimestamp, orderBy } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import type { Hospital, Order, Depot, DepoStokItem, OrderItem, ConsumptionRecord } from '@/lib/types';
-import { Input } from '@/components/ui/input';
-import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { compareAsc, parse } from 'date-fns';
-import { Label } from '@/components/ui/label';
+import { collection, getDocs, onSnapshot, orderBy, where } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import type { Hospital, SarfTransfer } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { useToast } from '@/hooks/use-toast';
+import {
+  SarfShell, SearchBox, TabBar, QrBox, Metric, SarfEmpty, SarfSuccessOverlay,
+  capForIndex, sarfMono, SARF_AC,
+} from '@/components/sarf/sarf-ui';
+import { IconPackage, IconBuilding, IconChevron, IconQr } from '@/components/sarf/sarf-icons';
+import { SarfTransferCard } from '@/components/sarf/SarfTransferCard';
+import { SarfVerifySheet } from '@/components/sarf/SarfVerifySheet';
+import {
+  hospitalMahalKodu, matchesTransferCode, matchesMahal, confirmSarfDelivery,
+  printSarfTransferLabel, formatSarfDate, toDateSafe,
+} from '@/lib/sarf-transfer';
 
+type SarfTabId = 'clinics' | 'pending' | 'delivered';
 
-export default function SarfDagilimPage() {
+const initialTab = (): SarfTabId => {
+  if (typeof window === 'undefined') return 'clinics';
+  const t = new URLSearchParams(window.location.search).get('tab');
+  return t === 'pending' || t === 'delivered' ? t : 'clinics';
+};
+
+/* ——— Poliklinik (mahal) kartı ——— */
+const ClinicCard = ({
+  clinic, cap, items, last, onClick,
+}: {
+  clinic: Hospital;
+  cap: string;
+  items: number;
+  last: string;
+  onClick: () => void;
+}) => {
+  const [p, setP] = useState(false);
+  const mahal = hospitalMahalKodu(clinic);
+  return (
+    <button
+      onClick={onClick}
+      onMouseDown={() => setP(true)}
+      onMouseUp={() => setP(false)}
+      onMouseLeave={() => setP(false)}
+      style={{
+        all: 'unset', cursor: 'pointer', boxSizing: 'border-box',
+        display: 'flex', flexDirection: 'column', gap: 16,
+        padding: 20, borderRadius: 'var(--sarf-radius)',
+        background: 'linear-gradient(180deg, var(--sarf-surface) 0%, var(--sarf-surface-2) 100%)',
+        boxShadow: p ? 'var(--sarf-clay-press)' : 'var(--sarf-clay)',
+        transition: 'transform 200ms cubic-bezier(.2,.7,.2,1.2), box-shadow 200ms ease',
+        transform: p ? 'translateY(2px) scale(0.99)' : 'none',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, width: '100%' }}>
+        <div style={{ width: 56, height: 56, flexShrink: 0 }}><IconBuilding /></div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 17, fontWeight: 800, color: 'var(--sarf-ink-1)', letterSpacing: '-0.01em', lineHeight: 1.15 }}>{clinic.name}</div>
+          <div style={{ fontSize: 13, color: 'var(--sarf-ink-2)', fontWeight: 600, fontFamily: sarfMono, marginTop: 3 }}>{mahal || 'Mahal kodu tanımsız'}</div>
+        </div>
+        <span style={{ color: 'var(--sarf-ink-3)', display: 'inline-flex' }}><IconChevron /></span>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16, width: '100%' }}>
+        <QrBox value={mahal} size={92} />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1, minWidth: 0 }}>
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 7, alignSelf: 'flex-start',
+            padding: '6px 12px', borderRadius: 'var(--sarf-radius-pill)',
+            background: 'var(--sarf-surface-2)', boxShadow: 'var(--sarf-clay-inset)',
+            fontSize: 12, fontWeight: 700, color: SARF_AC.primary,
+          }}>
+            <IconQr /> Mahal QR
+          </span>
+          <Metric label="Tanımlı ürün" value={items} cap={cap} />
+          <Metric label="Son transfer" value={last} mono />
+        </div>
+      </div>
+    </button>
+  );
+};
+
+export default function SarfDagitimPage() {
   const { toast } = useToast();
   const router = useRouter();
   const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
-  const [consumableHospitals, setConsumableHospitals] = useState<Hospital[]>([]);
-  const [pendingRequests, setPendingRequests] = useState<Order[]>([]);
+
+  const [tab, setTab] = useState<SarfTabId>(initialTab);
+  const [q, setQ] = useState('');
+  const [labs, setLabs] = useState<Hospital[]>([]);
+  const [ruleCounts, setRuleCounts] = useState<Record<string, number>>({});
+  const [transfers, setTransfers] = useState<SarfTransfer[]>([]);
   const [loading, setLoading] = useState(true);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [verifyTr, setVerifyTr] = useState<SarfTransfer | null>(null);
+  const [verifying, setVerifying] = useState(false);
+  const [successCode, setSuccessCode] = useState<string | null>(null);
 
-  const [fulfillmentModalOpen, setFulfillmentModalOpen] = useState(false);
-  const [selectedLabForFulfillment, setSelectedLabForFulfillment] = useState<Hospital | null>(null);
-  const [depots, setDepots] = useState<Depot[]>([]);
-  const [selectedDepotId, setSelectedDepotId] = useState<string>('');
-  const [depotStock, setDepotStock] = useState<DepoStokItem[]>([]);
-  const [editedItems, setEditedItems] = useState<Record<string, Record<string, number>>>({});
-  const [fulfilling, setFulfilling] = useState(false);
-
+  /* Hastane Sarf labları + tanımlı ürün sayıları */
   useEffect(() => {
-    const fetchHospitalsAndDepots = async () => {
+    let alive = true;
+    (async () => {
       setLoading(true);
       try {
-        const [hospitalsQuery, depotsQuery] = await Promise.all([
-            getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin, where('isConsumablesHospital', '==', true))),
-            getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin))
-        ]);
-        
-        const labs = hospitalsQuery.docs.map(doc => ({ id: doc.id, ...doc.data() } as Hospital));
-        labs.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-        setConsumableHospitals(labs);
+        const snap = await getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin, where('isConsumablesHospital', '==', true)));
+        const list = filterByCompanyScope(
+          snap.docs.map((d) => ({ id: d.id, ...d.data() } as Hospital)),
+          currentCompanyId,
+          isSuperAdmin,
+        ).sort((a, b) => (a.name || '').localeCompare(b.name || '', 'tr'));
+        if (!alive) return;
+        setLabs(list);
 
-        const depotList = depotsQuery.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
-        setDepots(depotList);
-        if (depotList.length > 0 && depotList[0].id) {
-            setSelectedDepotId(depotList[0].id);
-        }
-
-      } catch (error) {
-        console.error("Error fetching data:", error);
-        toast({ title: "Hata", description: "Veriler yüklenemedi.", variant: "destructive" });
+        const counts: Record<string, number> = {};
+        await Promise.all(list.filter((l) => l.id).map(async (lab) => {
+          try {
+            const rules = await getDocs(collection(db, 'hospitals', lab.id, 'minMaxRules'));
+            counts[lab.id] = rules.size;
+          } catch {
+            counts[lab.id] = 0;
+          }
+        }));
+        if (alive) setRuleCounts(counts);
+      } catch (e) {
+        console.error('Sarf labs fetch error:', e);
+        toast({ title: 'Hata', description: 'Poliklinikler yüklenemedi.', variant: 'destructive' });
       } finally {
-        setLoading(false);
+        if (alive) setLoading(false);
       }
-    };
-    
-    const unsubRequests = onSnapshot(
-      scopedQuery('consumableRequests', currentCompanyId, isSuperAdmin, where('status', '==', 'pending'), orderBy('createdAt', 'desc')),
-      (snapshot) => {
-        setPendingRequests(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Order)));
-      },
-      (error) => {
-        console.warn('Could not listen to pending consumableRequests with ordering, trying without: ', error.message);
-        const fallbackQuery = scopedQuery('consumableRequests', currentCompanyId, isSuperAdmin, where('status', '==', 'pending'));
-        onSnapshot(fallbackQuery, (snapshot) => {
-             setPendingRequests(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Order)));
-        });
-      }
-    );
+    })();
+    return () => { alive = false; };
+  }, [currentCompanyId, isSuperAdmin, toast]);
 
-    fetchHospitalsAndDepots();
-    return () => unsubRequests();
-  }, [toast]);
-  
+  /* Transferler — canlı dinleme (sıralı sorgu indeks beklerken sırasıza düşer) */
   useEffect(() => {
-    if (!selectedDepotId) {
-      setDepotStock([]);
-      return;
-    }
-    const q = scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('depotId', '==', selectedDepotId), where('isShipped', '==', false));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setDepotStock(filterByCompanyScope(
-        snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
-        currentCompanyId,
-        isSuperAdmin,
-      ));
-    }, (err) => {
-      console.error(err);
-      toast({ title: 'Hata', description: 'Depo stoğu güncellenemedi.', variant: 'destructive'});
-    });
-    return () => unsubscribe();
-  }, [selectedDepotId, toast, currentCompanyId, isSuperAdmin]);
+    const sortDesc = (arr: SarfTransfer[]) =>
+      [...arr].sort((a, b) => (toDateSafe(b.createdAt)?.getTime() || 0) - (toDateSafe(a.createdAt)?.getTime() || 0));
 
-  
-  const filteredHospitals = useMemo(() => {
-    if (!searchTerm) return consumableHospitals;
-    return consumableHospitals.filter(lab => 
-      lab.name?.toLowerCase().includes(searchTerm.toLowerCase())
+    let unsubFallback: (() => void) | null = null;
+    const unsub = onSnapshot(
+      scopedQuery('sarfTransfers', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc')),
+      (snap) => setTransfers(sortDesc(snap.docs.map((d) => ({ ...d.data(), id: d.id } as SarfTransfer)))),
+      (err) => {
+        console.warn('sarfTransfers ordered listen failed, falling back:', err?.message);
+        unsubFallback = onSnapshot(
+          scopedQuery('sarfTransfers', currentCompanyId, isSuperAdmin),
+          (snap) => setTransfers(sortDesc(snap.docs.map((d) => ({ ...d.data(), id: d.id } as SarfTransfer)))),
+        );
+      },
     );
-  }, [consumableHospitals, searchTerm]);
-  
-  const pendingRequestsByLab = useMemo(() => {
-    return pendingRequests.reduce((acc, req) => {
-        if (req.hospitalId) {
-            if (!acc[req.hospitalId]) acc[req.hospitalId] = [];
-            acc[req.hospitalId].push(req);
-        }
-        return acc;
-    }, {} as Record<string, Order[]>);
-  }, [pendingRequests]);
+    return () => { unsub(); unsubFallback?.(); };
+  }, [currentCompanyId, isSuperAdmin]);
 
-  const openFulfillmentModal = (lab: Hospital) => {
-    setSelectedLabForFulfillment(lab);
-    setEditedItems({});
-    setFulfillmentModalOpen(true);
-  };
-
-  const getStockForProduct = (stokKodu: string) => {
-    return depotStock.filter(s => s.stokKodu === stokKodu).length;
-  };
-
-  const handleQuantityChange = (orderId: string, itemId: string, value: string) => {
-    const qty = parseInt(value, 10);
-    setEditedItems(prev => ({
-      ...prev,
-      [orderId]: {
-        ...(prev[orderId] || {}),
-        [itemId]: isNaN(qty) ? 0 : Math.max(0, qty)
-      }
-    }));
-  };
-
-  const handleFulfillRequest = async (request: Order) => {
-    if (!selectedDepotId) {
-      toast({ title: 'Hata', description: 'Lütfen bir kaynak depo seçin.', variant: 'destructive' });
-      return;
+  const lastTransferByLab = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const tr of transfers) {
+      if (tr.hospitalId && !map[tr.hospitalId]) map[tr.hospitalId] = formatSarfDate(tr.createdAt);
     }
-    setFulfilling(true);
-  
-    if (!request.id) {
-      toast({ title: 'Hata', description: 'Talep kimliği bulunamadı.', variant: 'destructive' });
-      setFulfilling(false);
-      return;
-    }
-    const itemsToFulfill = (request.items || []).filter(item => item.id).map(item => ({
-      ...item,
-      adet: editedItems[request.id!]?.[item.id!] ?? item.adet
-    })).filter(item => item.adet > 0);
-  
-    if (itemsToFulfill.length === 0) {
-      toast({ title: 'Uyarı', description: 'Karşılanacak ürün bulunmuyor.', variant: 'default' });
-      setFulfilling(false);
-      return;
-    }
-  
-    const batch = writeBatch(db);
-    let allocationError = false;
-    const allItemsToShip: DepoStokItem[] = [];
-  
-    for (const item of itemsToFulfill) {
-      const availableItems = depotStock
-        .filter(s => s.stokKodu === item.stokKodu)
-        .sort((a,b) => {
-            try {
-                return compareAsc(parse(a.miad as string, 'dd.MM.yyyy', new Date()), parse(b.miad as string, 'dd.MM.yyyy', new Date()))
-            } catch { return 0; }
-        });
-  
-      if (availableItems.length < item.adet) {
-        toast({ title: 'Yetersiz Stok', description: `${item.stokAdi} için depoda yeterli stok (${availableItems.length}) bulunmuyor. İstenen: ${item.adet}`, variant: 'destructive' });
-        allocationError = true;
-        break;
-      }
-  
-      const itemsToUpdate = availableItems.slice(0, item.adet);
-      allItemsToShip.push(...itemsToUpdate);
+    return map;
+  }, [transfers]);
 
-      itemsToUpdate.filter(s => s.id).forEach(stockItem => {
-        batch.update(doc(db, 'depoStok', stockItem.id!), {
-          isShipped: true,
-          hedefKurum: selectedLabForFulfillment?.name,
-          hedefKurumId: selectedLabForFulfillment?.id,
-          sevkTarihi: serverTimestamp()
-        });
+  const filteredLabs = useMemo(() => {
+    if (!q) return labs;
+    const lower = q.toLowerCase();
+    return labs.filter((l) =>
+      (l.name || '').toLowerCase().includes(lower) || hospitalMahalKodu(l).toLowerCase().includes(lower));
+  }, [labs, q]);
 
-        const consumptionRecord: Omit<ConsumptionRecord, 'id'> = {
-          stokKodu: stockItem.stokKodu,
-          stokAdi: stockItem.stokAdi,
-          lotNumarasi: stockItem.lotNumarasi,
-          miad: stockItem.miad,
-          seriNumarasi: stockItem.seriNumarasi,
-          laboratoryId: selectedLabForFulfillment?.id || '',
-          laboratoryName: selectedLabForFulfillment?.name || '',
-          consumptionTimestamp: new Date(),
-          consumptionType: 'normal_kullanim',
-          userId: currentUser?.uid || '',
-          userName: currentUserProfile?.name || 'Sistem',
-        };
-        batch.set(doc(collection(db, 'tuketimKayitlari')), consumptionRecord);
-      });
-    }
-  
-    if (allocationError) {
-      setFulfilling(false);
-      return;
-    }
-  
-    batch.update(doc(db, 'consumableRequests', request.id!), {
-      status: 'completed',
-      depotId: selectedDepotId,
-      items: itemsToFulfill 
-    });
-  
+  const filterTransfers = useCallback((status: 'pending' | 'delivered') => {
+    const lower = q.toLowerCase();
+    return transfers.filter((t) => t.status === status && (
+      !q ||
+      t.code.toLowerCase().includes(lower) ||
+      (t.mahalKodu || '').toLowerCase().includes(lower) ||
+      (t.kurumAdi || '').toLowerCase().includes(lower)
+    ));
+  }, [transfers, q]);
+
+  const pendingList = useMemo(() => filterTransfers('pending'), [filterTransfers]);
+  const deliveredList = useMemo(() => filterTransfers('delivered'), [filterTransfers]);
+  const pendingCount = useMemo(() => transfers.filter((t) => t.status === 'pending').length, [transfers]);
+  const deliveredCount = useMemo(() => transfers.filter((t) => t.status === 'delivered').length, [transfers]);
+
+  const handleConfirmDelivery = async () => {
+    if (!verifyTr || verifying) return;
+    setVerifying(true);
     try {
-      await batch.commit();
-      toast({ title: 'Başarılı', description: `${request.kurumAdi} talebi karşılandı ve stoktan düşüldü.` });
-    } catch (error) {
-      console.error("Error fulfilling request:", error);
-      toast({ title: 'Hata', description: 'Talep karşılanırken bir sorun oluştu.', variant: 'destructive' });
+      await confirmSarfDelivery({
+        transfer: verifyTr,
+        companyId: currentCompanyId,
+        isSuperAdmin,
+        user: { uid: currentUser?.uid, name: currentUserProfile?.name || currentUser?.email },
+      });
+      setVerifyTr(null);
+      setTab('delivered');
+      setSuccessCode(verifyTr.code);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Teslimat tamamlanırken bir sorun oluştu.';
+      toast({ title: 'Teslimat Tamamlanamadı', description: msg, variant: 'destructive' });
     } finally {
-      setFulfilling(false);
+      setVerifying(false);
     }
   };
+
+  const placeholder = tab === 'clinics' ? 'Poliklinik veya mahal kodu ara…' : 'Transfer ID, mahal veya poliklinik ara…';
 
   return (
-    <>
-    <div className="p-4 md:p-6">
-        <Card>
-            <CardHeader>
-                <div className="flex flex-col sm:flex-row justify-between items-start gap-4">
-                    <div>
-                        <CardTitle className="flex items-center gap-2">
-                            <Package className="h-6 w-6 text-primary" />
-                            Hastane Sarf Dağıtım
-                        </CardTitle>
-                        <CardDescription>
-                            Bu panel, "Hastane Sarf" olarak işaretlenmiş laboratuvarları listeler.
-                        </CardDescription>
-                    </div>
-                    <div className="flex items-center gap-2">
-                         <Button variant="outline" onClick={() => router.push('/sarf-dagitim/gecmis')}>
-                            <History className="mr-2 h-4 w-4" /> Talep Geçmişi
-                        </Button>
-                        <div className="relative w-full sm:w-auto sm:max-w-xs">
-                            <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                            <Input
-                                placeholder="Laboratuvar ara..."
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
-                                className="pl-9"
-                            />
-                        </div>
-                    </div>
-                </div>
-            </CardHeader>
-            <CardContent>
-                {loading ? (
-                    <div className="flex items-center justify-center py-8">
-                        <Loader2 className="h-8 w-8 animate-spin" />
-                    </div>
-                ) : filteredHospitals.length === 0 ? (
-                    <p className="text-muted-foreground text-center py-8">
-                        {searchTerm ? 'Aramanızla eşleşen laboratuvar bulunamadı.' : '"Hastane Sarf" olarak işaretlenmiş laboratuvar bulunamadı.'}
-                    </p>
-                ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                        {filteredHospitals.filter(lab => lab.id).map(lab => {
-                            const openRequests = pendingRequestsByLab[lab.id!] || [];
-                            const openRequestCount = openRequests.length;
-                            return (
-                                <div key={lab.id} className="flex gap-1">
-                                    <Card
-                                        className="flex-1 cursor-pointer glass-card hover:border-primary/50 transition-colors"
-                                        onClick={() => router.push(`/sarf-dagitim/${lab.id}`)}
-                                    >
-                                        <CardContent className="p-4 flex items-center gap-4">
-                                            <Building className="h-8 w-8 text-muted-foreground"/>
-                                            <span className="text-base text-left font-semibold">{lab.name}</span>
-                                        </CardContent>
-                                    </Card>
-                                    {openRequestCount > 0 && (
-                                        <Card
-                                            className="w-16 flex-shrink-0 cursor-pointer bg-green-500/10 border-green-500/30 hover:bg-green-500/20 transition-colors"
-                                            onClick={() => openFulfillmentModal(lab)}
-                                            aria-label={`${openRequestCount} açık talebi karşıla`}
-                                        >
-                                            <CardContent className="p-0 h-full flex flex-col items-center justify-center gap-1 text-green-600">
-                                                <CheckCircle className="h-6 w-6"/>
-                                                <span className="text-xs font-bold">{openRequestCount}</span>
-                                            </CardContent>
-                                        </Card>
-                                    )}
-                                </div>
-                            )
-                        })}
-                    </div>
-                )}
-            </CardContent>
-        </Card>
-    </div>
-    
-    <Dialog open={fulfillmentModalOpen} onOpenChange={setFulfillmentModalOpen}>
-        <DialogContent className="max-w-4xl">
-            <DialogHeader>
-                <DialogTitle>Talep Karşılama: {selectedLabForFulfillment?.name}</DialogTitle>
-                <DialogDescription>Aşağıdaki talepleri seçilen depodan karşılayın. Adetleri düzenleyebilirsiniz.</DialogDescription>
-            </DialogHeader>
-            <div className="py-4 space-y-4">
-                <div>
-                    <Label>Kaynak Depo</Label>
-                    <Select value={selectedDepotId} onValueChange={setSelectedDepotId} disabled={loading}>
-                        <SelectTrigger className="max-w-xs"><SelectValue placeholder="Depo Seç..." /></SelectTrigger>
-                        <SelectContent>
-                            {depots.filter(d => d.id).map(d => <SelectItem key={d.id} value={d.id!}>{d.name}</SelectItem>)}
-                        </SelectContent>
-                    </Select>
-                </div>
-                
-                {selectedLabForFulfillment?.id && (pendingRequestsByLab[selectedLabForFulfillment.id] || []).length > 0 ? (
-                    <Accordion type="single" collapsible className="w-full" defaultValue={(pendingRequestsByLab[selectedLabForFulfillment.id] || [])[0]?.id}>
-                        {(pendingRequestsByLab[selectedLabForFulfillment.id] || []).filter(req => req.id).map(req => (
-                            <AccordionItem value={req.id!} key={req.id}>
-                                <AccordionTrigger>
-                                    <div className="flex justify-between w-full pr-4 text-sm">
-                                        <span>{new Date(req.createdAt as Date).toLocaleString('tr-TR')}</span>
-                                        <span>{(req.items || []).reduce((sum: number, i) => sum + (i.adet ?? 0), 0)} adet</span>
-                                        <span>Açan: {req.createdBy}</span>
-                                    </div>
-                                </AccordionTrigger>
-                                <AccordionContent>
-                                   <Table>
-                                    <TableHeader><TableRow><TableHead>Ürün</TableHead><TableHead>Depo Stoğu</TableHead><TableHead className="w-48">Karşılanacak Adet</TableHead></TableRow></TableHeader>
-                                    <TableBody>
-                                        {(req.items || []).filter((item): item is OrderItem & { id: string; stokKodu: string } => !!(item.id && item.stokKodu)).map(item => (
-                                            <TableRow key={item.id}>
-                                                <TableCell>{item.stokAdi}</TableCell>
-                                                <TableCell>{getStockForProduct(item.stokKodu)}</TableCell>
-                                                <TableCell>
-                                                    <Input
-                                                        type="number"
-                                                        value={editedItems[req.id!]?.[item.id] ?? item.adet}
-                                                        onChange={e => handleQuantityChange(req.id!, item.id, e.target.value)}
-                                                        min="0"
-                                                        max={getStockForProduct(item.stokKodu)}
-                                                        className="h-8"
-                                                    />
-                                                </TableCell>
-                                            </TableRow>
-                                        ))}
-                                    </TableBody>
-                                   </Table>
-                                   <div className="text-right mt-4">
-                                    <Button onClick={() => handleFulfillRequest(req)} disabled={fulfilling}>
-                                        {fulfilling ? <Loader2 className="animate-spin h-4 w-4 mr-2"/> : null}
-                                        Bu Talebi Karşıla
-                                    </Button>
-                                   </div>
-                                </AccordionContent>
-                            </AccordionItem>
-                        ))}
-                    </Accordion>
-                ) : (
-                    <p className="text-center text-muted-foreground py-8">Bu laboratuvar için açık talep bulunmuyor.</p>
-                )}
+    <SarfShell>
+      <div style={{ animation: 'sarfPopIn 360ms ease' }}>
+        {/* hero */}
+        <section style={{
+          position: 'relative', overflow: 'hidden',
+          padding: '28px 30px', marginBottom: 22, borderRadius: 'var(--sarf-radius-lg)',
+          background: 'linear-gradient(180deg, var(--sarf-surface) 0%, var(--sarf-surface-2) 100%)',
+          boxShadow: 'var(--sarf-clay)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 18, flexWrap: 'wrap' }}>
+            <div style={{ width: 58, height: 58 }}><IconPackage /></div>
+            <div style={{ flex: 1, minWidth: 220 }}>
+              <h1 style={{ margin: 0, fontSize: 28, fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--sarf-ink-1)' }}>
+                Hastane Sarf Dağıtım
+              </h1>
+              <p style={{ margin: '6px 0 0', fontSize: 15, color: 'var(--sarf-ink-2)', fontWeight: 500 }}>
+                Poliklinige transfer oluştur, kabul bekleyenleri QR ile takip et, teslimatı doğrula.
+              </p>
             </div>
-        </DialogContent>
-    </Dialog>
-    </>
+            <div style={{ minWidth: 280, flex: '0 1 360px' }}>
+              <SearchBox value={q} onChange={setQ} placeholder={placeholder} />
+            </div>
+          </div>
+        </section>
+
+        <TabBar
+          tabs={[
+            { id: 'clinics', label: 'Poliklinikler' },
+            { id: 'pending', label: 'Kabul Bekleyenler', count: pendingCount, dot: SARF_AC.primary },
+            { id: 'delivered', label: 'Teslim Edilenler', count: deliveredCount, dot: 'var(--sarf-sage)' },
+          ]}
+          tab={tab}
+          setTab={(v) => { setTab(v as SarfTabId); setQ(''); }}
+        />
+
+        {/* sekme içeriği */}
+        {tab === 'clinics' && (
+          loading ? (
+            <SarfEmpty icon={<IconBuilding />} text="Poliklinikler yükleniyor…" />
+          ) : (
+            <div style={{ display: 'grid', gap: 18, gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))' }}>
+              {filteredLabs.filter((l) => l.id).map((lab, i) => (
+                <ClinicCard
+                  key={lab.id}
+                  clinic={lab}
+                  cap={capForIndex(i)}
+                  items={ruleCounts[lab.id] ?? 0}
+                  last={lastTransferByLab[lab.id] || '—'}
+                  onClick={() => router.push(`/sarf-dagitim/${lab.id}`)}
+                />
+              ))}
+              {filteredLabs.length === 0 && (
+                <div style={{ gridColumn: '1 / -1', padding: 40, textAlign: 'center', color: 'var(--sarf-ink-3)', fontStyle: 'italic' }}>
+                  {q ? 'Eşleşen poliklinik bulunamadı.' : '"Hastane Sarf" olarak işaretlenmiş laboratuvar bulunamadı.'}
+                </div>
+              )}
+            </div>
+          )
+        )}
+
+        {tab === 'pending' && (
+          pendingList.length === 0 ? (
+            <SarfEmpty icon={<IconPackage />} text="Kabul bekleyen transfer yok." />
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, animation: 'sarfPopIn 320ms ease' }}>
+              {pendingList.map((tr) => (
+                <SarfTransferCard
+                  key={tr.id}
+                  tr={tr}
+                  actionLabel="Teslimatı Doğrula"
+                  onAction={setVerifyTr}
+                  onPrint={(t) => { printSarfTransferLabel(t).catch(() => toast({ title: 'Hata', description: 'Etiket oluşturulamadı.', variant: 'destructive' })); }}
+                />
+              ))}
+            </div>
+          )
+        )}
+
+        {tab === 'delivered' && (
+          deliveredList.length === 0 ? (
+            <SarfEmpty icon={<IconBuilding />} text="Henüz teslim edilen transfer yok." />
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, animation: 'sarfPopIn 320ms ease' }}>
+              {deliveredList.map((tr) => <SarfTransferCard key={tr.id} tr={tr} />)}
+            </div>
+          )
+        )}
+      </div>
+
+      {/* teslimat doğrulama — 1) ID kodu 2) mahal kodu */}
+      {verifyTr && (
+        <SarfVerifySheet
+          open={!!verifyTr}
+          title="Teslimatı Doğrula"
+          subtitle={<>{verifyTr.kurumAdi} · <span style={{ fontFamily: sarfMono }}>{verifyTr.code}</span></>}
+          steps={[
+            {
+              label: 'ID Kodunu Okut',
+              instruction: 'Teslimat üzerindeki QR’daki transfer ID kodunu okutun.',
+              placeholder: 'TRF-XXXXX',
+              validate: (text) => (matchesTransferCode(text, verifyTr) ? null : 'ID kodu bu transferle eşleşmiyor.'),
+            },
+            {
+              label: 'Mahal Kodunu Okut',
+              instruction: 'Ardından mahalin QR’ını okutarak teslimatı tamamlayın.',
+              placeholder: 'Mahal kodu',
+              validate: (text) => (matchesMahal(text, verifyTr) ? null : 'Mahal kodu bu transferle eşleşmiyor.'),
+            },
+          ]}
+          busy={verifying}
+          onClose={() => setVerifyTr(null)}
+          onComplete={handleConfirmDelivery}
+        />
+      )}
+
+      <SarfSuccessOverlay
+        show={!!successCode}
+        code={successCode}
+        label="Teslimat Tamamlandı"
+        onDone={() => setSuccessCode(null)}
+      />
+    </SarfShell>
   );
 }

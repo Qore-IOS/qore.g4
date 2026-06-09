@@ -75,6 +75,7 @@ export interface Hospital {
   defaultDepotId?: string; // Varsayılan depo ID'si (otomatik yönlendirme için)
   defaultDepotName?: string; // Varsayılan depo adı
   ceomedCariKodu?: string; // Ceomed ERP'deki cari kodu (örn. M51001) - irsaliye eşlemesi için
+  mahalKodu?: string; // Hastane Sarf kategorisindeki lablar için mahal kodu (örn. 152.06.A.001) — QR teslimat doğrulamasında kullanılır
   ekHizmetLabIds?: string[]; // Bu ana laboratuvara bağlı ek hizmet laboratuvarlarının id'leri
   /** Acil statüsü — true ise 7/24 (Pazartesi-Pazar 00:00-24:00) çalışır kabul edilir, calismaSaatleri yok sayılır. */
   acilStatusu?: boolean;
@@ -159,6 +160,47 @@ export interface MinMaxRule {
   ortalamaTuketimSuresi?: number;
   /** Tüketim süresi birimi: 'gun' (gün) veya 'saat' */
   tuketimSuresiBirimi?: 'gun' | 'saat';
+  /** Hastane Sarf labları için: transfer ekranında otomatik gelen transfer adedi */
+  otomatikTransferAdedi?: number;
+}
+
+/* ——— Sarf Dağıtım (Hastane Sarf) transfer akışı ——— */
+
+export interface SarfTransferItem {
+  stokKodu: string;
+  stokAdi: string;
+  adet: number;
+}
+
+/**
+ * Hastane Sarf transferi. Oluşturulduğunda 'pending' (kabul bekliyor);
+ * paket QR'ı (transferId + mahal kodu) ve ardından mahal QR'ı okutulup
+ * doğrulandığında 'delivered' olur — depo stoğu düşülür, mahal stoğuna eklenir.
+ */
+export interface SarfTransfer {
+  id: string;
+  /** Kısa transfer kodu, örn. TRF-9K2P7 — paket etiketinde basılır */
+  code: string;
+  hospitalId: string;
+  kurumAdi: string;
+  /** Hedef labın mahal kodu (hospitals.mahalKodu) */
+  mahalKodu: string;
+  items: SarfTransferItem[];
+  total: number;
+  status: 'pending' | 'delivered';
+  depotId?: string | null;
+  depotName?: string | null;
+  createdAt: TimestampLike;
+  createdBy?: string;
+  createdById?: string;
+  /** Sarf dağıtım personeli paketi üzerine aldığında dolar */
+  receivedAt?: TimestampLike;
+  receivedBy?: string;
+  receivedById?: string;
+  deliveredAt?: TimestampLike;
+  deliveredBy?: string;
+  deliveredById?: string;
+  companyId?: string;
 }
 
 // Şirket bazlı veri yönetimi
@@ -180,7 +222,7 @@ export interface Company {
 export interface User {
   uid: string;
   email: string | null;
-  role: 'super_admin' | 'admin' | 'admin_developer' | 'user' | 'teknik_servis' | 'aplikasyon' | 'teknisyen' | 'teknik_lojistik' | 'satin_alma' | string;
+  role: 'super_admin' | 'admin' | 'admin_developer' | 'user' | 'teknik_servis' | 'aplikasyon' | 'teknisyen' | 'teknik_lojistik' | 'satin_alma' | 'sarf_dagitim_personeli' | string;
   name?: string;
   companyId?: string; // Şirket ID - boş veya undefined ise legacy şirkete ait
   nfcId?: string; // Optional field for NFC card ID
