@@ -935,23 +935,23 @@ export default function TotalVerimlilikPanel({
 
     const fetchHakEdisDefinitions = async () => {
       try {
-        const hakEdisMap: Record<string, HakEdisDefinition[]> = {};
-
-        // Her laboratuvar için hak ediş tanımlarını çek
-        for (const labId of selectedPool.memberIds) {
-          try {
-            const hakEdisSnap = await getDocs(
-              query(collection(db, 'hospitals', labId, 'hakEdisDefinitions'), orderBy('sutKodu', 'asc'))
-            );
-            hakEdisMap[labId] = hakEdisSnap.docs.map(d => ({
-              id: d.id,
-              ...d.data()
-            } as HakEdisDefinition));
-          } catch (e) {
-            totalVerimlilikLogger.warn('Laboratuvar hak ediş tanımları yüklenirken hata oluştu', { labId, error: e });
-            hakEdisMap[labId] = [];
-          }
-        }
+        // Tüm laboratuvarların hak ediş tanımlarını PARALEL çek. Önceden her lab
+        // için ardışık getDocs yapılıyordu (N round-trip, havuz açılışını çok
+        // yavaşlatıyordu); artık tek Promise.all batch'i.
+        const entries = await Promise.all(
+          selectedPool.memberIds.map(async (labId) => {
+            try {
+              const hakEdisSnap = await getDocs(
+                query(collection(db, 'hospitals', labId, 'hakEdisDefinitions'), orderBy('sutKodu', 'asc'))
+              );
+              return [labId, hakEdisSnap.docs.map(d => ({ id: d.id, ...d.data() } as HakEdisDefinition))] as const;
+            } catch (e) {
+              totalVerimlilikLogger.warn('Laboratuvar hak ediş tanımları yüklenirken hata oluştu', { labId, error: e });
+              return [labId, [] as HakEdisDefinition[]] as const;
+            }
+          })
+        );
+        const hakEdisMap: Record<string, HakEdisDefinition[]> = Object.fromEntries(entries);
 
         setLabHakEdisDefinitions(hakEdisMap);
       } catch (error) {
@@ -1024,17 +1024,20 @@ export default function TotalVerimlilikPanel({
           }
         }
 
-        // Min-max kurallarını çek
-        const rulesMap: Record<string, MinMaxRule[]> = {};
-        for (const labId of labIdsToProcess) {
-          try {
-            const rulesSnap = await getDocs(collection(db, 'hospitals', labId, 'minMaxRules'));
-            rulesMap[labId] = rulesSnap.docs.map(d => ({ stokKodu: d.id, ...d.data() } as MinMaxRule));
-          } catch (e) {
-            totalVerimlilikLogger.warn('Min-max kuralları yüklenirken hata oluştu', { labId, error: e });
-            rulesMap[labId] = [];
-          }
-        }
+        // Min-max kurallarını PARALEL çek (önceden lab başına ardışık getDocs →
+        // N round-trip; havuz açılışındaki asıl gecikme buydu).
+        const ruleEntries = await Promise.all(
+          Array.from(labIdsToProcess).map(async (labId) => {
+            try {
+              const rulesSnap = await getDocs(collection(db, 'hospitals', labId, 'minMaxRules'));
+              return [labId, rulesSnap.docs.map(d => ({ stokKodu: d.id, ...d.data() } as MinMaxRule))] as const;
+            } catch (e) {
+              totalVerimlilikLogger.warn('Min-max kuralları yüklenirken hata oluştu', { labId, error: e });
+              return [labId, [] as MinMaxRule[]] as const;
+            }
+          })
+        );
+        const rulesMap: Record<string, MinMaxRule[]> = Object.fromEntries(ruleEntries);
         setAllMinMaxRules(rulesMap);
 
         // Her laboratuvar için benzersiz ürün listesi oluştur
@@ -1062,11 +1065,11 @@ export default function TotalVerimlilikPanel({
             const product = productCodes.find(p => p.stokKodu === stokKodu);
             if (!product) return;
 
-            // Marka filtresi uygula
-            if (selectedBrand && product.marka !== selectedBrand) return;
-
-            // Ürün grubu filtresi uygula
-            if (selectedUrunGrubu && product.urunGrubu !== selectedUrunGrubu) return;
+            // NOT: Marka / ürün grubu filtresi burada UYGULANMAZ. Tüm satırlar
+            // kurulur; marka/grup filtresi yalnızca GÖRÜNÜM aşamasında
+            // (filteredAndSortedRows) uygulanır. Böylece filtre değişiminde veri
+            // yeniden çekilmez, kayıt tüm satırları içerir (kısmi kayıt → veri
+            // kaybı önlenir) ve girilen değerler kaybolmaz.
 
             newRows.push({
               id: `${labId}-${stokKodu}`,
@@ -1279,7 +1282,10 @@ export default function TotalVerimlilikPanel({
     };
 
     fetchMinMaxAndBuildRows();
-  }, [selectedPoolId, selectedMonth, selectedYear, efficiencyPools, labPools, hospitals, productCodes, toast, selectedBrand, selectedUrunGrubu]);
+    // selectedBrand / selectedUrunGrubu KASITLI olarak bağımlılıkta DEĞİL: marka/
+    // grup filtresi artık client-side (görünüm) uygulanıyor; değişiminde veri
+    // yeniden çekilmiyor.
+  }, [selectedPoolId, selectedMonth, selectedYear, efficiencyPools, labPools, hospitals, productCodes, toast]);
 
   // Hesaplama fonksiyonu
   const computeRow = useCallback((row: TableRow, allRows?: TableRow[], transfers?: Record<string, { sourceLabId: string; sourceLabName: string; kutuAdet: number }>): TableRow => {
@@ -1619,7 +1625,17 @@ export default function TotalVerimlilikPanel({
     if (rows.length === 0) return;
 
     const selectedPool = efficiencyPools.find(p => p.id === selectedPoolId);
-    const dataToExport = rows.map(r => {
+    // Marka/grup filtresi artık client-side; export de görüntülenen alt kümeyi
+    // yansıtsın (eski davranış).
+    const rowsToExport = (selectedBrand || selectedUrunGrubu)
+      ? rows.filter(r => {
+          const p = productCodes.find(pc => pc.stokKodu === r.stokKodu);
+          if (selectedBrand && p?.marka !== selectedBrand) return false;
+          if (selectedUrunGrubu && p?.urunGrubu !== selectedUrunGrubu) return false;
+          return true;
+        })
+      : rows;
+    const dataToExport = rowsToExport.map(r => {
       // Fark değerlerini paneldeki gibi ters işaretle göster
       // Pozitif fark (kayıp) -> negatif olarak göster
       // Negatif fark (kazanç) -> pozitif olarak göster
@@ -1662,7 +1678,7 @@ export default function TotalVerimlilikPanel({
 
     const fileName = `Total_Verimlilik_${selectedPool?.name || 'Rapor'}_${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}`;
     exportDataToExcel(dataToExport, fileName, 'Veriler', toast);
-  }, [rows, selectedPoolId, efficiencyPools, selectedYear, selectedMonth, toast, interLabTransfers]);
+  }, [rows, selectedPoolId, efficiencyPools, selectedYear, selectedMonth, toast, interLabTransfers, selectedBrand, selectedUrunGrubu, productCodes]);
 
   // Phase 5 - Excel Şablon İndir
   const handleDownloadTemplate = useCallback(() => {
@@ -1965,8 +1981,30 @@ export default function TotalVerimlilikPanel({
   }, [rows]);
 
   // Filtrelenmiş ve sıralanmış satırlar
+  // stokKodu → ürün meta (marka / ürün grubu) — client-side marka/grup filtresi
+  // için hızlı arama.
+  const productMetaByCode = useMemo(() => {
+    const m = new Map<string, { marka?: string; urunGrubu?: string }>();
+    productCodes.forEach(p => m.set(p.stokKodu, { marka: p.marka, urunGrubu: p.urunGrubu }));
+    return m;
+  }, [productCodes]);
+
+  // Marka / ürün grubu filtresi GÖRÜNÜM aşamasında uygulanır (veri yeniden
+  // çekilmez). Bu ara küme, eskiden `rows`'un brand-filtreli hâliyle aynı role
+  // sahip: özet metrikler ve tablo bunun üzerinden çalışır; `rows` (tam küme)
+  // ise hesaplama ve kayıt için bozulmadan kalır.
+  const brandGroupFilteredRows = useMemo(() => {
+    if (!selectedBrand && !selectedUrunGrubu) return rows;
+    return rows.filter(row => {
+      const meta = productMetaByCode.get(row.stokKodu);
+      if (selectedBrand && meta?.marka !== selectedBrand) return false;
+      if (selectedUrunGrubu && meta?.urunGrubu !== selectedUrunGrubu) return false;
+      return true;
+    });
+  }, [rows, selectedBrand, selectedUrunGrubu, productMetaByCode]);
+
   const filteredAndSortedRows = useMemo(() => {
-    let result = [...rows];
+    let result = [...brandGroupFilteredRows];
 
     // Search filter
     if (searchTerm.trim()) {
@@ -2008,7 +2046,7 @@ export default function TotalVerimlilikPanel({
     }
 
     return result;
-  }, [rows, searchTerm, columnFilters, sortConfig]);
+  }, [brandGroupFilteredRows, searchTerm, columnFilters, sortConfig]);
 
   // Deferred value ile ağır tablo render'larında UI'ın bloke olmasını engelle
   const deferredRows = useDeferredValue(filteredAndSortedRows);
@@ -2077,9 +2115,10 @@ export default function TotalVerimlilikPanel({
       searchTerm.trim() !== '';
   }, [columnFilters, sortConfig, searchTerm]);
 
-  // Genel Verimlilik Hesaplaması
+  // Genel Verimlilik Hesaplaması — özet, görüntülenen marka/grup alt kümesini
+  // yansıtır (eski davranış: marka seçilince skor o markaya aitti).
   const efficiencyMetrics = useMemo(() => {
-    if (rows.length === 0) {
+    if (brandGroupFilteredRows.length === 0) {
       return {
         toplamKumulatif: 0,
         toplamBeklenenTuketim: 0,
@@ -2097,7 +2136,7 @@ export default function TotalVerimlilikPanel({
     let toplamBeklenenTuketim = 0;
     let toplamHakEdis = 0;
 
-    rows.forEach(row => {
+    brandGroupFilteredRows.forEach(row => {
       toplamKumulatif += row.kumulatifTotal;
       toplamBeklenenTuketim += (row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest);
       toplamHakEdis += row.hakEdis;
@@ -2129,7 +2168,7 @@ export default function TotalVerimlilikPanel({
       kitVerimlilikSkoru,
       genelVerimlilik,
     };
-  }, [rows]);
+  }, [brandGroupFilteredRows]);
 
   // Sütun 23: Maliyet hesaplama yardımcı fonksiyonu
   const calculateRowCost = useCallback((row: TableRow): { cost: number; hasData: boolean } => {
