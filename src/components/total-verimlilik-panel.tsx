@@ -83,7 +83,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { totalVerimlilikLogger } from '@/lib/logger';
-import { exportDataToExcel } from '@/lib/utils';
+import { cn, exportDataToExcel } from '@/lib/utils';
 import { getExchangeRates } from '@/lib/exchange-rates';
 import Link from 'next/link';
 
@@ -3790,15 +3790,6 @@ export default function TotalVerimlilikPanel({
           {hiddenCols.size > 0 && <span className="ml-1 px-1 rounded bg-orange-500 text-white text-[9px] font-bold">{hiddenCols.size}</span>}
         </button>
         <div className="w-px h-5 bg-zinc-200 dark:bg-zinc-700" />
-        {/* Density */}
-        <div className="flex items-center gap-0 border border-zinc-200 dark:border-zinc-700 rounded overflow-hidden h-7">
-          {(['compact', 'normal', 'comfortable'] as const).map(d => (
-            <button key={d} onClick={() => setDensity(d)} className={`px-1.5 h-full text-[10px] font-medium ${density === d ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900' : 'hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>
-              {d === 'compact' ? 'Sıkı' : d === 'normal' ? 'Normal' : 'Rahat'}
-            </button>
-          ))}
-        </div>
-        <div className="w-px h-5 bg-zinc-200 dark:bg-zinc-700" />
         {/* Excel-tarzı formül çubuğu: tıklanan hücre bir SONUÇ üretiyorsa,
             o sonucu üreten hesabı gerçek sayılarla burada gösterir. */}
         <div className="flex items-center gap-2 flex-1 min-w-0 border border-zinc-200 dark:border-zinc-700 rounded px-2 h-7 bg-zinc-50 dark:bg-zinc-800/50">
@@ -3821,20 +3812,9 @@ export default function TotalVerimlilikPanel({
             );
           })()}
         </div>
-        <button
-          onClick={() => setSnapshots(prev => ({ ...prev, [`actual-${currentSnapshotMetrics.monthKey}`]: currentSnapshotMetrics }))}
-          className="px-2.5 h-7 min-w-[108px] rounded text-[10px] font-medium border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 whitespace-nowrap"
-        >
-          Gerçekleşen Kaydet
-        </button>
         <span className="text-[10.5px] text-zinc-400 font-mono shrink-0">
           {groupedRows.length} lab · {totalVisibleRows} satır · {visibleCols.length} sütun
         </span>
-        {plannedSnapshot && actualSnapshot && (
-          <span className="ml-2 text-[10px] font-semibold text-emerald-700">
-            Δ Verimlilik %{(actualSnapshot.verimlilik - plannedSnapshot.verimlilik).toFixed(1)} · Δ HakEdiş {(actualSnapshot.hakEdisToplam - plannedSnapshot.hakEdisToplam).toLocaleString('tr-TR')}
-          </span>
-        )}
       </div>
 
       {/* ─── DATA TABLE ─────────────────────────────────────────────── */}
