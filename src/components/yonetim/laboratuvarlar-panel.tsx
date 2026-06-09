@@ -55,7 +55,9 @@ export default function LaboratuvarPanel() {
     refetchEfficiencyPools();
   };
 
-  const isLoading = isLoadingHospitals || isLoadingProducts || isLoadingAddress || isLoadingDepots || isLoadingLabPools || isLoadingEfficiencyPools;
+  // Kaydet/sil gibi mutasyonlar için yerel meşguliyet durumu (sorgu yüklenmesinden bağımsız).
+  const [isMutating, setIsMutating] = useState(false);
+  const isLoading = isLoadingHospitals || isLoadingProducts || isLoadingAddress || isLoadingDepots || isLoadingLabPools || isLoadingEfficiencyPools || isMutating;
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentHospital, setCurrentHospital] = useState<Partial<Hospital>>({});
   const [responsibleEmailsInput, setResponsibleEmailsInput] = useState('');
@@ -212,13 +214,14 @@ export default function LaboratuvarPanel() {
       return;
     }
     
-    setIsLoading(true);
+    setIsMutating(true);
     try {
       const responsibleEmails = parseResponsibleEmails(responsibleEmailsInput);
       const dataToSave: Partial<Hospital> = {
         name: currentHospital.name.trim(),
         kod: (currentHospital.kod || '').trim().toUpperCase(),
         ceomedCariKodu: (currentHospital.ceomedCariKodu || '').trim().toUpperCase() || null,
+        mahalKodu: (currentHospital.mahalKodu || '').trim().toUpperCase() || null,
         ekHizmetLabIds: currentHospital.ekHizmetLabIds || [],
         address: currentHospital.address || '',
         lat: currentHospital.lat || null,
@@ -271,7 +274,7 @@ export default function LaboratuvarPanel() {
     } catch (error) {
       toast({ title: 'Hata', description: 'Kayıt sırasında bir sorun oluştu.', variant: 'destructive' });
     } finally {
-      setIsLoading(false);
+      setIsMutating(false);
     }
   };
 
@@ -335,7 +338,7 @@ export default function LaboratuvarPanel() {
   };
   
   const handleSetMainLab = async (pool: LabPool, mainLabId: string) => {
-    setIsLoading(true);
+    setIsMutating(true);
     try {
         await updateDoc(doc(db, 'labPools', pool.id), { mainLabId });
         setPoolDetailsModal({ open: true, pool: { ...pool, mainLabId }});
@@ -344,13 +347,13 @@ export default function LaboratuvarPanel() {
     } catch (e) {
         toast({ title: 'Hata', description: 'Ana laboratuvar güncellenemedi.', variant: 'destructive' });
     } finally {
-        setIsLoading(false);
+        setIsMutating(false);
     }
   };
 
   const handleDeleteEfficiencyPool = async (poolId: string) => {
     if (confirm('Bu verimlilik havuzunu silmek istediğinizden emin misiniz?')) {
-      setIsLoading(true);
+      setIsMutating(true);
       try {
         await deleteDoc(doc(db, 'efficiencyPools', poolId));
         toast({ title: 'Silindi', description: 'Verimlilik havuzu silindi.' });
@@ -359,7 +362,7 @@ export default function LaboratuvarPanel() {
       } catch (error) {
         toast({ title: 'Hata', description: 'Havuz silinemedi.', variant: 'destructive' });
       } finally {
-        setIsLoading(false);
+        setIsMutating(false);
       }
     }
   };
@@ -679,7 +682,7 @@ export default function LaboratuvarPanel() {
                             {h.sorumluEmails && h.sorumluEmails.length > 1 && ` (+${h.sorumluEmails.length - 1})`}
                         </TableCell>
                         <TableCell className="text-right space-x-1">
-                          <Button variant="ghost" size="icon" onClick={() => openMinMaxPanel(h)} title="Min-Max Ayarları"><SlidersHorizontal className="h-4 w-4 text-primary" /></Button>
+                          <Button variant="ghost" size="icon" onClick={() => openMinMaxPanel(h)} title={h.isConsumablesHospital ? 'Otomatik Transfer Listesi' : 'Min-Max Ayarları'}><SlidersHorizontal className="h-4 w-4 text-primary" /></Button>
                           <Button variant="ghost" size="icon" onClick={() => { setProductOrderTarget(h); setIsProductOrderModalOpen(true); }} title="Özel Sıralama"><ListOrdered className="h-4 w-4 text-amber-500" /></Button>
                           <Button variant="ghost" size="icon" onClick={() => openModal(h)} title="Düzenle"><Edit3 className="h-4 w-4 text-muted-foreground group-hover:text-foreground" /></Button>
                           <Button variant="ghost" size="icon" onClick={() => handleDelete(h.id!)} title="Sil"><Trash2 className="h-4 w-4 text-destructive/70 group-hover:text-destructive" /></Button>
@@ -747,7 +750,11 @@ export default function LaboratuvarPanel() {
             <div className="space-y-4">
               <Input placeholder="Laboratuvar Adı" value={currentHospital.name || ''} onChange={(e) => setCurrentHospital({ ...currentHospital, name: e.target.value })} />
               <Input placeholder="Laboratuvar Kodu (Max 3 Karakter)" value={currentHospital.kod || ''} onChange={(e) => setCurrentHospital({ ...currentHospital, kod: e.target.value.toUpperCase() })} maxLength={3} />
-              <Input placeholder="Ceomed Cari Kodu (örn. M51001)" value={currentHospital.ceomedCariKodu || ''} onChange={(e) => setCurrentHospital({ ...currentHospital, ceomedCariKodu: e.target.value.trim().toUpperCase() })} />
+              {currentHospital.isConsumablesHospital ? (
+                <Input placeholder="Mahal Kodu (örn. 152.06.A.001)" value={currentHospital.mahalKodu || ''} onChange={(e) => setCurrentHospital({ ...currentHospital, mahalKodu: e.target.value.trim().toUpperCase() })} />
+              ) : (
+                <Input placeholder="Ceomed Cari Kodu (örn. M51001)" value={currentHospital.ceomedCariKodu || ''} onChange={(e) => setCurrentHospital({ ...currentHospital, ceomedCariKodu: e.target.value.trim().toUpperCase() })} />
+              )}
               <Input placeholder="Adres" value={currentHospital.address || ''} onChange={(e) => handleAddressInputChange(e.target.value)} />
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -931,7 +938,7 @@ export default function LaboratuvarPanel() {
                     <Label htmlFor="is-consumables-hospital-switch">
                         Hastane Sarf Kategorisi
                         <p className="text-xs text-muted-foreground">
-                            Aktifse, bu laboratuvar sadece Sarf Dağıtım panelinde görünür.
+                            Aktifse, bu laboratuvar sadece Sarf Dağıtım panelinde görünür; mahal kodu tanımlanır ve Min-Max paneli otomatik transfer listesine dönüşür.
                         </p>
                     </Label>
                 </div>

@@ -21,6 +21,12 @@ export default function AutoRedirectOnLogin() {
     // Check for specific role-based redirects first
     const userRole = currentUserProfile?.role;
 
+    // Sarf dağıtım personeli yalnızca tek ekran görür: /sarf-teslimat
+    if (userRole === 'sarf_dagitim_personeli' && !pathname?.startsWith('/sarf-teslimat')) {
+      router.replace('/sarf-teslimat');
+      return;
+    }
+
     // Redirect teknik_lojistik users to /direkt-transfer/yedek-parca-transfer
     if (userRole === 'teknik_lojistik' && pathname === '/dashboard') {
       router.replace('/direkt-transfer/yedek-parca-transfer');

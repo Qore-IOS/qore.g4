@@ -197,6 +197,7 @@ service cloud.firestore {
     match /totalEfficiencyRecords/{id}        { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /irsaliyeDosyalari/{id}             { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /consumableRequests/{id}            { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /sarfTransfers/{id}                 { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /teknikServisActionForms/{id}       { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /centralOrders/{id} {
       allow read: if inCompany();

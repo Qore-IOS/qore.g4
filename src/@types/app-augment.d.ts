@@ -159,6 +159,11 @@ declare module "@/lib/types" {
     visualDeductionEnabled?: boolean;
     fefoEnabled?: boolean;
     perifer?: boolean;
+    isConsumablesHospital?: boolean;
+    mahalKodu?: string;
+    ceomedCariKodu?: string;
+    defaultDepotId?: string;
+    defaultDepotName?: string;
     address?: string;
     lat?: number;
     lng?: number;
@@ -609,7 +614,41 @@ declare module "@/lib/types" {
     aylikTuketimLimiti?: number;
     ortalamaTuketimSuresi?: number;
     tuketimSuresiBirimi?: 'gun' | 'saat';
+    /** Hastane Sarf labları: transfer ekranında otomatik gelen adet */
+    otomatikTransferAdedi?: number;
     [k: string]: unknown;
+  }
+
+  // ---------- Sarf Dağıtım (Hastane Sarf) transfer akışı ----------
+  export interface SarfTransferItem {
+    stokKodu: string;
+    stokAdi: string;
+    adet: number;
+  }
+
+  export interface SarfTransfer {
+    id: string;
+    /** Kısa transfer kodu, örn. TRF-9K2P7 — paket etiketinde basılır */
+    code: string;
+    hospitalId: string;
+    kurumAdi: string;
+    /** Hedef labın mahal kodu (hospitals.mahalKodu) */
+    mahalKodu: string;
+    items: SarfTransferItem[];
+    total: number;
+    status: 'pending' | 'delivered';
+    depotId?: string | null;
+    depotName?: string | null;
+    createdAt: TimestampLike;
+    createdBy?: string;
+    createdById?: string;
+    receivedAt?: TimestampLike;
+    receivedBy?: string;
+    receivedById?: string;
+    deliveredAt?: TimestampLike;
+    deliveredBy?: string;
+    deliveredById?: string;
+    companyId?: string;
   }
 
   export interface UploadedReport {
