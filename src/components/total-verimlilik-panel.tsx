@@ -788,8 +788,8 @@ export default function TotalVerimlilikPanel({
   const [advFilters, setAdvFilters] = useState<AdvFilter[]>(() => loadLS('totalVerim_advFilters', []));
   const [advMode, setAdvMode] = useState<'AND' | 'OR'>(() => loadLS('totalVerim_advMode', 'AND'));
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set(loadLS<string[]>('totalVerim_collapsedGroups', [])));
-  const [bulkFillValue, setBulkFillValue] = useState('');
-  const [biPanelOpen, setBiPanelOpen] = useState(false);
+  // Excel-tarzı formül çubuğu için aktif (son tıklanan) hücre.
+  const [activeCell, setActiveCell] = useState<{ rowId: string; colId: string } | null>(null);
   const [pivotRowsBy, setPivotRowsBy] = useState<string>('labName');
   const [pivotColsBy, setPivotColsBy] = useState<string>('testAdi');
   const [pivotValueBy, setPivotValueBy] = useState<string>('hakEdis');
@@ -2814,28 +2814,6 @@ export default function TotalVerimlilikPanel({
   })), [formulaCols]);
   const allCols = useMemo(() => [...COLS, ...dynamicFormulaCols], [dynamicFormulaCols]);
 
-  const applyBulkValue = useCallback((mode: 'set' | 'increasePct') => {
-    const base = parseFloat(bulkFillValue);
-    if (Number.isNaN(base)) return;
-    setRows(prevRows => {
-      const selectedIds = selRows.size > 0 ? selRows : new Set(prevRows.map(r => r.id));
-      const selectedCellMap = new Set(selCells);
-      const updatedRows = prevRows.map(row => {
-        if (!selectedIds.has(row.id)) return row;
-        const next = { ...row } as TableRow;
-        EDITABLE_FIELDS.forEach((field) => {
-          const canApplyByCells = selectedCellMap.size === 0 || selectedCellMap.has(`${row.id}-${field}`);
-          if (!canApplyByCells) return;
-          const current = Number((next as unknown as Record<string, number>)[field] || 0);
-          const updated = mode === 'set' ? base : current * (1 + (base / 100));
-          (next as unknown as Record<string, number>)[field] = Number.isFinite(updated) ? updated : current;
-        });
-        return next;
-      });
-      return recomputeAllRows(updatedRows, interLabTransfers);
-    });
-  }, [bulkFillValue, selRows, selCells, recomputeAllRows, interLabTransfers]);
-
   const toggleColumnGroup = useCallback((groupId: string) => {
     setCollapsedGroups(prev => {
       const next = new Set(prev);
@@ -3164,6 +3142,7 @@ export default function TotalVerimlilikPanel({
   const onCellMouseDown = useCallback((rowId: string, colId: string, e: React.MouseEvent) => {
     if (e.button !== 0) return; // left-click only
     const key = `${rowId}-${colId}`;
+    setActiveCell({ rowId, colId }); // formül çubuğu için aktif hücre
     if (e.shiftKey && cellAnchor.current) {
       const a = cellAnchor.current;
       setSelCells(rangeSelect(a.rowId, a.colId, rowId, colId));
@@ -3288,6 +3267,34 @@ export default function TotalVerimlilikPanel({
   // Currency helpers
   const cur = costCurrency === 'TRY' ? '₺' : costCurrency === 'USD' ? '$' : '€';
   const fmtN = (n: number) => n.toLocaleString('tr-TR');
+
+  // Excel-tarzı formül: hesaplanan bir hücrenin değerini ÜRETEN formülü,
+  // gerçek sayılar yerine konularak döndürür. Manuel/bilgi sütunları için null.
+  const getCellFormula = (row: TableRow, colId: string): string | null => {
+    const f = (v: number) => fmtN(Math.round((v ?? 0) * 100) / 100);
+    switch (colId) {
+      case 'totalAyBasiStok':
+        return `(Baş.Stoğu ${f(row.baslangicStokuKutu)} × Ambalaj ${f(row.ambalajDegeri)}) + Ay Üstü ${f(row.ayBasiCihazUstuTest)} = ${f(row.totalAyBasiStok)}`;
+      case 'sevkiyatlarSonrasiTotalTest':
+        return `((AyBaşıSevk ${f(row.ayBasiSevkiyatKutu)} + Göztepe ${f(row.goztepeSevkiyat)} + K.Arası ${f(row.kurumlarArasiSevk)} + Loj ${f(row.lojistikAraTransfer)}) × Ambalaj ${f(row.ambalajDegeri)}) + TotalAyBaşı ${f(row.totalAyBasiStok)} = ${f(row.sevkiyatlarSonrasiTotalTest)}`;
+      case 'donemSonuToplamTest':
+        return `(D.SonuStok ${f(row.donemSonuStokKutu)} × Ambalaj ${f(row.ambalajDegeri)}) + D.SonuCihaz ${f(row.donemSonuCihazUstuTest)} = ${f(row.donemSonuToplamTest)}`;
+      case 'arizaliKitTest':
+        return `Cihazdan çıkan kit (dönem içi) test toplamı = ${f(row.arizaliKitTest)}`;
+      case 'beklenenTestSayisi':
+        return `Sevk.Sonrası ${f(row.sevkiyatlarSonrasiTotalTest)} − Arızalı Kit ${f(row.arizaliKitTest)} = ${f(row.beklenenTestSayisi)}`;
+      case 'stokDogrulukFark':
+        return `(Beklenen Test ${f(row.beklenenTestSayisi)} − D.Sonu Toplam ${f(row.donemSonuToplamTest)}) − Kümülatif ${f(row.kumulatifTotal)} = ${f(row.stokDogrulukFark)}   ·   Sapma %${f(row.stokDogrulukYuzde)}`;
+      case 'kitVerimlilikFark':
+        return `Kümülatif ${f(row.kumulatifTotal)} − Hak Ediş ${f(row.hakEdis)} = ${f(row.kitVerimlilikFark)}   ·   Sapma %${f(row.kitVerimlilikYuzde)}`;
+      case 'kutuKayip':
+        return row.ambalajDegeri > 0
+          ? `Stok Doğruluk Fark ${f(row.stokDogrulukFark)} ÷ Ambalaj ${f(row.ambalajDegeri)} = ${f(row.stokDogrulukFark / row.ambalajDegeri)} kutu`
+          : `Ambalaj 0 olduğundan hesaplanamaz`;
+      default:
+        return null;
+    }
+  };
 
   // Render value for a column×row cell
   const renderCellValue = (col: ColDef, row: TableRow): React.ReactNode => {
@@ -3792,40 +3799,35 @@ export default function TotalVerimlilikPanel({
           ))}
         </div>
         <div className="w-px h-5 bg-zinc-200 dark:bg-zinc-700" />
-        <button
-          onClick={() => toggleColumnGroup('sevkiyat')}
-          className="flex items-center gap-1 px-2 h-7 rounded text-[11px] font-medium border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-          title="Sevkiyat kolon grubunu aç/kapat"
-        >
-          {collapsedGroups.has('sevkiyat') ? '[ + ]' : '[ - ]'} Sevkiyat
-        </button>
-        <div className="flex items-center gap-1 border border-zinc-200 dark:border-zinc-700 rounded px-1.5 h-7">
-          <Input
-            value={bulkFillValue}
-            onChange={e => setBulkFillValue(e.target.value)}
-            placeholder="Toplu değer"
-            className="h-6 w-20 text-[11px] border-0 px-1 shadow-none"
-          />
-          <button onClick={() => applyBulkValue('set')} className="px-2 h-5 rounded bg-zinc-100 hover:bg-zinc-200 text-[10px] font-semibold whitespace-nowrap">Hepsine</button>
-          <button onClick={() => applyBulkValue('increasePct')} className="px-2 h-5 min-w-[56px] rounded bg-blue-100 hover:bg-blue-200 text-[10px] font-semibold text-blue-700 whitespace-nowrap">% Artır</button>
+        {/* Excel-tarzı formül çubuğu: tıklanan hücre bir SONUÇ üretiyorsa,
+            o sonucu üreten hesabı gerçek sayılarla burada gösterir. */}
+        <div className="flex items-center gap-2 flex-1 min-w-0 border border-zinc-200 dark:border-zinc-700 rounded px-2 h-7 bg-zinc-50 dark:bg-zinc-800/50">
+          <span className="text-[10px] font-mono font-bold text-emerald-600 shrink-0">fx</span>
+          {(() => {
+            if (!activeCell) {
+              return <span className="text-[10.5px] text-zinc-400 truncate">Bir hücreye tıklayın — hesaplanan değerin formülü burada görünür</span>;
+            }
+            const fRow = rows.find(r => r.id === activeCell.rowId);
+            const fCol = COLS_BY_ID[activeCell.colId];
+            if (!fRow || !fCol) return <span className="text-[10.5px] text-zinc-400 truncate">—</span>;
+            const formula = getCellFormula(fRow, fCol.id);
+            return (
+              <span className="text-[10.5px] truncate" title={formula || fCol.label}>
+                <span className="font-semibold text-zinc-500">{fCol.num}. {fCol.label} · {fRow.stokAdi}: </span>
+                {formula
+                  ? <span className="font-mono text-zinc-800 dark:text-zinc-200">{formula}</span>
+                  : <span className="text-zinc-400">{fCol.type === 'manual' ? 'Manuel giriş (formül yok)' : '—'}</span>}
+              </span>
+            );
+          })()}
         </div>
-        <button onClick={() => setBiPanelOpen(v => !v)} className={`flex items-center gap-1 px-2.5 h-7 min-w-[74px] rounded text-[10.5px] font-medium border whitespace-nowrap ${biPanelOpen ? 'bg-blue-600 text-white border-blue-600' : 'border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}>
-          BI Panel
-        </button>
-        <button
-          onClick={() => setSnapshots(prev => ({ ...prev, [`planned-${currentSnapshotMetrics.monthKey}`]: currentSnapshotMetrics }))}
-          className="px-2.5 h-7 min-w-[102px] rounded text-[10px] font-medium border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 whitespace-nowrap"
-        >
-          Planlanan Kaydet
-        </button>
         <button
           onClick={() => setSnapshots(prev => ({ ...prev, [`actual-${currentSnapshotMetrics.monthKey}`]: currentSnapshotMetrics }))}
           className="px-2.5 h-7 min-w-[108px] rounded text-[10px] font-medium border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 whitespace-nowrap"
         >
           Gerçekleşen Kaydet
         </button>
-        <div className="flex-1" />
-        <span className="text-[10.5px] text-zinc-400 font-mono">
+        <span className="text-[10.5px] text-zinc-400 font-mono shrink-0">
           {groupedRows.length} lab · {totalVisibleRows} satır · {visibleCols.length} sütun
         </span>
         {plannedSnapshot && actualSnapshot && (
@@ -4166,87 +4168,6 @@ export default function TotalVerimlilikPanel({
         </div>
       )}
 
-      {biPanelOpen && (
-        <div className="absolute right-0 top-0 bottom-0 w-[520px] max-w-full bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-700 z-40 shadow-2xl flex flex-col">
-          <div className="h-11 px-3 border-b border-zinc-200 dark:border-zinc-700 flex items-center justify-between">
-            <div className="font-semibold text-[12px]">Mini BI / Pivot / Formül</div>
-            <button onClick={() => setBiPanelOpen(false)} className="w-7 h-7 rounded hover:bg-zinc-100"><X className="h-4 w-4 mx-auto" /></button>
-          </div>
-          <div className="p-3 space-y-4 overflow-y-auto text-[11px]">
-            <div className="space-y-2">
-              <div className="font-semibold">Pivot Builder</div>
-              <div className="grid grid-cols-3 gap-2">
-                <Select value={pivotRowsBy} onValueChange={setPivotRowsBy}>
-                  <SelectTrigger className="h-8"><SelectValue placeholder="Rows" /></SelectTrigger>
-                  <SelectContent>{allCols.map(c => <SelectItem key={`pr-${c.id}`} value={c.id}>{c.label}</SelectItem>)}</SelectContent>
-                </Select>
-                <Select value={pivotColsBy} onValueChange={setPivotColsBy}>
-                  <SelectTrigger className="h-8"><SelectValue placeholder="Columns" /></SelectTrigger>
-                  <SelectContent>{allCols.map(c => <SelectItem key={`pc-${c.id}`} value={c.id}>{c.label}</SelectItem>)}</SelectContent>
-                </Select>
-                <Select value={pivotValueBy} onValueChange={setPivotValueBy}>
-                  <SelectTrigger className="h-8"><SelectValue placeholder="Values" /></SelectTrigger>
-                  <SelectContent>{allCols.map(c => <SelectItem key={`pv-${c.id}`} value={c.id}>{c.label}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div className="overflow-auto border rounded">
-                <table className="w-full text-[10.5px]">
-                  <thead><tr><th className="px-2 py-1 text-left border-b">{pivotRowsBy}</th>{pivotData.colKeys.map(k => <th key={k} className="px-2 py-1 text-left border-b">{k}</th>)}</tr></thead>
-                  <tbody>
-                    {pivotData.rowKeys.map(rk => (
-                      <tr key={rk}>
-                        <td className="px-2 py-1 border-b font-semibold">{rk}</td>
-                        {pivotData.colKeys.map(ck => (
-                          <td key={`${rk}-${ck}`} className="px-2 py-1 border-b cursor-pointer hover:bg-blue-50" onClick={() => {
-                            const matched = flatVisibleRows.filter(r => String(resolveFilterValue(r, pivotRowsBy) || '—') === rk && String(resolveFilterValue(r, pivotColsBy) || '—') === ck);
-                            setPivotDrillRows(matched);
-                            setPivotDrillOpen(true);
-                          }}>
-                            {(pivotData.matrix[rk]?.[ck] || 0).toLocaleString('tr-TR', { maximumFractionDigits: 2 })}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <div className="font-semibold">Formula Engine</div>
-              <div className="flex gap-2">
-                <Input value={newFormulaName} onChange={e => setNewFormulaName(e.target.value)} placeholder="Kolon adı" className="h-8" />
-                <Input value={newFormulaExpr} onChange={e => setNewFormulaExpr(e.target.value)} placeholder="(hakEdis / total) * 100" className="h-8" />
-                <Button type="button" className="h-8" onClick={() => {
-                  if (!newFormulaName.trim() || !newFormulaExpr.trim()) return;
-                  setFormulaCols(prev => [...prev, { id: String(Date.now()), name: newFormulaName.trim(), expr: newFormulaExpr.trim() }]);
-                  setNewFormulaName(''); setNewFormulaExpr('');
-                }}>Ekle</Button>
-              </div>
-              <div className="space-y-1">
-                {formulaCols.map(fx => (
-                  <div key={fx.id} className="flex items-center justify-between border rounded px-2 py-1">
-                    <span>{fx.name}: <span className="font-mono">{fx.expr}</span></span>
-                    <button onClick={() => setFormulaCols(prev => prev.filter(p => p.id !== fx.id))} className="text-rose-600">Sil</button>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <div className="font-semibold">Time Dimension / Trend</div>
-              <div className="space-y-1">
-                {Object.values(snapshots).sort((a, b) => a.monthKey.localeCompare(b.monthKey)).map(s => (
-                  <div key={`${s.monthKey}-${s.label}`} className="flex items-center justify-between border rounded px-2 py-1">
-                    <span>{s.label}</span>
-                    <span>Verim %{s.verimlilik.toFixed(1)} · HakEdiş {s.hakEdisToplam.toLocaleString('tr-TR')}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       <Dialog open={pivotDrillOpen} onOpenChange={setPivotDrillOpen}>
         <DialogContent className="max-w-3xl">
