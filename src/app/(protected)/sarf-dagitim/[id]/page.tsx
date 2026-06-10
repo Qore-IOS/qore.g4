@@ -277,6 +277,20 @@ export default function SarfUrunTransferiPage() {
       return;
     }
 
+    // Stok kontrolü transfer anında, seçili (varsayılan) depodan yapılır —
+    // yetersiz stok teslimat sırasında değil burada yakalanır.
+    const insufficient = items.filter((it) => (stockByCode[it.stokKodu] || 0) < it.adet);
+    if (insufficient.length > 0) {
+      toast({
+        title: 'Yetersiz Depo Stoğu',
+        description: insufficient
+          .map((it) => `${it.stokAdi}: istenen ${it.adet}, ${depotName ? `${depotName} deposunda` : 'depoda'} ${stockByCode[it.stokKodu] || 0}`)
+          .join(' · '),
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setSubmitting(true);
     try {
       const tr = await createSarfTransfer({

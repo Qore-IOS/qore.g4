@@ -1,10 +1,10 @@
 'use client';
 
 /* Sarf Teslimat — sarf dağıtım personelinin tek ekranı.
-   Kabul bekleyen transferleri görür; büyük "Ürün Teslim Al" butonuyla
-   kamera önizlemeli QR okutarak paketi üzerine alır, ardından (hemen ya da
-   "Teslim Aldıklarım" sekmesinden "Teslim Et" ile) mahal QR'ını okutup
-   teslimatı tamamlar. */
+   Büyük "Ürün Teslim Al" butonuyla kamera önizlemeli QR okutarak paketi
+   üzerine alır (teslim alındı animasyonu oynar, modal kapanır; transfer
+   ana panelde "Taşımada"ya düşer). Teslimatı "Teslim Aldıklarım"
+   sekmesinden "Teslim Et" ile mahal QR'ı okutarak tamamlar. */
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { onSnapshot } from 'firebase/firestore';
@@ -28,15 +28,17 @@ export default function SarfTeslimatPage() {
   const { toast } = useToast();
   const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin, logout } = useAuth();
 
-  const [tab, setTab] = useState<TeslimatTab>('pending');
+  // Personel ekranı varsayılan olarak kendi paketlerinde açılır.
+  const [tab, setTab] = useState<TeslimatTab>('mine');
   const [transfers, setTransfers] = useState<SarfTransfer[]>([]);
   const [receiveOpen, setReceiveOpen] = useState(false);
   const [deliverTr, setDeliverTr] = useState<SarfTransfer | null>(null);
   const [busy, setBusy] = useState(false);
-  const [successCode, setSuccessCode] = useState<string | null>(null);
+  const busyRef = useRef(false);
+  const [success, setSuccess] = useState<{ code: string; label: string } | null>(null);
   const [bigPressed, setBigPressed] = useState(false);
 
-  /* "Ürün Teslim Al" akışında 1. adımda eşleşen transfer */
+  /* "Ürün Teslim Al" akışında okutmada eşleşen transfer */
   const receiveTrRef = useRef<SarfTransfer | null>(null);
   const [receiveTr, setReceiveTr] = useState<SarfTransfer | null>(null);
 
@@ -52,12 +54,13 @@ export default function SarfTeslimatPage() {
   }, [currentCompanyId, isSuperAdmin]);
 
   const pending = useMemo(() => transfers.filter((t) => t.status === 'pending'), [transfers]);
-  const poolList = useMemo(() => pending.filter((t) => !t.receivedById || t.receivedById !== currentUser?.uid), [pending, currentUser?.uid]);
+  /* Havuz: henüz kimsenin üzerine almadığı paketler */
+  const poolList = useMemo(() => pending.filter((t) => !t.receivedById), [pending]);
   const mineList = useMemo(() => pending.filter((t) => t.receivedById === currentUser?.uid), [pending, currentUser?.uid]);
 
   const userInfo = { uid: currentUser?.uid, name: currentUserProfile?.name || currentUser?.email };
 
-  /* — Ürün Teslim Al: 1) paket QR (üzerine al) 2) mahal QR (teslimi bitir) — */
+  /* — Ürün Teslim Al: paket QR okutulur, paket üzerine alınır, modal kapanır — */
   const receiveSteps = [
     {
       label: 'Paket QR Okut',
@@ -66,47 +69,47 @@ export default function SarfTeslimatPage() {
       validate: (text: string) => {
         const found = pending.find((t) => matchesTransferCode(text, t));
         if (!found) return 'QR kodu kabul bekleyen bir transferle eşleşmiyor.';
-        if (found.receivedById && found.receivedById !== currentUser?.uid) {
-          return `Bu paket ${found.receivedBy || 'başka bir personel'} üzerinde.`;
-        }
+        if (found.receivedById === currentUser?.uid) return 'Bu paket zaten üzerinizde.';
+        if (found.receivedById) return `Bu paket ${found.receivedBy || 'başka bir personel'} üzerinde.`;
         receiveTrRef.current = found;
         setReceiveTr(found);
         return null;
       },
     },
-    {
-      label: 'Mahal Kodunu Okut',
-      instruction: 'Teslim noktasındaki mahal QR kodunu okutarak teslimatı tamamlayın.',
-      placeholder: 'Mahal kodu',
-      validate: (text: string) => {
-        const tr = receiveTrRef.current;
-        if (!tr) return 'Önce paket QR kodunu okutun.';
-        return matchesMahal(text, tr) ? null : 'Mahal kodu bu transferle eşleşmiyor.';
-      },
-    },
   ];
 
-  const handleReceiveStepMatched = (stepIndex: number) => {
+  const completeReceive = async () => {
     const tr = receiveTrRef.current;
-    if (stepIndex !== 0 || !tr) return;
-    if (tr.receivedById === currentUser?.uid) return; // zaten üzerinde
-    receiveSarfTransfer(tr.id, userInfo)
-      .then(() => toast({ title: 'Paket Üzerinize Alındı', description: `${tr.code} · ${tr.kurumAdi}` }))
-      .catch(() => toast({ title: 'Hata', description: 'Paket üzerinize alınamadı.', variant: 'destructive' }));
+    if (!tr || busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      await receiveSarfTransfer(tr.id, userInfo);
+      setReceiveOpen(false);
+      setSuccess({ code: tr.code, label: 'Paket Teslim Alındı' });
+      setTab('mine');
+    } catch {
+      toast({ title: 'Hata', description: 'Paket üzerinize alınamadı.', variant: 'destructive' });
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
   };
 
   const completeDelivery = async (tr: SarfTransfer | null, closeFn: () => void) => {
-    if (!tr || busy) return;
+    if (!tr || busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     try {
       await confirmSarfDelivery({ transfer: tr, companyId: currentCompanyId, isSuperAdmin, user: userInfo });
       closeFn();
-      setSuccessCode(tr.code);
-      setTab('pending');
+      setSuccess({ code: tr.code, label: 'Teslimat Tamamlandı' });
+      setTab('mine');
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Teslimat tamamlanırken bir sorun oluştu.';
       toast({ title: 'Teslimat Tamamlanamadı', description: msg, variant: 'destructive' });
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
@@ -211,7 +214,7 @@ export default function SarfTeslimatPage() {
         )}
       </div>
 
-      {/* Ürün Teslim Al — paket QR + mahal QR */}
+      {/* Ürün Teslim Al — paket QR okut, üzerine al */}
       <SarfVerifySheet
         open={receiveOpen}
         title="Ürün Teslim Al"
@@ -220,10 +223,10 @@ export default function SarfTeslimatPage() {
           : 'Kabul bekleyen paketin QR kodunu okutun'}
         steps={receiveSteps}
         busy={busy}
-        finishLabel="Teslimatı Tamamla"
+        finishLabel="Teslim Al"
+        autoCompleteOnScan
         onClose={() => setReceiveOpen(false)}
-        onStepMatched={handleReceiveStepMatched}
-        onComplete={() => completeDelivery(receiveTrRef.current, () => setReceiveOpen(false))}
+        onComplete={completeReceive}
       />
 
       {/* Teslim Et — yalnızca mahal QR */}
@@ -240,16 +243,17 @@ export default function SarfTeslimatPage() {
           }]}
           busy={busy}
           finishLabel="Teslimatı Tamamla"
+          autoCompleteOnScan
           onClose={() => setDeliverTr(null)}
           onComplete={() => completeDelivery(deliverTr, () => setDeliverTr(null))}
         />
       )}
 
       <SarfSuccessOverlay
-        show={!!successCode}
-        code={successCode}
-        label="Teslimat Tamamlandı"
-        onDone={() => setSuccessCode(null)}
+        show={!!success}
+        code={success?.code}
+        label={success?.label}
+        onDone={() => setSuccess(null)}
       />
     </SarfShell>
   );
