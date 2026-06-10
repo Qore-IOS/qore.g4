@@ -143,6 +143,7 @@ export function CalendarDockPanel({ onClose }: { onClose: () => void }) {
           zIndex: 511,
           boxShadow:
             '0 30px 70px -24px rgba(20,28,60,0.45), 0 8px 24px -12px rgba(20,28,60,0.30)',
+          willChange: 'auto',
         }}
       >
         {/* Apple Liquid Glass yüzeyi — içerik okunaklı kalsın diye hafif tonlu */}
