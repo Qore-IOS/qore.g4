@@ -212,10 +212,11 @@ const LiquidGlassSelector = ({
       >
         <LiquidGlassSurface
           radius={height / 2}
-          strength={isMoving ? 44 : 34}
-          dispersion={0.42}
-          blur={1.5}
-          bezel={Math.max(10, height * 0.24)}
+          strength={isMoving ? 88 : 68}
+          dispersion={0.55}
+          blur={1.2}
+          bezel={Math.max(14, height * 0.45)}
+          zoom={0.3}
           fallbackBlur={20}
         />
 
@@ -435,7 +436,7 @@ const DockItem = ({
   // Alt menü kabuğu: arka plan LiquidGlassSurface'tan gelir, burada yalnız gölge.
   const submenuSurface = "shadow-[0_16px_44px_rgba(0,0,0,0.16),0_3px_10px_rgba(0,0,0,0.07)] dark:shadow-[0_16px_48px_rgba(0,0,0,0.55)]";
   const submenuGlass = (
-    <LiquidGlassSurface radius={12} strength={16} dispersion={0.25} blur={5} bezel={10} fallbackBlur={26} shine={false} />
+    <LiquidGlassSurface radius={12} strength={26} dispersion={0.35} blur={4} bezel={14} zoom={0.12} fallbackBlur={26} shine={false} />
   );
 
   // Fast spring for snappy animations
@@ -836,7 +837,7 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
           onMouseLeave={handleMouseLeave}
         >
           {/* Apple Liquid Glass kabuk: arkadaki sahneyi canlı kıran cam yüzey */}
-          <LiquidGlassSurface radius={24} strength={26} dispersion={0.3} blur={3} bezel={18} />
+          <LiquidGlassSurface radius={24} strength={44} dispersion={0.45} blur={2.5} bezel={26} zoom={0.18} />
 
           {/* Content wrapper for position reference */}
           <div ref={dockContentRef} className="relative flex items-center gap-1">

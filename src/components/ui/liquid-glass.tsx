@@ -34,15 +34,22 @@ function supportsSvgBackdropFilter(): boolean {
 /**
  * Yuvarlatılmış dikdörtgenin signed-distance alanından kenar-bükme
  * (displacement) haritası üretir. R kanalı x, G kanalı y yönündeki
- * yer değiştirme vektörünü kodlar (128 = nötr). Kenara yaklaştıkça
- * vektör dışarıyı gösterir → feDisplacementMap kenar pikselleri dış
- * sahneden örnekler ve gerçek bir mercek kenarı görünümü oluşur.
+ * yer değiştirme vektörünü kodlar (128 = nötr).
+ *
+ * İki bileşen birleşir:
+ *  - Kenar bandında dışa bakan normal yönünde güçlü örnekleme → camın
+ *    hemen dışındaki renkler içeri çekilir ve kenar boyunca yayılır
+ *    (Apple'daki "rengin kenara dolanması").
+ *  - İç bölgede merkeze doğru hafif örnekleme → tüm cam bir mercek gibi
+ *    arkadaki içeriği büyütür (yarı eksene normalize edildiği için ince
+ *    pill'lerde dikey büyütme daha belirgindir — referanstaki gibi).
  */
 function makeDisplacementMap(
   w: number,
   h: number,
   radius: number,
   bezel: number,
+  zoom: number,
 ): string | null {
   if (typeof document === 'undefined') return null;
   const W = Math.max(2, Math.round(w));
@@ -76,25 +83,31 @@ function makeDisplacementMap(
       const px = x + 0.5;
       const py = y + 0.5;
       const depth = -sdf(px, py); // kenardan içeri doğru mesafe
-      let m = 0;
-      if (depth <= 0) {
-        m = 1;
-      } else if (depth < band) {
-        const t = depth / band;
-        m = Math.pow(1 - t, 1.7); // kenarda güçlü, içeride sıfırlanan bükülme
+      // Kenar şiddeti: smoothstep ile yumuşak başlayıp kenara doğru 1'e
+      // ulaşır — dar bir halka yerine geniş, akışkan bir bükülme bandı.
+      let edge = 1;
+      if (depth > 0) {
+        const e = 1 - Math.min(depth / band, 1);
+        edge = e * e * (3 - 2 * e);
       }
       let dx = 0;
       let dy = 0;
-      if (m > 0.004) {
+      if (edge > 0.004) {
         const gx = sdf(px + 1, py) - sdf(px - 1, py);
         const gy = sdf(px, py + 1) - sdf(px, py - 1);
         const len = Math.hypot(gx, gy) || 1;
-        dx = (gx / len) * m;
-        dy = (gy / len) * m;
+        dx = (gx / len) * edge;
+        dy = (gy / len) * edge;
       }
+      // İç mercek: merkeze doğru örnekle (büyütme); kenar bükmesinin
+      // baskın olduğu yerde söner.
+      const rx = (px - cx) / hw;
+      const ry = (py - cy) / hh;
+      dx -= rx * zoom * (1 - edge);
+      dy -= ry * zoom * (1 - edge);
       const i = (y * W + x) * 4;
-      data[i] = Math.round(128 + dx * 127);
-      data[i + 1] = Math.round(128 + dy * 127);
+      data[i] = Math.round(128 + Math.max(-1, Math.min(1, dx)) * 127);
+      data[i + 1] = Math.round(128 + Math.max(-1, Math.min(1, dy)) * 127);
       data[i + 2] = 128;
       data[i + 3] = 255;
     }
@@ -117,6 +130,8 @@ export interface LiquidGlassSurfaceProps {
   fallbackBlur?: number;
   /** Kenar bükülme bandının genişliği (px). */
   bezel?: number;
+  /** İç mercek büyütme oranı (0–0.5): camın ortasının lens etkisi. */
+  zoom?: number;
   /** İmleci takip eden spekülar parlama. */
   shine?: boolean;
 }
@@ -124,11 +139,12 @@ export interface LiquidGlassSurfaceProps {
 export function LiquidGlassSurface({
   radius,
   className,
-  strength = 24,
-  dispersion = 0.3,
-  blur = 2.5,
+  strength = 40,
+  dispersion = 0.45,
+  blur = 2,
   fallbackBlur = 22,
-  bezel = 16,
+  bezel = 20,
+  zoom = 0.22,
   shine = true,
 }: LiquidGlassSurfaceProps) {
   const rawId = useId();
@@ -150,7 +166,7 @@ export function LiquidGlassSurface({
     let timer: ReturnType<typeof setTimeout> | null = null;
     const regen = (w: number, h: number) => {
       setSize({ w, h });
-      setMapUrl(makeDisplacementMap(w, h, radius, bezel));
+      setMapUrl(makeDisplacementMap(w, h, radius, bezel, zoom));
     };
     const ro = new ResizeObserver((entries) => {
       const rect = entries[0]?.contentRect;
@@ -169,7 +185,7 @@ export function LiquidGlassSurface({
       ro.disconnect();
       if (timer) clearTimeout(timer);
     };
-  }, [supported, radius, bezel]);
+  }, [supported, radius, bezel, zoom]);
 
   // İmleç konumuna göre spekülar parlama + rim ışığının açısını güncelle.
   useEffect(() => {
@@ -206,8 +222,11 @@ export function LiquidGlassSurface({
   }, [shine]);
 
   const useRefraction = supported && mapUrl && size.w > 1 && size.h > 1;
+  // Filtre bölgesini elemanın DIŞINA taşır: backdrop, kenarların ötesinden de
+  // örneklenebilir hale gelir → camın hemen dışındaki renkler kenara dolanır.
+  const margin = Math.ceil(strength * (1 + dispersion)) + 4;
   const backdrop = useRefraction
-    ? `url(#${filterId}) blur(${blur}px) saturate(1.75) brightness(1.05)`
+    ? `url(#${filterId}) blur(${blur}px) saturate(1.85) brightness(1.05)`
     : `blur(${fallbackBlur}px) saturate(1.8) brightness(1.04)`;
 
   return (
@@ -222,10 +241,10 @@ export function LiquidGlassSurface({
           <defs>
             <filter
               id={filterId}
-              x="0"
-              y="0"
-              width={size.w}
-              height={size.h}
+              x={-margin}
+              y={-margin}
+              width={size.w + margin * 2}
+              height={size.h + margin * 2}
               filterUnits="userSpaceOnUse"
               colorInterpolationFilters="sRGB"
             >

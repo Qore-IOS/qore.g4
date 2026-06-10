@@ -146,7 +146,7 @@ export function CalendarDockPanel({ onClose }: { onClose: () => void }) {
         }}
       >
         {/* Apple Liquid Glass yüzeyi — içerik okunaklı kalsın diye hafif tonlu */}
-        <LiquidGlassSurface radius={22} strength={18} dispersion={0.25} blur={6} bezel={14} fallbackBlur={28} shine={false} />
+        <LiquidGlassSurface radius={22} strength={26} dispersion={0.32} blur={5} bezel={18} zoom={0.1} fallbackBlur={28} shine={false} />
         {/* head */}
         <div className="relative flex items-center justify-between">
           <div className="text-[15px] font-bold text-foreground">
