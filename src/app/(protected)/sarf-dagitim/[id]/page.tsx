@@ -9,10 +9,11 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { collection, doc, getDoc, getDocs, onSnapshot, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import type { DepoStokItem, Depot, Hospital, MinMaxRule, ProductCode, SarfTransfer, SarfTransferItem } from '@/lib/types';
+import type { DepoStokItem, Hospital, MinMaxRule, ProductCode, SarfTransfer, SarfTransferItem } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { useProductCodes, useDepots } from '@/hooks/useFirebaseQueries';
 import { useToast } from '@/hooks/use-toast';
 import {
   SarfShell, SoftBtn, SearchBox, QrBox, Stepper, sarfMono, SARF_AC, capForIndex,
@@ -24,6 +25,13 @@ import {
 
 const ROW_GRID = '64px minmax(0,2.4fr) 0.9fr 1fr 1.1fr 168px';
 
+/** Otomatik transfer listesindeki bir satır — kural + (varsa) ürün kartı bilgisi. */
+interface SarfRow {
+  stokKodu: string;
+  name: string;
+  unit: string;
+}
+
 const nowLabel = () => {
   const d = new Date();
   const aylar = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
@@ -33,9 +41,9 @@ const nowLabel = () => {
 
 /* ——— Ürün satırı ——— */
 const ProductRow = ({
-  p, qty, setQty, cap, stock, last,
+  row, qty, setQty, cap, stock, last,
 }: {
-  p: ProductCode;
+  row: SarfRow;
   qty: number;
   setQty: (v: number) => void;
   cap: string;
@@ -59,11 +67,11 @@ const ProductRow = ({
       <div style={{ width: 52, height: 52 }}><TubeRack cap={cap} /></div>
 
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--sarf-ink-1)', lineHeight: 1.25 }}>{p.stokAdi}</div>
-        <div style={{ fontSize: 12.5, color: 'var(--sarf-ink-2)', fontFamily: sarfMono, marginTop: 3 }}>{p.stokKodu}</div>
+        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--sarf-ink-1)', lineHeight: 1.25 }}>{row.name}</div>
+        <div style={{ fontSize: 12.5, color: 'var(--sarf-ink-2)', fontFamily: sarfMono, marginTop: 3 }}>{row.stokKodu}</div>
       </div>
 
-      <div style={{ textAlign: 'center', fontSize: 14, fontWeight: 600, color: 'var(--sarf-ink-2)' }}>{p.anaBirim || 'Adet'}</div>
+      <div style={{ textAlign: 'center', fontSize: 14, fontWeight: 600, color: 'var(--sarf-ink-2)' }}>{row.unit}</div>
 
       <div style={{ textAlign: 'center' }}>
         <span style={{
@@ -133,8 +141,6 @@ export default function SarfUrunTransferiPage() {
 
   const [hospital, setHospital] = useState<Hospital | null>(null);
   const [rules, setRules] = useState<MinMaxRule[]>([]);
-  const [allProducts, setAllProducts] = useState<ProductCode[]>([]);
-  const [depots, setDepots] = useState<Depot[]>([]);
   const [depotStock, setDepotStock] = useState<DepoStokItem[]>([]);
   const [lastByProduct, setLastByProduct] = useState<Record<string, string>>({});
   const [q, setQ] = useState('');
@@ -142,17 +148,20 @@ export default function SarfUrunTransferiPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
+  // Ürün kartları ve depolar — uygulamanın geri kalanıyla aynı (legacy-uyumlu,
+  // cache'li) kaynaktan gelir; salt scopedQuery legacy etiketli kayıtları kaçırır.
+  const { data: allProducts = [] } = useProductCodes();
+  const { data: depots = [] } = useDepots();
+
   useEffect(() => {
     if (!hospitalId) return;
     let alive = true;
     (async () => {
       setLoading(true);
       try {
-        const [hospitalSnap, productsSnap, rulesSnap, depotsSnap, transfersSnap] = await Promise.all([
+        const [hospitalSnap, rulesSnap, transfersSnap] = await Promise.all([
           getDoc(doc(db, 'hospitals', hospitalId)),
-          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
           getDocs(collection(db, 'hospitals', hospitalId, 'minMaxRules')),
-          getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
           getDocs(scopedQuery('sarfTransfers', currentCompanyId, isSuperAdmin, where('hospitalId', '==', hospitalId))).catch(() => null),
         ]);
         if (!alive) return;
@@ -164,9 +173,6 @@ export default function SarfUrunTransferiPage() {
           router.push('/sarf-dagitim');
           return;
         }
-
-        setAllProducts(productsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ProductCode)));
-        setDepots(depotsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Depot)));
 
         const ruleList = rulesSnap.docs.map((d) => d.data() as MinMaxRule);
         setRules(ruleList);
@@ -225,22 +231,29 @@ export default function SarfUrunTransferiPage() {
     return map;
   }, [depotStock]);
 
-  const listedProducts = useMemo(() => {
-    const ruleCodes = new Set(rules.map((r) => r.stokKodu));
-    return allProducts
-      .filter((p) => p.stokKodu && ruleCodes.has(p.stokKodu))
-      .sort((a, b) => (a.stokAdi || '').localeCompare(b.stokAdi || '', 'tr'));
+  /* Satırlar otomatik transfer listesindeki kurallardan türetilir; ürün kartı
+     bulunamazsa stok kodu ve varsayılan birimle yine de gösterilir. */
+  const listedRows = useMemo<SarfRow[]>(() => {
+    const byCode = new Map<string, ProductCode>();
+    allProducts.forEach((p) => { if (p.stokKodu) byCode.set(p.stokKodu, p); });
+    return rules
+      .filter((r) => r.stokKodu)
+      .map((r) => {
+        const p = byCode.get(r.stokKodu);
+        return { stokKodu: r.stokKodu, name: p?.stokAdi || r.stokKodu, unit: p?.anaBirim || 'Adet' };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name, 'tr'));
   }, [rules, allProducts]);
 
   const filtered = useMemo(() => {
-    if (!q) return listedProducts;
+    if (!q) return listedRows;
     const lower = q.toLowerCase();
-    return listedProducts.filter((p) =>
-      (p.stokAdi || '').toLowerCase().includes(lower) || (p.stokKodu || '').toLowerCase().includes(lower));
-  }, [listedProducts, q]);
+    return listedRows.filter((r) =>
+      r.name.toLowerCase().includes(lower) || r.stokKodu.toLowerCase().includes(lower));
+  }, [listedRows, q]);
 
   const setQty = (code: string, v: number) => setQtyState((s) => ({ ...s, [code]: Math.max(0, v) }));
-  const totalLines = useMemo(() => listedProducts.filter((p) => (qty[p.stokKodu!] || 0) > 0).length, [listedProducts, qty]);
+  const totalLines = useMemo(() => listedRows.filter((r) => (qty[r.stokKodu] || 0) > 0).length, [listedRows, qty]);
 
   const mahal = hospitalMahalKodu(hospital);
 
@@ -250,9 +263,9 @@ export default function SarfUrunTransferiPage() {
       toast({ title: 'Mahal Kodu Eksik', description: 'Bu laboratuvar için yönetim panelinden mahal kodu tanımlayın.', variant: 'destructive' });
       return;
     }
-    const items: SarfTransferItem[] = listedProducts
-      .filter((p) => (qty[p.stokKodu!] || 0) > 0)
-      .map((p) => ({ stokKodu: p.stokKodu!, stokAdi: p.stokAdi || 'Bilinmeyen Ürün', adet: qty[p.stokKodu!] }));
+    const items: SarfTransferItem[] = listedRows
+      .filter((r) => (qty[r.stokKodu] || 0) > 0)
+      .map((r) => ({ stokKodu: r.stokKodu, stokAdi: r.name, adet: qty[r.stokKodu] }));
     if (items.length === 0) {
       toast({ title: 'Uyarı', description: 'Transfer edilecek ürün bulunmuyor.' });
       return;
@@ -346,15 +359,15 @@ export default function SarfUrunTransferiPage() {
             <div style={{ padding: 40, textAlign: 'center', color: 'var(--sarf-ink-3)', fontStyle: 'italic' }}>
               {q ? 'Eşleşen ürün bulunamadı.' : 'Bu poliklinik için otomatik transfer listesinde ürün tanımlı değil.'}
             </div>
-          ) : filtered.map((p, i) => (
+          ) : filtered.map((row, i) => (
             <ProductRow
-              key={p.id || p.stokKodu}
-              p={p}
+              key={row.stokKodu}
+              row={row}
               cap={capForIndex(i)}
-              qty={qty[p.stokKodu!] || 0}
-              setQty={(v) => setQty(p.stokKodu!, v)}
-              stock={stockByCode[p.stokKodu!] || 0}
-              last={lastByProduct[p.stokKodu!] || '—'}
+              qty={qty[row.stokKodu] || 0}
+              setQty={(v) => setQty(row.stokKodu, v)}
+              stock={stockByCode[row.stokKodu] || 0}
+              last={lastByProduct[row.stokKodu] || '—'}
             />
           ))}
         </div>
