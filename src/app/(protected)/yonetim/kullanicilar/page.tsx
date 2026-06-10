@@ -77,6 +77,8 @@ const DEFAULT_ROLE_VIEW_PRESETS: Partial<Record<string, AppView[]>> = {
   lojistik_sorumlusu: ['arama', 'kullanici-talepleri'],
   satin_alma: ['arama', 'kullanici-talepleri'],
   driver: ['arama', 'kullanici-talepleri'],
+  // Sarf dağıtım personeli /sarf-teslimat ekranına kilitli; ek panel izni gerekmez.
+  sarf_dagitim_personeli: [],
 };
 
 export default function KullaniciPanel() {
@@ -459,6 +461,7 @@ export default function KullaniciPanel() {
                       <SelectItem value="lojistik_sorumlusu">Lojistik Sorumlusu</SelectItem>
                       <SelectItem value="teknik_lojistik">Teknik Lojistik</SelectItem>
                       <SelectItem value="satin_alma">Satın Alma</SelectItem>
+                      <SelectItem value="sarf_dagitim_personeli">Sarf Dağıtım Personeli</SelectItem>
                       <SelectItem value="user">User</SelectItem>
                       <SelectItem value="teknik_servis">Teknik Servis</SelectItem>
                       <SelectItem value="aplikasyon">Aplikasyon</SelectItem>

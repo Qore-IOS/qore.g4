@@ -32,13 +32,22 @@ export const capForIndex = (i: number) => SARF_CAPS[Math.abs(i) % SARF_CAPS.leng
 export const sarfMono = 'ui-monospace, SFMono-Regular, Menlo, monospace';
 
 /* ——— Shell: skin + font + içerik genişliği ——— */
-export const SarfShell = ({ children, maxWidth = 1240 }: { children: React.ReactNode; maxWidth?: number }) => (
-  <div className={`sarf-skin ${sarfFont.className}`}>
-    <div style={{ maxWidth, margin: '0 auto', padding: '32px 40px', minHeight: '100vh' }} className="sarf-shell-pad">
-      {children}
+export const SarfShell = ({ children, maxWidth = 1240 }: { children: React.ReactNode; maxWidth?: number }) => {
+  // PageShell'in dock boşluğu gibi skin dışında kalan alanlarda uygulamanın
+  // kendi arka planı görünmesin diye body'ye de sarf kremi uygulanır.
+  React.useEffect(() => {
+    document.body.classList.add('sarf-edge-body');
+    return () => { document.body.classList.remove('sarf-edge-body'); };
+  }, []);
+
+  return (
+    <div className={`sarf-skin ${sarfFont.className}`}>
+      <div style={{ maxWidth, margin: '0 auto', padding: '32px 40px', minHeight: '100vh' }} className="sarf-shell-pad">
+        {children}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 /* ——— Soft (clay) buton ——— */
 export const SoftBtn = ({

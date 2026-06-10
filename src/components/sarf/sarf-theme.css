@@ -56,6 +56,16 @@
   -webkit-font-smoothing: antialiased;
 }
 
+/* Sarf sayfası açıkken kabuğun dışında kalan body alanları (örn. dock için
+   ayrılan alt boşluk) da panelin krem zeminini alır — tema fark etmeksizin. */
+body.sarf-edge-body,
+html.dark body.sarf-edge-body {
+  background:
+    radial-gradient(120% 90% at 8% 0%, #F3EEE3 0%, transparent 55%),
+    radial-gradient(120% 90% at 100% 100%, #E6DFD0 0%, transparent 55%),
+    #EAE3D6 !important;
+}
+
 .sarf-skin *::-webkit-scrollbar { width: 10px; height: 10px; }
 .sarf-skin *::-webkit-scrollbar-thumb {
   background: rgba(150, 128, 96, 0.25);
