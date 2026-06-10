@@ -225,9 +225,12 @@ export function LiquidGlassSurface({
   // Filtre bölgesini elemanın DIŞINA taşır: backdrop, kenarların ötesinden de
   // örneklenebilir hale gelir → camın hemen dışındaki renkler kenara dolanır.
   const margin = Math.ceil(strength * (1 + dispersion)) + 4;
-  const backdrop = useRefraction
-    ? `url(#${filterId}) blur(${blur}px) saturate(1.85) brightness(1.05)`
-    : `blur(${fallbackBlur}px) saturate(1.8) brightness(1.04)`;
+  // İki katmanlı yaklaşım: buzlu taban her koşulda çalışır (url(#) zinciri
+  // herhangi bir nedenle geçersiz sayılırsa Chromium TÜM zinciri iptal eder —
+  // tek katmanda bu, camın tamamen görünmez kalmasına yol açıyordu). Kırılma
+  // katmanı buzlu tabanın üzerinde yalnızca bükme + ince netlik uygular.
+  const frostFilter = `blur(${fallbackBlur}px) saturate(1.8) brightness(1.04)`;
+  const refractFilter = `url(#${filterId}) blur(${blur}px) saturate(1.15)`;
 
   return (
     <div
@@ -307,11 +310,18 @@ export function LiquidGlassSurface({
         </svg>
       )}
 
-      {/* Kırılma katmanı: arkadaki sahneyi canlı büker */}
+      {/* Buzlu taban: süt beyazı frosted gövde — her tarayıcıda garanti */}
       <div
         className="lqg-layer lqg-refract"
-        style={{ backdropFilter: backdrop, WebkitBackdropFilter: backdrop }}
+        style={{ backdropFilter: frostFilter, WebkitBackdropFilter: frostFilter }}
       />
+      {/* Kırılma katmanı: buzlu tabanı ve arkadaki sahneyi kenarlarda büker */}
+      {useRefraction && (
+        <div
+          className="lqg-layer lqg-refract"
+          style={{ backdropFilter: refractFilter, WebkitBackdropFilter: refractFilter }}
+        />
+      )}
       {/* Cam gövde tonu */}
       <div className="lqg-layer lqg-tint" />
       {/* İç hacim/derinlik ışığı */}
