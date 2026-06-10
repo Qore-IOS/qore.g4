@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { CalendarDockPanel } from '@/components/dock/CalendarDockPanel';
 import Image from 'next/image';
 import { useIconMappings, getIconSrc } from '@/hooks/useIconMappings';
+import { LiquidGlassSurface } from '@/components/ui/liquid-glass';
 
 // Apple-like colorful icon colors - applied directly to the icon SVG via CSS gradient text
 // Each icon gets a unique vibrant color pair for a 3D gradient feel
@@ -188,35 +189,6 @@ const LiquidGlassSelector = ({
       exit={{ opacity: 0, scale: 0.85 }}
       transition={{ duration: 0.1, ease: "easeOut" }}
     >
-      {/* SVG Filters for advanced effects */}
-      <svg width="0" height="0" style={{ position: 'absolute' }}>
-        <defs>
-          {/* Displacement filter for liquid edge distortion */}
-          <filter id="liquid-distort" x="-20%" y="-20%" width="140%" height="140%">
-            <feTurbulence
-              type="fractalNoise"
-              baseFrequency="0.015"
-              numOctaves="2"
-              result="noise"
-              seed="5"
-            />
-            <feDisplacementMap
-              in="SourceGraphic"
-              in2="noise"
-              scale={isMoving ? 6 : 2}
-              xChannelSelector="R"
-              yChannelSelector="G"
-            />
-          </filter>
-
-          {/* Glow filter for rim light */}
-          <filter id="liquid-glow" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="3" result="blur" />
-            <feComposite in="SourceGraphic" in2="blur" operator="over" />
-          </filter>
-        </defs>
-      </svg>
-
       {/* Shadow layer - soft, colored shadow */}
       <div
         className="absolute inset-0"
@@ -228,151 +200,34 @@ const LiquidGlassSelector = ({
         }}
       />
 
-      {/* Main Glass Container */}
+      {/* Main Glass Container — gerçek kırılma + dispersiyon LiquidGlassSurface'tan.
+          drop-shadow yerine box-shadow: ata üzerindeki filter, backdrop-filter'ın
+          arkadaki sahneyi örneklemesini engellerdi (backdrop root). */}
       <div
         className="relative w-full h-full"
         style={{
           borderRadius: '9999px',
-          overflow: 'hidden',
-          filter: 'drop-shadow(0 4px 16px rgba(0,0,0,0.12)) drop-shadow(0 1px 3px rgba(0,0,0,0.08))',
+          boxShadow: '0 6px 18px rgba(0,0,0,0.14), 0 1px 4px rgba(0,0,0,0.08)',
         }}
       >
-        {/* Refraction layer - magnifies and tints background */}
-        <div
-          className="absolute inset-0"
-          style={{
-            borderRadius: '9999px',
-            background: `
-              linear-gradient(
-                180deg,
-                rgba(255, 255, 255, 0.35) 0%,
-                rgba(255, 255, 255, 0.05) 35%,
-                rgba(255, 255, 255, 0.12) 100%
-              )
-            `,
-            backdropFilter: 'blur(20px) saturate(200%) contrast(1.08) brightness(1.05)',
-            WebkitBackdropFilter: 'blur(20px) saturate(200%) contrast(1.08) brightness(1.05)',
-          }}
+        <LiquidGlassSurface
+          radius={height / 2}
+          strength={isMoving ? 44 : 34}
+          dispersion={0.42}
+          blur={1.5}
+          bezel={Math.max(10, height * 0.24)}
+          fallbackBlur={20}
         />
 
-        {/* Light A - Sharp rim light (top) */}
+        {/* Hareket halindeyken güçlenen spekülar sweep (sıvı parlaması) */}
         <div
-          className="absolute inset-x-[5%] top-0 h-[50%]"
+          className="absolute top-[8%] left-[6%] w-[26%] h-[44%] pointer-events-none"
           style={{
-            borderRadius: '9999px 9999px 50% 50%',
-            background: `
-              linear-gradient(
-                180deg,
-                rgba(255, 255, 255, 0.85) 0%,
-                rgba(255, 255, 255, 0.4) 30%,
-                rgba(255, 255, 255, 0.1) 60%,
-                transparent 100%
-              )
-            `,
-          }}
-        />
-
-        {/* Light B - Soft volume light */}
-        <div
-          className="absolute inset-0"
-          style={{
-            borderRadius: '9999px',
-            background: `
-              radial-gradient(
-                ellipse 80% 50% at 50% 0%,
-                rgba(255, 255, 255, 0.3) 0%,
-                transparent 70%
-              )
-            `,
-            opacity: 0.6,
-          }}
-        />
-
-        {/* Left edge refraction - stronger */}
-        <div
-          className="absolute left-0 top-0 bottom-0 w-[8px]"
-          style={{
-            background: `
-              linear-gradient(
-                90deg,
-                rgba(255, 255, 255, 0.95) 0%,
-                rgba(255, 255, 255, 0.5) 40%,
-                rgba(255, 255, 255, 0.1) 80%,
-                transparent 100%
-              )
-            `,
-          }}
-        />
-
-        {/* Right edge refraction */}
-        <div
-          className="absolute right-0 top-0 bottom-0 w-[8px]"
-          style={{
-            background: `
-              linear-gradient(
-                -90deg,
-                rgba(255, 255, 255, 0.75) 0%,
-                rgba(255, 255, 255, 0.3) 40%,
-                rgba(255, 255, 255, 0.05) 80%,
-                transparent 100%
-              )
-            `,
-          }}
-        />
-
-        {/* Bottom edge subtle highlight */}
-        <div
-          className="absolute inset-x-[10%] bottom-0 h-[25%]"
-          style={{
-            borderRadius: '50% 50% 9999px 9999px',
-            background: `
-              linear-gradient(
-                0deg,
-                rgba(255, 255, 255, 0.25) 0%,
-                transparent 100%
-              )
-            `,
-          }}
-        />
-
-        {/* Light C - Specular highlight sweep (top-left) */}
-        <div
-          className="absolute top-[8%] left-[5%] w-[25%] h-[45%]"
-          style={{
-            background: 'radial-gradient(ellipse at 30% 30%, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.4) 40%, transparent 70%)',
+            background: 'radial-gradient(ellipse at 30% 30%, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.35) 40%, transparent 70%)',
             borderRadius: '50%',
             filter: 'blur(1px)',
-          }}
-        />
-
-        {/* Light D - Secondary highlight (top-right, subtle) */}
-        <div
-          className="absolute top-[15%] right-[8%] w-[15%] h-[30%]"
-          style={{
-            background: 'radial-gradient(ellipse at center, rgba(255,255,255,0.5) 0%, transparent 70%)',
-            borderRadius: '50%',
-          }}
-        />
-
-        {/* Inner depth shadow */}
-        <div
-          className="absolute inset-0"
-          style={{
-            borderRadius: '9999px',
-            boxShadow: `
-              inset 0 -8px 20px rgba(0, 0, 0, 0.06),
-              inset 0 4px 8px rgba(255, 255, 255, 0.4),
-              inset 0 1px 2px rgba(255, 255, 255, 0.6)
-            `,
-          }}
-        />
-
-        {/* Glass border */}
-        <div
-          className="absolute inset-0"
-          style={{
-            borderRadius: '9999px',
-            border: '1.5px solid rgba(255, 255, 255, 0.7)',
+            opacity: isMoving ? 1 : 0.75,
+            transition: 'opacity 0.15s ease',
           }}
         />
       </div>
@@ -577,7 +432,11 @@ const DockItem = ({
     filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.15))',
   } as React.CSSProperties;
 
-  const submenuSurface = "bg-white/80 dark:bg-black/30 backdrop-blur-xl border border-gray-200/60 dark:border-white/[0.08] shadow-[0_8px_32px_rgba(0,0,0,0.12),0_2px_8px_rgba(0,0,0,0.06)] dark:shadow-[0_8px_32px_rgba(0,0,0,0.4)]";
+  // Alt menü kabuğu: arka plan LiquidGlassSurface'tan gelir, burada yalnız gölge.
+  const submenuSurface = "shadow-[0_16px_44px_rgba(0,0,0,0.16),0_3px_10px_rgba(0,0,0,0.07)] dark:shadow-[0_16px_48px_rgba(0,0,0,0.55)]";
+  const submenuGlass = (
+    <LiquidGlassSurface radius={12} strength={16} dispersion={0.25} blur={5} bezel={10} fallbackBlur={26} shine={false} />
+  );
 
   // Fast spring for snappy animations
   const fastSpring = { type: 'spring' as const, stiffness: 600, damping: 25 };
@@ -620,6 +479,7 @@ const DockItem = ({
                 whiteSpace: 'nowrap',
               } as React.CSSProperties}
             >
+              {submenuGlass}
               {/* Invisible bridge to prevent gap between submenu and icon */}
               <div className="absolute -bottom-2 left-0 right-0 h-3" />
               {item.subItems!.map(sub => {
@@ -654,6 +514,7 @@ const DockItem = ({
                             whiteSpace: 'nowrap',
                           } as React.CSSProperties}
                         >
+                          {submenuGlass}
                           {/* Invisible bridge for nested menu */}
                           <div className="absolute -left-2 top-0 bottom-0 w-3" />
                           {sub.subItems.map(nestedSub => {
@@ -661,7 +522,7 @@ const DockItem = ({
                             return (
                               <button
                                 key={nestedSub.key}
-                                className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-sm font-medium hover:bg-black/[0.06] dark:hover:bg-white/[0.08] transition-colors text-left"
+                                className="relative flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-sm font-medium hover:bg-black/[0.06] dark:hover:bg-white/[0.08] transition-colors text-left"
                                 onClick={(e) => handleNavigate(e, nestedSub.href, nestedSub.label, nestedSub.icon)}
                               >
                                 <nestedSub.icon className="w-4 h-4 flex-shrink-0" style={{ color: nestedColors[0] }} />
@@ -958,10 +819,8 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
           data-qore-dock
           className={cn(
             "relative flex h-[72px] items-center gap-1 px-3 py-2.5 rounded-[24px] transition-shadow duration-300",
-            "bg-white/80 backdrop-blur-xl border border-gray-200/60",
-            "shadow-[0_2px_12px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)]",
-            "dark:bg-black/30 dark:backdrop-blur-xl dark:border-white/[0.08]",
-            "dark:shadow-[0_4px_24px_rgba(0,0,0,0.2),0_1px_4px_rgba(0,0,0,0.1)]",
+            "shadow-[0_16px_40px_rgba(0,0,0,0.14),0_4px_12px_rgba(0,0,0,0.07)]",
+            "dark:shadow-[0_16px_44px_rgba(0,0,0,0.5),0_4px_12px_rgba(0,0,0,0.3)]",
             isLiquidMode && isMouseInDock && "[&_*]:!cursor-none !cursor-none"
           )}
           animate={{
@@ -976,6 +835,9 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
         >
+          {/* Apple Liquid Glass kabuk: arkadaki sahneyi canlı kıran cam yüzey */}
+          <LiquidGlassSurface radius={24} strength={26} dispersion={0.3} blur={3} bezel={18} />
+
           {/* Content wrapper for position reference */}
           <div ref={dockContentRef} className="relative flex items-center gap-1">
             {/* Liquid Glass Selector */}
