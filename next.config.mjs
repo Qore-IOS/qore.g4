@@ -62,6 +62,8 @@ const config = {
         hostname: "**",
       },
     ],
+    // PERF: /_next/image yanıtları varsayılan 60sn yerine 1 gün cache'lenir.
+    minimumCacheTTL: 86400,
   },
 
   // Experimental features
@@ -128,6 +130,20 @@ const config = {
           {
             key: 'Referrer-Policy',
             value: 'origin-when-cross-origin',
+          },
+        ],
+      },
+      // PERF: public/ altındaki görseller önceden `max-age=0, private` ile
+      // servis ediliyordu → 0.7–1.5MB'lık logolar HER sayfa yüklemesinde
+      // yeniden iniyordu (HAR analizi, 2026-06). Dosyalar hash'siz olduğu
+      // için "immutable" değil; 1 saat tazelik + 1 gün stale-while-revalidate
+      // tekrar ziyaretleri ağdan bağımsızlaştırır.
+      {
+        source: '/:all*(svg|jpg|jpeg|png|PNG|gif|ico|webp|avif)',
+        headers: [
+          {
+            key: 'Cache-Control',
+            value: 'public, max-age=3600, stale-while-revalidate=86400',
           },
         ],
       },

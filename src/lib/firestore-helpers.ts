@@ -15,6 +15,7 @@
 import {
   collection,
   getDocs,
+  getDocsFromCache,
   query,
   where,
   type Query,
@@ -24,6 +25,12 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { matchesCompanyScope, normalizeCompanyId } from '@/lib/company-scope';
+import {
+  getDocsCacheFirst,
+  revalidateInBackground,
+  type QueryFnCtx,
+} from '@/lib/firestore-fetch';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 
 export const GLOBAL_DEFINITION_COLLECTIONS = new Set([
   'def_brands',
@@ -112,6 +119,76 @@ export async function getScopedDocs(
       });
   } catch {
     // Ignore permission/index failures from the compatibility path.
+  }
+
+  return Array.from(docsById.values());
+}
+
+/**
+ * `getScopedDocs`'un cache-first muadili (React Query hook'ları için).
+ *
+ * Birincil (company) sorgu local cache'ten gelebiliyorsa sonuç milisaniyeler
+ * içinde döner; legacy + untagged uyumluluk sorguları da cache'ten okunur ve
+ * üçü birden arka planda sunucudan tazelenip ilgili query key invalidate
+ * edilir. Birincil sorgu cache'te yoksa (ilk ziyaret) davranış birebir
+ * `getScopedDocs` ile aynıdır — sadece takılan kanala karşı timeout +
+ * otomatik kurtarma korumalıdır.
+ */
+export async function getScopedDocsCacheFirst(
+  ctx: QueryFnCtx,
+  collectionPath: string,
+  currentCompanyId: string | null | undefined,
+  isSuperAdmin: boolean | undefined,
+  ...extraConstraints: QueryConstraint[]
+): Promise<QueryDocumentSnapshot<DocumentData>[]> {
+  const normalized = normalizeCompanyId(currentCompanyId);
+
+  if (isGlobalDefinitionCollection(collectionPath) || isSuperAdmin || normalized === '__legacy__') {
+    const snap = await getDocsCacheFirst(
+      ctx,
+      scopedQuery(collectionPath, currentCompanyId, isSuperAdmin, ...extraConstraints),
+    );
+    return snap.docs;
+  }
+
+  const base = collection(db, collectionPath);
+  const companyQuery = query(base, where('companyId', '==', normalized), ...extraConstraints);
+  const legacyQuery = query(base, where('companyId', '==', '__legacy__'), ...extraConstraints);
+  const unscopedQuery = query(base, ...extraConstraints);
+
+  const companySnap = await getDocsCacheFirst(ctx, companyQuery);
+
+  const docsById = new Map<string, QueryDocumentSnapshot<DocumentData>>();
+  companySnap.docs.forEach((docSnap) => docsById.set(docSnap.id, docSnap));
+
+  const mergeSnap = (snap: { docs: QueryDocumentSnapshot<DocumentData>[] }, scopeFilter = false) => {
+    snap.docs
+      .filter((docSnap) => !scopeFilter || matchesCompanyScope(docSnap.data(), normalized, isSuperAdmin))
+      .forEach((docSnap) => {
+        if (!docsById.has(docSnap.id)) docsById.set(docSnap.id, docSnap);
+      });
+  };
+
+  if (companySnap.metadata.fromCache) {
+    // Hızlı yol: uyumluluk sorguları da cache'ten gelir (boşsa eksik legacy
+    // kayıtlar arka plan tazelemesiyle ~1sn içinde görünür). Sunucuyu
+    // bloklamadan beklemek, "panel açılır açılmaz veri" garantisinin parçası.
+    try {
+      mergeSnap(await getDocsFromCache(legacyQuery));
+    } catch { /* cache erişilemedi — arka plan tazelemesi telafi eder */ }
+    try {
+      mergeSnap(await getDocsFromCache(unscopedQuery), true);
+    } catch { /* ignore */ }
+    revalidateInBackground(ctx, legacyQuery);
+    revalidateInBackground(ctx, unscopedQuery);
+  } else {
+    // İlk yükleme: tam doğruluk için orijinal sunucu yolu.
+    mergeSnap(await getDocsResilient(legacyQuery));
+    try {
+      mergeSnap(await getDocsResilient(unscopedQuery), true);
+    } catch {
+      // Multi-tenant kurallarda unscoped okuma reddedilebilir — yoksay.
+    }
   }
 
   return Array.from(docsById.values());
