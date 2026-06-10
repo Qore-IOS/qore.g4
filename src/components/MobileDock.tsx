@@ -176,7 +176,7 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
                 : "shadow-[0_12px_32px_rgba(0,0,0,0.16),0_3px_8px_rgba(0,0,0,0.08)]"
             )}
           >
-            <LiquidGlassSurface radius={28} strength={18} dispersion={0.28} blur={3} bezel={12} fallbackBlur={22} shine={false} />
+            <LiquidGlassSurface radius={28} strength={34} dispersion={0.42} blur={2.5} bezel={18} zoom={0.22} fallbackBlur={22} shine={false} />
 
             {/* Left - Profile Button */}
             <div className="relative">
