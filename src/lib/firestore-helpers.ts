@@ -4,6 +4,8 @@
  * `scopedQuery` is the single entry point for building company-scoped
  * collection queries. It injects `where('companyId', '==', X)` automatically
  * for non-superadmin sessions and falls through unfiltered for superadmins.
+ * Product-code definition collections are intentionally global and are never
+ * filtered by company.
  *
  * After Faz 4 every hook in src/hooks/useFirebaseQueries.ts uses this helper,
  * so tenant data isolation is enforced at the database level — the
@@ -23,10 +25,23 @@ import {
 import { db } from '@/lib/firebase';
 import { matchesCompanyScope, normalizeCompanyId } from '@/lib/company-scope';
 
+export const GLOBAL_DEFINITION_COLLECTIONS = new Set([
+  'def_brands',
+  'def_labGroups',
+  'def_testGroups',
+  'def_deviceGroups',
+  'def_productGroups',
+  'def_mainUnits',
+]);
+
+export function isGlobalDefinitionCollection(collectionPath: string): boolean {
+  return GLOBAL_DEFINITION_COLLECTIONS.has(collectionPath);
+}
+
 /**
  * Build a Firestore Query for `collectionPath` that's scoped to the caller's
- * company. Superadmins receive an unscoped query so they can browse across
- * tenants from the admin console.
+ * company. Superadmins and shared product-definition collections receive an
+ * unscoped query.
  *
  * Composite indexes (firestore.indexes.json) cover the common
  * `(companyId, <orderBy/where>)` shapes — see Faz 5.
@@ -39,7 +54,7 @@ export function scopedQuery(
 ): Query<DocumentData> {
   const base = collection(db, collectionPath);
   const normalized = normalizeCompanyId(currentCompanyId);
-  if (isSuperAdmin || normalized === '__legacy__') {
+  if (isGlobalDefinitionCollection(collectionPath) || isSuperAdmin || normalized === '__legacy__') {
     return extraConstraints.length > 0
       ? query(base, ...extraConstraints)
       : query(base);
@@ -69,7 +84,7 @@ export async function getScopedDocs(
 ): Promise<QueryDocumentSnapshot<DocumentData>[]> {
   const normalized = normalizeCompanyId(currentCompanyId);
 
-  if (isSuperAdmin || normalized === '__legacy__') {
+  if (isGlobalDefinitionCollection(collectionPath) || isSuperAdmin || normalized === '__legacy__') {
     return (await getDocs(scopedQuery(collectionPath, currentCompanyId, isSuperAdmin, ...extraConstraints))).docs;
   }
 
