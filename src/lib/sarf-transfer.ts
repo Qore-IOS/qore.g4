@@ -325,5 +325,8 @@ export async function printSarfTransferTutanak(tr: SarfTransfer) {
   }
 
   doc.autoPrint();
-  window.open(doc.output('bloburl'), '_blank');
+  // Ek sekme açmadan yazdır; Chrome --kiosk-printing ile diyalogsuz,
+  // doğrudan varsayılan yazıcıdan çıktı alınır.
+  const { openPdfForPrint } = await import('@/lib/pdf/print-pdf');
+  openPdfForPrint(doc.output('bloburl') as unknown as string);
 }
