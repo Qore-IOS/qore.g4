@@ -25,7 +25,7 @@ const PUBLIC_IMAGES = [
   'IFS.png', 'QORE-INV_LOGO.PNG',
   'alkim kartuş.png', 'blk.png', 'e411.png',
   'invitrolab_LOGO__-_Kopya__1_-removebg.png',
-  'lab.png', 'lab_diorama.png', 'newlogoblk.png', 'newlogowh.png', 'wt.webp',
+  'lab.png', 'lab_diorama.png', 'newlogoblk.png', 'newlogowh.png', 'wt.png',
 ];
 
 type IconTab = 'dock' | 'mobile' | 'envanter';
