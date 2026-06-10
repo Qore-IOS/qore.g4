@@ -3000,19 +3000,33 @@
 
 /* Dock tooltip styling - renders via portal above everything */
 .dock-tooltip {
-  @apply rounded-lg px-3 py-1.5 text-xs font-medium;
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(12px) saturate(180%);
-  -webkit-backdrop-filter: blur(12px) saturate(180%);
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04);
+  @apply rounded-full px-3 py-1.5 text-xs font-medium;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.72) 0%,
+    rgba(255, 255, 255, 0.5) 100%
+  );
+  backdrop-filter: blur(18px) saturate(190%) brightness(1.05);
+  -webkit-backdrop-filter: blur(18px) saturate(190%) brightness(1.05);
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.12),
+    0 1px 3px rgba(0, 0, 0, 0.06),
+    inset 0 1px 1px rgba(255, 255, 255, 0.8);
   color: #1a1a1a;
 }
 
 .dark .dock-tooltip {
-  background: rgba(30, 30, 30, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.15);
+  background: linear-gradient(
+    180deg,
+    rgba(50, 50, 60, 0.55) 0%,
+    rgba(25, 25, 32, 0.5) 100%
+  );
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.4),
+    0 1px 3px rgba(0, 0, 0, 0.2),
+    inset 0 1px 1px rgba(255, 255, 255, 0.18);
   color: #e5e5e5;
 }
 
@@ -3025,11 +3039,25 @@
   height: 42px;
   margin: 0 7px;
   border-radius: 1px;
-  background: rgba(20, 28, 50, 0.12);
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(20, 28, 50, 0.16) 25%,
+    rgba(20, 28, 50, 0.16) 75%,
+    transparent 100%
+  );
   align-self: center;
   flex: 0 0 auto;
 }
-.dark .qdock-sep { background: rgba(255, 255, 255, 0.14); }
+.dark .qdock-sep {
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.18) 25%,
+    rgba(255, 255, 255, 0.18) 75%,
+    transparent 100%
+  );
+}
 
 .qdock-minslot {
   width: 46px;
@@ -3042,6 +3070,111 @@
 .dark .qdock-minslot {
   border-color: rgba(255, 255, 255, 0.12);
   background: rgba(255, 255, 255, 0.03);
+}
+
+/* ===== Apple Liquid Glass yüzey katmanları (LiquidGlassSurface) =====
+   --lqg-mx / --lqg-my : imlecin yüzey içindeki normalize konumu (JS yazar)
+   --lqg-ang           : ışık yönü — rim gradyanının açısı (JS yazar)
+   --lqg-r             : köşe yarıçapı */
+.lqg-surface {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: var(--lqg-r, 24px);
+  isolation: isolate;
+}
+.lqg-layer {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+.lqg-refract {
+  overflow: hidden;
+  /* backdrop-filter inline olarak bileşenden gelir (url(#id) + blur + saturate) */
+  transform: translateZ(0);
+}
+/* Cam gövde tonu — ışığı üstten alan çok hafif beyaz hacim */
+.lqg-tint {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.34) 0%,
+    rgba(255, 255, 255, 0.07) 38%,
+    rgba(255, 255, 255, 0.16) 100%
+  );
+}
+.dark .lqg-tint {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.1) 0%,
+    rgba(12, 12, 18, 0.22) 42%,
+    rgba(255, 255, 255, 0.05) 100%
+  );
+}
+/* İç hacim: üst iç ışık + altta yumuşak geri yansıma */
+.lqg-bevel {
+  box-shadow:
+    inset 0 1.5px 1px rgba(255, 255, 255, 0.75),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.3),
+    inset 0 -10px 22px rgba(255, 255, 255, 0.14),
+    inset 0 12px 24px rgba(255, 255, 255, 0.1);
+}
+.dark .lqg-bevel {
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.32),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.1),
+    inset 0 -10px 22px rgba(255, 255, 255, 0.05),
+    inset 0 12px 24px rgba(0, 0, 0, 0.18);
+}
+/* İmleci takip eden spekülar parlama + yavaş ortam ışıltısı */
+.lqg-sheen {
+  background:
+    radial-gradient(
+      130px 56px at calc(var(--lqg-mx, 0.5) * 100%) -28%,
+      rgba(255, 255, 255, 0.55) 0%,
+      rgba(255, 255, 255, 0.14) 45%,
+      transparent 72%
+    ),
+    radial-gradient(
+      90px 44px at calc(var(--lqg-mx, 0.5) * 100% - 60px) 120%,
+      rgba(255, 255, 255, 0.2) 0%,
+      transparent 70%
+    );
+  mix-blend-mode: screen;
+  animation: lqg-ambient 7s ease-in-out infinite;
+}
+.dark .lqg-sheen {
+  opacity: 0.55;
+}
+@keyframes lqg-ambient {
+  0%, 100% { opacity: 0.75; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lqg-sheen { animation: none; }
+}
+/* Işık yönüne göre dönen 1px cam kenarı (maskeli gradyan halka) */
+.lqg-rim {
+  padding: 1px;
+  background: linear-gradient(
+    var(--lqg-ang, 135deg),
+    rgba(255, 255, 255, 0.9) 0%,
+    rgba(255, 255, 255, 0.15) 38%,
+    rgba(255, 255, 255, 0.5) 62%,
+    rgba(255, 255, 255, 0.85) 100%
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+}
+.dark .lqg-rim {
+  background: linear-gradient(
+    var(--lqg-ang, 135deg),
+    rgba(255, 255, 255, 0.55) 0%,
+    rgba(255, 255, 255, 0.08) 40%,
+    rgba(255, 255, 255, 0.22) 65%,
+    rgba(255, 255, 255, 0.45) 100%
+  );
 }
 
 /* Ensure dialogs with glass-card maintain fixed positioning */

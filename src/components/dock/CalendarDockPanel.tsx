@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { motion } from 'framer-motion';
 import { ChevronLeft, ChevronRight, Dot } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { LiquidGlassSurface } from '@/components/ui/liquid-glass';
 import { useAuth } from '@/contexts/auth-context';
 import { usePurchasingTasks } from '@/hooks/useFirebaseQueries';
 
@@ -134,7 +135,7 @@ export function CalendarDockPanel({ onClose }: { onClose: () => void }) {
         onClick={(e) => e.stopPropagation()}
         className={cn(
           'fixed w-[360px] max-w-[94vw] rounded-[22px] p-4 flex flex-col gap-3',
-          'bg-white/90 dark:bg-zinc-900/90 backdrop-blur-2xl border border-gray-200/70 dark:border-white/10',
+          'bg-white/40 dark:bg-zinc-900/35',
         )}
         style={{
           right: 16,
@@ -144,8 +145,10 @@ export function CalendarDockPanel({ onClose }: { onClose: () => void }) {
             '0 30px 70px -24px rgba(20,28,60,0.45), 0 8px 24px -12px rgba(20,28,60,0.30)',
         }}
       >
+        {/* Apple Liquid Glass yüzeyi — içerik okunaklı kalsın diye hafif tonlu */}
+        <LiquidGlassSurface radius={22} strength={18} dispersion={0.25} blur={6} bezel={14} fallbackBlur={28} shine={false} />
         {/* head */}
-        <div className="flex items-center justify-between">
+        <div className="relative flex items-center justify-between">
           <div className="text-[15px] font-bold text-foreground">
             {MONTHS[view.m]} {view.y}
           </div>
@@ -167,7 +170,7 @@ export function CalendarDockPanel({ onClose }: { onClose: () => void }) {
         </div>
 
         {/* grid */}
-        <div className="grid grid-cols-7 gap-y-1 text-center">
+        <div className="relative grid grid-cols-7 gap-y-1 text-center">
           {DOW.map((d) => (
             <div key={d} className="text-[11px] font-semibold text-muted-foreground/70 pb-1">
               {d}
@@ -206,7 +209,7 @@ export function CalendarDockPanel({ onClose }: { onClose: () => void }) {
         </div>
 
         {/* bugünün görevleri */}
-        <div className="border-t border-black/[0.06] dark:border-white/[0.08] pt-2.5">
+        <div className="relative border-t border-black/[0.06] dark:border-white/[0.08] pt-2.5">
           <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground px-1 mb-1.5">
             Bugünün görevleri · {today.getDate()} {MONTHS[today.getMonth()]}
           </div>
