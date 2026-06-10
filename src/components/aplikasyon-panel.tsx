@@ -13,6 +13,7 @@ import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
 import { matchesCompanyScope } from '@/lib/company-scope';
 import { useOpenDeviceFaultReports } from '@/hooks/useFirebaseQueries';
+import { getAffectedDeviceIds } from '@/lib/device-faults';
 
 
 
@@ -68,7 +69,8 @@ export default function AplikasyonPanel({
   const faultyDeviceIds = useMemo(() => {
     const ids = new Set<string>();
     openFaults?.forEach(f => {
-      if (f.deviceId) ids.add(f.deviceId);
+      if (f.faultType !== 'aplikasyon') return;
+      getAffectedDeviceIds(f).forEach(deviceId => ids.add(deviceId));
     });
     return ids;
   }, [openFaults]);

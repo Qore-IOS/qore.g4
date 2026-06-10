@@ -13,6 +13,7 @@ import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
 import { matchesCompanyScope } from '@/lib/company-scope';
 import { useOpenDeviceFaultReports } from '@/hooks/useFirebaseQueries';
+import { getAffectedDeviceIds } from '@/lib/device-faults';
 
 /* ─── Types ─── */
 
@@ -70,7 +71,8 @@ export default function TeknikServisPanel({
   const faultyDeviceIds = useMemo(() => {
     const ids = new Set<string>();
     openFaults?.forEach(f => {
-      if (f.deviceId) ids.add(f.deviceId);
+      if (f.faultType !== 'teknik_servis') return;
+      getAffectedDeviceIds(f).forEach(deviceId => ids.add(deviceId));
     });
     return ids;
   }, [openFaults]);
