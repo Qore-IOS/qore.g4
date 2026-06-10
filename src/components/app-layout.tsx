@@ -229,7 +229,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <SidebarHeader>
             <div className="flex items-center gap-2 p-2">
               <Image
-                src="/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG"
+                src="/icon-192.png"
                 alt="Logo"
                 width={32}
                 height={32}

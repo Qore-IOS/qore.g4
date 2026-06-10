@@ -34,14 +34,17 @@ export default function RootLayout({
         />
         <link rel="manifest" href="/manifest.json" />
         <link rel="icon" href="/favicon.ico" sizes="any" />
+        {/* PERF: ikonlar 0.7MB ham logo yerine küçük türevlerden gelir
+            (scripts/optimize-brand-assets.mjs) — eski hali her sayfa
+            yüklemesinde ~1.4MB gereksiz transferdi. */}
         <link
           rel="icon"
-          href="/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG"
+          href="/icon-192.png"
           type="image/png"
         />
         <link
           rel="apple-touch-icon"
-          href="/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG"
+          href="/apple-touch-icon.png"
         />
       </head>
       <body className={urbanist.className}>
