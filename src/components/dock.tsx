@@ -1,19 +1,30 @@
 
 "use client";
 
+/**
+ * Masaüstü dock — Apple Liquid Glass.
+ *
+ * Kabuk, mobil dock ile birebir aynı prensiple kurulur: framer-motion'sız
+ * düz bir div. Bunun nedeni kozmetik değil, işlevsel: motion.div'in opacity
+ * animasyonu sırasında eklediği will-change, Chromium'da elemanı backdrop
+ * root yapıp içerideki LiquidGlassSurface'ın sayfayı örneklemesini (gerçek
+ * kırılmayı) engelliyordu. Görünürlük artık saf CSS transition ile yönetilir;
+ * kabukta grup oluşturucu hiçbir özellik (filter/opacity sarmalayıcı/
+ * will-change) bulunmaz. Framer-motion yalnızca yaprak öğelerde (seçici,
+ * alt menüler, butonlar) kullanılır.
+ */
+
 import React, { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
-import { motion, AnimatePresence, useMotionValue, useSpring } from 'framer-motion';
+import { motion, AnimatePresence, useSpring } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ChevronRight, Calendar } from 'lucide-react';
 import NotificationsBell from '@/components/notifications/NotificationsBell';
 import type { DockItemData } from '@/hooks/use-dock';
 import { useAuth } from '@/contexts/auth-context';
 import { useStartMenu } from '@/contexts/start-menu-context';
 import { useRouter } from 'next/navigation';
-import { Button } from '@/components/ui/button';
 import { CalendarDockPanel } from '@/components/dock/CalendarDockPanel';
 import Image from 'next/image';
 import { useIconMappings, getIconSrc } from '@/hooks/useIconMappings';
@@ -93,7 +104,7 @@ interface DockProps {
   isVisible: boolean;
 }
 
-// Liquid Glass Selector Component - Apple Style with Liquid Motion
+// Liquid Glass Selector — imleci takip eden, hareketle deforme olan cam pill
 const LiquidGlassSelector = ({
   x,
   width,
@@ -114,8 +125,7 @@ const LiquidGlassSelector = ({
   const springX = useSpring(x, positionSpring);
   const springWidth = useSpring(width, positionSpring);
 
-  // Track velocity for liquid deformation
-  const [velocity, setVelocity] = useState(0);
+  // Track movement for liquid deformation
   const [isMoving, setIsMoving] = useState(false);
   const prevXRef = useRef(x);
   const velocityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -127,11 +137,9 @@ const LiquidGlassSelector = ({
 
   useEffect(() => {
     const deltaX = x - prevXRef.current;
-    const newVelocity = Math.abs(deltaX);
 
-    if (newVelocity > 2) {
+    if (Math.abs(deltaX) > 2) {
       setIsMoving(true);
-      setVelocity(deltaX);
 
       // Calculate deformation based on movement direction and speed
       const deformAmount = Math.min(Math.abs(deltaX) / 30, 0.25);
@@ -142,7 +150,6 @@ const LiquidGlassSelector = ({
       scaleY.set(1 - deformAmount * 0.3);
       skewX.set(direction * deformAmount * 8);
 
-      // Clear previous timeout
       if (velocityTimeoutRef.current) {
         clearTimeout(velocityTimeoutRef.current);
       }
@@ -153,7 +160,6 @@ const LiquidGlassSelector = ({
         scaleY.set(1);
         skewX.set(0);
         setIsMoving(false);
-        setVelocity(0);
       }, 80);
     }
 
@@ -257,7 +263,6 @@ const LiquidGlassSelector = ({
 const DockItem = ({
   item,
   isActive,
-  setTheme,
   isLiquidMode,
   isLiquidHovered,
   onRefSet,
@@ -265,28 +270,25 @@ const DockItem = ({
 }: {
   item: DockItemData;
   isActive: boolean;
-  setTheme: (theme: string) => void;
   isLiquidMode?: boolean;
   isLiquidHovered?: boolean;
   onRefSet?: (el: HTMLDivElement | null) => void;
   customIcon?: string;
 }) => {
-
-  const { isOrbAnimationEnabled, toggleOrbAnimation, toggleNavMode, navMode } = useAuth();
   const router = useRouter();
   const [isHovered, setIsHovered] = useState(false);
   const [activeSubMenu, setActiveSubMenu] = useState<string | null>(null);
-  const hoverTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
-  const subMenuTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+  const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const subMenuTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [tooltipOpen, setTooltipOpen] = useState(false);
 
+  // Viewport-aware submenu positioning
+  const submenuRef = useRef<HTMLDivElement>(null);
+  const nestedSubmenuRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const iconRef = useRef<HTMLDivElement>(null);
+
   // Doğrudan sayfaya yönlendir
-  const handleNavigate = (
-    e: React.MouseEvent,
-    path?: string,
-    label?: string,
-    icon?: React.ElementType,
-  ) => {
+  const handleNavigate = (e: React.MouseEvent, path?: string) => {
     if (path) {
       e.stopPropagation();
       router.push(path);
@@ -326,33 +328,12 @@ const DockItem = ({
   };
 
   // Cleanup timeouts on unmount
-  React.useEffect(() => {
+  useEffect(() => {
     return () => {
       if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
       if (subMenuTimeoutRef.current) clearTimeout(subMenuTimeoutRef.current);
     };
   }, []);
-
-  if (item.key === 'notifications') {
-    return (
-      <div className="relative flex items-center justify-center">
-        <NotificationsBell
-          label={item.label}
-          items={item.items || []}
-          unreadCount={item.unreadCount || 0}
-          loading={item.loading || false}
-          customIcon={customIcon}
-        />
-      </div>
-    );
-  }
-
-  const hasSubItems = item.subItems && item.subItems.length > 0;
-
-  // Viewport-aware submenu positioning
-  const submenuRef = useRef<HTMLDivElement>(null);
-  const nestedSubmenuRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-  const iconRef = useRef<HTMLDivElement>(null);
 
   // Adjust main submenu: clamp horizontally, flip vertically if needed
   useEffect(() => {
@@ -360,7 +341,6 @@ const DockItem = ({
     const menu = submenuRef.current;
     const rect = menu.getBoundingClientRect();
     const vw = window.innerWidth;
-    const vh = window.innerHeight;
 
     // Reset
     menu.style.transform = '';
@@ -425,6 +405,22 @@ const DockItem = ({
     }
   }, [activeSubMenu]);
 
+  if (item.key === 'notifications') {
+    return (
+      <div className="relative flex items-center justify-center">
+        <NotificationsBell
+          label={item.label}
+          items={item.items || []}
+          unreadCount={item.unreadCount || 0}
+          loading={item.loading || false}
+          customIcon={customIcon}
+        />
+      </div>
+    );
+  }
+
+  const hasSubItems = item.subItems && item.subItems.length > 0;
+
   const iconColors = ICON_COLORS[item.key] || ['#6b7280', '#4b5563'];
   const iconGradientStyle = {
     background: `linear-gradient(135deg, ${iconColors[0]}, ${iconColors[1]})`,
@@ -442,18 +438,6 @@ const DockItem = ({
 
   // Fast spring for snappy animations
   const fastSpring = { type: 'spring' as const, stiffness: 600, damping: 25 };
-
-  // Helper: get gradient style for a sub-item icon by key
-  const getSubIconStyle = (key: string): React.CSSProperties => {
-    const colors = ICON_COLORS[key];
-    if (!colors) return {};
-    return {
-      background: `linear-gradient(135deg, ${colors[0]}, ${colors[1]})`,
-      WebkitBackgroundClip: 'text',
-      WebkitTextFillColor: 'transparent',
-      backgroundClip: 'text',
-    };
-  };
 
   // For items with submenus, use a different structure
   // Tooltip wraps only the icon, not the submenu
@@ -496,7 +480,7 @@ const DockItem = ({
                   >
                     <button
                       className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-sm font-medium hover:bg-black/[0.06] dark:hover:bg-white/[0.08] transition-colors text-left"
-                      onClick={(e) => handleNavigate(e, sub.href, sub.label, sub.icon)}
+                      onClick={(e) => handleNavigate(e, sub.href)}
                     >
                       <sub.icon className="w-4 h-4 flex-shrink-0" style={{ color: subColors[0] }} />
                       <span className="text-foreground">{sub.label}</span>
@@ -527,7 +511,7 @@ const DockItem = ({
                               <button
                                 key={nestedSub.key}
                                 className="relative flex items-center gap-2.5 w-full px-3 py-2 rounded-lg text-sm font-medium hover:bg-black/[0.06] dark:hover:bg-white/[0.08] transition-colors text-left"
-                                onClick={(e) => handleNavigate(e, nestedSub.href, nestedSub.label, nestedSub.icon)}
+                                onClick={(e) => handleNavigate(e, nestedSub.href)}
                               >
                                 <nestedSub.icon className="w-4 h-4 flex-shrink-0" style={{ color: nestedColors[0] }} />
                                 <span className="text-foreground">{nestedSub.label}</span>
@@ -649,13 +633,13 @@ const DockLogo = () => {
           aria-label="Başlat"
           aria-expanded={isOpen}
           className={cn(
-            'flex items-center justify-center h-11 w-11 cursor-pointer rounded-2xl text-white transition-shadow',
+            'relative flex items-center justify-center h-11 w-11 cursor-pointer rounded-2xl text-white transition-shadow',
             'bg-gradient-to-br from-[#f99a52] to-[#f06f2c]',
             'shadow-[0_8px_16px_-5px_rgba(240,111,44,0.7),inset_0_1px_1px_rgba(255,255,255,0.4)]',
             isOpen && 'ring-2 ring-orange-300/70'
           )}
         >
-          <Image src="/wt.png" alt="Qore" width={24} height={24} className="object-contain" />
+          <Image src="/wt.webp" alt="Qore" width={24} height={24} className="object-contain" />
         </motion.button>
       </TooltipTrigger>
       <TooltipPrimitive.Portal>
@@ -719,13 +703,10 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
   const [isMouseInDock, setIsMouseInDock] = useState(false);
   const [activeItemKey, setActiveItemKey] = useState<string | null>(null);
   const [selectorPosition, setSelectorPosition] = useState({ x: 0, width: 48 });
-  const mouseInDockRef = useRef(false);
 
   // Calendar shortcut (right zone). Close it when navigating to another view.
   const [calendarOpen, setCalendarOpen] = useState(false);
   useEffect(() => { setCalendarOpen(false); }, [currentView]);
-
-
 
   // Auto-fit: shrink the whole dock proportionally if it would overflow the
   // viewport (many panels). offsetWidth is the layout width — unaffected by the
@@ -779,14 +760,12 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
 
   const handleMouseEnter = useCallback(() => {
     if (isLiquidMode) {
-      mouseInDockRef.current = true;
       setIsMouseInDock(true);
     }
   }, [isLiquidMode]);
 
   const handleMouseLeave = useCallback(() => {
     if (isLiquidMode) {
-      mouseInDockRef.current = false;
       setIsMouseInDock(false);
       setActiveItemKey(null);
     }
@@ -818,32 +797,29 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
   return (
     <div className={cn(className)}>
       <TooltipProvider delayDuration={150}>
-        <motion.div
+        {/* Kabuk: düz div — mobil dock ile aynı yapı. Görünürlük CSS
+            transition'la; kabukta backdrop örneklemesini bozacak hiçbir
+            grup oluşturucu yok. */}
+        <div
           ref={dockRef}
-          data-qore-dock
           className={cn(
-            "relative flex h-[72px] items-center gap-1 px-3 py-2.5 rounded-[24px] transition-shadow duration-300",
-            "shadow-[0_16px_40px_rgba(0,0,0,0.14),0_4px_12px_rgba(0,0,0,0.07)]",
-            "dark:shadow-[0_16px_44px_rgba(0,0,0,0.5),0_4px_12px_rgba(0,0,0,0.3)]",
+            "relative flex h-[72px] items-center gap-1 px-3 py-2.5 rounded-full",
+            "transition-[transform,opacity] duration-300 ease-in-out",
+            "shadow-[0_12px_32px_rgba(0,0,0,0.16),0_3px_8px_rgba(0,0,0,0.08)]",
+            "dark:shadow-[0_12px_36px_rgba(0,0,0,0.5),0_3px_8px_rgba(0,0,0,0.3)]",
+            !isVisible && "opacity-0 pointer-events-none",
             isLiquidMode && isMouseInDock && "[&_*]:!cursor-none !cursor-none"
           )}
-          animate={{
-            opacity: isVisible ? 1 : 0,
-            y: isVisible ? 0 : 20,
-            scale: fitScale,
-            pointerEvents: isVisible ? 'auto' : 'none',
+          style={{
+            transformOrigin: 'bottom center',
+            transform: `translateY(${isVisible ? 0 : 20}px) scale(${fitScale})`,
           }}
-          /* willChange:auto — framer'ın eklediği will-change:opacity, Chromium'da
-             elemanı backdrop root yapıp içerideki backdrop-filter'ın sayfayı
-             örneklemesini engelliyordu (cam "düz" kalıyordu). */
-          style={{ transformOrigin: 'bottom center', willChange: 'auto' }}
-          transition={{ duration: 0.3, ease: 'easeInOut' }}
           onMouseMove={handleMouseMove}
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
         >
           {/* Apple Liquid Glass kabuk: arkadaki sahneyi canlı kıran cam yüzey */}
-          <LiquidGlassSurface radius={24} strength={44} dispersion={0.45} blur={2.5} bezel={26} zoom={0.18} />
+          <LiquidGlassSurface radius={36} strength={40} dispersion={0.45} blur={2.5} bezel={22} zoom={0.2} fallbackBlur={22} />
 
           {/* Content wrapper for position reference */}
           <div ref={dockContentRef} className="relative flex items-center gap-1">
@@ -868,7 +844,6 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
                 key={item.key}
                 item={item}
                 isActive={item.key === currentView && item.type === 'nav'}
-                setTheme={setTheme}
                 isLiquidMode={isLiquidMode}
                 isLiquidHovered={isLiquidMode && activeItemKey === item.key}
                 onRefSet={(el) => setItemRef(item.key, el)}
@@ -883,7 +858,6 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
                 key={logoutItem.key}
                 item={logoutItem}
                 isActive={false}
-                setTheme={setTheme}
                 isLiquidMode={isLiquidMode}
                 isLiquidHovered={isLiquidMode && activeItemKey === logoutItem.key}
                 onRefSet={(el) => setItemRef(logoutItem.key, el)}
@@ -891,7 +865,7 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
               />
             )}
           </div>
-        </motion.div>
+        </div>
       </TooltipProvider>
 
       <AnimatePresence>
