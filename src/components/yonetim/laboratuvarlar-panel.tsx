@@ -439,6 +439,9 @@ export default function LaboratuvarPanel() {
         manualDeductionEnabled: parseExcelBoolean(row['Manuel Düşüm'] ?? row['manualDeductionEnabled'], false),
         isConsumablesHospital: parseExcelBoolean(row['Hastane Sarf'] ?? row['isConsumablesHospital'], false),
         autoTutanak: parseExcelBoolean(row['Otomatik Tutanak'] ?? row['autoTutanak'], false),
+        // Hastane Sarf statüsündeki lablar mahal kodu, diğerleri Ceomed cari kodu kullanır.
+        mahalKodu: (row['Mahal Kodu'] || row['mahalKodu'] || '').toString().trim().toUpperCase(),
+        ceomedCariKodu: (row['Cari Kodu'] || row['Ceomed Cari Kodu'] || row['ceomedCariKodu'] || '').toString().trim().toUpperCase(),
       }));
 
       const validRows = mapped.filter((r: any) => r.name);
@@ -503,6 +506,9 @@ export default function LaboratuvarPanel() {
           manualDeductionEnabled: row.manualDeductionEnabled,
           isConsumablesHospital: row.isConsumablesHospital,
           autoTutanak: row.autoTutanak,
+          // Form ile aynı kural: Hastane Sarf statüsünde mahal kodu, diğerlerinde cari kodu geçerlidir.
+          mahalKodu: (row.isConsumablesHospital ? row.mahalKodu : '') || null,
+          ceomedCariKodu: (!row.isConsumablesHospital ? row.ceomedCariKodu : '') || null,
           createdAt: new Date(),
           updatedAt: new Date(),
         };
@@ -538,17 +544,21 @@ export default function LaboratuvarPanel() {
         'Manuel Düşüm': 'Hayır',
         'Hastane Sarf': 'Hayır',
         'Otomatik Tutanak': 'Hayır',
+        'Cari Kodu': 'M51001',
+        'Mahal Kodu': '',
       },
       {
-        'Laboratuvar Adı': 'Örnek Laboratuvar 2',
-        'Kod': 'OL2',
+        'Laboratuvar Adı': 'Örnek Sarf Polikliniği',
+        'Kod': 'OS1',
         'Adres': '',
         'E-posta': '',
         'Tüketim Takibi': 'Evet',
         'FEFO': 'Evet',
         'Manuel Düşüm': 'Hayır',
-        'Hastane Sarf': 'Hayır',
+        'Hastane Sarf': 'Evet',
         'Otomatik Tutanak': 'Hayır',
+        'Cari Kodu': '',
+        'Mahal Kodu': '152.06.A.001',
       },
     ];
     exportDataToExcel(templateData, 'Laboratuvar_Sablonu', 'Laboratuvarlar', toast);
@@ -1277,6 +1287,8 @@ export default function LaboratuvarPanel() {
                       <TableHead>E-posta</TableHead>
                       <TableHead className="text-center">FEFO</TableHead>
                       <TableHead className="text-center">Tüketim</TableHead>
+                      <TableHead className="text-center">Hastane Sarf</TableHead>
+                      <TableHead>Mahal/Cari Kodu</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1301,6 +1313,10 @@ export default function LaboratuvarPanel() {
                           <TableCell className="text-xs">{(row.sorumluEmails || []).join(', ')}</TableCell>
                           <TableCell className="text-center text-xs">{row.fefoEnabled ? 'Evet' : 'Hayır'}</TableCell>
                           <TableCell className="text-center text-xs">{row.consumptionTrackingEnabled ? 'Evet' : 'Hayır'}</TableCell>
+                          <TableCell className="text-center text-xs">{row.isConsumablesHospital ? 'Evet' : 'Hayır'}</TableCell>
+                          <TableCell className="font-mono text-xs">
+                            {row.isConsumablesHospital ? (row.mahalKodu || '-') : (row.ceomedCariKodu || '-')}
+                          </TableCell>
                         </TableRow>
                       );
                     })}
