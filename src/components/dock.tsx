@@ -651,7 +651,7 @@ const DockLogo = () => {
             isOpen && 'ring-2 ring-orange-300/70'
           )}
         >
-          <Image src="/wt.webp" alt="Qore" width={24} height={24} className="object-contain" />
+          <Image src="/wt.png" alt="Qore" width={24} height={24} className="object-contain" />
         </motion.button>
       </TooltipTrigger>
       <TooltipPrimitive.Portal>
