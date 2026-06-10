@@ -3,7 +3,7 @@
 /* Hastane Sarf Dağıtım — Ürün Transferi ekranı.
    Otomatik transfer listesinde tanımlı ürünler, tanımlanan adetlerle
    önceden doldurulmuş gelir; "Transfer Et" kabul bekleyen transfer oluşturur
-   ve paket QR etiketi yazdırılır. Demo sarf-app.jsx ProductRequest karşılığı. */
+   ve A4 transfer tutanağı yazdırılır. Demo sarf-app.jsx ProductRequest karşılığı. */
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
@@ -20,7 +20,7 @@ import {
 } from '@/components/sarf/sarf-ui';
 import { IconPackage, IconBuilding, IconBack, IconClipboard, TubeRack } from '@/components/sarf/sarf-icons';
 import {
-  createSarfTransfer, hospitalMahalKodu, printSarfTransferLabel, formatSarfDate, toDateSafe,
+  createSarfTransfer, hospitalMahalKodu, printSarfTransferTutanak, formatSarfDate, toDateSafe,
 } from '@/lib/sarf-transfer';
 
 const ROW_GRID = '64px minmax(0,2.4fr) 0.9fr 1fr 1.1fr 168px';
@@ -303,7 +303,7 @@ export default function SarfUrunTransferiPage() {
       });
 
       toast({ title: 'Transfer Oluşturuldu', description: `${hospital.name} için ${tr.code} kabul bekleyenlere eklendi.` });
-      printSarfTransferLabel(tr).catch(() => { /* yazdırma engellendiyse karttan tekrar yazdırılabilir */ });
+      printSarfTransferTutanak(tr).catch(() => { /* yazdırma engellendiyse karttan tekrar yazdırılabilir */ });
       router.push('/sarf-dagitim?tab=pending');
     } catch (e) {
       console.error('Transfer create error:', e);

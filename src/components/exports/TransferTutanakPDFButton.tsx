@@ -5,10 +5,10 @@ import { Button } from '@/components/ui/button';
 import { FileText, Loader2 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import QRCode from 'qrcode';
-import { tr } from 'date-fns/locale';
-import { format } from 'date-fns';
 import { formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
+import {
+  drawTutanakFrame, drawTutanakQrBlock, drawTutanakTitle, sanitizeForPdfFont, TUTANAK_PAD_X,
+} from '@/lib/pdf/tutanak-chrome';
 
 type HeaderInfo = {
   shipmentId: string;
@@ -40,18 +40,6 @@ export type TransferTutanakPDFButtonProps = {
 
 const FONT_FAMILY = 'helvetica';
 
-function sanitizeForPdfFont(str: string | null | undefined): string {
-    if (!str) return '';
-    return str
-        .replace(/İ/g, 'I').replace(/ı/g, 'i')
-        .replace(/Ş/g, 'S').replace(/ş/g, 's')
-        .replace(/Ğ/g, 'G').replace(/ğ/g, 'g')
-        .replace(/Ü/g, 'U').replace(/ü/g, 'u')
-        .replace(/Ö/g, 'O').replace(/ö/g, 'o')
-        .replace(/Ç/g, 'C').replace(/ç/g, 'c');
-}
-
-
 export default function TransferTutanakPDFButton({ header, rows, className }: TransferTutanakPDFButtonProps) {
   const [busy, setBusy] = React.useState(false);
 
@@ -61,77 +49,17 @@ export default function TransferTutanakPDFButton({ header, rows, className }: Tr
       const doc = new jsPDF({ unit: 'pt', format: 'a4' });
       const pageW = doc.internal.pageSize.getWidth();
       const pageH = doc.internal.pageSize.getHeight();
-      const padX = 40;
+      const padX = TUTANAK_PAD_X;
 
       doc.setFont(FONT_FAMILY);
 
-      const ORANGE = { r: 199, g: 137, b: 65 };
-      doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
-      doc.setLineWidth(2);
-      doc.rect(padX / 2, padX / 2, pageW - padX, pageH - padX);
-      
+      drawTutanakFrame(doc);
+
       const origin = typeof window !== 'undefined' ? window.location.origin : 'https://invpilot.web.app';
       const deepLinkIdOnly = `${origin}/transfer-gecmis/${encodeURIComponent(header.shipmentId)}`;
+      await drawTutanakQrBlock(doc, deepLinkIdOnly);
 
-      let qrDataUrl: string;
-      try {
-        qrDataUrl = await QRCode.toDataURL(deepLinkIdOnly, { errorCorrectionLevel: 'M', margin: 0, scale: 4 });
-      } catch (e) {
-          console.error("QR Code generation failed:", e);
-          qrDataUrl = '';
-      }
-
-      if (qrDataUrl) {
-          const frameSize = 80;
-          const framePadding = 4;
-          const frameX = pageW - padX - frameSize;
-          const frameY = padX;
-          const frameCornerRadius = 8;
-          
-          const qrSize = frameSize - (framePadding * 2);
-          const qrX = frameX + framePadding;
-          const qrY = frameY + framePadding;
-          
-          doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
-          doc.setLineWidth(1.5);
-          (doc as any).roundedRect(frameX, frameY, frameSize, frameSize, frameCornerRadius, frameCornerRadius, 'S');
-
-          doc.addImage(qrDataUrl, 'PNG', qrX, qrY, qrSize, qrSize, undefined, 'FAST');
-      }
-
-      doc.setTextColor(0, 0, 0);
-      doc.setFontSize(16);
-      doc.setFont(FONT_FAMILY, 'bold');
-      doc.text(sanitizeForPdfFont('Transfer Formu'), pageW / 2, 60, { align: 'center' });
-
-      let transferLogoRendered = false;
-      try {
-        const transferLogoResponse = await fetch('/invlogo.png');
-        if (transferLogoResponse.ok) {
-          const transferLogoBlob = await transferLogoResponse.blob();
-          const transferLogoReader = new FileReader();
-          transferLogoReader.readAsDataURL(transferLogoBlob);
-          await new Promise<void>(resolve => {
-            transferLogoReader.onloadend = () => {
-              const transferLogoData = transferLogoReader.result as string;
-              const transferLogoWidth = 250;
-              const transferLogoHeight = 48;
-              const transferLogoX = (pageW / 2) - (transferLogoWidth / 2);
-              doc.addImage(transferLogoData, 'PNG', transferLogoX, 78, transferLogoWidth, transferLogoHeight, undefined, 'FAST');
-              transferLogoRendered = true;
-              resolve();
-            };
-          });
-        }
-      } catch (e) {
-        console.error('Could not load transfer header logo:', e);
-      }
-
-      if (!transferLogoRendered) {
-        doc.setFontSize(36);
-        doc.setFont(FONT_FAMILY, 'bold');
-        doc.text('INVITROLAB', pageW / 2, 110, { align: 'center' });
-      }
+      await drawTutanakTitle(doc);
 
       doc.setFont(FONT_FAMILY, 'normal');
       doc.setFontSize(10);
@@ -163,10 +91,10 @@ export default function TransferTutanakPDFButton({ header, rows, className }: Tr
       if (header.company) {
         doc.text(sanitizeForPdfFont(header.company), col2X, currentY + 15);
       }
-      
+
       const recipientBlockHeight = recipientLines.length * 12;
       currentY += recipientBlockHeight + 20;
-      
+
       doc.setFont(FONT_FAMILY, 'normal');
       doc.text(sanitizeForPdfFont('Teslim Eden :'), col1X, currentY);
       doc.setFont(FONT_FAMILY, 'bold');
@@ -200,35 +128,13 @@ export default function TransferTutanakPDFButton({ header, rows, className }: Tr
       const finalY = (doc as any).lastAutoTable.finalY;
 
       const signatureY = finalY + 80;
-      if (signatureY < pageH - 120) { // Make sure there's enough space for logo
+      if (signatureY < pageH - 80) {
         doc.setFont(FONT_FAMILY, 'normal');
         doc.setFontSize(11);
         doc.text(sanitizeForPdfFont('Teslim Eden'), padX, signatureY);
         doc.line(padX, signatureY + 5, padX + 150, signatureY + 5);
         doc.text(sanitizeForPdfFont('Teslim Alan'), pageW / 2 + 20, signatureY);
         doc.line(pageW / 2 + 20, signatureY + 5, pageW / 2 + 20 + 150, signatureY + 5);
-      }
-
-      // --- ADD FOOTER LOGO ---
-      try {
-        const imgResponseFooter = await fetch('/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG');
-        const imgBlobFooter = await imgResponseFooter.blob();
-        const readerFooter = new FileReader();
-        readerFooter.readAsDataURL(imgBlobFooter);
-        await new Promise<void>(resolve => {
-          readerFooter.onloadend = () => {
-            const base64data = readerFooter.result as string;
-            const imgWidth = 50;
-            const imgHeight = 50;
-            const imgX = (pageW / 2) - (imgWidth / 2);
-            // Position above the bottom frame line.
-            const imgY = pageH - (padX / 2) - imgHeight - 10;
-            doc.addImage(base64data, 'PNG', imgX, imgY, imgWidth, imgHeight, undefined, 'FAST');
-            resolve();
-          };
-        });
-      } catch (e) {
-        console.error("Could not load or add footer logo to PDF:", e);
       }
 
       doc.save(`Transfer_${header.shipmentId}_Form.pdf`);
