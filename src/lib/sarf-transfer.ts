@@ -229,39 +229,101 @@ export async function confirmSarfDelivery({ transfer, companyId, isSuperAdmin, u
 }
 
 /**
- * Paket etiketi yazdır: QR (mahal::kod) + transfer bilgileri.
- * jsPDF ve qrcode yalnızca burada lazy yüklenir.
+ * Sarf transfer tutanağı (A4) — direkt transfer tutanağı ile aynı şablon.
+ * Sağ üstteki QR, paketi teslim almada okutulan koddur (mahal + transfer id).
+ * jsPDF ve qrcode yalnızca burada lazy yüklenir; çıktı otomatik yazdırmaya açılır.
  */
-export async function printSarfTransferLabel(tr: SarfTransfer) {
-  const [{ default: jsPDF }, { default: QRCodeLib }] = await Promise.all([
+export async function printSarfTransferTutanak(tr: SarfTransfer) {
+  const [{ default: jsPDF }, { default: autoTable }, chrome] = await Promise.all([
     import('jspdf'),
-    import('qrcode'),
+    import('jspdf-autotable'),
+    import('@/lib/pdf/tutanak-chrome'),
   ]);
+  const { drawTutanakFrame, drawTutanakQrBlock, drawTutanakTitle, sanitizeForPdfFont, TUTANAK_PAD_X } = chrome;
 
-  const qrDataUrl = await QRCodeLib.toDataURL(sarfQrPayload(tr), { margin: 1, width: 480 });
+  const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const padX = TUTANAK_PAD_X;
+  const FONT = 'helvetica';
+  doc.setFont(FONT);
 
-  const pdf = new jsPDF({ unit: 'mm', format: [100, 100] });
-  pdf.setFont('helvetica', 'bold');
-  pdf.setFontSize(14);
-  pdf.text('SARF TRANSFER', 50, 10, { align: 'center' });
+  drawTutanakFrame(doc);
+  await drawTutanakQrBlock(doc, sarfQrPayload(tr));
+  await drawTutanakTitle(doc);
 
-  pdf.addImage(qrDataUrl, 'PNG', 27, 14, 46, 46);
+  const created = toDateSafe(tr.createdAt) || new Date();
+  const tarih = formatSarfDate(created);
+  const saat = `${p2(created.getHours())}:${p2(created.getMinutes())}`;
 
-  pdf.setFontSize(13);
-  pdf.text(tr.code, 50, 66, { align: 'center' });
+  doc.setFont(FONT, 'normal');
+  doc.setFontSize(10);
+  const col1X = padX;
+  const col2X = pageW / 2 + 20;
+  const col1MaxWidth = col2X - col1X - 20;
+  let currentY = 160;
 
-  pdf.setFont('helvetica', 'normal');
-  pdf.setFontSize(10);
-  const kurum = (tr.kurumAdi || '').slice(0, 40);
-  pdf.text(kurum, 50, 73, { align: 'center' });
-  pdf.text(`Mahal: ${tr.mahalKodu}`, 50, 79, { align: 'center' });
-  pdf.text(`Toplam: ${tr.total} adet  ·  ${formatSarfStamp(tr.createdAt)}`, 50, 85, { align: 'center' });
+  doc.text(sanitizeForPdfFont('Gönderen Depo :'), col1X, currentY);
+  doc.text(sanitizeForPdfFont('Tarih / Saat :'), col2X, currentY);
+  doc.setFont(FONT, 'bold');
+  doc.text(sanitizeForPdfFont(tr.depotName || '-'), col1X, currentY + 15, { maxWidth: col1MaxWidth });
+  doc.text(`${tarih} ${saat}`, col2X, currentY + 15);
 
-  pdf.setFontSize(8);
-  const itemsLine = (tr.items || []).map((i) => `${i.stokAdi} x${i.adet}`).join('  ·  ');
-  const wrapped = pdf.splitTextToSize(itemsLine, 90) as string[];
-  pdf.text(wrapped.slice(0, 2), 50, 91, { align: 'center' });
+  currentY += 35;
+  doc.setDrawColor(200, 200, 200);
+  doc.line(padX, currentY, pageW - padX, currentY);
+  currentY += 25;
 
-  pdf.autoPrint();
-  window.open(pdf.output('bloburl'), '_blank');
+  doc.setFont(FONT, 'normal');
+  doc.text(sanitizeForPdfFont('Teslim Alan Kurum :'), col1X, currentY);
+  doc.text(sanitizeForPdfFont('Transfer No :'), col2X, currentY);
+  doc.setFont(FONT, 'bold');
+  const recipientLines = doc.splitTextToSize(sanitizeForPdfFont(tr.kurumAdi), col1MaxWidth) as string[];
+  doc.text(recipientLines, col1X, currentY + 15);
+  doc.text(sanitizeForPdfFont(tr.code), col2X, currentY + 15);
+
+  currentY += recipientLines.length * 12 + 20;
+
+  doc.setFont(FONT, 'normal');
+  doc.text(sanitizeForPdfFont('Teslim Eden :'), col1X, currentY);
+  doc.text(sanitizeForPdfFont('Mahal Kodu :'), col2X, currentY);
+  doc.setFont(FONT, 'bold');
+  doc.text(sanitizeForPdfFont(tr.createdBy || ''), col1X, currentY + 15, { maxWidth: col1MaxWidth });
+  doc.text(sanitizeForPdfFont(tr.mahalKodu || '-'), col2X, currentY + 15);
+  currentY += 35;
+
+  autoTable(doc, {
+    head: [['Stok Kodu', 'Urun', 'Adet', 'Birim']],
+    body: (tr.items || []).map((it) => [
+      sanitizeForPdfFont(it.stokKodu),
+      sanitizeForPdfFont(it.stokAdi),
+      String(it.adet),
+      'adet',
+    ]),
+    startY: currentY,
+    theme: 'grid',
+    styles: { font: FONT, fontSize: 10, cellPadding: 8 },
+    headStyles: {
+      fillColor: [224, 224, 224],
+      textColor: [0, 0, 0],
+      fontStyle: 'bold',
+    },
+    alternateRowStyles: { fillColor: [245, 245, 245] },
+    margin: { left: padX, right: padX },
+    tableWidth: 'auto',
+  });
+
+  const finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY;
+  const signatureY = finalY + 80;
+  if (signatureY < pageH - 80) {
+    doc.setFont(FONT, 'normal');
+    doc.setFontSize(11);
+    doc.text(sanitizeForPdfFont('Teslim Eden'), padX, signatureY);
+    doc.line(padX, signatureY + 5, padX + 150, signatureY + 5);
+    doc.text(sanitizeForPdfFont('Teslim Alan'), pageW / 2 + 20, signatureY);
+    doc.line(pageW / 2 + 20, signatureY + 5, pageW / 2 + 20 + 150, signatureY + 5);
+  }
+
+  doc.autoPrint();
+  window.open(doc.output('bloburl'), '_blank');
 }

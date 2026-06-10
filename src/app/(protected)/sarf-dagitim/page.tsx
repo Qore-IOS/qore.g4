@@ -22,7 +22,7 @@ import { SarfTransferCard } from '@/components/sarf/SarfTransferCard';
 import { SarfVerifySheet } from '@/components/sarf/SarfVerifySheet';
 import {
   hospitalMahalKodu, matchesTransferCode, matchesMahal, confirmSarfDelivery,
-  printSarfTransferLabel, formatSarfDate, toDateSafe,
+  printSarfTransferTutanak, formatSarfDate, toDateSafe,
 } from '@/lib/sarf-transfer';
 
 type SarfTabId = 'clinics' | 'pending' | 'transit' | 'delivered';
@@ -295,7 +295,7 @@ export default function SarfDagitimPage() {
                   tr={tr}
                   actionLabel="Teslimatı Doğrula"
                   onAction={setVerifyTr}
-                  onPrint={(t) => { printSarfTransferLabel(t).catch(() => toast({ title: 'Hata', description: 'Etiket oluşturulamadı.', variant: 'destructive' })); }}
+                  onPrint={(t) => { printSarfTransferTutanak(t).catch(() => toast({ title: 'Hata', description: 'Tutanak oluşturulamadı.', variant: 'destructive' })); }}
                 />
               ))}
             </div>
@@ -313,7 +313,7 @@ export default function SarfDagitimPage() {
                   tr={tr}
                   actionLabel="Teslimatı Doğrula"
                   onAction={setVerifyTr}
-                  onPrint={(t) => { printSarfTransferLabel(t).catch(() => toast({ title: 'Hata', description: 'Etiket oluşturulamadı.', variant: 'destructive' })); }}
+                  onPrint={(t) => { printSarfTransferTutanak(t).catch(() => toast({ title: 'Hata', description: 'Tutanak oluşturulamadı.', variant: 'destructive' })); }}
                 />
               ))}
             </div>
