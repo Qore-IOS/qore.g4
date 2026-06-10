@@ -27,6 +27,7 @@ import {
 } from 'firebase/firestore';
 import { useEffect, useRef } from 'react';
 import { subDays } from 'date-fns';
+import { ACTIVE_DEVICE_FAULT_STATUSES } from '@/lib/device-faults';
 import { useAuth } from '@/contexts/auth-context';
 import type {
   Hospital,
@@ -599,8 +600,8 @@ export function useRecentDeviceFaultReports(daysWindow: number = 90) {
 }
 
 /**
- * Sadece açık (closed olmayan) arıza kayıtları. Arıza yönetimi anasayfası
- * için. Composite index: (companyId, status, openedAt DESC).
+ * Yalnızca aktif arıza kayıtları. Hem güncel `cozuldu` hem de legacy `closed`
+ * kayıtları kapsam dışında kalır. Composite index: (companyId, status, openedAt DESC).
  */
 export function useOpenDeviceFaultReports() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
@@ -611,8 +612,7 @@ export function useOpenDeviceFaultReports() {
         'deviceFaultReports',
         currentCompanyId,
         isSuperAdmin,
-        where('status', '!=', 'closed'),
-        orderBy('status'),
+        where('status', 'in', [...ACTIVE_DEVICE_FAULT_STATUSES]),
         orderBy('openedAt', 'desc'),
         limit(1000),
       ));
@@ -622,6 +622,8 @@ export function useOpenDeviceFaultReports() {
     enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 30 * 1000,
     gcTime: 5 * 60 * 1000,
+    refetchInterval: 30 * 1000,
+    refetchOnWindowFocus: true,
   });
 }
 

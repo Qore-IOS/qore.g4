@@ -8,11 +8,8 @@ import {
 import { cn } from '@/lib/utils';
 import BackButton from './BackButton';
 import { useRouter } from 'next/navigation';
-import { db } from '@/lib/firebase';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { useAuth } from '@/contexts/auth-context';
-import { matchesCompanyScope } from '@/lib/company-scope';
-import { useOpenDeviceFaultReports } from '@/hooks/useFirebaseQueries';
+import { useRealtimeOpenDeviceFaultReports } from '@/hooks/useRealtimeDeviceFaults';
+import { getFaultyDeviceIds } from '@/lib/device-faults';
 
 /* ─── Types ─── */
 
@@ -62,18 +59,12 @@ export default function TeknikServisPanel({
 }: TeknikServisPanelProps) {
   const router = useRouter();
   const [expandedPoolId, setExpandedPoolId] = useState<string | null>(null);
-  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   /* ── Open fault reports ── */
-  const { data: openFaults } = useOpenDeviceFaultReports();
+  const openFaults = useRealtimeOpenDeviceFaultReports();
 
-  const faultyDeviceIds = useMemo(() => {
-    const ids = new Set<string>();
-    openFaults?.forEach(f => {
-      if (f.deviceId) ids.add(f.deviceId);
-    });
-    return ids;
-  }, [openFaults]);
+  // Her iki arıza türü de cihazı arızalı yapar; panel türü yalnızca yönetim yetkisini belirler.
+  const faultyDeviceIds = useMemo(() => getFaultyDeviceIds(openFaults), [openFaults]);
 
   /* ── Device helpers ── */
 
