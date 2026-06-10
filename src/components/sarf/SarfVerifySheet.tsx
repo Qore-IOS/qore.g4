@@ -18,6 +18,15 @@ export interface SarfSheetStep {
   validate: (text: string) => string | null;
 }
 
+/* Mobil cihazlarda okutma geri bildirimi (Android Chrome; iOS web titreşimi desteklemez). */
+const haptic = (pattern: number | number[]) => {
+  try {
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) navigator.vibrate(pattern);
+  } catch { /* yoksay */ }
+};
+export const hapticSuccess = () => haptic(50);
+export const hapticError = () => haptic([60, 40, 60]);
+
 /* ——— Kamera önizlemeli tarama alanı ——— */
 const ScanViewport = ({
   ok, value, cameraOn, onScan,
@@ -151,7 +160,7 @@ const ScanViewport = ({
 /* ——— Adımlı doğrulama sheet'i ——— */
 export function SarfVerifySheet({
   open, title, subtitle, steps, startStep = 0, finishLabel = 'Teslimatı Tamamla',
-  busy, onClose, onStepMatched, onComplete,
+  busy, autoCompleteOnScan, onClose, onStepMatched, onComplete,
 }: {
   open: boolean;
   title: string;
@@ -160,6 +169,8 @@ export function SarfVerifySheet({
   startStep?: number;
   finishLabel?: string;
   busy?: boolean;
+  /** Son adım kamerayla okutulduğunda buton beklemeden tamamla. */
+  autoCompleteOnScan?: boolean;
   onClose: () => void;
   /** Bir adım doğrulandığında (ileri geçmeden hemen önce) çağrılır. */
   onStepMatched?: (stepIndex: number, value: string) => void;
@@ -170,6 +181,7 @@ export function SarfVerifySheet({
   const [values, setValues] = React.useState<string[]>([]);
   const [oks, setOks] = React.useState<boolean[]>([]);
   const [err, setErr] = React.useState('');
+  const autoFiredRef = React.useRef(false);
 
   React.useEffect(() => {
     if (open) {
@@ -177,6 +189,7 @@ export function SarfVerifySheet({
       setValues([]);
       setOks([]);
       setErr('');
+      autoFiredRef.current = false;
     }
   }, [open, startStep]);
 
@@ -201,16 +214,34 @@ export function SarfVerifySheet({
   const handleScan = (text: string) => {
     if (curOk) return;
     const e = cur.validate(text);
-    if (e === null) markOk(text);
-    else { setValues((prev) => { const n = [...prev]; n[step] = text; return n; }); setErr(e); }
+    if (e === null) {
+      hapticSuccess();
+      markOk(text);
+      // Okuma akışını kesintisiz kılmak için son adımda otomatik tamamla
+      // (yeşil onayın görünmesi için kısa bir gecikmeyle).
+      if (autoCompleteOnScan && step === steps.length - 1 && !autoFiredRef.current) {
+        autoFiredRef.current = true;
+        setTimeout(() => onComplete(), 450);
+      }
+    } else {
+      hapticError();
+      setValues((prev) => { const n = [...prev]; n[step] = text; return n; });
+      setErr(e);
+    }
   };
+
+  // Tamamlama başarısız olursa (busy true→false) buton ile tekrar denenebilsin.
+  React.useEffect(() => {
+    if (!busy) autoFiredRef.current = false;
+  }, [busy]);
 
   const next = () => {
     if (busy) return;
     let ok = curOk;
     if (!ok) {
       const e = cur.validate(curValue);
-      if (e !== null) { setErr(e); return; }
+      if (e !== null) { hapticError(); setErr(e); return; }
+      hapticSuccess();
       markOk(curValue);
       ok = true;
     }
@@ -218,6 +249,8 @@ export function SarfVerifySheet({
       setStep(step + 1);
       setErr('');
     } else {
+      if (autoFiredRef.current) return; // otomatik tamamlama zaten tetiklendi
+      autoFiredRef.current = true;
       onComplete();
     }
   };

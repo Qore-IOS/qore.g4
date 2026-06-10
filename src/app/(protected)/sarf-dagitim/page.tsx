@@ -25,12 +25,12 @@ import {
   printSarfTransferLabel, formatSarfDate, toDateSafe,
 } from '@/lib/sarf-transfer';
 
-type SarfTabId = 'clinics' | 'pending' | 'delivered';
+type SarfTabId = 'clinics' | 'pending' | 'transit' | 'delivered';
 
 const initialTab = (): SarfTabId => {
   if (typeof window === 'undefined') return 'clinics';
   const t = new URLSearchParams(window.location.search).get('tab');
-  return t === 'pending' || t === 'delivered' ? t : 'clinics';
+  return t === 'pending' || t === 'transit' || t === 'delivered' ? t : 'clinics';
 };
 
 /* ——— Poliklinik (mahal) kartı ——— */
@@ -174,19 +174,29 @@ export default function SarfDagitimPage() {
       (l.name || '').toLowerCase().includes(lower) || hospitalMahalKodu(l).toLowerCase().includes(lower));
   }, [labs, q]);
 
-  const filterTransfers = useCallback((status: 'pending' | 'delivered') => {
+  /* pending: henüz teslim alınmamış · transit: personel üzerinde (taşımada) */
+  const matchesQuery = useCallback((t: SarfTransfer) => {
+    if (!q) return true;
     const lower = q.toLowerCase();
-    return transfers.filter((t) => t.status === status && (
-      !q ||
-      t.code.toLowerCase().includes(lower) ||
+    return t.code.toLowerCase().includes(lower) ||
       (t.mahalKodu || '').toLowerCase().includes(lower) ||
-      (t.kurumAdi || '').toLowerCase().includes(lower)
-    ));
-  }, [transfers, q]);
+      (t.kurumAdi || '').toLowerCase().includes(lower);
+  }, [q]);
 
-  const pendingList = useMemo(() => filterTransfers('pending'), [filterTransfers]);
-  const deliveredList = useMemo(() => filterTransfers('delivered'), [filterTransfers]);
-  const pendingCount = useMemo(() => transfers.filter((t) => t.status === 'pending').length, [transfers]);
+  const pendingList = useMemo(
+    () => transfers.filter((t) => t.status === 'pending' && !t.receivedById && matchesQuery(t)),
+    [transfers, matchesQuery],
+  );
+  const transitList = useMemo(
+    () => transfers.filter((t) => t.status === 'pending' && !!t.receivedById && matchesQuery(t)),
+    [transfers, matchesQuery],
+  );
+  const deliveredList = useMemo(
+    () => transfers.filter((t) => t.status === 'delivered' && matchesQuery(t)),
+    [transfers, matchesQuery],
+  );
+  const pendingCount = useMemo(() => transfers.filter((t) => t.status === 'pending' && !t.receivedById).length, [transfers]);
+  const transitCount = useMemo(() => transfers.filter((t) => t.status === 'pending' && !!t.receivedById).length, [transfers]);
   const deliveredCount = useMemo(() => transfers.filter((t) => t.status === 'delivered').length, [transfers]);
 
   const handleConfirmDelivery = async () => {
@@ -242,6 +252,7 @@ export default function SarfDagitimPage() {
           tabs={[
             { id: 'clinics', label: 'Poliklinikler' },
             { id: 'pending', label: 'Kabul Bekleyenler', count: pendingCount, dot: SARF_AC.primary },
+            { id: 'transit', label: 'Taşımada', count: transitCount, dot: SARF_AC.accent },
             { id: 'delivered', label: 'Teslim Edilenler', count: deliveredCount, dot: 'var(--sarf-sage)' },
           ]}
           tab={tab}
@@ -279,6 +290,24 @@ export default function SarfDagitimPage() {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16, animation: 'sarfPopIn 320ms ease' }}>
               {pendingList.map((tr) => (
+                <SarfTransferCard
+                  key={tr.id}
+                  tr={tr}
+                  actionLabel="Teslimatı Doğrula"
+                  onAction={setVerifyTr}
+                  onPrint={(t) => { printSarfTransferLabel(t).catch(() => toast({ title: 'Hata', description: 'Etiket oluşturulamadı.', variant: 'destructive' })); }}
+                />
+              ))}
+            </div>
+          )
+        )}
+
+        {tab === 'transit' && (
+          transitList.length === 0 ? (
+            <SarfEmpty icon={<IconPackage />} text="Taşımada transfer yok. Personel paket QR'ını okutup teslim aldığında burada görünür." />
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, animation: 'sarfPopIn 320ms ease' }}>
+              {transitList.map((tr) => (
                 <SarfTransferCard
                   key={tr.id}
                   tr={tr}

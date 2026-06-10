@@ -50,7 +50,7 @@ export function SarfTransferCard({
           </div>
           {delivered
             ? <DeliveredPill />
-            : <PendingPill label={pendingLabel || (tr.receivedById ? 'Dağıtımda' : 'Kabul Bekliyor')} />}
+            : <PendingPill label={pendingLabel || (tr.receivedById ? 'Taşımada' : 'Kabul Bekliyor')} />}
         </div>
 
         <ItemChips items={tr.items || []} />
