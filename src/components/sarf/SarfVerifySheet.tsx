@@ -193,6 +193,12 @@ export function SarfVerifySheet({
     }
   }, [open, startStep]);
 
+  // Tamamlama başarısız olursa (busy true→false) buton ile tekrar denenebilsin.
+  // Not: erken dönüşten (if (!open) return null) ÖNCE olmalı — hook sırası sabit kalır.
+  React.useEffect(() => {
+    if (!busy) autoFiredRef.current = false;
+  }, [busy]);
+
   if (!open) return null;
 
   const cur = steps[step];
@@ -229,11 +235,6 @@ export function SarfVerifySheet({
       setErr(e);
     }
   };
-
-  // Tamamlama başarısız olursa (busy true→false) buton ile tekrar denenebilsin.
-  React.useEffect(() => {
-    if (!busy) autoFiredRef.current = false;
-  }, [busy]);
 
   const next = () => {
     if (busy) return;
