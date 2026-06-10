@@ -120,6 +120,7 @@ const LiquidGlassSelector = ({
 }) => {
   // Spring configs for different properties
   const positionSpring = { damping: 18, stiffness: 150, mass: 0.8 };
+  const morphSpring = { damping: 12, stiffness: 200, mass: 0.5 };
 
   const springX = useSpring(x, positionSpring);
   const springWidth = useSpring(width, positionSpring);
@@ -129,21 +130,37 @@ const LiquidGlassSelector = ({
   const prevXRef = useRef(x);
   const velocityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Sıvı hissi: hareket halindeyken kırılma şiddeti artar (strength boost) ve
-  // spekülar parlama güçlenir. NOT: scale/skew deformasyonu bilinçli olarak
-  // kaldırıldı — CSS transform, Chromium'da içerideki SVG backdrop
-  // kırılmasını bozuyor; konum/genişlik bu yüzden left/width ile sürülür.
+  // Sıvı squash & stretch deformasyonu. CSS transform'ların SVG backdrop
+  // kırılmasıyla uyumlu olduğu headless Chromium yeniden üretimiyle
+  // kanıtlandı (gerçek sorun mix-blend-mode'lu sheen katmanıydı).
+  const scaleX = useSpring(1, morphSpring);
+  const scaleY = useSpring(1, morphSpring);
+  const skewX = useSpring(0, morphSpring);
+
   useEffect(() => {
     const deltaX = x - prevXRef.current;
 
     if (Math.abs(deltaX) > 2) {
       setIsMoving(true);
 
+      // Calculate deformation based on movement direction and speed
+      const deformAmount = Math.min(Math.abs(deltaX) / 30, 0.25);
+      const direction = deltaX > 0 ? 1 : -1;
+
+      // Stretch horizontally, compress vertically (liquid squash & stretch)
+      scaleX.set(1 + deformAmount * 0.8);
+      scaleY.set(1 - deformAmount * 0.3);
+      skewX.set(direction * deformAmount * 8);
+
       if (velocityTimeoutRef.current) {
         clearTimeout(velocityTimeoutRef.current);
       }
 
+      // Bounce back to original shape
       velocityTimeoutRef.current = setTimeout(() => {
+        scaleX.set(1);
+        scaleY.set(1);
+        skewX.set(0);
         setIsMoving(false);
       }, 80);
     }
@@ -157,7 +174,7 @@ const LiquidGlassSelector = ({
         clearTimeout(velocityTimeoutRef.current);
       }
     };
-  }, [x, width, springX, springWidth]);
+  }, [x, width, springX, springWidth, scaleX, scaleY, skewX]);
 
   if (!isVisible) return null;
 
@@ -171,7 +188,10 @@ const LiquidGlassSelector = ({
         top: '50%',
         marginTop: -height / 2,
         zIndex: 5,
-        willChange: 'auto', // backdrop-filter'ın sayfayı görmesi için (backdrop root engeli)
+        scaleX,
+        scaleY,
+        skewX,
+        willChange: 'auto', // framer'ın will-change:opacity eklemesini engelle (backdrop root)
       }}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
@@ -779,10 +799,9 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
   return (
     <div className={cn(className)}>
       <TooltipProvider delayDuration={150}>
-        {/* Kabuk: düz div — mobil dock ile aynı yapı. Kabukta ve atalarında
-            CSS transform YOK: Chromium'da transform'lu zincir, SVG backdrop
-            kırılmasını bozuyordu. Gizleme yalnız opacity ile; auto-fit
-            ölçeği transform yerine layout-tabanlı zoom ile uygulanır. */}
+        {/* Kabuk: düz div — mobil dock ile aynı yapı. Camı bozan gerçek neden
+            sheen katmanındaki mix-blend-mode idi (globals.css'teki nota bakın);
+            transform'suz/zoom'lu bu sade kurulum yine de korunuyor. */}
         <div
           ref={dockRef}
           className={cn(
