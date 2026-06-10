@@ -183,6 +183,7 @@ const LiquidGlassSelector = ({
         scaleX,
         scaleY,
         skewX,
+        willChange: 'auto', // backdrop-filter'ın sayfayı görmesi için (backdrop root engeli)
       }}
       initial={{ opacity: 0, scale: 0.85 }}
       animate={{ opacity: 1, scale: 1 }}
@@ -478,6 +479,7 @@ const DockItem = ({
                 marginBottom: '4px',
                 zIndex: 'var(--z-float)',
                 whiteSpace: 'nowrap',
+                willChange: 'auto',
               } as React.CSSProperties}
             >
               {submenuGlass}
@@ -513,6 +515,7 @@ const DockItem = ({
                           style={{
                             zIndex: 'var(--z-float)',
                             whiteSpace: 'nowrap',
+                            willChange: 'auto',
                           } as React.CSSProperties}
                         >
                           {submenuGlass}
@@ -830,7 +833,10 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
             scale: fitScale,
             pointerEvents: isVisible ? 'auto' : 'none',
           }}
-          style={{ transformOrigin: 'bottom center' }}
+          /* willChange:auto — framer'ın eklediği will-change:opacity, Chromium'da
+             elemanı backdrop root yapıp içerideki backdrop-filter'ın sayfayı
+             örneklemesini engelliyordu (cam "düz" kalıyordu). */
+          style={{ transformOrigin: 'bottom center', willChange: 'auto' }}
           transition={{ duration: 0.3, ease: 'easeInOut' }}
           onMouseMove={handleMouseMove}
           onMouseEnter={handleMouseEnter}
