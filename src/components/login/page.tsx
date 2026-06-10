@@ -19,7 +19,7 @@ export default function LoginPage() {
   const { login } = useAuth();
   const { toast } = useToast();
   const { resolvedTheme } = useTheme();
-  const logoSrc = resolvedTheme === 'light' ? '/blk.png' : '/wt.webp';
+  const logoSrc = resolvedTheme === 'light' ? '/blk.png' : '/wt.png';
 
   const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
