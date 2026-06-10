@@ -125,7 +125,7 @@ test('SuperAdmin can write a device in any company', async () => {
 });
 
 
-test('Company A user can read own scoped definition data', async () => {
+test('Company A user can read shared definition data created by Company A', async () => {
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
     await setDoc(doc(ctx.firestore(), 'def_labGroups', 'labGroupA'), {
       name: 'Hematoloji',
@@ -136,7 +136,7 @@ test('Company A user can read own scoped definition data', async () => {
   await assertSucceeds(getDoc(doc(db, 'def_labGroups', 'labGroupA')));
 });
 
-test('Company A user cannot read Company B scoped definition data', async () => {
+test('Company A user can read shared definition data created by Company B', async () => {
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
     await setDoc(doc(ctx.firestore(), 'def_labGroups', 'labGroupB'), {
       name: 'Biyokimya',
@@ -144,7 +144,22 @@ test('Company A user cannot read Company B scoped definition data', async () => 
     });
   });
   const db = authedAsCompanyA();
-  await assertFails(getDoc(doc(db, 'def_labGroups', 'labGroupB')));
+  await assertSucceeds(getDoc(doc(db, 'def_labGroups', 'labGroupB')));
+});
+
+
+test('Authenticated user can create a company-independent shared definition', async () => {
+  const db = authedAsCompanyA();
+  await assertSucceeds(
+    setDoc(doc(db, 'def_brands', 'sharedBrand'), { name: 'Ortak Marka' }),
+  );
+});
+
+test('Unauthenticated user cannot read shared definitions', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'def_brands', 'sharedBrand'), { name: 'Ortak Marka' });
+  });
+  await assertFails(getDoc(doc(unauthed(), 'def_brands', 'sharedBrand')));
 });
 
 // ============================================================================
