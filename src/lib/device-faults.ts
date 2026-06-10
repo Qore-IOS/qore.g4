@@ -8,7 +8,7 @@ export const ACTIVE_DEVICE_FAULT_STATUSES = [
 type ActiveDeviceFaultStatus = (typeof ACTIVE_DEVICE_FAULT_STATUSES)[number];
 type DeviceFaultStatus = ActiveDeviceFaultStatus | 'cozuldu' | 'closed';
 
-type DeviceFaultTarget = {
+export type DeviceFaultTarget = {
   deviceId?: string;
   affectsAllDevices?: boolean;
   affectedDeviceIds?: string[];
@@ -26,4 +26,12 @@ export function getAffectedDeviceIds(fault: DeviceFaultTarget): string[] {
     : [fault.deviceId];
 
   return [...new Set(ids.filter((id): id is string => typeof id === 'string' && id.length > 0))];
+}
+
+export function getFaultyDeviceIds(faults: readonly DeviceFaultTarget[]): Set<string> {
+  const deviceIds = new Set<string>();
+  faults.forEach((fault) => {
+    getAffectedDeviceIds(fault).forEach((deviceId) => deviceIds.add(deviceId));
+  });
+  return deviceIds;
 }

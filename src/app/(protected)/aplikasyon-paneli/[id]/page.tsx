@@ -26,9 +26,10 @@ import { db } from '@/lib/firebase';
 import type { Hospital, Device, PersonalStockItem, MaintenancePlan, MaintenanceLog, PeriodicPartChange, PeriodicPartChangeLog } from '@/lib/types';
 import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
-import { withCompanyScope } from '@/lib/company-scope';
+import { matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { classifyStopFault } from '@/lib/stop-fault';
+import { getAffectedDeviceIds } from '@/lib/device-faults';
 import { useAuth } from '@/contexts/auth-context';
 import {
   Dialog,
@@ -159,21 +160,28 @@ export default function AplikasyonPaneliDetayPage() {
       const idsMap: Record<string, string[]> = {};
       snap.docs.forEach((d) => {
         const data = d.data();
-        if (data.deviceId && data.faultType && deviceIds.has(data.deviceId)) {
-          // Track all fault report IDs per device
-          if (!idsMap[data.deviceId]) idsMap[data.deviceId] = [];
-          idsMap[data.deviceId].push(d.id);
-          // For aplikasyon panel: aplikasyon is primary (red), teknik_servis is secondary (amber)
-          // If device has both, prefer aplikasyon
-          if (map[data.deviceId] === 'aplikasyon') return;
-          map[data.deviceId] = data.faultType;
-        }
+        if (!data.faultType || !matchesCompanyScope(data, currentCompanyId, isSuperAdmin)) return;
+
+        getAffectedDeviceIds(data).forEach((deviceId) => {
+          if (!deviceIds.has(deviceId)) return;
+
+          if (!idsMap[deviceId]) idsMap[deviceId] = [];
+          if (!idsMap[deviceId].includes(d.id)) {
+            if (data.faultType === 'aplikasyon') idsMap[deviceId].unshift(d.id);
+            else idsMap[deviceId].push(d.id);
+          }
+
+          // Cihazda iki tür arıza da varsa bu panelin kendi arıza türünü önceliklendir.
+          if (map[deviceId] !== 'aplikasyon') {
+            map[deviceId] = data.faultType;
+          }
+        });
       });
       setOpenFaultMap(map);
       setOpenFaultReportIds(idsMap);
     });
     return () => unsub();
-  }, [devicesByHospital]);
+  }, [devicesByHospital, currentCompanyId, isSuperAdmin]);
 
   // Fetch fault history for all devices
   useEffect(() => {
@@ -1170,7 +1178,7 @@ export default function AplikasyonPaneliDetayPage() {
             <DialogDescription>
               {selectedDeviceFaultType === 'aplikasyon'
                 ? 'Bu cihaz için bir aplikasyon arıza kaydı bulunmaktadır. Yapmak istediğiniz işlemi seçin.'
-                : 'Bu cihaz için bir teknik servis arıza kaydı bulunmaktadır. Bu arızayı yalnızca teknik servis personeli yönetebilir.'}
+                : 'Bu cihaz için bir teknik servis arıza kaydı bulunmaktadır. Arıza kaydı salt okunur görüntülenir; aplikasyon işlem formu yine de oluşturabilirsiniz.'}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="flex-col sm:flex-col sm:space-x-0 gap-2 pt-4">
@@ -1197,6 +1205,12 @@ export default function AplikasyonPaneliDetayPage() {
                     disabled={!faultIdForSelectedDevice}
                   >
                     <Wrench className="mr-2 h-4 w-4" /> Arıza Kaydını Görüntüle (Salt Okunur)
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => selectedDevice?.id && navigateToAction(`/aplikasyon-paneli/islem-formu/${selectedDevice.id}`)}
+                  >
+                    <FilePenLine className="mr-2 h-4 w-4" /> Aplikasyon İşlem Formu Aç
                   </Button>
                   <Button
                     variant="outline"

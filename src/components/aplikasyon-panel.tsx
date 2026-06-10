@@ -7,13 +7,9 @@ import { FlaskConical, ArrowLeft, Layers, ChevronRight, FileText, Package, Loade
 import { cn } from '@/lib/utils';
 import BackButton from './BackButton';
 import { useRouter } from 'next/navigation';
-import { db } from '@/lib/firebase';
 import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { useAuth } from '@/contexts/auth-context';
-import { matchesCompanyScope } from '@/lib/company-scope';
-import { useOpenDeviceFaultReports } from '@/hooks/useFirebaseQueries';
-import { getAffectedDeviceIds } from '@/lib/device-faults';
+import { useRealtimeOpenDeviceFaultReports } from '@/hooks/useRealtimeDeviceFaults';
+import { getFaultyDeviceIds } from '@/lib/device-faults';
 
 
 
@@ -61,19 +57,12 @@ export default function AplikasyonPanel({
 }: AplikasyonPanelProps) {
   const router = useRouter();
   const [expandedPoolId, setExpandedPoolId] = useState<string | null>(null);
-  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   // Open fault reports - deviceIds with active faults
-  const { data: openFaults } = useOpenDeviceFaultReports();
+  const openFaults = useRealtimeOpenDeviceFaultReports();
 
-  const faultyDeviceIds = useMemo(() => {
-    const ids = new Set<string>();
-    openFaults?.forEach(f => {
-      if (f.faultType !== 'aplikasyon') return;
-      getAffectedDeviceIds(f).forEach(deviceId => ids.add(deviceId));
-    });
-    return ids;
-  }, [openFaults]);
+  // Her iki arıza türü de cihazı arızalı yapar; panel türü yalnızca yönetim yetkisini belirler.
+  const faultyDeviceIds = useMemo(() => getFaultyDeviceIds(openFaults), [openFaults]);
 
   // Pre-group devices by hospital once per `devices` change so each card does an
   // O(1) map lookup instead of re-filtering + re-sorting the full device list

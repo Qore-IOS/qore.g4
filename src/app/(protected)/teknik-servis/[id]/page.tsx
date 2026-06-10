@@ -29,9 +29,10 @@ import { tr } from 'date-fns/locale';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
-import { withCompanyScope } from '@/lib/company-scope';
+import { matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { classifyStopFault } from '@/lib/stop-fault';
+import { getAffectedDeviceIds } from '@/lib/device-faults';
 import {
   Dialog,
   DialogContent,
@@ -158,21 +159,28 @@ export default function TeknikServisDetayPage() {
       const idsMap: Record<string, string[]> = {};
       snap.docs.forEach((d) => {
         const data = d.data();
-        if (data.deviceId && data.faultType && deviceIds.has(data.deviceId)) {
-          // Track all fault report IDs per device
-          if (!idsMap[data.deviceId]) idsMap[data.deviceId] = [];
-          idsMap[data.deviceId].push(d.id);
-          // For teknik servis panel: teknik_servis is primary (red), aplikasyon is secondary (amber)
-          // If device has both, prefer teknik_servis
-          if (map[data.deviceId] === 'teknik_servis') return;
-          map[data.deviceId] = data.faultType;
-        }
+        if (!data.faultType || !matchesCompanyScope(data, currentCompanyId, isSuperAdmin)) return;
+
+        getAffectedDeviceIds(data).forEach((deviceId) => {
+          if (!deviceIds.has(deviceId)) return;
+
+          if (!idsMap[deviceId]) idsMap[deviceId] = [];
+          if (!idsMap[deviceId].includes(d.id)) {
+            if (data.faultType === 'teknik_servis') idsMap[deviceId].unshift(d.id);
+            else idsMap[deviceId].push(d.id);
+          }
+
+          // Cihazda iki tür arıza da varsa bu panelin kendi arıza türünü önceliklendir.
+          if (map[deviceId] !== 'teknik_servis') {
+            map[deviceId] = data.faultType;
+          }
+        });
       });
       setOpenFaultMap(map);
       setOpenFaultReportIds(idsMap);
     });
     return () => unsub();
-  }, [devicesByHospital]);
+  }, [devicesByHospital, currentCompanyId, isSuperAdmin]);
 
   // Fetch fault history for all devices
   useEffect(() => {
@@ -1192,7 +1200,7 @@ export default function TeknikServisDetayPage() {
             <DialogDescription>
               {selectedDeviceFaultType === 'teknik_servis'
                 ? 'Bu cihaz için bir teknik servis arıza kaydı bulunmaktadır. Yapmak istediğiniz işlemi seçin.'
-                : 'Bu cihaz için bir aplikasyon arıza kaydı bulunmaktadır. Bu arızayı yalnızca aplikasyon personeli yönetebilir.'}
+                : 'Bu cihaz için bir aplikasyon arıza kaydı bulunmaktadır. Arıza kaydı salt okunur görüntülenir; teknik servis işlem formu yine de oluşturabilirsiniz.'}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="flex-col sm:flex-col sm:space-x-0 gap-2 pt-4">
@@ -1220,6 +1228,12 @@ export default function TeknikServisDetayPage() {
                     className="cihaz-tool-item px-4 py-2.5 text-sm font-medium bg-[var(--dashboard-surface-2)] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <FlaskConical className="h-4 w-4" /> Arıza Kaydını Görüntüle (Salt Okunur)
+                  </button>
+                  <button
+                    onClick={() => selectedDevice?.id && navigateToAction(`/teknik-servis/islem-formu/${selectedDevice.id}`)}
+                    className="cihaz-tool-item px-4 py-2.5 text-sm font-medium flex items-center justify-center gap-2"
+                  >
+                    <FilePenLine className="h-4 w-4" /> Teknik Servis İşlem Formu Aç
                   </button>
                   <button
                     onClick={() => setIsModalOpen(false)}

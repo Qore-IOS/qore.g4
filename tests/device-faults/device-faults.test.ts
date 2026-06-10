@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getAffectedDeviceIds, isActiveDeviceFaultStatus } from '../../src/lib/device-faults';
+import { getAffectedDeviceIds, getFaultyDeviceIds, isActiveDeviceFaultStatus } from '../../src/lib/device-faults';
 
 test('yalnızca gerçekten açık arıza durumlarını aktif kabul eder', () => {
   assert.equal(isActiveDeviceFaultStatus('atama_bekliyor'), true);
@@ -24,4 +24,16 @@ test('tüm laboratuvarı etkileyen arızalarda etkilenen cihazları benzersiz sa
     affectsAllDevices: true,
     affectedDeviceIds: ['device-1', 'device-2', 'device-1', ''],
   }), ['device-1', 'device-2']);
+});
+
+test('teknik servis ve aplikasyon arızalarını aynı cihaz sağlık sayımına dahil eder', () => {
+  assert.deepEqual([...getFaultyDeviceIds([
+    { deviceId: 'teknik-device' },
+    { deviceId: 'aplikasyon-device' },
+    {
+      deviceId: 'lab-fault-source',
+      affectsAllDevices: true,
+      affectedDeviceIds: ['lab-device-1', 'lab-device-2'],
+    },
+  ])], ['teknik-device', 'aplikasyon-device', 'lab-device-1', 'lab-device-2']);
 });
