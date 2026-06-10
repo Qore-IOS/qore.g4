@@ -342,9 +342,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </PageShell>
 
         {!isMobile && !isTeknisyen && (
-          /* Ortalanma flex ile yapılır (mobil dock deseni) — translate-x
-             KULLANILMAZ: transform'lu ata, Chromium'da dock camının SVG
-             backdrop kırılmasını bozuyordu. */
+          /* Ortalanma flex ile (mobil dock deseni). Not: dock camını bozan
+             gerçek neden sheen'deki mix-blend-mode idi; flex ortalama yine
+             de translate'e eşdeğer ve daha sade olduğu için korunuyor. */
           <div
              className="fixed left-0 right-0 flex justify-center pointer-events-none"
              style={{ bottom: 'var(--dock-gap)', zIndex: 'var(--z-dock)' } as React.CSSProperties}

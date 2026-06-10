@@ -3076,12 +3076,15 @@
    --lqg-mx / --lqg-my : imlecin yüzey içindeki normalize konumu (JS yazar)
    --lqg-ang           : ışık yönü — rim gradyanının açısı (JS yazar)
    --lqg-r             : köşe yarıçapı */
+/* DİKKAT: Bu ağaçta isolation/mix-blend-mode KULLANMAYIN. Blend'li bir
+   çocuk (+isolate kapsayıcı), kardeş .lqg-refract'ın backdrop-filter'ının
+   sayfa arkasını örneklemesini engelliyor — headless Chromium yeniden
+   üretimiyle kanıtlandı (masaüstü dock'un "düz cam" kalmasının kök nedeni). */
 .lqg-surface {
   position: absolute;
   inset: 0;
   pointer-events: none;
   border-radius: var(--lqg-r, 24px);
-  isolation: isolate;
 }
 .lqg-layer {
   position: absolute;
@@ -3126,7 +3129,8 @@
     inset 0 -10px 22px rgba(255, 255, 255, 0.05),
     inset 0 12px 24px rgba(0, 0, 0, 0.18);
 }
-/* İmleci takip eden spekülar parlama + yavaş ortam ışıltısı */
+/* İmleci takip eden spekülar parlama + yavaş ortam ışıltısı.
+   mix-blend-mode bilinçli olarak YOK (yukarıdaki nota bakın). */
 .lqg-sheen {
   background:
     radial-gradient(
@@ -3140,7 +3144,6 @@
       rgba(255, 255, 255, 0.2) 0%,
       transparent 70%
     );
-  mix-blend-mode: screen;
   animation: lqg-ambient 7s ease-in-out infinite;
 }
 .dark .lqg-sheen {
