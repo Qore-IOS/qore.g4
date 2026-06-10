@@ -342,18 +342,25 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </PageShell>
 
         {!isMobile && !isTeknisyen && (
+          /* Ortalanma flex ile yapılır (mobil dock deseni) — translate-x
+             KULLANILMAZ: transform'lu ata, Chromium'da dock camının SVG
+             backdrop kırılmasını bozuyordu. */
           <div
-             className="fixed left-1/2 -translate-x-1/2"
+             className="fixed left-0 right-0 flex justify-center pointer-events-none"
              style={{ bottom: 'var(--dock-gap)', zIndex: 'var(--z-dock)' } as React.CSSProperties}
-             onMouseEnter={handleMouseEnter}
-             onMouseLeave={handleMouseLeave}
           >
-            <Dock
-                items={dockItems}
-                currentView={currentViewKey}
-                setTheme={setTheme}
-                isVisible={isVisible}
-            />
+            <div
+              className="pointer-events-auto"
+              onMouseEnter={handleMouseEnter}
+              onMouseLeave={handleMouseLeave}
+            >
+              <Dock
+                  items={dockItems}
+                  currentView={currentViewKey}
+                  setTheme={setTheme}
+                  isVisible={isVisible}
+              />
+            </div>
           </div>
         )}
 

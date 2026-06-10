@@ -120,7 +120,6 @@ const LiquidGlassSelector = ({
 }) => {
   // Spring configs for different properties
   const positionSpring = { damping: 18, stiffness: 150, mass: 0.8 };
-  const morphSpring = { damping: 12, stiffness: 200, mass: 0.5 };
 
   const springX = useSpring(x, positionSpring);
   const springWidth = useSpring(width, positionSpring);
@@ -130,35 +129,21 @@ const LiquidGlassSelector = ({
   const prevXRef = useRef(x);
   const velocityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Deformation values based on velocity
-  const scaleX = useSpring(1, morphSpring);
-  const scaleY = useSpring(1, morphSpring);
-  const skewX = useSpring(0, morphSpring);
-
+  // Sıvı hissi: hareket halindeyken kırılma şiddeti artar (strength boost) ve
+  // spekülar parlama güçlenir. NOT: scale/skew deformasyonu bilinçli olarak
+  // kaldırıldı — CSS transform, Chromium'da içerideki SVG backdrop
+  // kırılmasını bozuyor; konum/genişlik bu yüzden left/width ile sürülür.
   useEffect(() => {
     const deltaX = x - prevXRef.current;
 
     if (Math.abs(deltaX) > 2) {
       setIsMoving(true);
 
-      // Calculate deformation based on movement direction and speed
-      const deformAmount = Math.min(Math.abs(deltaX) / 30, 0.25);
-      const direction = deltaX > 0 ? 1 : -1;
-
-      // Stretch horizontally, compress vertically (liquid squash & stretch)
-      scaleX.set(1 + deformAmount * 0.8);
-      scaleY.set(1 - deformAmount * 0.3);
-      skewX.set(direction * deformAmount * 8);
-
       if (velocityTimeoutRef.current) {
         clearTimeout(velocityTimeoutRef.current);
       }
 
-      // Bounce back to original shape
       velocityTimeoutRef.current = setTimeout(() => {
-        scaleX.set(1);
-        scaleY.set(1);
-        skewX.set(0);
         setIsMoving(false);
       }, 80);
     }
@@ -172,7 +157,7 @@ const LiquidGlassSelector = ({
         clearTimeout(velocityTimeoutRef.current);
       }
     };
-  }, [x, width, springX, springWidth, scaleX, scaleY, skewX]);
+  }, [x, width, springX, springWidth]);
 
   if (!isVisible) return null;
 
@@ -180,20 +165,17 @@ const LiquidGlassSelector = ({
     <motion.div
       className="absolute pointer-events-none"
       style={{
-        x: springX,
+        left: springX,
         width: springWidth,
         height: height,
         top: '50%',
-        translateY: '-50%',
+        marginTop: -height / 2,
         zIndex: 5,
-        scaleX,
-        scaleY,
-        skewX,
         willChange: 'auto', // backdrop-filter'ın sayfayı görmesi için (backdrop root engeli)
       }}
-      initial={{ opacity: 0, scale: 0.85 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.85 }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
       transition={{ duration: 0.1, ease: "easeOut" }}
     >
       {/* Shadow layer - soft, colored shadow */}
@@ -797,23 +779,21 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
   return (
     <div className={cn(className)}>
       <TooltipProvider delayDuration={150}>
-        {/* Kabuk: düz div — mobil dock ile aynı yapı. Görünürlük CSS
-            transition'la; kabukta backdrop örneklemesini bozacak hiçbir
-            grup oluşturucu yok. */}
+        {/* Kabuk: düz div — mobil dock ile aynı yapı. Kabukta ve atalarında
+            CSS transform YOK: Chromium'da transform'lu zincir, SVG backdrop
+            kırılmasını bozuyordu. Gizleme yalnız opacity ile; auto-fit
+            ölçeği transform yerine layout-tabanlı zoom ile uygulanır. */}
         <div
           ref={dockRef}
           className={cn(
             "relative flex h-[72px] items-center gap-1 px-3 py-2.5 rounded-full",
-            "transition-[transform,opacity] duration-300 ease-in-out",
+            "transition-opacity duration-300 ease-in-out",
             "shadow-[0_12px_32px_rgba(0,0,0,0.16),0_3px_8px_rgba(0,0,0,0.08)]",
             "dark:shadow-[0_12px_36px_rgba(0,0,0,0.5),0_3px_8px_rgba(0,0,0,0.3)]",
             !isVisible && "opacity-0 pointer-events-none",
             isLiquidMode && isMouseInDock && "[&_*]:!cursor-none !cursor-none"
           )}
-          style={{
-            transformOrigin: 'bottom center',
-            transform: `translateY(${isVisible ? 0 : 20}px) scale(${fitScale})`,
-          }}
+          style={{ zoom: fitScale } as React.CSSProperties}
           onMouseMove={handleMouseMove}
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
