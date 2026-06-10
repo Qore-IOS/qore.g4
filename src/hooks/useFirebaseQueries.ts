@@ -1005,6 +1005,63 @@ export function usePaginatedDepotStock(params: {
 }
 
 /**
+ * Server-side paginated product codes.
+ *
+ * Calls the `getPaginatedProductCodes` server action so that only the requested
+ * page of products + column values + brand counts travel down the wire.
+ * Mirrors usePaginatedDepotStock's caching strategy.
+ */
+export function usePaginatedProductCodes(params: {
+  page: number;
+  pageSize: number;
+  sortField: string;
+  sortDirection: 'asc' | 'desc';
+  searchTerm?: string;
+  columnFilters?: Record<string, string[]>;
+  brandTab?: string;
+}) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  const {
+    page, pageSize, sortField, sortDirection, searchTerm, columnFilters, brandTab,
+  } = params;
+
+  // Stable cache key derived from sorted column filter entries.
+  const filterKey = columnFilters
+    ? Object.entries(columnFilters)
+        .map(([k, v]) => `${k}:${[...v].sort().join('|')}`)
+        .sort()
+        .join(';')
+    : '';
+
+  return useQuery({
+    queryKey: [
+      'productCodesPaginated', page, pageSize,
+      sortField, sortDirection, searchTerm ?? '',
+      filterKey, brandTab ?? 'ALL',
+      currentCompanyId, isSuperAdmin,
+    ],
+    queryFn: async () => {
+      const { getPaginatedProductCodes } = await import('@/actions/stokActions');
+      return getPaginatedProductCodes({
+        page,
+        pageSize,
+        sortField,
+        sortDirection,
+        searchTerm,
+        columnFilters,
+        brandTab,
+        companyId: currentCompanyId,
+        isSuperAdmin,
+      });
+    },
+    enabled: !!currentCompanyId || isSuperAdmin,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    placeholderData: (prev) => prev,
+  });
+}
+
+/**
  * Unshipped depot stock - server-side filtered by (depotId, isShipped=false).
  * Used by panels that only operate on un-shipped inventory (e.g., StokYonetimi).
  * Returns ALL un-shipped items for the depot (no client-side cap).
