@@ -15,6 +15,7 @@ import type { DockItemData, NotificationItem } from "@/hooks/use-dock";
 import Image from "next/image";
 import { useIconMappings, getIconSrc } from "@/hooks/useIconMappings";
 import { CalendarDockPanel } from "./dock/CalendarDockPanel";
+import { LiquidGlassSurface } from "@/components/ui/liquid-glass";
 
 // --- HELPERS ---
 
@@ -166,17 +167,21 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
         style={{ paddingBottom: "env(safe-area-inset-bottom, 16px)" }}
       >
         <div className="pointer-events-auto px-4 pb-4 w-full max-w-md">
-          {/* Dock Container */}
+          {/* Dock Container — Apple Liquid Glass yüzeyi (eski neumorphic kabuk kalktı) */}
           <div
             className={cn(
               "relative flex items-center justify-between h-14 px-4 rounded-full transition-all duration-300",
               isDark
-                ? "bg-white/10 backdrop-blur-xl border border-white/20 shadow-[0_4px_30px_rgba(0,0,0,0.3)]"
-                : "bg-[#e0e0e0] shadow-[6px_6px_12px_#bebebe,-6px_-6px_12px_#ffffff]"
+                ? "shadow-[0_10px_32px_rgba(0,0,0,0.45),0_2px_8px_rgba(0,0,0,0.25)]"
+                : "shadow-[0_12px_32px_rgba(0,0,0,0.16),0_3px_8px_rgba(0,0,0,0.08)]"
             )}
           >
+            <LiquidGlassSurface radius={28} strength={18} dispersion={0.28} blur={3} bezel={12} fallbackBlur={22} shine={false} />
+
             {/* Left - Profile Button */}
-            <MobileProfileButton isDark={isDark} />
+            <div className="relative">
+              <MobileProfileButton isDark={isDark} />
+            </div>
 
             {/* Center - Logo Button (Floating Above) */}
             {/* Tap: Open menu | Long press: Open AI */}
@@ -205,7 +210,7 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
             </div>
 
             {/* Right - Notification Button */}
-            <div className="flex items-center">
+            <div className="relative flex items-center">
               {notificationItem ? (
                 <NotificationsBell
                   triggerClassName={cn(
@@ -291,8 +296,8 @@ function FullScreenMenu({ items, onClose, isDark, onCalendarClick }: FullScreenM
       className={cn(
         "fixed inset-0 z-50 flex flex-col",
         isDark
-          ? "bg-black/95 backdrop-blur-xl"
-          : "bg-[#e0e0e0]"
+          ? "bg-black/70 backdrop-blur-2xl"
+          : "bg-white/60 backdrop-blur-2xl"
       )}
       style={{
         paddingTop: "env(safe-area-inset-top, 20px)",
@@ -312,8 +317,8 @@ function FullScreenMenu({ items, onClose, isDark, onCalendarClick }: FullScreenM
           className={cn(
             "p-3 rounded-full transition-all duration-200",
             isDark
-              ? "bg-white/10 text-white hover:bg-white/20"
-              : "bg-[#e0e0e0] text-[#333] shadow-[4px_4px_8px_#bebebe,-4px_-4px_8px_#ffffff] active:shadow-[inset_4px_4px_8px_#bebebe,inset_-4px_-4px_8px_#ffffff]"
+              ? "bg-white/10 text-white hover:bg-white/20 border border-white/15"
+              : "bg-white/55 text-[#333] border border-white/70 backdrop-blur-xl shadow-[0_8px_24px_rgba(0,0,0,0.12),inset_0_1px_1px_rgba(255,255,255,0.8)] active:scale-95"
           )}
         >
           <X size={24} />
@@ -430,7 +435,7 @@ function FullScreenMenu({ items, onClose, isDark, onCalendarClick }: FullScreenM
               "p-3 rounded-2xl",
               isDark
                 ? "bg-white/5 border border-white/10"
-                : "bg-[#e0e0e0] shadow-[4px_4px_8px_#bebebe,-4px_-4px_8px_#ffffff]"
+                : "bg-white/55 border border-white/70 backdrop-blur-xl shadow-[0_8px_24px_rgba(0,0,0,0.10),inset_0_1px_1px_rgba(255,255,255,0.8)]"
             )}
           >
             <ThemeToggleDock />

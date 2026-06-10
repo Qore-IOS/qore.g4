@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { cn } from '@/lib/utils';
+import { LiquidGlassSurface } from '@/components/ui/liquid-glass';
 import {
   Home,
   ShieldAlert,
@@ -430,6 +431,9 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
 
       {/* Mobile bottom nav */}
       <nav className="qore-technic-bottom-nav md:hidden" aria-label="QOREtechnic menü">
+        {/* Apple Liquid Glass yüzeyi — eski düz cam (CSS background) yerine canlı kırılma */}
+        <LiquidGlassSurface radius={18} strength={18} dispersion={0.26} blur={4} bezel={12} fallbackBlur={20} shine={false} />
+
         {/* Backdrop for closing popovers */}
         <div 
           className={cn('qt-popover-overlay', expandedMenu && 'qt-popover-overlay--open')}
@@ -439,7 +443,8 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
 
         {/* Popover Container */}
         <div className={cn('qt-mobile-popover', expandedMenu && 'qt-mobile-popover--open')} aria-hidden={!expandedMenu}>
-          {expandedMenu && 
+          <LiquidGlassSurface radius={20} strength={14} dispersion={0.22} blur={5} bezel={10} fallbackBlur={26} shine={false} />
+          {expandedMenu &&
             mobileNavItems.find(g => g.key === expandedMenu)?.subItems?.map((sub, idx) => {
               const SubIcon = sub.icon;
               return (

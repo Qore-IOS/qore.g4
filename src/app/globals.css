@@ -4366,17 +4366,13 @@ html.qt-active { color: var(--qt-text); }
   min-height: 100dvh;
 }
 
-/* Mobile bottom nav */
+/* Mobile bottom nav — cam yüzey LiquidGlassSurface bileşeninden gelir */
 .qore-technic-bottom-nav {
   position: fixed;
   left: 10px;
   right: 10px;
   bottom: 10px;
   z-index: 40;
-  background: var(--qt-surface);
-  backdrop-filter: blur(18px) saturate(140%);
-  -webkit-backdrop-filter: blur(18px) saturate(140%);
-  border: 1px solid var(--qt-stroke);
   border-radius: 18px;
   box-shadow: var(--qt-elev-md);
   padding: 6px;
@@ -4445,10 +4441,7 @@ html.qt-active { color: var(--qt-text); }
   /* The nav is pinned left/right, so we can position this anywhere inside */
   left: 10px;
   right: 10px;
-  background: rgba(255, 255, 255, 0.70);
-  backdrop-filter: blur(24px) saturate(160%);
-  -webkit-backdrop-filter: blur(24px) saturate(160%);
-  border: 1px solid rgba(255, 255, 255, 0.4);
+  /* Cam yüzey LiquidGlassSurface bileşeninden gelir */
   border-radius: 20px;
   box-shadow: 0 -4px 24px 0 rgba(31, 38, 135, 0.08);
   padding: 12px;
@@ -4472,6 +4465,7 @@ html.qt-active { color: var(--qt-text); }
 }
 
 .qt-popover-item {
+  position: relative; /* LiquidGlassSurface katmanlarının üzerinde boyansın */
   display: flex;
   align-items: center;
   gap: 14px;
