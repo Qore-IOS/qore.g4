@@ -8,7 +8,7 @@
  * transfer 'delivered' olur.
  */
 import {
-  collection, doc, getDocs, serverTimestamp, setDoc, updateDoc, where, writeBatch,
+  collection, doc, getDoc, getDocs, serverTimestamp, setDoc, updateDoc, where, writeBatch,
 } from 'firebase/firestore';
 import { compareAsc, parse } from 'date-fns';
 import { db } from '@/lib/firebase';
@@ -147,8 +147,19 @@ export interface ConfirmSarfDeliveryInput {
  * Teslimatı tamamlar: her kalem için depodan FEFO sırasıyla stok ayırır,
  * ayrılan ürünleri sevk edilmiş (mahal stoğu) olarak işaretler ve transferi
  * 'delivered' durumuna çeker. Yetersiz stokta hata fırlatır (hiçbir yazma yapılmaz).
+ *
+ * Depo kapsamı: transfer oluşturulurken sabitlenen depo; sabitlenmemişse
+ * mahalin güncel varsayılan deposu; o da yoksa tüm depolar.
  */
 export async function confirmSarfDelivery({ transfer, companyId, isSuperAdmin, user }: ConfirmSarfDeliveryInput) {
+  let depotId = transfer.depotId || null;
+  if (!depotId && transfer.hospitalId) {
+    try {
+      const hospitalSnap = await getDoc(doc(db, 'hospitals', transfer.hospitalId));
+      depotId = (hospitalSnap.exists() ? (hospitalSnap.data() as Hospital).defaultDepotId : null) || null;
+    } catch { /* mahal okunamazsa tüm depolardan düşülür */ }
+  }
+
   const allToShip: DepoStokItem[] = [];
 
   for (const item of transfer.items || []) {
@@ -156,7 +167,7 @@ export async function confirmSarfDelivery({ transfer, companyId, isSuperAdmin, u
     const constraints = [
       where('stokKodu', '==', item.stokKodu),
       where('isShipped', '==', false),
-      ...(transfer.depotId ? [where('depotId', '==', transfer.depotId)] : []),
+      ...(depotId ? [where('depotId', '==', depotId)] : []),
     ];
     const snap = await getDocs(scopedQuery('depoStok', companyId, isSuperAdmin, ...constraints));
     const available = filterByCompanyScope(

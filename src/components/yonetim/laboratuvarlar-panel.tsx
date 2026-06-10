@@ -973,7 +973,9 @@ export default function LaboratuvarPanel() {
                         Varsayılan Depo (Otomatik Yönlendirme)
                       </Label>
                       <p className="text-xs text-muted-foreground">
-                        Bu laboratuvar için bir depo atandığında, ürün talebi oluştururken depo seçme adımı atlanır ve talepler otomatik olarak bu depoya yönlendirilir.
+                        {currentHospital.isConsumablesHospital
+                          ? 'Hastane Sarf mahallerinde stok sorguları, transferler ve teslimatta stok düşümü atanan bu depodan yapılır.'
+                          : 'Bu laboratuvar için bir depo atandığında, ürün talebi oluştururken depo seçme adımı atlanır ve talepler otomatik olarak bu depoya yönlendirilir.'}
                       </p>
                       <Select 
                         value={currentHospital.defaultDepotId || "none"} 

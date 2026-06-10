@@ -207,8 +207,14 @@ export default function SarfUrunTransferiPage() {
     return () => { alive = false; };
   }, [hospitalId, currentCompanyId, isSuperAdmin, toast, router]);
 
-  /* Depo adedi — labın varsayılan deposu tanımlıysa o depo, değilse tüm depolar */
+  /* Mahale atanan varsayılan depo tüm zincirde bağlayıcıdır: stok sorgusu,
+     transferin sabitlendiği depo ve teslimatta düşüm hep bu depodan yapılır.
+     Atanmamışsa tüm depolar kapsanır. */
   const depotId = hospital?.defaultDepotId || null;
+  const depotName = useMemo(
+    () => (depotId ? (depots.find((d) => d.id === depotId)?.name || hospital?.defaultDepotName || depotId) : null),
+    [depotId, depots, hospital?.defaultDepotName],
+  );
   useEffect(() => {
     const constraints = [where('isShipped', '==', false), ...(depotId ? [where('depotId', '==', depotId)] : [])];
     const unsub = onSnapshot(
@@ -273,12 +279,11 @@ export default function SarfUrunTransferiPage() {
 
     setSubmitting(true);
     try {
-      const depot = depots.find((d) => d.id === hospital.defaultDepotId) || depots[0];
       const tr = await createSarfTransfer({
         hospital,
         items,
-        depotId: depot?.id || null,
-        depotName: depot?.name || null,
+        depotId,
+        depotName,
         companyId: currentCompanyId,
         user: { uid: currentUser?.uid, name: currentUserProfile?.name || currentUser?.email },
       });
@@ -328,6 +333,9 @@ export default function SarfUrunTransferiPage() {
               <p style={{ margin: '5px 0 0', fontSize: 14, color: 'var(--sarf-ink-2)', fontWeight: 500 }}>
                 Min-Max tanımı olan ürünler için transfer adedi girin. Mahal:{' '}
                 <strong style={{ fontFamily: sarfMono, color: 'var(--sarf-ink-1)' }}>{mahal || 'Tanımsız'}</strong>
+                {depotName && (
+                  <> · Depo: <strong style={{ color: 'var(--sarf-ink-1)' }}>{depotName}</strong></>
+                )}
               </p>
             </div>
             <QrBox value={mahal} size={78} />
