@@ -569,6 +569,8 @@ export interface DeviceFaultReport {
   description: string;
   status: DeviceFaultStatus;
   faultType: 'teknik_servis' | 'aplikasyon';
+  affectsAllDevices?: boolean;
+  affectedDeviceIds?: string[];
   openedAt: Date | null;
   openedBy: string;
   openedByName: string;

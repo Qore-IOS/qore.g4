@@ -116,7 +116,7 @@ export default function DashboardV2({
   // PERF (Faz 2): Dashboard KPI'ları yalnızca AÇIK arıza durumlarını (atama/müdahale
   // bekleyen/edilen) sayıyor. Önceden useDeviceFaultReports() 730 gün + 10.000 kayıt
   // (kapalılar dahil) + 60sn refetch çekiyordu — KPI için fazlası. Faz 4'te eklenmiş
-  // ama hiç kullanılmayan useOpenDeviceFaultReports (status != closed, limit 1000)
+  // ama hiç kullanılmayan useOpenDeviceFaultReports (yalnızca aktif durumlar, limit 1000)
   // tam karşılığı; çok daha hafif.
   const { data: faultReports = [], isLoading: faultsLoading } = useOpenDeviceFaultReports();
   const { data: purchasingTasks = [], isLoading: tasksLoading } = usePurchasingTasks();
