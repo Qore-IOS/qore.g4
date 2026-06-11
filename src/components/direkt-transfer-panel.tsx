@@ -37,7 +37,7 @@ import {
   limit,
 } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
-import { useDepoStokByDepot, touchStockMetadata, useDepots, useProductCodes, useHospitals, useBorcDepots, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
+import { useDepotStockLite, touchStockMetadata, useDepots, useProductCodes, useHospitals, useBorcDepots, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Loader2, Camera, Truck, Plus, CheckCircle2, History, DatabaseZap, ChevronsUpDown, Check, Trash2, AlertTriangle, Package, FileText, ListChecks, ArrowRight, Minus, MoreHorizontal, X, ChevronDown, ChevronUp, Search, QrCode } from 'lucide-react';
@@ -239,7 +239,7 @@ export default function DirektTransferPanel() {
   const [selectedDepotId, setSelectedDepotId] = useState<string>('');
 
   // Pre-load depot stock for instant barcode lookups (eliminates 200-500ms per scan)
-  const { data: depotStockData = [], isPending: depotStockPending } = useDepoStokByDepot(selectedDepotId);
+  const { data: depotStockData = [], isPending: depotStockPending } = useDepotStockLite(selectedDepotId);
 
   // Create lookup maps for O(1) stock queries - DRAMATIC performance improvement
   const depotStockLookups = useMemo(() => {

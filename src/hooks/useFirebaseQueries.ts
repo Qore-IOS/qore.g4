@@ -936,6 +936,31 @@ export function useDepotSerialIndex(
 }
 
 /**
+ * Lightweight depot stock hook for the Direkt Transfer panel.
+ *
+ * Replaces `useDepoStokByDepot` — instead of 3 parallel full-document Firestore
+ * queries through IndexedDB, this calls a single Admin SDK server action with
+ * field projection. Load time drops from ~15 s to ~1–2 s.
+ *
+ * Query key starts with `['depoStok']` so it is automatically invalidated by the
+ * `useStockUpdateListener` metadata listener and `invalidateDepoStok()`.
+ */
+export function useDepotStockLite(depotId: string | null) {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['depoStok', 'lite', depotId, currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      if (!depotId) return [] as DepoStokItem[];
+      const { getDepotStockForTransfer } = await import('@/actions/stokActions');
+      return getDepotStockForTransfer(depotId, currentCompanyId, isSuperAdmin);
+    },
+    enabled: !!depotId && (!!currentCompanyId || isSuperAdmin === true),
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+}
+
+/**
  * Server-side paginated grouped depot stock.
  *
  * Calls the `getPaginatedDepotStock` server action so that only the requested
