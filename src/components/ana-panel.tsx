@@ -26,6 +26,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useDepots, useProductCodes, useAddressDefinitions, useBarcodeFormatsQuery, useUsers, useDepotSerialIndex, useInvalidateQueries, touchStockMetadata, useDepotCountSessions, useScannedItems, useIrsaliyeFiles } from '@/hooks/useFirebaseQueries';
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import useHidScanner from '@/hooks/useHidScanner';
+import { useScanPerformance } from '@/hooks/useScanPerformance';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
 
@@ -560,13 +561,8 @@ export default function AnaPanel(props: AnaPanelProps) {
   const isMasterDataLoading = masterDataProgress < 100;
 
   const [scannedItems, setScannedItems] = useState<ScanRow[]>([]);
-  // Canlı okutma süresi ölçer: barkod okutmadan, sonucu ekrana boyayan (paint)
-  // kareye kadar geçen gerçek süre (ms). Cihaz üstünde gerçek INP'yi gösterir —
-  // trace almadan darboğazı (JS mi, render mi) anlamak için.
-  const [lastScanMs, setLastScanMs] = useState<number | null>(null);
-  // JS (parse + state) süresi ayrı: senkron gövde bitince mikrotask'ta ölçülür.
-  // "JS" düşük ama toplam yüksekse darboğaz render/paint; "JS" yüksekse parse.
-  const [lastScanJsMs, setLastScanJsMs] = useState<number | null>(null);
+  // Ölçülebilir uygulama maliyeti: senkron JS ve React'in acil UI commit süresi.
+  const { beginScanMeasurement, lastScanMs, lastScanJsMs } = useScanPerformance();
 
   // A scan must stay on the urgent input path. Grouping and sorting thousands of
   // rows synchronously here used to block the next HID/keyboard event for a few
@@ -791,20 +787,8 @@ export default function AnaPanel(props: AnaPanelProps) {
 
   const processScan = useCallback(async (barcodeData: string, source: 'barcode' | 'bulk_item' = 'barcode') => {
     const scanCorrelationId = createCorrelationId();
-    // Okutma→paint süresini ölç (yalnızca üst seviye barkod okutmalarında).
-    // Bu okutmadaki tüm setState'ler React 18 tarafından tek render'da batch'lenip
-    // boyandıktan SONRA çift requestAnimationFrame ile ölçeriz → ekranda gördüğün
-    // gerçek gecikme. Bulk alt-okutmalar (source==='bulk_item') ölçülmez.
-    if (source === 'barcode' && typeof performance !== 'undefined') {
-      const scanStartedAt = performance.now();
-      // JS süresi: senkron processScan gövdesi (parse + state queue) bitince
-      // çalışan mikrotask → saf JS maliyeti (render/paint hariç).
-      queueMicrotask(() => setLastScanJsMs(performance.now() - scanStartedAt));
-      // Toplam scan→paint: tüm setState'ler boyandıktan sonra (çift rAF).
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        setLastScanMs(performance.now() - scanStartedAt);
-      }));
-    }
+    // Toplu QR içindeki alt okutmalar ana okutmanın ölçümünü ezmesin.
+    const finishScanJsMeasurement = source === 'barcode' ? beginScanMeasurement() : undefined;
     const trimmedData = (barcodeData || '').trim();
     if (!trimmedData) {
       malKabulLogger.warn('Scan ignored: empty payload', { source, isBulkScanMode }, { correlationId: scanCorrelationId });
@@ -880,6 +864,7 @@ export default function AnaPanel(props: AnaPanelProps) {
         const mode = (staticTrackingMode === 'qty_manual' || staticTrackingMode === 'qty_barcode')
           ? 'qty_barcode'
           : resolveEffectiveTrackingMode(resolved, matchedFormat, matchedProduct as any);
+        finishScanJsMeasurement?.();
 
         const isLotOnlyBarcode = (mode === 'serial') && !!lotNumarasi && !seriNumarasi;
 
@@ -985,7 +970,7 @@ export default function AnaPanel(props: AnaPanelProps) {
         setTimeout(() => setScanStatus('idle'), 3000);
       }
     }
-  }, [flashScanFeedback, productCodes, barcodeFormats, existingDepotSerials, productTracking, isBulkScanMode]);
+  }, [flashScanFeedback, productCodes, barcodeFormats, existingDepotSerials, productTracking, isBulkScanMode, beginScanMeasurement]);
 
   // Direkt transfer paneliyle aynı davranış: tarayıcı yalnızca modal/kamera/manuel
   // giriş açıkken devre dışı. Eskiden buradaki `!isProcessingScan` koşulu HER
@@ -2069,14 +2054,14 @@ export default function AnaPanel(props: AnaPanelProps) {
                     <span
                       className={cn(
                         "text-[9px] font-mono font-bold px-1.5 py-0.5 rounded tabular-nums",
-                        lastScanMs < 50 ? "bg-green-500/15 text-green-600"
-                          : lastScanMs < 200 ? "bg-amber-500/15 text-amber-600"
+                        lastScanMs < 10 ? "bg-green-500/15 text-green-600"
+                          : lastScanMs < 16.7 ? "bg-amber-500/15 text-amber-600"
                           : "bg-red-500/15 text-red-600"
                       )}
-                      title="JS = parse + state (saf JS). Toplam = okutma→paint (render dahil)."
+                      title="JS = barkod çözümleme süresi. UI = React acil commit süresi."
                     >
                       {lastScanJsMs !== null && <span className="opacity-60 font-normal">JS {Math.round(lastScanJsMs)} · </span>}
-                      {Math.round(lastScanMs)} ms
+                      UI {Math.round(lastScanMs)} ms
                     </span>
                   )}
                   {scanFeedback && (

@@ -8,7 +8,7 @@
 
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState, Suspense, ChangeEvent } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, Suspense, ChangeEvent } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import type { Depot, DepoStokItem, ProductCode, Hospital, ConsumptionRecord, ManualProductOption, TransferTemplate } from '@/lib/types';
@@ -43,6 +43,7 @@ import { Input } from '@/components/ui/input';
 import { Loader2, Camera, Truck, Plus, CheckCircle2, History, DatabaseZap, ChevronsUpDown, Check, Trash2, AlertTriangle, Package, FileText, ListChecks, ArrowRight, Minus, MoreHorizontal, X, ChevronDown, ChevronUp, Search, QrCode } from 'lucide-react';
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import useHidScanner from '@/hooks/useHidScanner';
+import { useScanPerformance } from '@/hooks/useScanPerformance';
 import BarcodeFormatSelect, { type FormatValue } from '@/components/BarcodeFormatSelect';
 import { cn, playFeedback, sanitizeGS1, generateId } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
@@ -305,9 +306,8 @@ export default function DirektTransferPanel() {
   
   const [fefoViolations, setFefoViolations] = useState<FefoViolation[]>([]);
 
-  // Scan latency: synchronous parse/state cost and total scan-to-paint duration.
-  const [lastScanMs, setLastScanMs] = useState<number | null>(null);
-  const [lastScanJsMs, setLastScanJsMs] = useState<number | null>(null);
+  // Ölçülebilir uygulama maliyeti: senkron JS ve React'in acil UI commit süresi.
+  const { beginScanMeasurement, lastScanMs, lastScanJsMs } = useScanPerformance();
 
   // Last scanned product tracking for UI feedback
   const [lastScannedProduct, setLastScannedProduct] = useState<{
@@ -480,6 +480,15 @@ export default function DirektTransferPanel() {
         return;
       }
 
+      // Toplu QR içindeki alt okutmalar ana okutmanın ölçümünü ezmesin.
+      const finishScanJsMeasurement = source !== 'bulk_item' ? beginScanMeasurement() : undefined;
+
+      if (!transferDataReady) {
+        playFeedback(true);
+        flashScanFeedback('error', 'Ürün, barkod ve depo stok verileri henüz hazır değil.');
+        return;
+      }
+
       const trimmedRaw = raw.trim();
       if (!trimmedRaw) return;
 
@@ -548,6 +557,7 @@ export default function DirektTransferPanel() {
       const mode: TrackingMode = (staticTrackingMode === 'qty_manual' || staticTrackingMode === 'qty_barcode')
         ? 'qty_barcode'
         : resolveEffectiveTrackingMode(resolved, matchedFormat, product as any);
+      finishScanJsMeasurement?.();
 
       if (mode === 'serial') {
         if (!seri) {
@@ -624,7 +634,7 @@ export default function DirektTransferPanel() {
       flashScanFeedback('success', `${stokAdi} eklendi.`);
       playFeedback();
     },
-    [selectedFormatId, barcodeFormats, products, toast, addDirectTransferItem, upsertGroupedRow, countStockBySerial, countStockByLot, countStockByCode, sumStockAdet, alreadyQueued, resolveProductFromParsed, parseAnyBarcode, parseAndResolveBarcode, directTransferItems, isBulkScanMode, flashScanFeedback, transferDataReady]
+    [selectedFormatId, barcodeFormats, products, toast, addDirectTransferItem, upsertGroupedRow, countStockBySerial, countStockByLot, countStockByCode, sumStockAdet, alreadyQueued, resolveProductFromParsed, parseAnyBarcode, parseAndResolveBarcode, directTransferItems, isBulkScanMode, flashScanFeedback, transferDataReady, beginScanMeasurement]
   );
   
   useHidScanner({
@@ -1109,6 +1119,10 @@ export default function DirektTransferPanel() {
     flashScanFeedback('success', `${items.length} kalem (${totalAdet} adet) transfer listesine eklendi.`);
   };
   
+  // Binlerce satırın gruplanması okutma event'ini bloke etmesin; sayaçlar ve
+  // mükerrer kontrolü güncel listeyi, görsel liste ertelenmiş snapshot'ı kullanır.
+  const deferredDirectTransferItems = useDeferredValue(directTransferItems);
+
   const groupedTransferItems = useMemo(() => {
     const groups: Record<string, {
       key: string,
@@ -1121,7 +1135,7 @@ export default function DirektTransferPanel() {
       serials: { id: string; seriNumarasi: string }[]
     }> = {};
 
-    directTransferItems.forEach(item => {
+    deferredDirectTransferItems.forEach(item => {
       const groupKey = `${item.stokKodu}-${item.lotNumarasi || ''}-${item.miad || ''}`;
       if (!groups[groupKey]) {
         groups[groupKey] = {
@@ -1141,7 +1155,7 @@ export default function DirektTransferPanel() {
       }
     });
     return Object.values(groups).sort((a,b) => a.stokAdi.localeCompare(b.stokAdi));
-  }, [directTransferItems]);
+  }, [deferredDirectTransferItems]);
 
   const removeTransferItem = (itemId: string, isGroup: boolean | undefined) => {
     if (isGroup) {
@@ -1407,14 +1421,14 @@ export default function DirektTransferPanel() {
                         <span
                           className={cn(
                             "rounded px-1.5 py-0.5 font-mono text-[9px] font-bold tabular-nums",
-                            lastScanMs < 50 ? "bg-green-500/15 text-green-600"
-                              : lastScanMs < 200 ? "bg-amber-500/15 text-amber-600"
+                            lastScanMs < 10 ? "bg-green-500/15 text-green-600"
+                              : lastScanMs < 16.7 ? "bg-amber-500/15 text-amber-600"
                               : "bg-red-500/15 text-red-600"
                           )}
-                          title="JS = parse + state (saf JS). Toplam = okutma→paint (render dahil)."
+                          title="JS = barkod çözümleme süresi. UI = React acil commit süresi."
                         >
                           {lastScanJsMs !== null && <span className="font-normal opacity-60">JS {Math.round(lastScanJsMs)} · </span>}
-                          {Math.round(lastScanMs)} ms
+                          UI {Math.round(lastScanMs)} ms
                         </span>
                       )}
                       {scanFeedback && (
