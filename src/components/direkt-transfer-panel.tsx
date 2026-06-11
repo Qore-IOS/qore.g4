@@ -8,7 +8,7 @@
 
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState, Suspense, ChangeEvent } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, Suspense, ChangeEvent } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import type { Depot, DepoStokItem, ProductCode, Hospital, ConsumptionRecord, ManualProductOption, TransferTemplate } from '@/lib/types';
@@ -43,6 +43,7 @@ import { Input } from '@/components/ui/input';
 import { Loader2, Camera, Truck, Plus, CheckCircle2, History, DatabaseZap, ChevronsUpDown, Check, Trash2, AlertTriangle, Package, FileText, ListChecks, ArrowRight, Minus, MoreHorizontal, X, ChevronDown, ChevronUp, Search, QrCode } from 'lucide-react';
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import useHidScanner from '@/hooks/useHidScanner';
+import { ScanCommitProbe, ScanPerformanceBadge, useScanPerformance } from '@/hooks/useScanPerformance';
 import BarcodeFormatSelect, { type FormatValue } from '@/components/BarcodeFormatSelect';
 import { cn, playFeedback, sanitizeGS1, generateId } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
@@ -237,7 +238,7 @@ export default function DirektTransferPanel() {
   const [selectedDepotId, setSelectedDepotId] = useState<string>('');
 
   // Pre-load depot stock for instant barcode lookups (eliminates 200-500ms per scan)
-  const { data: depotStockData = [] } = useDepoStokByDepot(selectedDepotId);
+  const { data: depotStockData = [], isPending: depotStockPending } = useDepoStokByDepot(selectedDepotId);
 
   // Create lookup maps for O(1) stock queries - DRAMATIC performance improvement
   const depotStockLookups = useMemo(() => {
@@ -272,6 +273,19 @@ export default function DirektTransferPanel() {
     return { bySerial, byLot, byCode };
   }, [depotStockData]);
 
+  const transferDataProgress = useMemo(() => {
+    const sourcesReady = [
+      !depotsLoading,
+      !productsLoading,
+      !hospitalsLoading,
+      !formatsLoading,
+      Boolean(selectedDepotId) && !depotStockPending,
+    ];
+    return Math.round((sourcesReady.filter(Boolean).length / sourcesReady.length) * 100);
+  }, [depotsLoading, productsLoading, hospitalsLoading, formatsLoading, selectedDepotId, depotStockPending]);
+  const isTransferDataLoading = transferDataProgress < 100;
+  const transferDataReady = !isTransferDataLoading;
+
   const [selectedLabId, setSelectedLabId] = useState<string>('');
   const [isBorcMode, setIsBorcMode] = useState<boolean>(false);
   const [selectedBorcDepotId, setSelectedBorcDepotId] = useState<string>('');
@@ -291,6 +305,9 @@ export default function DirektTransferPanel() {
   const [selectedFormatId, setSelectedFormatId] = useState<FormatValue>('__auto__');
   
   const [fefoViolations, setFefoViolations] = useState<FefoViolation[]>([]);
+
+  // Ölçülebilir uygulama maliyeti: senkron JS ve React'in acil UI commit süresi.
+  const { startScanMeasurement, controller: scanPerformanceController } = useScanPerformance();
 
   // Last scanned product tracking for UI feedback
   const [lastScannedProduct, setLastScannedProduct] = useState<{
@@ -442,6 +459,15 @@ export default function DirektTransferPanel() {
     async (raw: string, source: 'hid' | 'camera' | 'manual' | 'bulk_item' = 'hid') => {
       if (!raw) return;
 
+      // Toplu QR içindeki alt okutmalar ana okutmanın ölçümünü ezmesin.
+      if (source !== 'bulk_item') startScanMeasurement();
+
+      if (!transferDataReady) {
+        playFeedback(true);
+        flashScanFeedback('error', 'Ürün, barkod ve depo stok verileri henüz hazır değil.');
+        return;
+      }
+
       const trimmedRaw = raw.trim();
       if (!trimmedRaw) return;
 
@@ -586,11 +612,11 @@ export default function DirektTransferPanel() {
       flashScanFeedback('success', `${stokAdi} eklendi.`);
       playFeedback();
     },
-    [selectedFormatId, barcodeFormats, products, toast, addDirectTransferItem, upsertGroupedRow, countStockBySerial, countStockByLot, countStockByCode, sumStockAdet, alreadyQueued, resolveProductFromParsed, parseAnyBarcode, parseAndResolveBarcode, directTransferItems, isBulkScanMode, flashScanFeedback]
+    [selectedFormatId, barcodeFormats, products, toast, addDirectTransferItem, upsertGroupedRow, countStockBySerial, countStockByLot, countStockByCode, sumStockAdet, alreadyQueued, resolveProductFromParsed, parseAnyBarcode, parseAndResolveBarcode, directTransferItems, isBulkScanMode, flashScanFeedback, transferDataReady, startScanMeasurement]
   );
   
   useHidScanner({
-    enabled: true,
+    enabled: transferDataReady,
     onScan: ({ raw }) => {
       if (raw) handleScan(raw.trim(), 'hid');
     },
@@ -1071,6 +1097,10 @@ export default function DirektTransferPanel() {
     flashScanFeedback('success', `${items.length} kalem (${totalAdet} adet) transfer listesine eklendi.`);
   };
   
+  // Binlerce satırın gruplanması okutma event'ini bloke etmesin; sayaçlar ve
+  // mükerrer kontrolü güncel listeyi, görsel liste ertelenmiş snapshot'ı kullanır.
+  const deferredDirectTransferItems = useDeferredValue(directTransferItems);
+
   const groupedTransferItems = useMemo(() => {
     const groups: Record<string, {
       key: string,
@@ -1083,7 +1113,7 @@ export default function DirektTransferPanel() {
       serials: { id: string; seriNumarasi: string }[]
     }> = {};
 
-    directTransferItems.forEach(item => {
+    deferredDirectTransferItems.forEach(item => {
       const groupKey = `${item.stokKodu}-${item.lotNumarasi || ''}-${item.miad || ''}`;
       if (!groups[groupKey]) {
         groups[groupKey] = {
@@ -1103,7 +1133,7 @@ export default function DirektTransferPanel() {
       }
     });
     return Object.values(groups).sort((a,b) => a.stokAdi.localeCompare(b.stokAdi));
-  }, [directTransferItems]);
+  }, [deferredDirectTransferItems]);
 
   const removeTransferItem = (itemId: string, isGroup: boolean | undefined) => {
     if (isGroup) {
@@ -1173,13 +1203,14 @@ export default function DirektTransferPanel() {
 
   return (
     <>
+      <ScanCommitProbe controller={scanPerformanceController} />
       <div
-        className="cihaz-shell px-3 py-4 sm:px-5 sm:py-6 space-y-4 sm:space-y-5 min-h-screen"
+        className="cihaz-shell px-3 py-3 sm:px-5 sm:py-4 space-y-3 sm:space-y-4 min-h-screen"
         role="main"
         aria-label="Direkt transfer paneli"
       >
         {/* ══════════════════════ HEADER ══════════════════════ */}
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <BackButton fallback="/siparisler" aria-label="Geri dön" />
           <div className="flex-1 min-w-0">
             <h1 className="sr-only">Direkt Transfer</h1>
@@ -1188,8 +1219,39 @@ export default function DirektTransferPanel() {
               {selectedLabName ? `→ ${selectedLabName}` : isBorcMode && selectedCompany ? `→ ${selectedCompany} (Borç)` : ''}
             </p>
           </div>
+          {/* Compact workflow indicator keeps the working area close to the header. */}
+          <div className="order-3 flex w-full items-center justify-center gap-0 sm:order-none sm:w-auto sm:px-3">
+            {[
+              { label: 'Bağlam', done: stepperState.hasSource && stepperState.hasTarget, num: 1 },
+              { label: 'Ürün Ekle', done: stepperState.hasItems, num: 2 },
+              { label: 'Transfer', done: false, num: 3 },
+            ].map((step, index) => (
+              <React.Fragment key={step.num}>
+                {index > 0 && (
+                  <div className={cn(
+                    "h-[2px] w-8 sm:w-10 transition-colors",
+                    step.done || (index === 1 && stepperState.hasSource && stepperState.hasTarget)
+                      ? "bg-[var(--dashboard-accent)]"
+                      : "bg-[var(--dashboard-stroke)]"
+                  )} />
+                )}
+                <div className="flex items-center gap-1.5">
+                  <div className={cn(
+                    "flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold transition-all",
+                    step.done
+                      ? "bg-[var(--dashboard-accent)] text-white shadow-[var(--dashboard-raised-soft)]"
+                      : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)]"
+                  )}>
+                    {step.done ? <Check className="h-3.5 w-3.5" /> : step.num}
+                  </div>
+                  <span className="hidden text-[10px] font-medium text-[var(--dashboard-muted)] md:inline">{step.label}</span>
+                </div>
+              </React.Fragment>
+            ))}
+          </div>
+
           {/* Secondary actions */}
-          <div className="flex items-center gap-1.5">
+          <div className="ml-auto flex items-center gap-1.5">
             {(currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik') && (
               <button
                 onClick={() => router.push('/direkt-transfer/yedek-parca-transfer')}
@@ -1222,37 +1284,6 @@ export default function DirektTransferPanel() {
           </div>
         </div>
 
-        {/* ══════════════════════ STEPPER INDICATOR ══════════════════════ */}
-        <div className="flex items-center justify-center gap-0 px-2">
-          {[
-            { label: 'Bağlam', done: stepperState.hasSource && stepperState.hasTarget, num: 1 },
-            { label: 'Ürün Ekle', done: stepperState.hasItems, num: 2 },
-            { label: 'Transfer', done: false, num: 3 },
-          ].map((step, i) => (
-            <React.Fragment key={step.num}>
-              {i > 0 && (
-                <div className={cn(
-                  "flex-1 h-[2px] max-w-[60px] sm:max-w-[80px] transition-colors",
-                  step.done || (i === 1 && stepperState.hasSource && stepperState.hasTarget)
-                    ? "bg-[var(--dashboard-accent)]"
-                    : "bg-[var(--dashboard-stroke)]"
-                )} />
-              )}
-              <div className="flex flex-col items-center gap-1">
-                <div className={cn(
-                  "w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-xs sm:text-sm font-bold transition-all",
-                  step.done
-                    ? "bg-[var(--dashboard-accent)] text-white shadow-[var(--dashboard-raised-soft)]"
-                    : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)]"
-                )}>
-                  {step.done ? <Check className="h-4 w-4" /> : step.num}
-                </div>
-                <span className="text-[10px] sm:text-xs font-medium text-[var(--dashboard-muted)]">{step.label}</span>
-              </div>
-            </React.Fragment>
-          ))}
-        </div>
-
         {/* ══════════════════════ 2-COL LAYOUT ══════════════════════ */}
         <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-4 sm:gap-5">
           {/* ── LEFT COLUMN: Context + Add Methods ── */}
@@ -1263,7 +1294,30 @@ export default function DirektTransferPanel() {
 
               {/* Source Depot */}
               <div className="space-y-1">
-                <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Kaynak Depo</label>
+                <div className="flex items-center justify-between gap-3">
+                  <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Kaynak Depo</label>
+                  {isTransferDataLoading && (
+                    <div
+                      className="w-28 shrink-0"
+                      role="progressbar"
+                      aria-label="Direkt transfer verileri yükleniyor"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={transferDataProgress}
+                    >
+                      <div className="mb-1 flex items-center justify-between text-[9px] font-medium text-[var(--dashboard-muted)]">
+                        <span>Veriler</span>
+                        <span className="tabular-nums">%{transferDataProgress}</span>
+                      </div>
+                      <div className="h-1 overflow-hidden rounded-full bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
+                        <div
+                          className="h-full rounded-full bg-[var(--dashboard-accent)] transition-[width] duration-300"
+                          style={{ width: `${transferDataProgress}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
                 <Select value={selectedDepotId} onValueChange={setSelectedDepotId} disabled={prereqsLoading}>
                   <SelectTrigger className="w-full bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl h-10">
                     <SelectValue placeholder="Kaynak depo seçin" />
@@ -1339,16 +1393,19 @@ export default function DirektTransferPanel() {
                     ? "ring-2 ring-red-500/60 bg-red-50/60 dark:bg-red-950/20"
                     : "cihaz-pressed"
                 )}>
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <p className="text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Son Okutulan</p>
-                    {scanFeedback && (
-                      <span className={cn(
-                        "text-[10px] font-bold uppercase tracking-wide",
-                        scanFeedback.type === 'success' ? "text-green-600" : "text-red-600"
-                      )}>
-                        {scanFeedback.type === 'success' ? '✓ Başarılı' : '✗ Hata'}
-                      </span>
-                    )}
+                    <div className="flex shrink-0 items-center gap-2">
+                      <ScanPerformanceBadge controller={scanPerformanceController} />
+                      {scanFeedback && (
+                        <span className={cn(
+                          "text-[9px] font-bold uppercase tracking-wide",
+                          scanFeedback.type === 'success' ? "text-green-600" : "text-red-600"
+                        )}>
+                          {scanFeedback.type === 'success' ? '✓ Başarılı' : '✗ Hata'}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   {scanFeedback?.type === 'error' && !lastScannedProduct ? (
                     <p className="text-sm font-bold text-red-600 truncate">{scanFeedback.message}</p>
@@ -1389,7 +1446,7 @@ export default function DirektTransferPanel() {
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() => { setIsBatchScanning(false); setIsCameraScannerOpen(true); }}
-                  disabled={shipmentLoading || (!isBorcMode && !selectedLabId) || (isBorcMode && !selectedCompany)}
+                  disabled={shipmentLoading || !transferDataReady || (!isBorcMode && !selectedLabId) || (isBorcMode && !selectedCompany)}
                   className="cihaz-action-tile flex flex-col items-center gap-1.5 py-3 px-2 text-center disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none"
                 >
                   <Camera className="h-5 w-5 text-[var(--dashboard-accent)]" />
@@ -1397,7 +1454,7 @@ export default function DirektTransferPanel() {
                 </button>
                 <button
                   onClick={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }}
-                  disabled={shipmentLoading || (!isBorcMode && !selectedLabId) || (isBorcMode && !selectedCompany)}
+                  disabled={shipmentLoading || !transferDataReady || (!isBorcMode && !selectedLabId) || (isBorcMode && !selectedCompany)}
                   className="cihaz-action-tile flex flex-col items-center gap-1.5 py-3 px-2 text-center disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none"
                 >
                   <Camera className="h-5 w-5 text-[var(--dashboard-accent)]" />
@@ -1413,7 +1470,7 @@ export default function DirektTransferPanel() {
                     next ? 'Toplu barkod modu açık' : 'Normal barkod okuma moduna dönüldü.'
                   );
                 }}
-                disabled={shipmentLoading || (!isBorcMode && !selectedLabId) || (isBorcMode && !selectedCompany)}
+                disabled={shipmentLoading || !transferDataReady || (!isBorcMode && !selectedLabId) || (isBorcMode && !selectedCompany)}
                 className={cn(
                   "cihaz-tool-item w-full flex items-center justify-center gap-2 py-2.5 text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none",
                   isBulkScanMode && "bg-[var(--dashboard-accent)] text-white"
@@ -1427,8 +1484,9 @@ export default function DirektTransferPanel() {
               <div className="grid grid-cols-3 gap-2">
                 <button
                   onClick={() => setShowManualInline(v => !v)}
+                  disabled={!transferDataReady}
                   className={cn(
-                    "cihaz-tool-item flex flex-col items-center gap-1 py-2.5 px-2 text-center",
+                    "cihaz-tool-item flex flex-col items-center gap-1 py-2.5 px-2 text-center disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none",
                     showManualInline && "shadow-[var(--dashboard-pressed)] bg-[var(--dashboard-surface-2)]"
                   )}
                 >
@@ -1437,8 +1495,9 @@ export default function DirektTransferPanel() {
                 </button>
                 <button
                   onClick={() => { setShowTemplateSelector(v => !v); fetchTemplates(); }}
+                  disabled={!transferDataReady}
                   className={cn(
-                    "cihaz-tool-item flex flex-col items-center gap-1 py-2.5 px-2 text-center",
+                    "cihaz-tool-item flex flex-col items-center gap-1 py-2.5 px-2 text-center disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none",
                     showTemplateSelector && "shadow-[var(--dashboard-pressed)] bg-[var(--dashboard-surface-2)]"
                   )}
                 >
@@ -1448,7 +1507,7 @@ export default function DirektTransferPanel() {
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
                     <button
-                      disabled={!selectedDepotId}
+                      disabled={!selectedDepotId || !transferDataReady}
                       className="cihaz-tool-item flex flex-col items-center gap-1 py-2.5 px-2 text-center disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none"
                     >
                       <DatabaseZap className="h-4 w-4 text-[var(--dashboard-muted)]" />
