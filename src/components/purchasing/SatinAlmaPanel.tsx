@@ -22,6 +22,7 @@ import {
   writeBatch,
   arrayUnion,
 } from 'firebase/firestore';
+import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import type {
   PurchasingTask,
   PurchasingTaskAttachment,
@@ -720,7 +721,7 @@ export default function SatinAlmaPanel() {
         if (mutation.action === 'create' && mutation.payload) {
           await setDoc(taskRef, mutation.payload, { merge: true });
         } else if (mutation.action === 'update' && mutation.payload) {
-          const remote = await getDoc(taskRef);
+          const remote = await getDocResilient(taskRef);
           if (!remote.exists()) {
             await setDoc(taskRef, mutation.payload, { merge: true });
           } else {
@@ -783,9 +784,9 @@ export default function SatinAlmaPanel() {
     async function fetchReferenceData() {
       try {
         const [hospSnap, poolSnap, usersSnap] = await Promise.all([
-          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-          getDocs(scopedQuery('labPools', currentCompanyId, isSuperAdmin)),
-          getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin, where('role', 'in', ['admin', 'satin_alma']))),
+          getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+          getDocsResilient(scopedQuery('labPools', currentCompanyId, isSuperAdmin)),
+          getDocsResilient(scopedQuery('users', currentCompanyId, isSuperAdmin, where('role', 'in', ['admin', 'satin_alma']))),
         ]);
         if (cancelled) return;
         setLaboratories(hospSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Hospital)));
@@ -1161,7 +1162,7 @@ export default function SatinAlmaPanel() {
   const fetchCompanyResponsible = useCallback(async (companyId?: string) => {
     if (!companyId) return null;
     try {
-      const snap = await getDoc(doc(db, 'companies', companyId));
+      const snap = await getDocResilient(doc(db, 'companies', companyId));
       if (!snap.exists()) return null;
       const data = snap.data() as any;
       if (!data.responsibleUid) return null;

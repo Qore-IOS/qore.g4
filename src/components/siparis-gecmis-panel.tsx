@@ -28,6 +28,7 @@ import { Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
 import { collection, query, where, getDocs, orderBy, Timestamp, onSnapshot, limit } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { ORDERS_ARCHIVE_COLLECTION } from '@/lib/orders-archive';
@@ -112,8 +113,8 @@ export default function SiparisGecmisPanel(): JSX.Element {
             // Sevkiyatların atıfta bulunduğu siparişler tamamlanıp arşive
             // taşınmış olabilir → hem `orders` hem `ordersArchive` sorgulanır.
             const orderPromises = orderChunks.flatMap(chunk => [
-                getDocs(scopedQuery('orders', currentCompanyId, isSuperAdmin, where('id', 'in', chunk))),
-                getDocs(scopedQuery(ORDERS_ARCHIVE_COLLECTION, currentCompanyId, isSuperAdmin, where('id', 'in', chunk))),
+                getDocsResilient(scopedQuery('orders', currentCompanyId, isSuperAdmin, where('id', 'in', chunk))),
+                getDocsResilient(scopedQuery(ORDERS_ARCHIVE_COLLECTION, currentCompanyId, isSuperAdmin, where('id', 'in', chunk))),
             ]);
             const orderSnaps = await Promise.all(orderPromises);
             

@@ -10,6 +10,7 @@ import {
   orderBy,
   getDocs,
 } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import type { PurchasingTask, User } from '@/lib/types';
 import {
   ArrowLeft,
@@ -85,7 +86,7 @@ export default function TumIslemlerPanel() {
   useEffect(() => {
     async function fetchPersonnel() {
       try {
-        const snap = await getDocs(
+        const snap = await getDocsResilient(
           query(
             collection(db, 'users'),
             where('role', 'in', ['admin', 'satin_alma'])

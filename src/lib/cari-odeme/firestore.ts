@@ -38,6 +38,7 @@ import {
   type QueryConstraint,
   type FirestoreDataConverter,
 } from "firebase/firestore";
+import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import { getAuth } from "firebase/auth";
 import { db } from "@/lib/firebase";
 import { scopedQuery } from "@/lib/firestore-helpers";
@@ -118,7 +119,7 @@ export async function createPayment(
 
 export async function getPayment(id: string): Promise<Payment | null> {
   const docRef = doc(db, CARI_PAYMENTS, id).withConverter(paymentConverter);
-  const snap = await getDoc(docRef);
+  const snap = await getDocResilient(docRef);
   return snap.exists() ? snap.data() : null;
 }
 
@@ -291,7 +292,7 @@ export async function listPayments(
     limit(max)
   ).withConverter(paymentConverter);
 
-  const snap = await getDocs(q);
+  const snap = await getDocsResilient(q);
   let all = snap.docs.map((d) => d.data());
 
   if (opts.status) all = all.filter((p) => p.status === opts.status);
@@ -337,7 +338,7 @@ export async function createCariFirma(
 
 export async function getCariFirma(id: string): Promise<CariFirma | null> {
   const docRef = doc(db, CARI_FIRMALAR, id).withConverter(cariFirmaConverter);
-  const snap = await getDoc(docRef);
+  const snap = await getDocResilient(docRef);
   return snap.exists() ? snap.data() : null;
 }
 
@@ -347,7 +348,7 @@ export async function updateCariFirma(
   data: Partial<Omit<CariFirma, "id">>
 ) {
   const docRef = doc(db, CARI_FIRMALAR, id);
-  const currentSnap = await getDoc(docRef);
+  const currentSnap = await getDocResilient(docRef);
   if (!currentSnap.exists()) throw new Error("Cari firma bulunamadı.");
   const oldBudget = (currentSnap.data() as any).budget ?? 0;
 
@@ -385,7 +386,7 @@ export async function listCariFirmalar(
     orderBy("name", "asc"),
     limit(size)
   ).withConverter(cariFirmaConverter);
-  const snap = await getDocs(q);
+  const snap = await getDocsResilient(q);
   return { items: snap.docs.map((d) => d.data()) };
 }
 
@@ -396,7 +397,7 @@ export async function deleteCariFirma(id: string) {
 export async function listCariFirmaBudgetHistory(cariFirmaId: string): Promise<BudgetHistory[]> {
   const historyRef = collection(db, CARI_FIRMALAR, cariFirmaId, "history");
   const q = query(historyRef, orderBy("changedAt", "desc")).withConverter(budgetHistoryConverter);
-  const snap = await getDocs(q);
+  const snap = await getDocsResilient(q);
   return snap.docs.map((d) => d.data());
 }
 
@@ -417,7 +418,7 @@ export async function createCariFirmaIban(
 export async function listCariFirmaIbans(cariFirmaId: string): Promise<Iban[]> {
   const ref = collection(db, CARI_FIRMALAR, cariFirmaId, "ibans");
   const q = query(ref, orderBy("createdAt", "desc")).withConverter(ibanConverter);
-  const snap = await getDocs(q);
+  const snap = await getDocsResilient(q);
   return snap.docs.map((d) => d.data());
 }
 
@@ -448,7 +449,7 @@ export async function listBankAccounts(scope: Scope): Promise<BankAccount[]> {
     scope.isSuperAdmin,
     orderBy("bankName", "asc")
   ).withConverter(bankAccountConverter);
-  const snap = await getDocs(q);
+  const snap = await getDocsResilient(q);
   return snap.docs.map((d) => d.data());
 }
 
@@ -474,7 +475,7 @@ export async function createPaymentTemplate(
 
 export async function getPaymentTemplate(id: string): Promise<PaymentTemplate | null> {
   const docRef = doc(db, CARI_TEMPLATES, id).withConverter(paymentTemplateConverter);
-  const snap = await getDoc(docRef);
+  const snap = await getDocResilient(docRef);
   return snap.exists() ? snap.data() : null;
 }
 
@@ -493,7 +494,7 @@ export async function listPaymentTemplates(scope: Scope): Promise<PaymentTemplat
     scope.isSuperAdmin,
     orderBy("templateName", "asc")
   ).withConverter(paymentTemplateConverter);
-  const snap = await getDocs(q);
+  const snap = await getDocsResilient(q);
   return snap.docs.map((d) => d.data());
 }
 
@@ -542,7 +543,7 @@ export async function listDepartments(scope: Scope): Promise<Department[]> {
     scope.isSuperAdmin,
     orderBy("name", "asc")
   ).withConverter(departmentConverter);
-  const snap = await getDocs(q);
+  const snap = await getDocsResilient(q);
   return snap.docs.map((d) => d.data());
 }
 
@@ -552,7 +553,7 @@ export async function updateDepartment(
   data: Partial<Omit<Department, "id" | "createdAt">>
 ) {
   const docRef = doc(db, CARI_DEPARTMENTS, id);
-  const currentSnap = await getDoc(docRef);
+  const currentSnap = await getDocResilient(docRef);
   if (!currentSnap.exists()) throw new Error("Departman bulunamadı.");
   const oldBudget = (currentSnap.data() as any).budget;
 
@@ -584,7 +585,7 @@ export async function deleteDepartment(id: string) {
 export async function listBudgetHistory(departmentId: string): Promise<BudgetHistory[]> {
   const ref = collection(db, CARI_DEPARTMENTS, departmentId, "history");
   const q = query(ref, orderBy("changedAt", "desc")).withConverter(budgetHistoryConverter);
-  const snap = await getDocs(q);
+  const snap = await getDocsResilient(q);
   return snap.docs.map((d) => d.data());
 }
 
@@ -607,8 +608,8 @@ export async function getDashboardData(scope: Scope) {
   ).withConverter(cariFirmaConverter);
 
   const [paymentsSnap, firmalarSnap] = await Promise.all([
-    getDocs(paymentsQuery),
-    getDocs(firmalarQuery),
+    getDocsResilient(paymentsQuery),
+    getDocsResilient(firmalarQuery),
   ]);
 
   const allPayments = paymentsSnap.docs.map((d) => d.data());
@@ -674,7 +675,7 @@ export async function listAuditEvents(
     scope.isSuperAdmin,
     ...constraints
   ).withConverter(auditEventConverter);
-  const snap = await getDocs(q);
+  const snap = await getDocsResilient(q);
   return snap.docs.map((d) => d.data());
 }
 
@@ -692,6 +693,6 @@ export async function listRecentAuditEvents(
     orderBy("timestamp", "desc"),
     limit(maxItems)
   ).withConverter(auditEventConverter);
-  const snap = await getDocs(q);
+  const snap = await getDocsResilient(q);
   return snap.docs.map((d) => d.data());
 }

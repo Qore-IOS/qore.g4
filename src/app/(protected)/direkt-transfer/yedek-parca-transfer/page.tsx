@@ -19,6 +19,7 @@ import {
   setDoc,
   runTransaction,
 } from 'firebase/firestore';
+import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import type { ProductCode, User, PendingReturn, SparePartTransferRow, PersonalStockItem, YedekParcaDepoStokItem, Device, Hospital, Depot, DeviceLabPool, PoolWarehouseStockItem } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope, filterByCompanyScope } from '@/lib/company-scope';
@@ -126,19 +127,19 @@ function SparePartFormPDFButton({ formId, formType, deviceId }: { formId: string
     if (data) { setAutoExport(true); return; }
     setLoading(true);
     try {
-      const deviceSnap = await getDoc(doc(db, 'devices', deviceId));
+      const deviceSnap = await getDocResilient(doc(db, 'devices', deviceId));
       if (!deviceSnap.exists()) return;
       const deviceData = { id: deviceSnap.id, ...deviceSnap.data() } as Device;
 
       let hospitalData: Hospital | null = null;
       if (deviceData.hospitalId) {
-        const hospitalSnap = await getDoc(doc(db, 'hospitals', deviceData.hospitalId));
+        const hospitalSnap = await getDocResilient(doc(db, 'hospitals', deviceData.hospitalId));
         if (hospitalSnap.exists()) {
           hospitalData = { id: hospitalSnap.id, ...hospitalSnap.data() } as Hospital;
         }
       }
 
-      const formSnap = await getDoc(doc(db, 'deviceActionForms', formId));
+      const formSnap = await getDocResilient(doc(db, 'deviceActionForms', formId));
       if (!formSnap.exists()) return;
       const actionRecord = { id: formSnap.id, ...formSnap.data() };
 
@@ -345,11 +346,11 @@ export default function YedekParcaTransferPage() {
 
   const loadRecentTransferLogs = useCallback(async () => {
     const [transferLogsSnap, depotLogsSnap, depotStockSnap, personalStockSnap, poolStockSnap] = await Promise.all([
-      getDocs(scopedQuery('sparePartTransferLogs', currentCompanyId, isSuperAdmin)),
-      getDocs(scopedQuery('yedekParcaDepoLog', currentCompanyId, isSuperAdmin)),
-      getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin)),
-      getDocs(scopedQuery('personalStock', currentCompanyId, isSuperAdmin, where('status', '==', 'in_stock'))),
-      getDocs(scopedQuery('poolWarehouseStock', currentCompanyId, isSuperAdmin, where('status', '==', 'in_stock'))),
+      getDocsResilient(scopedQuery('sparePartTransferLogs', currentCompanyId, isSuperAdmin)),
+      getDocsResilient(scopedQuery('yedekParcaDepoLog', currentCompanyId, isSuperAdmin)),
+      getDocsResilient(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin)),
+      getDocsResilient(scopedQuery('personalStock', currentCompanyId, isSuperAdmin, where('status', '==', 'in_stock'))),
+      getDocsResilient(scopedQuery('poolWarehouseStock', currentCompanyId, isSuperAdmin, where('status', '==', 'in_stock'))),
     ]);
 
     const transferLogsData = filterByCompanyScope(transferLogsSnap.docs.map(d => {
@@ -439,13 +440,13 @@ export default function YedekParcaTransferPage() {
 
         const fetchMainData = async () => {
           const [productsSnap, brandsSnap, stokSnap, usersSnap, pendingSnap, borrowedSnap, depotsSnap] = await Promise.all([
-            getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin, where('urunGrubu', '==', 'yedek_parca'))),
-            getDocs(scopedQuery('def_brands', currentCompanyId, isSuperAdmin)),
-            getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin)),
-            getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin)),
-            getDocs(pendingQuery),
-            getDocs(borrowedQuery),
-            getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+            getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin, where('urunGrubu', '==', 'yedek_parca'))),
+            getDocsResilient(scopedQuery('def_brands', currentCompanyId, isSuperAdmin)),
+            getDocsResilient(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin)),
+            getDocsResilient(scopedQuery('users', currentCompanyId, isSuperAdmin)),
+            getDocsResilient(pendingQuery),
+            getDocsResilient(borrowedQuery),
+            getDocsResilient(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
           ]);
 
           // Product codes + brands
@@ -575,7 +576,7 @@ export default function YedekParcaTransferPage() {
   const fetchDepoStok = useCallback(async () => {
     setDepoStokLoading(true);
     try {
-      const stokSnap = await getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
+      const stokSnap = await getDocsResilient(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
       const stokItems = filterByCompanyScope(stokSnap.docs.map(d => {
         const data = d.data();
         return {
@@ -733,8 +734,8 @@ export default function YedekParcaTransferPage() {
       );
       // Stok ve kullanım logları birbirinden bağımsız — paralel çek (waterfall yok).
       const [stockSnap, usageSnap] = await Promise.all([
-        getDocs(stockQuery),
-        getDocs(usageLogQuery),
+        getDocsResilient(stockQuery),
+        getDocsResilient(usageLogQuery),
       ]);
       const stockItems = filterByCompanyScope(stockSnap.docs.map(d => {
         const data = d.data();
@@ -800,8 +801,8 @@ export default function YedekParcaTransferPage() {
       );
 
       const [personalSnap, poolSnap] = await Promise.all([
-        getDocs(personalQuery),
-        getDocs(poolQuery),
+        getDocsResilient(personalQuery),
+        getDocsResilient(poolQuery),
       ]);
 
       const stockItems = filterByCompanyScope(personalSnap.docs.map(d => {
@@ -845,7 +846,7 @@ export default function YedekParcaTransferPage() {
         isSuperAdmin,
         where('poolWarehouseId', '==', poolWarehouseId)
       );
-      const stockSnap = await getDocs(stockQuery);
+      const stockSnap = await getDocsResilient(stockQuery);
       const stockItems = filterByCompanyScope(stockSnap.docs.map(d => {
         const data = d.data();
         return {
@@ -1167,7 +1168,7 @@ export default function YedekParcaTransferPage() {
       const now = new Date();
 
       // Read fresh depot stock from Firestore to avoid stale state issues
-      const freshStokSnap = await getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
+      const freshStokSnap = await getDocsResilient(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
       const freshDepoStok = filterByCompanyScope(freshStokSnap.docs.map(d => {
         const data = d.data();
         return { id: d.id, ...data, createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date() } as YedekParcaDepoStokItem;
@@ -1513,7 +1514,7 @@ export default function YedekParcaTransferPage() {
       setTransferRows([]);
 
       // Refresh depot stock
-      const stokSnap = await getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
+      const stokSnap = await getDocsResilient(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
       const stokItems = filterByCompanyScope(stokSnap.docs.map(d => {
         const data = d.data();
         return { id: d.id, ...data, createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date() } as YedekParcaDepoStokItem;
@@ -2539,7 +2540,7 @@ export default function YedekParcaTransferPage() {
       const hucreNumarasi = normalize(params.hucreNumarasi);
       const idField = params.scope === 'personal' ? 'personalStockId' : 'poolStockId';
       const stockCollection = params.scope === 'personal' ? 'personalStock' : 'poolWarehouseStock';
-      const stockSnap = await getDoc(doc(db, stockCollection, params.id));
+      const stockSnap = await getDocResilient(doc(db, stockCollection, params.id));
       const traceId = stockSnap.exists()
         ? normalize((stockSnap.data() as any)?.traceId || params.id)
         : normalize(params.id);
@@ -2580,11 +2581,11 @@ export default function YedekParcaTransferPage() {
       if (hucreNumarasi) depoQueries.push(scopedQuery('yedekParcaDepoLog', currentCompanyId, isSuperAdmin, where('hucreNumarasi', '==', hucreNumarasi)));
 
       for (const qRef of transferQueries) {
-        const snap = await getDocs(qRef);
+        const snap = await getDocsResilient(qRef);
         pushLogs(snap.docs.map((d) => toLog(d, 'transfer')));
       }
       for (const qRef of depoQueries) {
-        const snap = await getDocs(qRef);
+        const snap = await getDocsResilient(qRef);
         pushLogs(snap.docs.map((d) => toLog(d, 'depo')));
       }
 
@@ -3404,7 +3405,7 @@ export default function YedekParcaTransferPage() {
         }, { merge: true });
       }
 
-      const refreshedProducts = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin, where('urunGrubu', '==', 'yedek_parca')));
+      const refreshedProducts = await getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin, where('urunGrubu', '==', 'yedek_parca')));
       setProductCodes(refreshedProducts.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode));
 
       toast({ title: 'Başarılı', description: `${stockCardSyncMissing.length} ürün için stok kartı açıldı.` });

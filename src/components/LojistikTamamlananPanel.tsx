@@ -10,6 +10,7 @@ import {
   Timestamp,
   where,
 } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { format as formatDate } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { db } from '@/lib/firebase';
@@ -59,7 +60,7 @@ export default function LojistikTamamlananPanel() {
   // Product codes for name lookup
   useEffect(() => {
     (async () => {
-      const snap = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin));
+      const snap = await getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin));
       setProductCodes(
         snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) } as ProductCode))
       );

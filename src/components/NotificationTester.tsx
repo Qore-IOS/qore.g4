@@ -24,6 +24,7 @@ import {
   limit,
   getDocs,
 } from "firebase/firestore";
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 
 type NotificationLog = {
   id: string;
@@ -59,7 +60,7 @@ export default function NotificationTester() {
         orderBy("createdAt", "desc"),
         limit(20)
       );
-      const snap = await getDocs(q);
+      const snap = await getDocsResilient(q);
       const items: NotificationLog[] = snap.docs.map((d) => ({
         id: d.id,
         ...d.data(),

@@ -36,7 +36,9 @@ declare global {
   }
 }
 
-const ORDER = ['LCP', 'INP', 'CLS', 'FCP', 'TTFB'] as const;
+// DATA: Firestore veri yolunun ön-plan servis süresi (cache veya sunucu) —
+// src/lib/perf/data-vitals.ts üzerinden `qore:vital` olayıyla beslenir.
+const ORDER = ['LCP', 'INP', 'CLS', 'FCP', 'TTFB', 'DATA'] as const;
 
 function fmt(name: string, value: number): string {
   if (name === 'CLS') return value.toFixed(3);
@@ -137,6 +139,20 @@ export default function WebVitalsReporter() {
       .catch(() => {
         /* web-vitals yüklenemezse sessizce geç */
       });
+  }, []);
+
+  // DATA örnekleri buffer'a data-vitals.ts'te yazılır; burada yalnızca
+  // overlay'in canlı güncellenmesi için dinlenir. startedRef korumasının
+  // DIŞINDA: StrictMode'un mount-unmount-mount döngüsünde dinleyicinin
+  // kaybolmaması için kendi effect'inde yaşar.
+  useEffect(() => {
+    const onDataVital = (e: Event) => {
+      const sample = (e as CustomEvent<VitalSample>).detail;
+      if (!sample?.name) return;
+      setSamples((prev) => ({ ...prev, [sample.name]: sample }));
+    };
+    window.addEventListener('qore:vital', onDataVital);
+    return () => window.removeEventListener('qore:vital', onDataVital);
   }, []);
 
   if (!enabled) return null;

@@ -71,6 +71,7 @@ import {
     serverTimestamp,
     Timestamp,
 } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import type {
     Hospital,
     Device,
@@ -196,7 +197,7 @@ export default function EjectedKitPanel() {
         }
         const fetchRules = async () => {
             try {
-                const rulesSnap = await getDocs(
+                const rulesSnap = await getDocsResilient(
                     collection(db, 'hospitals', selectedLabId, 'minMaxRules')
                 );
                 setLabMinMaxRules(rulesSnap.docs.map((d) => d.data() as MinMaxRule));

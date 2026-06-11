@@ -8,6 +8,7 @@ import {
   Timestamp,
   type Firestore,
 } from 'firebase/firestore';
+import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 
 import {
   Document,
@@ -258,11 +259,11 @@ export async function autoPrintTutanakFromTransferId(
 
   // 2) Read saved transfer + items (so we print what is actually persisted)
   const tRef = doc(db, 'transfers', transferId);
-  const tSnap = await getDoc(tRef);
+  const tSnap = await getDocResilient(tRef);
   if (!tSnap.exists()) return;
 
   const t = tSnap.data() as any;
-  const itemsSnap = await getDocs(collection(db, 'transfers', transferId, 'items'));
+  const itemsSnap = await getDocsResilient(collection(db, 'transfers', transferId, 'items'));
   const items = itemsSnap.docs.map((d) => d.data() as any);
 
   const groups = buildGroupsFromItems(

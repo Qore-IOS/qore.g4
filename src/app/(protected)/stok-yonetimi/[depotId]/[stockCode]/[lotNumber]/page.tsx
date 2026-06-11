@@ -9,6 +9,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Loader2, ListChecks, Check, X, Save, XCircle, Search, ListFilter, Nfc, Smartphone, ScanLine } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { collection, query, where, getDocs, writeBatch, doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import type { DepoStokItem, ConsumptionRecord } from '@/lib/types';
 import BackButton from '@/components/BackButton';
 import { useToast } from '@/hooks/use-toast';
@@ -134,7 +135,7 @@ export default function StockDetailPage() {
         decodeURIComponent(stockCode as string),
         decodeURIComponent(lotNumber as string)
       );
-      const definitionSnap = await getDoc(doc(db, 'lotNfcDefinitions', definitionId));
+      const definitionSnap = await getDocResilient(doc(db, 'lotNfcDefinitions', definitionId));
       if (definitionSnap.exists()) {
         setLotNfcDefinition(definitionSnap.data() as LotNfcDefinition);
       } else {
@@ -164,7 +165,7 @@ export default function StockDetailPage() {
         where('lotNumarasi', '==', decodeURIComponent(lotNumber as string)),
         where('isShipped', '==', false)
       );
-      const snap = await getDocs(q);
+      const snap = await getDocsResilient(q);
       const fetchedItems = filterByCompanyScope(
         snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as DepoStokItem)),
         currentCompanyId,

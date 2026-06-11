@@ -17,6 +17,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, doc, writeBatch, Timestamp, deleteDoc } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import type { DepoStokItem, Laboratory, ProductCode, MinMaxRule } from '@/lib/types';
 import { Loader2, Search, ChevronUp, ChevronDown, ListChecks, History, PackageX, FileText } from 'lucide-react';
 import { useMinMaxRules, touchStockMetadata } from '@/hooks/useFirebaseQueries';
@@ -191,9 +192,9 @@ export default function LaboratuvarYonetimiPanel() {
     async function fetchData() {
       setIsLoading(true);
       const [labsSnap, stokSnap, productsSnap] = await Promise.all([
-        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true))),
-        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin))
+        getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocsResilient(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true))),
+        getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin))
       ]);
       setLaboratories(labsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Laboratory)));
       setDepoStok(filterByCompanyScope(
@@ -592,7 +593,7 @@ export default function LaboratuvarYonetimiPanel() {
       });
 
       // Refresh local stock data
-      const stokSnap = await getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true)));
+      const stokSnap = await getDocsResilient(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true)));
       setDepoStok(filterByCompanyScope(
         stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
         currentCompanyId,

@@ -1,6 +1,7 @@
 'use client';
 
 import { getDocs, where, orderBy, limit, Timestamp } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { subDays } from 'date-fns';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import type { User, MaintenancePlan, MaintenanceLog, PeriodicPartChange, PeriodicPartChangeLog, Device } from '@/lib/types';
@@ -119,26 +120,26 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
     periodicPartChangeLogsSnap,
     availabilitySnap,
   ] = await Promise.all([
-    getDocs(scopedQuery('users', companyId, isSuperAdmin)),
-    getDocs(scopedQuery('deviceFaultReports', companyId, isSuperAdmin,
+    getDocsResilient(scopedQuery('users', companyId, isSuperAdmin)),
+    getDocsResilient(scopedQuery('deviceFaultReports', companyId, isSuperAdmin,
       where('openedAt', '>=', startTs), where('openedAt', '<=', endTs),
       orderBy('openedAt', 'desc'), limit(10000))),
-    getDocs(scopedQuery('deviceActionForms', companyId, isSuperAdmin,
+    getDocsResilient(scopedQuery('deviceActionForms', companyId, isSuperAdmin,
       where('createdAt', '>=', startTs), where('createdAt', '<=', endTs),
       orderBy('createdAt', 'desc'), limit(10000))),
-    getDocs(scopedQuery('aplikasyonActionForms', companyId, isSuperAdmin,
+    getDocsResilient(scopedQuery('aplikasyonActionForms', companyId, isSuperAdmin,
       where('createdAt', '>=', startTs), where('createdAt', '<=', endTs),
       orderBy('createdAt', 'desc'), limit(10000))),
-    getDocs(scopedQuery('devices', companyId, isSuperAdmin)),
-    getDocs(scopedQuery('maintenancePlans', companyId, isSuperAdmin)),
-    getDocs(scopedQuery('maintenanceLogs', companyId, isSuperAdmin,
+    getDocsResilient(scopedQuery('devices', companyId, isSuperAdmin)),
+    getDocsResilient(scopedQuery('maintenancePlans', companyId, isSuperAdmin)),
+    getDocsResilient(scopedQuery('maintenanceLogs', companyId, isSuperAdmin,
       where('completedAt', '>=', startTs), where('completedAt', '<=', endTs),
       orderBy('completedAt', 'desc'), limit(10000))),
-    getDocs(scopedQuery('periodicPartChanges', companyId, isSuperAdmin)),
-    getDocs(scopedQuery('periodicPartChangeLogs', companyId, isSuperAdmin,
+    getDocsResilient(scopedQuery('periodicPartChanges', companyId, isSuperAdmin)),
+    getDocsResilient(scopedQuery('periodicPartChangeLogs', companyId, isSuperAdmin,
       where('changedAt', '>=', startTs), where('changedAt', '<=', endTs),
       orderBy('changedAt', 'desc'), limit(10000))),
-    getDocs(scopedQuery('personnelAvailability', companyId, isSuperAdmin)),
+    getDocsResilient(scopedQuery('personnelAvailability', companyId, isSuperAdmin)),
   ]);
 
   // Parse data

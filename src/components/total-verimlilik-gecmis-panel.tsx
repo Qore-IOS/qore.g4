@@ -23,6 +23,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, orderBy, query } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
@@ -89,7 +90,7 @@ export default function TotalVerimlilikGecmisPanel() {
           isSuperAdmin,
           orderBy('createdAt', 'desc')
         );
-        const snapshot = await getDocs(recordsQuery);
+        const snapshot = await getDocsResilient(recordsQuery);
 
         const fetchedRecords: TotalEfficiencyRecord[] = snapshot.docs.map(doc => {
           const data = doc.data();

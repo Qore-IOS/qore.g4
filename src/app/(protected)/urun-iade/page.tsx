@@ -18,6 +18,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Barcode, Trash2, CheckCircle, Loader2, Search, AlertTriangle, Undo, Info, History } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { collection, writeBatch, doc, getDocs, query, where, serverTimestamp, addDoc, onSnapshot } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { cn, generateId, playFeedback } from '@/lib/utils';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { LabSelector } from '@/components/common/LabSelector';
@@ -63,9 +64,9 @@ export default function UrunIadePanel() {
     setIsLoading(true);
     try {
       const [depotsSnap, hospitalsSnap, productsSnap] = await Promise.all([
-        getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+        getDocsResilient(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+        getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
       ]);
       const depotList = depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
       setDepots(depotList);

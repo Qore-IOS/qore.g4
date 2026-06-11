@@ -47,6 +47,7 @@ import { Trash2, CheckSquare, PlusCircle, Loader2, Search, History, Camera, Scan
 // Firebase
 import { db } from '@/lib/firebase';
 import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, orderBy, limit } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 
 // Utilities
 import { cn, generateId, playFeedback } from '@/lib/utils';
@@ -917,7 +918,7 @@ export default function AnaPanel(props: AnaPanelProps) {
 
             // PERFORMANS: Geçmişte tüketilmiş/işlem görmüş seri kontrolü artık her
             // okutmada Firestore'a sorgu atmıyor. Eskiden burada her seri için
-            // `getDocs(serialHistory/{seri}/events)` çağrısı yapılıyordu; "fire and
+            // `getDocsResilient(serialHistory/{seri}/events)` çağrısı yapılıyordu; "fire and
             // forget" olsa bile her okutmada Firestore IndexedDB persistence katmanını
             // ve ağı tetikliyordu. Hızlı okutmalarda bu sorgular birikip ana iş
             // parçacığını boğuyor, her tuşa basıştan sonra boyamayı (paint) geciktiriyordu
@@ -1521,7 +1522,7 @@ export default function AnaPanel(props: AnaPanelProps) {
           await Promise.all(
             serialsToCheck.map(async ({ serial, stokKodu }) => {
               try {
-                const historySnap = await getDocs(
+                const historySnap = await getDocsResilient(
                   query(
                     collection(db, `serialHistory/${serial}/events`),
                     limit(1)

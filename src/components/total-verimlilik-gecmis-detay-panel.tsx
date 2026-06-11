@@ -24,6 +24,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
+import { getDocResilient } from '@/lib/firestore-network-recovery';
 import { useToast } from '@/hooks/use-toast';
 import { totalVerimlilikLogger } from '@/lib/logger';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
@@ -117,7 +118,7 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
     const fetchRecord = async () => {
       try {
         const docRef = doc(db, 'totalEfficiencyRecords', recordId);
-        const docSnap = await getDoc(docRef);
+        const docSnap = await getDocResilient(docRef);
 
         if (docSnap.exists()) {
           const data = docSnap.data();

@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { doc, getDoc } from 'firebase/firestore';
+import { getDocResilient } from '@/lib/firestore-network-recovery';
 import { ChevronLeft } from 'lucide-react';
 import { db } from '@/lib/firebase';
 
@@ -14,7 +15,7 @@ export default function StokGecmisDetayPage() {
   useEffect(() => {
     const load = async () => {
       if (!params?.islemId) return;
-      const snap = await getDoc(doc(db, 'yedekParcaDepoLog', params.islemId));
+      const snap = await getDocResilient(doc(db, 'yedekParcaDepoLog', params.islemId));
       if (snap.exists()) {
         setData({ id: snap.id, ...snap.data() });
       }

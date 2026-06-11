@@ -16,6 +16,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { collection, doc, getDocs, onSnapshot, updateDoc, query, orderBy } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
@@ -191,9 +192,9 @@ export default function CihazTestDagilimiPage() {
       setLoading(true);
       try {
         const [labsSnap, productsSnap, devicesSnap] = await Promise.all([
-          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin, orderBy('name', 'asc'))),
-          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin, orderBy('stokAdi', 'asc'))),
-          getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
+          getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin, orderBy('name', 'asc'))),
+          getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin, orderBy('stokAdi', 'asc'))),
+          getDocsResilient(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
         ]);
         if (cancelled) return;
         setLabs(

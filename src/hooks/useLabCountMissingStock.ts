@@ -13,6 +13,7 @@ import {
   writeBatch,
   serverTimestamp
 } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import type { DepoStokItem, ProductCode } from '@/lib/types';
 import { parseAnyBarcode, resolveProductFromParsed, parseAndResolveBarcode } from '@/lib/barcode';
 import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
@@ -112,21 +113,21 @@ export function useLabCountMissingStock(params: {
         // stokKodu olmadan sorgu yanlış ürünü döndürebilir. stokKodu varsa
         // birlikte sorgula; yoksa fallback olarak seri ile çek.
         const snap = stokKodu
-          ? await getDocs(
+          ? await getDocsResilient(
               query(stokRef, where('stokKodu', '==', stokKodu), where('seriNumarasi', '==', serial), limit(5))
             )
-          : await getDocs(
+          : await getDocsResilient(
               query(stokRef, where('seriNumarasi', '==', serial), limit(5))
             );
         const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         candidates.push(...(stokKodu ? rows.filter((r: any) => r.stokKodu === stokKodu) : rows));
       } else if (stokKodu && lot) {
-        const snap = await getDocs(
+        const snap = await getDocsResilient(
           query(stokRef, where('stokKodu', '==', stokKodu), where('lotNumarasi', '==', lot), limit(10))
         );
         candidates.push(...snap.docs.map(d => ({ id: d.id, ...d.data() })));
       } else if (stokKodu) {
-        const snap = await getDocs(
+        const snap = await getDocsResilient(
           query(stokRef, where('stokKodu', '==', stokKodu), limit(10))
         );
         candidates.push(...snap.docs.map(d => ({ id: d.id, ...d.data() })));
@@ -227,7 +228,7 @@ export function useLabCountMissingStock(params: {
 
       // Aynı seri farklı ürünlere ait olabildiği için stokKodu varsa filtreye dahil et.
       const snap = stokKodu
-        ? await getDocs(
+        ? await getDocsResilient(
             query(
               stokRef,
               where('stokKodu', '==', stokKodu),
@@ -236,7 +237,7 @@ export function useLabCountMissingStock(params: {
               limit(5)
             )
           )
-        : await getDocs(
+        : await getDocsResilient(
             query(
               stokRef,
               where('seriNumarasi', '==', serial),

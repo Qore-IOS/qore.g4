@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { doc, getDoc, updateDoc, arrayRemove, arrayUnion } from 'firebase/firestore';
+import { getDocResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import type { Rack } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
@@ -38,7 +39,7 @@ export default function GecmisRafDetayPage() {
     setLoading(true);
     try {
       const rackRef = doc(db, 'archiveRacks', rackId as string);
-      const rackSnap = await getDoc(rackRef);
+      const rackSnap = await getDocResilient(rackRef);
       if (rackSnap.exists()) {
         const data = rackSnap.data();
         const rackData: Rack = {

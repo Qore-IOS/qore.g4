@@ -16,6 +16,8 @@ import {
   limit,
   Timestamp,
 } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
+import { getDocsCacheFirst } from '@/lib/firestore-fetch';
 import { subDays } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -174,8 +176,8 @@ export default function MerkezSiparisPanel() {
   const depotRulesQueries = useQueries({
     queries: depots.map(d => ({
       queryKey: ['minMaxRules', 'depot', d.id],
-      queryFn: async () => {
-        const snap = await getDocs(collection(db, 'depots', d.id, 'minMaxRules'));
+      queryFn: async (qctx: { queryKey: readonly unknown[] }) => {
+        const snap = await getDocsCacheFirst(qctx, collection(db, 'depots', d.id, 'minMaxRules'));
         return snap.docs.reduce<Record<string, MinMaxRule>>((acc, doc) => {
           const r = doc.data() as MinMaxRule;
           if (r?.stokKodu) acc[r.stokKodu] = r;
@@ -189,8 +191,8 @@ export default function MerkezSiparisPanel() {
   const hospitalRulesQueries = useQueries({
     queries: hospitals.map(h => ({
       queryKey: ['minMaxRules', 'hospital', h.id],
-      queryFn: async () => {
-        const snap = await getDocs(collection(db, 'hospitals', h.id, 'minMaxRules'));
+      queryFn: async (qctx: { queryKey: readonly unknown[] }) => {
+        const snap = await getDocsCacheFirst(qctx, collection(db, 'hospitals', h.id, 'minMaxRules'));
         return snap.docs.reduce<Record<string, MinMaxRule>>((acc, doc) => {
           const r = doc.data() as MinMaxRule;
           if (r?.stokKodu) acc[r.stokKodu] = r;
@@ -244,7 +246,7 @@ export default function MerkezSiparisPanel() {
         // Açıkları tam çek, tamamlananları son 90 gün + limit(500) ile sınırla.
         const completedSinceTs = Timestamp.fromDate(subDays(new Date(), 90));
         const [openOrdersSnap, completedOrdersSnap, cihazUstuSnap] = await Promise.all([
-          getDocs(scopedQuery(
+          getDocsResilient(scopedQuery(
             'centralOrders',
             currentCompanyId,
             isSuperAdmin,
@@ -253,7 +255,7 @@ export default function MerkezSiparisPanel() {
             orderBy('createdAt', 'desc'),
             limit(500),
           )),
-          getDocs(scopedQuery(
+          getDocsResilient(scopedQuery(
             'centralOrders',
             currentCompanyId,
             isSuperAdmin,
@@ -262,7 +264,7 @@ export default function MerkezSiparisPanel() {
             orderBy('createdAt', 'desc'),
             limit(500),
           )),
-          getDocs(scopedQuery('cihazUstuGecmisi', currentCompanyId, isSuperAdmin)),
+          getDocsResilient(scopedQuery('cihazUstuGecmisi', currentCompanyId, isSuperAdmin)),
         ]);
 
         const cihazMap: Record<string, Record<string, number>> = {};

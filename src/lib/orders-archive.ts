@@ -22,6 +22,7 @@ import {
   type DocumentSnapshot,
   type WriteBatch,
 } from 'firebase/firestore';
+import { getDocResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 
 export const ORDERS_COLLECTION = 'orders';
@@ -60,9 +61,9 @@ export function archiveCompletedOrderInBatch(
 export async function getOrderDocWithArchiveFallback(
   orderId: string,
 ): Promise<DocumentSnapshot<DocumentData>> {
-  const live = await getDoc(doc(db, ORDERS_COLLECTION, orderId));
+  const live = await getDocResilient(doc(db, ORDERS_COLLECTION, orderId));
   if (live.exists()) return live;
-  return getDoc(doc(db, ORDERS_ARCHIVE_COLLECTION, orderId));
+  return getDocResilient(doc(db, ORDERS_ARCHIVE_COLLECTION, orderId));
 }
 
 /**

@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { collection, doc, getDoc, Timestamp } from 'firebase/firestore';
+import { getDocResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { getOrderDocWithArchiveFallback } from '@/lib/orders-archive';
 import { useToast } from '@/hooks/use-toast';
@@ -43,13 +44,13 @@ export default function SiparisGecmisDetailPage() {
     setLoading(true);
     (async () => {
       // First, try to fetch as a shipment (most common case for this page)
-      const shipmentSnap = await getDoc(doc(db, 'shipments', id));
+      const shipmentSnap = await getDocResilient(doc(db, 'shipments', id));
       if (shipmentSnap.exists()) {
         const shipmentData = { id: shipmentSnap.id, ...shipmentSnap.data() } as Shipment;
         setShipment(shipmentData);
 
         if (shipmentData.orderId && shipmentData.orderId !== 'DIREKT_TRANSFER') {
-            const orderSnap = await getDoc(doc(db, 'orders', shipmentData.orderId));
+            const orderSnap = await getDocResilient(doc(db, 'orders', shipmentData.orderId));
             if (orderSnap.exists()) {
                 const orderData = orderSnap.data();
                 setOrder({ id: orderSnap.id, ...orderData } as Order);

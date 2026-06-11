@@ -16,6 +16,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
+import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { Loader2, FileText, FileSpreadsheet } from 'lucide-react';
@@ -67,14 +68,14 @@ export default function Page() {
     (async () => {
       try {
         const ref = doc(db, 'transfers', transferId);
-        const snap = await getDoc(ref);
+        const snap = await getDocResilient(ref);
         if (!snap.exists()) {
           toast({ title: 'Bulunamadı', description: 'Transfer kaydı mevcut değil.', variant: 'destructive' });
           router.back();
           return;
         }
         const rootData = { id: snap.id, ...snap.data() } as TransferRoot; // Include id in rootData
-        const itemsSnap = await getDocs(collection(db, 'transfers', transferId, 'items'));
+        const itemsSnap = await getDocsResilient(collection(db, 'transfers', transferId, 'items'));
         const rows = itemsSnap.docs.map(d => d.data() as TransferItem);
 
         const stokKodlari = Array.from(new Set(rows.map((r) => r.stokKodu).filter(Boolean)));
@@ -84,7 +85,7 @@ export default function Page() {
           for (let i = 0; i < stokKodlari.length; i += chunkSize) {
             const chunk = stokKodlari.slice(i, i + chunkSize);
             const q = scopedQuery('productCodes', currentCompanyId, isSuperAdmin, where('stokKodu', 'in', chunk));
-            const pSnap = await getDocs(q);
+            const pSnap = await getDocsResilient(q);
             pSnap.docs.forEach((d) => {
               const data = d.data() as ProductCode;
               if (data.stokKodu) {

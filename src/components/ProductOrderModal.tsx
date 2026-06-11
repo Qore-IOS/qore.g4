@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { Hospital, ProductCode, MinMaxRule } from '@/lib/types';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, doc, updateDoc } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
@@ -60,7 +61,7 @@ export default function ProductOrderModal({
 
     setIsLoading(true);
     try {
-      const rulesSnap = await getDocs(collection(db, 'hospitals', hospital.id, 'minMaxRules'));
+      const rulesSnap = await getDocsResilient(collection(db, 'hospitals', hospital.id, 'minMaxRules'));
       const rules: MinMaxRule[] = rulesSnap.docs.map(d => d.data() as MinMaxRule);
 
       // Get all stokKodus from minMaxRules

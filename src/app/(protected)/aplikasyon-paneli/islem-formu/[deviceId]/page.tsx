@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { db, storage } from '@/lib/firebase';
 import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where, orderBy, updateDoc, Timestamp, writeBatch, setDoc, deleteDoc } from 'firebase/firestore';
+import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog, PersonalStockItem, PeriodicPartChange, PeriodicPartChangeLog, MaintenancePeriodUnit, FaultDefinition, DraftActionLog, PoolWarehouseStockItem, Depot, DeviceLabPool, YedekParcaDepoStokItem } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
@@ -329,11 +330,11 @@ export default function AplikasyonIslemFormuPage() {
         if (isLabMode && hospitalIdFromLab) {
           // Lab Mode: Fetch all devices for this hospital
           const q = scopedQuery('devices', currentCompanyId, isSuperAdmin, where('hospitalId', '==', hospitalIdFromLab));
-          const snap = await getDocs(q);
+          const snap = await getDocsResilient(q);
           const devices = snap.docs.map(d => ({ id: d.id, ...d.data() } as Device));
           setDevicesByLab(devices);
 
-          const hospitalSnap = await getDoc(doc(db, 'hospitals', hospitalIdFromLab));
+          const hospitalSnap = await getDocResilient(doc(db, 'hospitals', hospitalIdFromLab));
           if (hospitalSnap.exists()) {
             setHospital({ id: hospitalSnap.id, ...hospitalSnap.data() } as Hospital);
           }
@@ -342,7 +343,7 @@ export default function AplikasyonIslemFormuPage() {
           return;
         }
 
-        const deviceSnap = await getDoc(doc(db, 'devices', rawDeviceId));
+        const deviceSnap = await getDocResilient(doc(db, 'devices', rawDeviceId));
         if (!deviceSnap.exists()) {
           toast({ title: 'Hata', description: 'Cihaz bulunamadı.', variant: 'destructive' });
           router.back();
@@ -352,7 +353,7 @@ export default function AplikasyonIslemFormuPage() {
         setDevice(deviceData);
 
         if (deviceData.hospitalId) {
-          const hospitalSnap = await getDoc(doc(db, 'hospitals', deviceData.hospitalId));
+          const hospitalSnap = await getDocResilient(doc(db, 'hospitals', deviceData.hospitalId));
           if (hospitalSnap.exists()) {
             setHospital({ id: hospitalSnap.id, ...hospitalSnap.data() } as Hospital);
           }
@@ -371,7 +372,7 @@ export default function AplikasyonIslemFormuPage() {
     if (!draftIdFromUrl || !rawDeviceId) return;
     (async () => {
       try {
-        const draftSnap = await getDoc(doc(db, 'draftActionForms', draftIdFromUrl));
+        const draftSnap = await getDocResilient(doc(db, 'draftActionForms', draftIdFromUrl));
         if (draftSnap.exists()) {
           const draftData = draftSnap.data();
           setCurrentDraftId(draftIdFromUrl);
@@ -415,7 +416,7 @@ export default function AplikasyonIslemFormuPage() {
           where('ownerUid', '==', currentUserProfile.uid),
           where('status', '==', 'in_stock')
         );
-        const snap = await getDocs(q);
+        const snap = await getDocsResilient(q);
         const items = snap.docs.map(d => {
           const data = d.data();
           return {
@@ -434,7 +435,7 @@ export default function AplikasyonIslemFormuPage() {
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
+        const snap = await getDocsResilient(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
         const items = snap.docs.map((d) => {
           const data = d.data();
           return {
@@ -455,11 +456,11 @@ export default function AplikasyonIslemFormuPage() {
     if (!rawDeviceId) return;
     (async () => {
       try {
-        const deviceSnap = isLabMode ? null : await getDoc(doc(db, 'devices', rawDeviceId));
+        const deviceSnap = isLabMode ? null : await getDocResilient(doc(db, 'devices', rawDeviceId));
         const hospitalId = isLabMode ? hospitalIdFromLab : deviceSnap?.data()?.hospitalId;
         if (!hospitalId) return;
 
-        const poolsSnap = await getDocs(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin));
+        const poolsSnap = await getDocsResilient(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin));
         const matchingPoolIds: string[] = [];
         const companyScopedPools = filterByCompanyScope(
           poolsSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as DeviceLabPool),
@@ -473,7 +474,7 @@ export default function AplikasyonIslemFormuPage() {
         });
         if (matchingPoolIds.length === 0) return;
 
-        const depotsSnap = await getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin));
+        const depotsSnap = await getDocsResilient(scopedQuery('depots', currentCompanyId, isSuperAdmin));
         const poolWarehouseIds: string[] = [];
         const companyScopedDepots = filterByCompanyScope(
           depotsSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as Depot),
@@ -496,7 +497,7 @@ export default function AplikasyonIslemFormuPage() {
             where('poolWarehouseId', '==', pwId),
             where('status', '==', 'in_stock')
           );
-          const stockSnap = await getDocs(stockQ);
+          const stockSnap = await getDocsResilient(stockQ);
           stockSnap.docs.forEach(d => {
             const data = d.data();
             allPoolStock.push({
@@ -553,7 +554,7 @@ export default function AplikasyonIslemFormuPage() {
           isSuperAdmin,
           where('deviceId', '==', deviceId)
         );
-        const partsSnap = await getDocs(partsQuery);
+        const partsSnap = await getDocsResilient(partsQuery);
         const allParts = partsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as PeriodicPartChange);
         // Filter for aplikasyon or both responsibility
         const filteredParts = allParts.filter(p => p.responsibilityType === 'aplikasyon' || p.responsibilityType === 'both');
@@ -566,7 +567,7 @@ export default function AplikasyonIslemFormuPage() {
           isSuperAdmin,
           where('deviceId', '==', deviceId)
         );
-        const logsSnap = await getDocs(logsQuery);
+        const logsSnap = await getDocsResilient(logsQuery);
         const logs = logsSnap.docs.map(d => {
           const data = d.data();
           return {
@@ -1135,7 +1136,7 @@ export default function AplikasyonIslemFormuPage() {
   };
 
   const refreshDepotStock = async () => {
-    const snap = await getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
+    const snap = await getDocsResilient(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
     const items = snap.docs.map((d) => {
       const data = d.data();
       return {
@@ -1584,7 +1585,7 @@ export default function AplikasyonIslemFormuPage() {
     // Case 1: Direct ID provided (Serial or Cell tracked item)
     if (partChange.depotStockId && !isGroupedDepotKey) {
       const depotRef = doc(db, 'yedekParcaDepoStok', partChange.depotStockId);
-      const depotSnap = await getDoc(depotRef);
+      const depotSnap = await getDocResilient(depotRef);
       if (depotSnap.exists()) {
         const depotData = depotSnap.data();
         const currentQty = depotData.quantity || 1;
@@ -1603,7 +1604,7 @@ export default function AplikasyonIslemFormuPage() {
       for (const sourceId of groupedSourceIds) {
         if (remainingToConsume <= 0) break;
         const sourceRef = doc(db, 'yedekParcaDepoStok', sourceId);
-        const sourceSnap = await getDoc(sourceRef);
+        const sourceSnap = await getDocResilient(sourceRef);
         if (!sourceSnap.exists()) continue;
         const sourceData = sourceSnap.data();
         const available = sourceData.quantity || 0;
@@ -1625,7 +1626,7 @@ export default function AplikasyonIslemFormuPage() {
         collection(db, 'yedekParcaDepoStok'),
         where('stokKodu', '==', partChange.stokKodu)
       );
-      const snapshot = await getDocs(q);
+      const snapshot = await getDocsResilient(q);
 
       const docsSorted = [...snapshot.docs].sort((a, b) => {
         const aTs = (a.data().createdAt?.toDate?.() || new Date(0)).getTime();
@@ -1827,7 +1828,7 @@ export default function AplikasyonIslemFormuPage() {
                         resolvedDevices.push(existingMap.get(id)!);
                         continue;
                     }
-                    const extraSnap = await getDoc(doc(db, 'devices', id));
+                    const extraSnap = await getDocResilient(doc(db, 'devices', id));
                     if (extraSnap.exists()) {
                         resolvedDevices.push({ id: extraSnap.id, ...extraSnap.data() } as Device);
                     }

@@ -11,6 +11,7 @@ import {
   doc,
   Timestamp,
 } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import {
   Card,
   CardHeader,
@@ -96,7 +97,7 @@ export default function BorcDepotPanel({
         collection(db, 'borcTransfers'),
         where('fromDepotId', '==', fromDepotId)
       );
-      const [tSnap] = await Promise.all([getDocs(tQ)]);
+      const [tSnap] = await Promise.all([getDocsResilient(tQ)]);
       const fetchedTransfers = tSnap.docs.map(
         d => ({ id: d.id, ...d.data() } as BorcTransfer)
       );

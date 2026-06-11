@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils';
 import { format, isWithinInterval, isBefore, isAfter, parseISO, eachDayOfInterval } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { collection, query, getDocs, doc, updateDoc, where } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
@@ -60,7 +61,7 @@ export default function ShiftHistoryPanel({
           isSuperAdmin,
           where('isActive', '==', true)
         );
-        const snapshot = await getDocs(shiftsQuery);
+        const snapshot = await getDocsResilient(shiftsQuery);
         const shiftsData = snapshot.docs.map(doc => ({
           id: doc.id,
           ...doc.data()

@@ -6,6 +6,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import { db } from '@/lib/firebase';
 import { doc, getDoc, collection, query, orderBy, onSnapshot, updateDoc, serverTimestamp, getDocs, where, addDoc, Timestamp, writeBatch, arrayUnion } from 'firebase/firestore';
+import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -268,7 +269,7 @@ export default function FaultDetailPage() {
 
       if (faultData.deviceId) {
         const deviceRef = doc(db, 'devices', faultData.deviceId);
-        const deviceSnap = await getDoc(deviceRef);
+        const deviceSnap = await getDocResilient(deviceRef);
         if (deviceSnap.exists()) {
           setDevice({ id: deviceSnap.id, ...(deviceSnap.data() as any) });
         }
@@ -332,7 +333,7 @@ export default function FaultDetailPage() {
 
       try {
         // Laboratuvara tanımlı minMaxRules'dan ürünlerin testAdi'lerini al
-        const minMaxSnap = await getDocs(collection(db, 'hospitals', fault.hospitalId, 'minMaxRules'));
+        const minMaxSnap = await getDocsResilient(collection(db, 'hospitals', fault.hospitalId, 'minMaxRules'));
         const stokKodulari = minMaxSnap.docs.map(d => d.id);
 
         if (stokKodulari.length === 0) {
@@ -341,7 +342,7 @@ export default function FaultDetailPage() {
         }
 
         // ProductCodes'dan testAdi'leri al
-        const productCodesSnap = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin));
+        const productCodesSnap = await getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin));
         const testNames = new Set<string>();
 
         productCodesSnap.docs.forEach(d => {
@@ -370,7 +371,7 @@ export default function FaultDetailPage() {
 
       try {
         // ProductCodes'dan stokKodu ile eşleşen ürünü bul
-        const productCodesSnap = await getDocs(
+        const productCodesSnap = await getDocsResilient(
           scopedQuery('productCodes', currentCompanyId, isSuperAdmin, where('stokKodu', '==', fault.productStokKodu))
         );
 
@@ -400,7 +401,7 @@ export default function FaultDetailPage() {
     if (!fault || normalizeStatus(fault.status) === 'cozuldu') return;
     (async () => {
       try {
-        const usersSnap = await getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin));
+        const usersSnap = await getDocsResilient(scopedQuery('users', currentCompanyId, isSuperAdmin));
         const users = usersSnap.docs.map(d => ({ uid: d.id, ...d.data() } as User));
         // Filter to teknik_servis and aplikasyon roles
         const personnel = users.filter(u => u.role === 'teknik_servis' || u.role === 'aplikasyon');
@@ -416,7 +417,7 @@ export default function FaultDetailPage() {
     if (!currentUser) return;
     const fetchPersonalStock = async () => {
       try {
-        const stockSnap = await getDocs(
+        const stockSnap = await getDocsResilient(
           query(
             collection(db, 'personalStock'),
             where('ownerUid', '==', currentUser.uid),
@@ -437,7 +438,7 @@ export default function FaultDetailPage() {
     if (!fault || normalizeStatus(fault.status) === 'cozuldu') return;
     (async () => {
       try {
-        const snap = await getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
+        const snap = await getDocsResilient(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
         const items = snap.docs.map((d) => {
           const data = d.data();
           return {
@@ -460,13 +461,13 @@ export default function FaultDetailPage() {
     if (!fault?.deviceId || normalizeStatus(fault.status) === 'cozuldu') return;
     (async () => {
       try {
-        const deviceSnap = await getDoc(doc(db, 'devices', fault.deviceId));
+        const deviceSnap = await getDocResilient(doc(db, 'devices', fault.deviceId));
         if (!deviceSnap.exists()) return;
         const deviceData = deviceSnap.data();
         const hospitalId = deviceData.hospitalId;
         if (!hospitalId) return;
 
-        const poolsSnap = await getDocs(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin));
+        const poolsSnap = await getDocsResilient(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin));
         const matchingPoolIds: string[] = [];
         poolsSnap.docs.forEach(d => {
           const pool = d.data() as DeviceLabPool;
@@ -476,7 +477,7 @@ export default function FaultDetailPage() {
         });
         if (matchingPoolIds.length === 0) return;
 
-        const depotsSnap = await getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin));
+        const depotsSnap = await getDocsResilient(scopedQuery('depots', currentCompanyId, isSuperAdmin));
         const poolWarehouseIds: string[] = [];
         depotsSnap.docs.forEach(d => {
           const depot = d.data() as Depot;
@@ -495,7 +496,7 @@ export default function FaultDetailPage() {
             where('poolWarehouseId', '==', pwId),
             where('status', '==', 'in_stock')
           );
-          const stockSnap = await getDocs(stockQ);
+          const stockSnap = await getDocsResilient(stockQ);
           stockSnap.docs.forEach(d => {
             const data = d.data();
             allPoolStock.push({
@@ -1236,7 +1237,7 @@ export default function FaultDetailPage() {
       };
 
       if (removedSerial && removedSerial !== (resolvedSerialNumber || '').trim()) {
-        const duplicateSnap = await getDocs(query(
+        const duplicateSnap = await getDocsResilient(query(
           collection(db, 'personalStock'),
           where('ownerUid', '==', currentUser.uid),
           where('serialNumber', '==', removedSerial)
@@ -1715,7 +1716,7 @@ export default function FaultDetailPage() {
         updateData.closeDescription = editCloseDescription;
 
         // Also update the 'closed' history event
-        const historySnap = await getDocs(
+        const historySnap = await getDocsResilient(
           query(
             collection(db, 'deviceFaultReports', fault.id, 'history'),
             where('type', '==', 'closed')

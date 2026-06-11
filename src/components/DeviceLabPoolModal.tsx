@@ -10,6 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { LabSelector } from '@/components/common/LabSelector';
 import { Loader2, Users, FlaskConical, Trash2, Edit3, Plus, ArrowLeft, Server } from 'lucide-react';
 import { collection, getDocs, addDoc, deleteDoc, updateDoc, doc, Timestamp, query, orderBy, where } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
@@ -47,7 +48,7 @@ export default function DeviceLabPoolModal({ open, onOpenChange, hospitals, devi
   const fetchPools = useCallback(async () => {
     setIsLoading(true);
     try {
-      const snap = await getDocs(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc')));
+      const snap = await getDocsResilient(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc')));
       setPools(snap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceLabPool)));
     } catch (error) {
       console.error('Error fetching device lab pools:', error);

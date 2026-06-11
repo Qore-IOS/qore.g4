@@ -7,6 +7,7 @@ import {
   serverTimestamp, getDoc, getDocs, query, where, orderBy, Timestamp,
   arrayUnion, arrayRemove, setDoc,
 } from 'firebase/firestore';
+import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import type { User } from '@/lib/types';
 import { normalizeCompanyId } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
@@ -145,7 +146,7 @@ export async function createSession(params: {
 /** Join a session (accept invitation) */
 export async function joinSession(sessionId: string, uid: string, name: string): Promise<void> {
   const ref = doc(db, COLLECTION, sessionId);
-  const snap = await getDoc(ref);
+  const snap = await getDocResilient(ref);
   if (!snap.exists()) throw new Error('Oturum bulunamadı');
 
   const data = snap.data() as Omit<MaliyetSayimOturum, 'id'>;
@@ -159,7 +160,7 @@ export async function joinSession(sessionId: string, uid: string, name: string):
 /** Decline a session invitation */
 export async function declineSession(sessionId: string, uid: string): Promise<void> {
   const ref = doc(db, COLLECTION, sessionId);
-  const snap = await getDoc(ref);
+  const snap = await getDocResilient(ref);
   if (!snap.exists()) throw new Error('Oturum bulunamadı');
 
   const data = snap.data() as Omit<MaliyetSayimOturum, 'id'>;
@@ -356,7 +357,7 @@ export async function getUsersForLocation(
   isSuperAdmin: boolean,
 ): Promise<{ uid: string; name: string; email: string; role: string }[]> {
   const field = locationType === 'lab' ? 'assignedLaboratories' : 'assignedDepots';
-  const usersSnap = await getDocs(scopedQuery('users', companyId, isSuperAdmin));
+  const usersSnap = await getDocsResilient(scopedQuery('users', companyId, isSuperAdmin));
 
   const users: { uid: string; name: string; email: string; role: string }[] = [];
 

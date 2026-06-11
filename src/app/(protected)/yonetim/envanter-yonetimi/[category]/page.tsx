@@ -11,6 +11,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { PlusCircle, Trash2, Loader2, Filter, Search, Eye, Pencil, ChevronLeft, Package, ChevronDown, Upload, Download } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { collection, getDocs, addDoc, deleteDoc, doc, query, where, setDoc, writeBatch } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
@@ -143,9 +144,9 @@ export default function AssetCategoryPage() {
     setLoading(true);
     try {
       const [labsSnap, depotsSnap, categoriesSnap] = await Promise.all([
-        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('assetCategories', currentCompanyId, isSuperAdmin)),
+        getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocsResilient(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+        getDocsResilient(scopedQuery('assetCategories', currentCompanyId, isSuperAdmin)),
       ]);
       const labLocations = filterByCompanyScope(
         labsSnap.docs.map(doc => ({ value: (doc.data() as Hospital).name, label: `Lab: ${(doc.data() as Hospital).name}`, companyId: (doc.data() as any).companyId })),
@@ -158,7 +159,7 @@ export default function AssetCategoryPage() {
       setLocations([...labLocations, ...depotLocations, { value: 'Diğer', label: 'Diğer (Manuel Giriş)' }].sort((a, b) => a.label.localeCompare(b.label)));
       setAllCategories(categoriesSnap.docs.map(d => (d.data() as any).name as string).filter(Boolean).sort());
 
-      const assetsSnap = await getDocs(scopedQuery('assets', currentCompanyId, isSuperAdmin, where('category', '==', categoryName)));
+      const assetsSnap = await getDocsResilient(scopedQuery('assets', currentCompanyId, isSuperAdmin, where('category', '==', categoryName)));
       setAssets(filterByCompanyScope(
         assetsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Asset)),
         currentCompanyId, isSuperAdmin

@@ -27,6 +27,7 @@ import {
   where,
   writeBatch,
 } from "firebase/firestore";
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { archiveCompletedOrderInBatch } from "@/lib/orders-archive";
 import type { Order } from "@/lib/types";
 import { emitOrderReconciled } from "@/lib/notifications";
@@ -176,7 +177,7 @@ export async function reconcileIrsaliyeAcceptance(
   if (!options.hospitalId || options.accepted.length === 0) return empty;
 
   // Fetch all peripheral, "Hazırlanan" orders for this lab.
-  const ordersSnap = await getDocs(
+  const ordersSnap = await getDocsResilient(
     query(
       collection(db, "orders"),
       where("isPeripheral", "==", true),

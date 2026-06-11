@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDocs, query, where, writeBatch, Timestamp, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
@@ -99,7 +100,7 @@ export default function PostClosurePartChangeButton({
     if (!currentUser || !isOpen) return;
     (async () => {
       try {
-        const stockSnap = await getDocs(
+        const stockSnap = await getDocsResilient(
           scopedQuery(
             'personalStock',
             currentCompanyId,
@@ -120,13 +121,13 @@ export default function PostClosurePartChangeButton({
     if (!deviceId || !isOpen) return;
     (async () => {
       try {
-        const deviceSnap = await getDoc(doc(db, 'devices', deviceId));
+        const deviceSnap = await getDocResilient(doc(db, 'devices', deviceId));
         if (!deviceSnap.exists()) return;
         const deviceData = deviceSnap.data();
         const hId = hospitalId || deviceData.hospitalId;
         if (!hId) return;
 
-        const poolsSnap = await getDocs(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin));
+        const poolsSnap = await getDocsResilient(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin));
         const matchingPoolIds: string[] = [];
         poolsSnap.docs.forEach(d => {
           const pool = d.data() as DeviceLabPool;
@@ -136,7 +137,7 @@ export default function PostClosurePartChangeButton({
         });
         if (matchingPoolIds.length === 0) return;
 
-        const depotsSnap = await getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin));
+        const depotsSnap = await getDocsResilient(scopedQuery('depots', currentCompanyId, isSuperAdmin));
         const poolWarehouseIds: string[] = [];
         depotsSnap.docs.forEach(d => {
           const depot = d.data() as Depot;
@@ -155,7 +156,7 @@ export default function PostClosurePartChangeButton({
             where('poolWarehouseId', '==', pwId),
             where('status', '==', 'in_stock')
           );
-          const stockSnap = await getDocs(stockQ);
+          const stockSnap = await getDocsResilient(stockQ);
           stockSnap.docs.forEach(d => {
             const data = d.data();
             allPoolStock.push({
@@ -319,7 +320,7 @@ export default function PostClosurePartChangeButton({
       const mirrorCollectionName = formType === 'teknik_servis' ? 'teknikServisActionForms' : 'aplikasyonActionForms';
       try {
         const mirrorRef = doc(db, mirrorCollectionName, formId);
-        const mirrorSnap = await getDoc(mirrorRef);
+        const mirrorSnap = await getDocResilient(mirrorRef);
         if (mirrorSnap.exists()) {
           batch.update(mirrorRef, {
             actions: arrayUnion(newAction),
@@ -368,7 +369,7 @@ export default function PostClosurePartChangeButton({
       };
 
       if (removedSerial && removedSerial !== resolvedSerialNumber.trim()) {
-        const duplicateSnap = await getDocs(query(
+        const duplicateSnap = await getDocsResilient(query(
           collection(db, 'personalStock'),
           where('ownerUid', '==', currentUser.uid),
           where('serialNumber', '==', removedSerial)

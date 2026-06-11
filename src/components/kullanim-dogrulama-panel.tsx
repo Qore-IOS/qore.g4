@@ -24,6 +24,7 @@ import {
   where,
   serverTimestamp,
 } from 'firebase/firestore';
+import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { kullanimDogrulamaLogger } from '@/lib/logger';
@@ -187,8 +188,8 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
       setIsLabsLoading(true);
       try {
         const [laboratoriesSnap, productsSnap] = await Promise.all([
-          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+          getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+          getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
         ]);
 
         setLaboratories(
@@ -319,7 +320,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
         keys.map(async (key) => {
           const [stokKodu, lotNumarasi] = key.split('__');
           const definitionId = buildLotNfcDefinitionId(stokKodu, lotNumarasi);
-          const definitionSnap = await getDoc(doc(db, 'lotNfcDefinitions', definitionId));
+          const definitionSnap = await getDocResilient(doc(db, 'lotNfcDefinitions', definitionId));
           return [key, definitionSnap.exists() ? (definitionSnap.data() as LotNfcDefinition) : null] as const;
         })
       );
@@ -483,7 +484,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
     const disposalDocId = buildDisposalEventId(uid);
 
     try {
-      const existingDisposalSnap = await getDoc(doc(db, 'nfcDisposalEvents', disposalDocId));
+      const existingDisposalSnap = await getDocResilient(doc(db, 'nfcDisposalEvents', disposalDocId));
       if (existingDisposalSnap.exists()) {
         toast({
           title: 'UID Daha Önce İmha Edilmiş',

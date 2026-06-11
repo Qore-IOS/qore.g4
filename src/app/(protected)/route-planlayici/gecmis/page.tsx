@@ -8,6 +8,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Loader2 } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, orderBy, query, limit } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { format } from 'date-fns';
@@ -34,7 +35,7 @@ export default function RouteHistoryPage() {
       setLoading(true);
       const qy = scopedQuery('routes', currentCompanyId, isSuperAdmin, orderBy('completedAt', 'desc'), limit(1000));
       try {
-        const snap = await getDocs(qy);
+        const snap = await getDocsResilient(qy);
         const all = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as Row[];
         // Client-side filter ensures we don't need a composite index on status + completedAt
         setRows(all.filter(r => r.status === 'completed' && r.completedAt));

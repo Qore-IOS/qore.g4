@@ -5,6 +5,7 @@ import Link from 'next/link';
 import {
   collection, getDocs, setDoc, doc, deleteDoc, addDoc, serverTimestamp, query, where, Timestamp, updateDoc
 } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import type { Device, Hospital, MaintenancePlan, MaintenancePeriodUnit, MaintenanceType, ProductCode, PeriodicPartChange, PeriodicPartResponsibility } from '@/lib/types';
 import {
@@ -163,8 +164,8 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   const fetchDevices = async () => {
     setLoading(true);
     const [deviceSnap, planSnap] = await Promise.all([
-      getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
-      getDocs(scopedQuery('maintenancePlans', currentCompanyId, isSuperAdmin)),
+      getDocsResilient(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
+      getDocsResilient(scopedQuery('maintenancePlans', currentCompanyId, isSuperAdmin)),
     ]);
     const scopedDevices = filterByCompanyScope(
       deviceSnap.docs.map(d => ({ id: d.id, ...d.data() } as Device)),
@@ -183,7 +184,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   useEffect(() => { fetchDevices(); }, [currentCompanyId, isSuperAdmin]);
 
   const fetchModelDefinitions = async () => {
-    const snap = await getDocs(scopedQuery('deviceModelDefinitions', currentCompanyId, isSuperAdmin));
+    const snap = await getDocsResilient(scopedQuery('deviceModelDefinitions', currentCompanyId, isSuperAdmin));
     const rows = filterByCompanyScope(
       snap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceModelDefinition)),
       currentCompanyId,
@@ -202,7 +203,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     const fetchProductCodes = async () => {
       try {
         // Fetch all products and filter for yedek_parca client-side
-        const snap = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin));
+        const snap = await getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin));
         const allProducts = snap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
         // Filter for yedek_parca products - only show products that are explicitly marked as spare parts
         const spareParts = allProducts.filter(p => p.urunGrubu === 'yedek_parca');
@@ -284,7 +285,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
         collection(db, 'maintenancePlans'),
         where('deviceId', '==', device.id)
       );
-      const plansSnap = await getDocs(plansQuery);
+      const plansSnap = await getDocsResilient(plansQuery);
       const plans = filterByCompanyScope(
         plansSnap.docs.map(d => ({ id: d.id, ...d.data() }) as MaintenancePlan),
         currentCompanyId,
@@ -299,7 +300,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
         isSuperAdmin,
         where('deviceId', '==', device.id)
       );
-      const partsSnap = await getDocs(partsQuery);
+      const partsSnap = await getDocsResilient(partsQuery);
       const parts = filterByCompanyScope(
         partsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as PeriodicPartChange),
         currentCompanyId,
@@ -704,8 +705,8 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     try {
       // Fetch all maintenance plans and periodic parts for all devices
       const [allPlansSnap, allPartsSnap] = await Promise.all([
-        getDocs(scopedQuery('maintenancePlans', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('periodicPartChanges', currentCompanyId, isSuperAdmin)),
+        getDocsResilient(scopedQuery('maintenancePlans', currentCompanyId, isSuperAdmin)),
+        getDocsResilient(scopedQuery('periodicPartChanges', currentCompanyId, isSuperAdmin)),
       ]);
       const allPlans = filterByCompanyScope(
         allPlansSnap.docs.map(d => ({ id: d.id, ...d.data() }) as MaintenancePlan),
@@ -764,8 +765,8 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     setExportExcelLoading(true);
     try {
       const [allPlansSnap, allPartsSnap] = await Promise.all([
-        getDocs(scopedQuery('maintenancePlans', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('periodicPartChanges', currentCompanyId, isSuperAdmin)),
+        getDocsResilient(scopedQuery('maintenancePlans', currentCompanyId, isSuperAdmin)),
+        getDocsResilient(scopedQuery('periodicPartChanges', currentCompanyId, isSuperAdmin)),
       ]);
       const allPlans = filterByCompanyScope(
         allPlansSnap.docs.map(d => ({ id: d.id, ...d.data() }) as MaintenancePlan),
@@ -852,7 +853,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
         }, currentUserProfile?.companyId));
       }
       if (selectedDefinitionImageUrl) {
-        const deviceSnap = await getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin));
+        const deviceSnap = await getDocsResilient(scopedQuery('devices', currentCompanyId, isSuperAdmin));
         const scopedDevices = filterByCompanyScope(
           deviceSnap.docs.map(d => ({ id: d.id, ...d.data() } as Device)),
           currentCompanyId,

@@ -13,6 +13,7 @@ import {
   setDoc,
   updateDoc,
 } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import type { ProductCode } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
@@ -118,9 +119,9 @@ export default function YedekParcaStokGirisPage() {
     const fetchData = async () => {
       try {
         const [productsSnap, brandsSnap, ordersSnap] = await Promise.all([
-          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
-          getDocs(scopedQuery('def_brands', currentCompanyId, isSuperAdmin)),
-          getDocs(scopedQuery('yedekParcaSiparisler', currentCompanyId, isSuperAdmin)),
+          getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+          getDocsResilient(scopedQuery('def_brands', currentCompanyId, isSuperAdmin)),
+          getDocsResilient(scopedQuery('yedekParcaSiparisler', currentCompanyId, isSuperAdmin)),
         ]);
         const allProducts = productsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
         const sparePartProducts = allProducts.filter(p => p.urunGrubu === 'yedek_parca');
@@ -712,7 +713,7 @@ export default function YedekParcaStokGirisPage() {
         await createMissingSparePartCards(missing, selectedBrandForCards);
         toast({ title: 'Stok Kartları Açıldı', description: `${missing.length} ürün için yedek parça stok kartı oluşturuldu.` });
 
-        const refreshedSnap = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin));
+        const refreshedSnap = await getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin));
         const refreshed = refreshedSnap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
         setAllProductCodes(refreshed);
         setSpareParts(refreshed.filter(p => p.urunGrubu === 'yedek_parca'));

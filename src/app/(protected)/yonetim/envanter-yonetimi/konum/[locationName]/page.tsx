@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Loader2, Search, Trash2, ChevronLeft, MapPin, Package, Upload, Download } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { collection, getDocs, query, where, deleteDoc, doc, writeBatch } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
@@ -56,10 +57,10 @@ export default function AssetLocationPage() {
     setLoading(true);
     try {
       const [assetsSnap, categoriesSnap, hospitalsSnap, depotsSnap] = await Promise.all([
-        getDocs(scopedQuery('assets', currentCompanyId, isSuperAdmin, where('konum', '==', locationName))),
-        getDocs(scopedQuery('assetCategories', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+        getDocsResilient(scopedQuery('assets', currentCompanyId, isSuperAdmin, where('konum', '==', locationName))),
+        getDocsResilient(scopedQuery('assetCategories', currentCompanyId, isSuperAdmin)),
+        getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocsResilient(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
       ]);
       setAssets(
         filterByCompanyScope(
