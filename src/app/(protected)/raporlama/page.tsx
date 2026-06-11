@@ -16,8 +16,6 @@ import {
   FileJson,
   Loader2,
   CalendarClock,
-  Calculator,
-  History as HistoryIcon,
   Activity,
   Archive,
   Barcode,
@@ -28,8 +26,6 @@ import {
   TrendingUp,
   ChevronRight,
   Download,
-  PlusCircle,
-  BarChart3,
   DatabaseZap,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
@@ -71,8 +67,6 @@ export default function RaporlamaPage() {
   const { toast } = useToast();
   const [isExporting, setIsExporting] = useState(false);
   const [exportFormat, setExportFormat] = useState<'json' | 'xlsx' | null>(null);
-  const [isCumulativeModalOpen, setIsCumulativeModalOpen] = useState(false);
-  const [isCihazUstuModalOpen, setIsCihazUstuModalOpen] = useState(false);
   const [isStokIslemleriModalOpen, setIsStokIslemleriModalOpen] = useState(false);
 
   const handleExport = async (format: 'json' | 'xlsx') => {
@@ -127,16 +121,6 @@ export default function RaporlamaPage() {
     }
   };
 
-  const handleCumulativeNavigation = (path: string) => {
-    router.push(path);
-    setIsCumulativeModalOpen(false);
-  };
-
-  const navigateTo = (path: string) => {
-    router.push(path);
-    setIsCihazUstuModalOpen(false);
-  };
-
   const handleStokIslemleriNavigation = (path: string) => {
     router.push(path);
     setIsStokIslemleriModalOpen(false);
@@ -145,8 +129,8 @@ export default function RaporlamaPage() {
   const modules = [
     { icon: FolderOpen, title: 'Dosya Yönetimi', desc: 'İrsaliye PDF ve Excel dosyalarını yükleyin ve yönetin.', onClick: () => router.push('/dosya-yonetimi') },
     { icon: TrendingUp, title: 'Tüketim İstatistikleri', desc: 'Laboratuvar bazlı ürün tüketim verilerini analiz edin.', onClick: () => router.push('/tuketim-istatistikleri') },
-    { icon: Archive, title: 'Kümülatif', desc: 'Kümülatif test hesaplama, analiz ve geçmiş kayıtları.', onClick: () => setIsCumulativeModalOpen(true) },
-    { icon: Activity, title: 'Cihaz Üstü', desc: 'Cihaz üzerindeki stok ve test bilgilerini kaydedin.', onClick: () => setIsCihazUstuModalOpen(true) },
+    { icon: Archive, title: 'Kümülatif', desc: "'Cumulative Operation List' PDF/TXT dosyalarından test sayılarını hesaplayın.", onClick: () => router.push('/kumulatif-hesaplama') },
+    { icon: Activity, title: 'Cihaz Üstü', desc: "'Reagent Status' PDF/TXT dosyalarından kullanılabilir test sayılarını hesaplayın.", onClick: () => router.push('/cihaz-ustu-hesaplama') },
     { icon: Package, title: 'Stok İşlemleri', desc: 'Transfer, imha, hareketsiz stok ve min-max raporları.', onClick: () => setIsStokIslemleriModalOpen(true) },
     { icon: Barcode, title: 'Seri No Format Tanımla', desc: 'Barkod seri numarası format kurallarını belirleyin.', onClick: () => router.push('/raporlama/seri-no-format') },
   ];
@@ -238,80 +222,6 @@ export default function RaporlamaPage() {
           </div>
         </CardContent>
       </Card>
-
-      {/* ─── Kümülatif Modal ─────────────────────────────────── */}
-      <Dialog open={isCumulativeModalOpen} onOpenChange={setIsCumulativeModalOpen}>
-        <DialogContent className="max-w-[520px]">
-          <DialogHeader>
-            <div className="flex items-center gap-3 mb-1">
-              <span className="dashboard-panel-icon flex items-center justify-center w-9 h-9 rounded-full">
-                <Archive className="w-[18px] h-[18px]" />
-              </span>
-              <div>
-                <DialogTitle className="text-lg font-semibold">Kümülatif Paneli</DialogTitle>
-                <DialogDescription className="text-sm mt-0.5">
-                  Kümülatif analiz ve raporlama araçlarından birini seçin.
-                </DialogDescription>
-              </div>
-            </div>
-          </DialogHeader>
-          <div className="flex flex-col gap-2 pt-2">
-            <ActionCard
-              icon={Calculator}
-              title="Kümülatif Hesaplama"
-              description="Laboratuvar bazlı kümülatif test sonuçlarını hesaplayın."
-              onClick={() => handleCumulativeNavigation('/kumulatif-hesaplama')}
-              primary
-            />
-            <ActionCard
-              icon={BarChart3}
-              title="Kümülatif Analiz"
-              description="Kümülatif verileri detaylı olarak analiz edin ve karşılaştırın."
-              onClick={() => handleCumulativeNavigation('/raporlama/kumulatif-analiz')}
-            />
-            <ActionCard
-              icon={HistoryIcon}
-              title="Kümülatif Geçmişi"
-              description="Önceki kümülatif raporları görüntüleyin ve arşivleyin."
-              onClick={() => handleCumulativeNavigation('/kumulatif-gecmis')}
-            />
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* ─── Cihaz Üstü Modal ────────────────────────────────── */}
-      <Dialog open={isCihazUstuModalOpen} onOpenChange={setIsCihazUstuModalOpen}>
-        <DialogContent className="max-w-[480px]">
-          <DialogHeader>
-            <div className="flex items-center gap-3 mb-1">
-              <span className="dashboard-panel-icon flex items-center justify-center w-9 h-9 rounded-full">
-                <Activity className="w-[18px] h-[18px]" />
-              </span>
-              <div>
-                <DialogTitle className="text-lg font-semibold">Cihaz Üstü</DialogTitle>
-                <DialogDescription className="text-sm mt-0.5">
-                  Cihaz üzerindeki stok işlemlerini yönetin.
-                </DialogDescription>
-              </div>
-            </div>
-          </DialogHeader>
-          <div className="flex flex-col gap-2 pt-2">
-            <ActionCard
-              icon={PlusCircle}
-              title="Yeni Cihaz Üstü Kaydı"
-              description="Cihaz üzerindeki mevcut stok ve test bilgisini ekleyin."
-              onClick={() => navigateTo('/raporlama/cihaz-ustu-ekle')}
-              primary
-            />
-            <ActionCard
-              icon={HistoryIcon}
-              title="Geçmiş Kayıtlar"
-              description="Önceki cihaz üstü hareketlerini görüntüleyin."
-              onClick={() => navigateTo('/raporlama/cihaz-ustu-gecmisi')}
-            />
-          </div>
-        </DialogContent>
-      </Dialog>
 
       {/* ─── Stok İşlemleri Modal ────────────────────────────── */}
       <Dialog open={isStokIslemleriModalOpen} onOpenChange={setIsStokIslemleriModalOpen}>

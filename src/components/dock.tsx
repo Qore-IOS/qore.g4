@@ -77,12 +77,8 @@ const ICON_COLORS: Record<string, [string, string]> = {
   'hareketsiz-stok': ['#64748b', '#475569'],   // slate
   'minmax-grafik': ['#3b82f6', '#1d4ed8'],   // blue
   'gecmis-stok': ['#8b5cf6', '#7c3aed'],   // violet
-  'kumulatif-islemleri': ['#14b8a6', '#0d9488'],   // teal
   'kumulatif-hesaplama': ['#06b6d4', '#0891b2'],   // cyan
-  'kumulatif-gecmis': ['#64748b', '#475569'],   // slate
-  'cihaz-ustu-islemleri': ['#f43f5e', '#e11d48'],   // rose
-  'cihaz-ustu-ekle': ['#22c55e', '#16a34a'],   // green
-  'cihaz-ustu-gecmisi': ['#f59e0b', '#d97706'],   // amber
+  'cihaz-ustu-hesaplama': ['#f43f5e', '#e11d48'],   // rose
   'urun-talep': ['#3b82f6', '#1d4ed8'],   // blue
   'tuketim-istatistikleri': ['#d946ef', '#c026d3'],  // fuchsia
   'kullanim-dogrulama': ['#22c55e', '#16a34a'],   // green

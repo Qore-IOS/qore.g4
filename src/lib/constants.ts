@@ -1,7 +1,7 @@
 
 
 import type { AppView } from './types';
-import { LayoutDashboard, Package, TestTube, BarChart3, Settings, ScanBarcode, ShieldCheck, TrendingUp, PackagePlus, Server, CheckSquare, LogOut, Moon, Map, ShoppingBag, Truck, Activity, Archive, BookText, Bell, Search, SprayCan, ClipboardPlus, UserCog, ListChecks, Unplug, ListTodo, ShoppingCart, LifeBuoy, Wallet, Landmark } from 'lucide-react';
+import { LayoutDashboard, Package, TestTube, BarChart3, Settings, ScanBarcode, ShieldCheck, TrendingUp, PackagePlus, Server, CheckSquare, LogOut, Moon, Map, ShoppingBag, Truck, Activity, Archive, BookText, Bell, Search, SprayCan, ClipboardPlus, UserCog, ListChecks, Unplug, ListTodo, ShoppingCart, LifeBuoy, Wallet, Landmark, Calculator } from 'lucide-react';
 
 // VIEWS dizisi Türkçeleştirildi ve "Hastane" "Laboratuvar" olarak güncellendi.
 // URL'ler kebab-case yapısına uygun güncellendi.
@@ -25,8 +25,8 @@ export const VIEWS: { key: string; label: string; icon: React.ElementType; type:
   { key: 'cost-dashboard', label: 'Maliyet Paneli', icon: Wallet, type: 'nav', href: '/cost-dashboard' },
   { key: 'cihaz-yonetimi-ana', label: 'Cihaz Yönetimi', icon: Server, type: 'nav', href: '/cihaz-yonetimi-ana' },
   { key: 'raporlama', label: 'Raporlama', icon: BarChart3, type: 'nav', href: '/raporlama' },
-  { key: 'cihaz-ustu-ekle', label: 'Cihaz Üstü Ekle', icon: Activity, type: 'nav', href: '/raporlama/cihaz-ustu-ekle'},
-  { key: 'cihaz-ustu-gecmisi', label: 'Cihaz Üstü Geçmişi', icon: Archive, type: 'nav', href: '/raporlama/cihaz-ustu-gecmisi'},
+  { key: 'kumulatif-hesaplama', label: 'Kümülatif Hesaplama', icon: Calculator, type: 'nav', href: '/kumulatif-hesaplama'},
+  { key: 'cihaz-ustu-hesaplama', label: 'Cihaz Üstü Hesaplama', icon: Activity, type: 'nav', href: '/cihaz-ustu-hesaplama'},
   { key: 'personel-islemleri', label: 'Personel İşlemleri', icon: UserCog, type: 'nav', href: '/personel-islemleri'},
   { key: 'tanimlar', label: 'Tanımlar', icon: BookText, type: 'nav', href: '/yonetim/tanimlar' },
   { key: 'satin-alma', label: 'Planlama Birimi', icon: ShoppingCart, type: 'nav', href: '/satin-alma' },
