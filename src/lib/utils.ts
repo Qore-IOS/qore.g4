@@ -824,23 +824,42 @@ export const playNotificationSound = () => {
   }
 };
 
+let feedbackAudioContext: AudioContext | null = null;
+
+const getFeedbackAudioContext = (): AudioContext | null => {
+  if (typeof window === 'undefined') return null;
+  const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+  if (!AudioContextClass) return null;
+  if (!feedbackAudioContext || feedbackAudioContext.state === 'closed') {
+    feedbackAudioContext = new AudioContextClass();
+  }
+  return feedbackAudioContext;
+};
+
 export const playFeedback = (isError = false) => {
   if (typeof window === 'undefined') return;
   if (navigator.vibrate) navigator.vibrate(isError ? [200, 100, 200] : 100);
 
-  // Play browser-generated beep for both success and error
+  // AudioContext construction is relatively expensive. Reuse one context for
+  // the session and create only the short-lived oscillator per scan.
   try {
-    const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioContext) return;
-    const ctx = new AudioContext();
+    const ctx = getFeedbackAudioContext();
+    if (!ctx) return;
+    if (ctx.state === 'suspended') void ctx.resume();
+
     const oscillator = ctx.createOscillator();
-    
+    const gain = ctx.createGain();
     oscillator.type = isError ? 'square' : 'sine';
     oscillator.frequency.setValueAtTime(isError ? 220 : 440, ctx.currentTime);
-    oscillator.connect(ctx.destination);
+    gain.gain.setValueAtTime(0.12, ctx.currentTime);
+    oscillator.connect(gain);
+    gain.connect(ctx.destination);
     oscillator.start();
-    oscillator.stop(ctx.currentTime + 0.15); // Short beep
-
+    oscillator.stop(ctx.currentTime + 0.15);
+    oscillator.addEventListener('ended', () => {
+      oscillator.disconnect();
+      gain.disconnect();
+    }, { once: true });
   } catch {
     // fallback silently if sound is not supported
   }
