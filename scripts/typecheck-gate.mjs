@@ -52,6 +52,10 @@ for (const line of output.split('\n')) {
   const m = ERROR_RE.exec(line);
   if (!m) continue; // detay/devam satırları (girintili) sayılmaz
   const file = m[1].replace(/\\/g, '/');
+  // Determinizm: .next/ üretilen dosyalardır; CI'da build çalışmadığı için
+  // yoktur, lokalde ise build sonrası vardır. Ortama göre değişen girdiler
+  // ratchet'e dahil edilmez. (next-env.d.ts aynı sebeple commit'lidir.)
+  if (file.startsWith('.next/')) continue;
   counts.set(file, (counts.get(file) ?? 0) + 1);
   if (!rawLines.has(file)) rawLines.set(file, []);
   rawLines.get(file).push(line);
