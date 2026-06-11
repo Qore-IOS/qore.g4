@@ -81,7 +81,7 @@ import { collection, getDocs, query, orderBy, doc, setDoc, getDoc, Timestamp, wh
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { getScopedDocs, scopedQuery } from '@/lib/firestore-helpers';
 import { totalVerimlilikLogger } from '@/lib/logger';
 import { cn, exportDataToExcel } from '@/lib/utils';
 import { getExchangeRates } from '@/lib/exchange-rates';
@@ -836,26 +836,53 @@ export default function TotalVerimlilikPanel({
 
   // Verimlilik havuzlarını, ortak lab havuzlarını ve depoları çek
   useEffect(() => {
+    let isActive = true;
+
     const fetchPools = async () => {
       setIsLoading(true);
-      try {
-        const [effPoolsSnap, labPoolsSnap, depotsSnap] = await Promise.all([
-          getDocs(scopedQuery('efficiencyPools', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
-          getDocs(scopedQuery('labPools', currentCompanyId, isSuperAdmin)),
-          getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
-        ]);
-        setEfficiencyPools(effPoolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as EfficiencyPool)));
-        setLabPools(labPoolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as LabPool)));
-        setDepots(depotsSnap.docs.map(d => ({ id: d.id, name: (d.data() as any).name || d.id })));
-      } catch (error) {
-        totalVerimlilikLogger.error('Verimlilik havuzları yüklenirken hata oluştu', error);
+
+      const [effPoolsResult, labPoolsResult, depotsResult] = await Promise.allSettled([
+        // Havuz seçicisi eski/legacy kayıtları da göstermeli. Sıralamayı istemcide
+        // yapmak, createdAt alanı olmayan eski havuzların sorgudan düşmesini önler.
+        getScopedDocs('efficiencyPools', currentCompanyId, isSuperAdmin),
+        getScopedDocs('labPools', currentCompanyId, isSuperAdmin),
+        getScopedDocs('depots', currentCompanyId, isSuperAdmin),
+      ]);
+
+      if (!isActive) return;
+
+      if (effPoolsResult.status === 'fulfilled') {
+        const pools = effPoolsResult.value
+          .map(d => ({ id: d.id, ...d.data() } as EfficiencyPool))
+          .sort((a, b) => a.name.localeCompare(b.name, 'tr'));
+        setEfficiencyPools(pools);
+      } else {
+        setEfficiencyPools([]);
+        totalVerimlilikLogger.error('Verimlilik havuzları yüklenirken hata oluştu', effPoolsResult.reason);
         toast({ title: 'Hata', description: 'Havuzlar yüklenemedi.', variant: 'destructive' });
-      } finally {
-        setIsLoading(false);
       }
+
+      if (labPoolsResult.status === 'fulfilled') {
+        setLabPools(labPoolsResult.value.map(d => ({ id: d.id, ...d.data() } as LabPool)));
+      } else {
+        totalVerimlilikLogger.error('Laboratuvar havuzları yüklenirken hata oluştu', labPoolsResult.reason);
+      }
+
+      if (depotsResult.status === 'fulfilled') {
+        setDepots(depotsResult.value.map(d => ({ id: d.id, name: (d.data() as any).name || d.id })));
+      } else {
+        totalVerimlilikLogger.error('Depolar yüklenirken hata oluştu', depotsResult.reason);
+      }
+
+      setIsLoading(false);
     };
-    fetchPools();
-  }, [toast]);
+
+    void fetchPools();
+
+    return () => {
+      isActive = false;
+    };
+  }, [currentCompanyId, isSuperAdmin, toast]);
 
   // Sütun 23 için döviz kurlarını çek
   useEffect(() => {
