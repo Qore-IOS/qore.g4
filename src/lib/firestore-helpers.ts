@@ -106,9 +106,17 @@ export async function getScopedDocs(
   }
 
   const base = collection(db, collectionPath);
-  const [companySnap, legacySnap] = await Promise.all([
+  // Üç sorgu da paralel: uyumluluk sorgusunun seri beklenmesi, compat açıkken
+  // her scoped okumaya bir tam round-trip daha ekliyordu.
+  // Backward compatibility (unscoped sorgu): companyId alanı hiç olmayan çok
+  // eski kayıtlar için. Multi-tenant kurallarda reddedilebilir; o durumda
+  // company/legacy sonuçları geçerli kalır.
+  const [companySnap, legacySnap, unscopedSnap] = await Promise.all([
     getDocsResilient(query(base, where('companyId', '==', normalized), ...extraConstraints)),
     getDocsResilient(query(base, where('companyId', '==', '__legacy__'), ...extraConstraints)),
+    LEGACY_UNTAGGED_COMPAT
+      ? getDocsResilient(query(base, ...extraConstraints)).catch(() => null)
+      : Promise.resolve(null),
   ]);
 
   const docsById = new Map<string, QueryDocumentSnapshot<DocumentData>>();
@@ -116,22 +124,11 @@ export async function getScopedDocs(
   legacySnap.docs.forEach((docSnap) => {
     if (!docsById.has(docSnap.id)) docsById.set(docSnap.id, docSnap);
   });
-
-  // Backward compatibility for very old, untagged records. In multi-tenant
-  // projects this unscoped read may be rejected by security rules; in that case
-  // the explicit company/legacy query result above remains the source of truth.
-  if (LEGACY_UNTAGGED_COMPAT) {
-    try {
-      const unscopedSnap = await getDocsResilient(query(base, ...extraConstraints));
-      unscopedSnap.docs
-        .filter((docSnap) => matchesCompanyScope(docSnap.data(), normalized, isSuperAdmin))
-        .forEach((docSnap) => {
-          if (!docsById.has(docSnap.id)) docsById.set(docSnap.id, docSnap);
-        });
-    } catch {
-      // Ignore permission/index failures from the compatibility path.
-    }
-  }
+  unscopedSnap?.docs
+    .filter((docSnap) => matchesCompanyScope(docSnap.data(), normalized, isSuperAdmin))
+    .forEach((docSnap) => {
+      if (!docsById.has(docSnap.id)) docsById.set(docSnap.id, docSnap);
+    });
 
   return Array.from(docsById.values());
 }

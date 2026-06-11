@@ -7,7 +7,7 @@
  */
 
 'use client';
-import React, { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter, useParams } from 'next/navigation';
 import type { Laboratory, DepoStokItem, ConsumptionRecord, Device, ProductCode, BarcodeFormat, LabPool, DeviceGroup, TrashBinRecord, FaultDefinition } from '@/lib/types';
@@ -413,7 +413,7 @@ export default function UrunKullanimPanel() {
   const { data: devices = [] } = useDevices();
 
   // Use TanStack Query for barcode formats with caching
-  const { data: barcodeFormats = [] } = useBarcodeFormatsQuery();
+  const { data: barcodeFormats = [], isLoading: barcodeFormatsLoading } = useBarcodeFormatsQuery();
   const { invalidateConsumption, invalidateDepoStok } = useInvalidateQueries();
 
   // Fetch min/max rules for selected lab (for trash bin product filtering)
@@ -638,9 +638,17 @@ export default function UrunKullanimPanel() {
   // Use TanStack Query for lab stock - much more efficient than full depoStok
   // Now also passes lab names to support legacy records without hedefKurumId
   // Wait for labPools to load before querying to ensure pool members are included
-  const { data: labStock = [] } = useLabStock(poolMemberIds, poolMemberNames, {
+  const { data: labStock = [], isLoading: labStockLoading } = useLabStock(poolMemberIds, poolMemberNames, {
     enabled: !labPoolsLoading && poolMemberIds.length > 0
   });
+
+  // STABİLİZASYON (P0.5 barkod readiness): formatlar, ürün kataloğu, lab
+  // havuzları ve lab stoğu yüklenmeden okutulan barkod artık "format hatası"
+  // veya "stokta yok" gibi YANLIŞ iş kuralı hatası üretmez. Okuma kuyruğa
+  // alınır; referans verileri gelir gelmez otomatik işlenir.
+  const barcodeEngineReady =
+    !isLoading && !barcodeFormatsLoading && !labPoolsLoading && !labStockLoading;
+  const pendingScansRef = useRef<Array<{ raw: string; at: number }>>([]);
 
   // Use TanStack Query for recent consumption (for duplicate check)
   const { data: tuketimKayitlari = [] } = useRecentConsumption(200);
@@ -962,6 +970,16 @@ export default function UrunKullanimPanel() {
       return;
     }
 
+    // Readiness gate: referans verisi eksikken işleme — kuyruğa al.
+    if (!barcodeEngineReady) {
+      pendingScansRef.current.push({ raw: rawInput, at: Date.now() });
+      toast({
+        title: 'Veriler Hazırlanıyor',
+        description: 'Barkod kuyruğa alındı; stok ve format verileri yüklenince otomatik işlenecek.',
+      });
+      return;
+    }
+
     const candidate = sanitizeGS1(rawInput) || rawInput;
     const resolveResult = parseAndResolveBarcode(candidate, barcodeFormats, products);
 
@@ -1159,8 +1177,22 @@ export default function UrunKullanimPanel() {
     playFeedback(true);
     setTimeout(() => setScanStatus('idle'), 3000);
 
-  }, [selectedLabId, barcodeFormats, products, productTracking, labStock, toast, findBySerial, findByLot, findByRefOnly, recordConsumption, tuketimKayitlari, verifyStockInFirestore, checkRecentConsumption, invalidateDepoStok, invalidateConsumption]);
-  
+  }, [selectedLabId, barcodeEngineReady, barcodeFormats, products, productTracking, labStock, toast, findBySerial, findByLot, findByRefOnly, recordConsumption, tuketimKayitlari, verifyStockInFirestore, checkRecentConsumption, invalidateDepoStok, invalidateConsumption]);
+
+  // Kuyruktaki okumalar referans verileri hazır olunca otomatik işlenir.
+  useEffect(() => {
+    if (!barcodeEngineReady || pendingScansRef.current.length === 0) return;
+    const queued = pendingScansRef.current.splice(0);
+    const fresh = queued.filter((scan) => Date.now() - scan.at < 60_000);
+    if (fresh.length === 0) return;
+    (async () => {
+      for (const scan of fresh) {
+        // eslint-disable-next-line no-await-in-loop
+        await consumeByParsed(scan.raw);
+      }
+    })();
+  }, [barcodeEngineReady, consumeByParsed]);
+
   const onProcess = useCallback((barcode: string) => {
     if (isExpiryWarningModalOpen && lotReplaceTarget) {
         const parsed = parseAnyBarcode(barcode, barcodeFormats);

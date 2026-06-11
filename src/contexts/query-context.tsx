@@ -3,7 +3,7 @@
 import React, { useEffect } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useStockUpdateListener } from '@/hooks/useFirebaseQueries';
-import { appQueryClient } from '@/lib/query-client';
+import { appQueryClient, queryRetryOptions } from '@/lib/query-client';
 import { initFirestoreConnectionWatchdog } from '@/lib/firestore-network-recovery';
 
 // Stable query client — gerçek instance src/lib/query-client.ts'te yaşar ki
@@ -39,7 +39,7 @@ export const getQueryClient = () => {
         staleTime: 5 * 60 * 1000,
         gcTime: 30 * 60 * 1000,
         refetchOnWindowFocus: false,
-        retry: 2,
+        ...queryRetryOptions,
         refetchOnMount: false,
       },
     },

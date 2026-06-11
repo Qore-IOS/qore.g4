@@ -36,6 +36,59 @@ function rate(ms: number): Rating {
   return 'poor';
 }
 
+export type DataIssueKind =
+  | 'read-timeout'
+  | 'channel-recovery'
+  | 'query-retry'
+  | 'query-error'
+  | 'bg-revalidate-error';
+
+export type DataIssueSample = {
+  name: 'DATA-ISSUE';
+  kind: DataIssueKind;
+  detail: string;
+  path: string;
+  ts: number;
+};
+
+/** Aynı kind için konsol uyarısını boğmamak adına kısma penceresi. */
+const ISSUE_LOG_THROTTLE_MS = 5_000;
+const lastIssueLogAt = new Map<DataIssueKind, number>();
+
+/**
+ * Veri yolu problemi telemetrisi: timeout, kanal kurtarma, retry ve yutulmuş
+ * arka plan hataları artık görünmez değil. Örnekler window.__QORE_VITALS__
+ * buffer'ına yazılır (destek "konsolda window.__QORE_VITALS__'a bak" diyebilir)
+ * ve kind başına 5sn'de bir konsola structured uyarı düşer.
+ */
+export function recordDataIssue(kind: DataIssueKind, detail?: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const sample: DataIssueSample = {
+      name: 'DATA-ISSUE',
+      kind,
+      detail: detail ?? '',
+      path: window.location.pathname,
+      ts: Date.now(),
+    };
+    const w = window as unknown as { __QORE_VITALS__?: unknown[] };
+    if (!w.__QORE_VITALS__) w.__QORE_VITALS__ = [];
+    w.__QORE_VITALS__.push(sample);
+    if (w.__QORE_VITALS__.length > MAX_BUFFER) {
+      w.__QORE_VITALS__.splice(0, w.__QORE_VITALS__.length - MAX_BUFFER);
+    }
+    window.dispatchEvent(new CustomEvent('qore:vital', { detail: sample }));
+
+    const lastAt = lastIssueLogAt.get(kind) ?? 0;
+    if (Date.now() - lastAt > ISSUE_LOG_THROTTLE_MS) {
+      lastIssueLogAt.set(kind, Date.now());
+      console.warn(`[qore-telemetry] ${kind}`, detail ?? '', `(${sample.path})`);
+    }
+  } catch {
+    // Telemetri asla veri yolunu bozmamalı.
+  }
+}
+
 export function recordDataServe(ms: number, source: 'cache' | 'server'): void {
   if (typeof window === 'undefined') return;
   try {

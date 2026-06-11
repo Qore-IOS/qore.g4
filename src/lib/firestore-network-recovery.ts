@@ -7,15 +7,26 @@
  * kendini online sandığı için getDocs/onSnapshot sonsuza dek sunucuyu
  * bekliyor; F5 taze kanal açtığı için sorun anında kayboluyor.
  *
- * Bu modül iki şey yapar:
- *  1. `initFirestoreConnectionWatchdog()` — sekme uykudan/arkaplandan
- *     dönünce veya tarayıcı online olunca kanalı proaktif tazeler
- *     (disableNetwork → enableNetwork). Bekleyen yazmalar kaybolmaz;
- *     kuyrukta kalır ve yeni kanaldan gönderilir. Aktif onSnapshot
- *     listener'ları da yeni kanal üzerinden kendiliğinden yeniden kurulur.
- *  2. `getDocsResilient()` — sunucu okumasına üst sınır koyar: timeout
- *     aşılırsa kanalı tazeleyip bir kez daha dener. "Sonsuz loading"
- *     en kötü ihtimalle sınırlı bir gecikmeye iner ve kendi kendini iyileştirir.
+ * STABİLİZASYON (P0.2): Önceki sürüm HER sorgu timeout'unda bütün Firestore
+ * ağını disableNetwork/enableNetwork ile resetliyordu. Aynı anda timeout
+ * olan 5-6 sorgu bağlantıyı peş peşe sıfırlayıp tüm panellerin okumalarını
+ * ve listener'larını birlikte bozuyordu ("reset fırtınası": ekrandaki
+ * art arda [firestore-recovery] uyarılarının nedeni). Yeni kurallar:
+ *
+ *  1. Kanal reseti yalnız merkezi supervisor üzerinden yapılır ve
+ *     RECOVERY_COOLDOWN_MS içinde EN FAZLA BİR kez çalışır. Eşzamanlı
+ *     timeout'lar tek resette birleşir; cooldown içindeki yeni timeout'lar
+ *     reset tetiklemez.
+ *  2. Watchdog (uyku/ağ değişimi dönüşü) gerçek connectivity sinyali
+ *     olduğu için cooldown'u bypass eder (force) — meşru kullanım budur.
+ *  3. Timeout süreleri 12+15sn'den 8+8sn'ye indi: takılan okuma en kötü
+ *     16 saniyede sonuçlanır (eskiden 27sn; üstüne TanStack retry'ları
+ *     binince ~81sn'ye çıkabiliyordu).
+ *  4. withTimeout alttaki getDocs'u iptal edemez; retry'da eski promise
+ *     ÇÖPE ATILMAZ — ikisinden önce dolan kazanır (firstFulfilled). Geç
+ *     gelen ilk yanıt böylece kaybolmaz ve mükerrer bekleme kısalır.
+ *  5. Her timeout/kurtarma artık telemetriye yazılır (recordDataIssue) —
+ *     üretimde "neden 12sn bekledik" sorusu görünür hale gelir.
  */
 import {
   disableNetwork,
@@ -29,22 +40,25 @@ import {
   type QuerySnapshot,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { recordDataIssue } from '@/lib/perf/data-vitals';
 
 /** İlk deneme için sunucu yanıt üst sınırı. */
-const FIRST_ATTEMPT_TIMEOUT_MS = 12_000;
-/** Kanal tazelendikten sonraki ikinci deneme üst sınırı. */
-const RETRY_TIMEOUT_MS = 15_000;
+const FIRST_ATTEMPT_TIMEOUT_MS = 8_000;
+/** İkinci (retry) deneme üst sınırı. */
+const RETRY_TIMEOUT_MS = 8_000;
 /** Sekme bundan uzun süre arkaplanda kaldıysa dönüşte kanal tazelenir. */
 const HIDDEN_RECOVERY_THRESHOLD_MS = 45_000;
+/** İki kanal reseti arasındaki zorunlu bekleme (reset fırtınası önleyici). */
+const RECOVERY_COOLDOWN_MS = 60_000;
 
-class FirestoreTimeoutError extends Error {
+export class FirestoreTimeoutError extends Error {
   constructor(ms: number) {
     super(`Firestore sunucu yanıtı ${ms}ms içinde gelmedi (olası zombi kanal)`);
     this.name = 'FirestoreTimeoutError';
   }
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new FirestoreTimeoutError(ms)), ms);
     promise.then(
@@ -54,18 +68,46 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
+/**
+ * İlk DOLAN promise'i döndürür (Promise.any benzeri, lib bağımsız).
+ * Hepsi reddederse son hatayla reddeder.
+ */
+function firstFulfilled<T>(promises: Array<Promise<T>>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let rejectedCount = 0;
+    let lastError: unknown;
+    for (const p of promises) {
+      p.then(resolve, (err) => {
+        lastError = err;
+        rejectedCount += 1;
+        if (rejectedCount === promises.length) reject(lastError);
+      });
+    }
+  });
+}
+
 let recoveryInFlight: Promise<void> | null = null;
+let lastRecoveryAt = 0;
 
 /**
- * WebChannel'ı kapatıp yeniden açarak taze bağlantı kurdurur. Eşzamanlı
- * çağrılar tek kurtarma işlemini paylaşır (kanal flap'ini önler).
+ * WebChannel'ı kapatıp yeniden açarak taze bağlantı kurdurur.
+ *
+ * Eşzamanlı çağrılar tek kurtarma işlemini paylaşır; cooldown penceresi
+ * içindeki tekrar istekler (force değilse) resetlemeden döner. `force`
+ * yalnız gerçek connectivity sinyalleri (online/uykudan dönüş) içindir.
  */
-export function recoverFirestoreNetwork(): Promise<void> {
+export function recoverFirestoreNetwork(options?: { force?: boolean }): Promise<void> {
   if (recoveryInFlight) return recoveryInFlight;
+  const now = Date.now();
+  if (!options?.force && now - lastRecoveryAt < RECOVERY_COOLDOWN_MS) {
+    return Promise.resolve();
+  }
+  lastRecoveryAt = now;
   recoveryInFlight = (async () => {
     try {
       await disableNetwork(db);
       await enableNetwork(db);
+      recordDataIssue('channel-recovery', options?.force ? 'forced (connectivity)' : 'timeout-escalation');
     } catch (err) {
       console.warn('[firestore-recovery] Ağ tazeleme başarısız:', err);
     } finally {
@@ -76,7 +118,7 @@ export function recoverFirestoreNetwork(): Promise<void> {
 }
 
 /**
- * Timeout + otomatik kanal kurtarma + tek retry'lı getDocs.
+ * Timeout + (cooldown'lu) kanal kurtarma + tek retry'lı getDocs.
  * Sağlıklı bağlantıda davranış birebir getDocs ile aynıdır.
  */
 export async function getDocsResilient<T = DocumentData>(
@@ -84,31 +126,36 @@ export async function getDocsResilient<T = DocumentData>(
 ): Promise<QuerySnapshot<T>> {
   // SSR/server-action tarafında watchdog mantığına gerek yok.
   if (typeof window === 'undefined') return getDocs(q);
+  const first = getDocs(q);
   try {
-    return await withTimeout(getDocs(q), FIRST_ATTEMPT_TIMEOUT_MS);
+    return await withTimeout(first, FIRST_ATTEMPT_TIMEOUT_MS);
   } catch (err) {
     if (!(err instanceof FirestoreTimeoutError)) throw err;
-    console.warn('[firestore-recovery] Okuma takıldı, kanal tazelenip yeniden deneniyor…');
+    recordDataIssue('read-timeout', `getDocs ${FIRST_ATTEMPT_TIMEOUT_MS}ms`);
+    // Supervisor cooldown içindeyse bu çağrı resetlemez — sadece retry eder.
     await recoverFirestoreNetwork();
-    return withTimeout(getDocs(q), RETRY_TIMEOUT_MS);
+    const second = getDocs(q);
+    return withTimeout(firstFulfilled([first, second]), RETRY_TIMEOUT_MS);
   }
 }
 
 /**
- * Timeout + otomatik kanal kurtarma + tek retry'lı getDoc (tekil doküman).
+ * Timeout + (cooldown'lu) kanal kurtarma + tek retry'lı getDoc (tekil doküman).
  * Sağlıklı bağlantıda davranış birebir getDoc ile aynıdır.
  */
 export async function getDocResilient<T = DocumentData>(
   ref: DocumentReference<T>,
 ): Promise<DocumentSnapshot<T>> {
   if (typeof window === 'undefined') return getDoc(ref);
+  const first = getDoc(ref);
   try {
-    return await withTimeout(getDoc(ref), FIRST_ATTEMPT_TIMEOUT_MS);
+    return await withTimeout(first, FIRST_ATTEMPT_TIMEOUT_MS);
   } catch (err) {
     if (!(err instanceof FirestoreTimeoutError)) throw err;
-    console.warn('[firestore-recovery] Doküman okuması takıldı, kanal tazelenip yeniden deneniyor…');
+    recordDataIssue('read-timeout', `getDoc ${FIRST_ATTEMPT_TIMEOUT_MS}ms`);
     await recoverFirestoreNetwork();
-    return withTimeout(getDoc(ref), RETRY_TIMEOUT_MS);
+    const second = getDoc(ref);
+    return withTimeout(firstFulfilled([first, second]), RETRY_TIMEOUT_MS);
   }
 }
 
@@ -124,7 +171,7 @@ export function initFirestoreConnectionWatchdog(): void {
   watchdogInstalled = true;
 
   window.addEventListener('online', () => {
-    void recoverFirestoreNetwork();
+    void recoverFirestoreNetwork({ force: true });
   });
 
   document.addEventListener('visibilitychange', () => {
@@ -133,7 +180,7 @@ export function initFirestoreConnectionWatchdog(): void {
       return;
     }
     if (hiddenSince && Date.now() - hiddenSince > HIDDEN_RECOVERY_THRESHOLD_MS) {
-      void recoverFirestoreNetwork();
+      void recoverFirestoreNetwork({ force: true });
     }
     hiddenSince = 0;
   });

@@ -30,8 +30,11 @@ import {
 } from 'firebase/firestore';
 import { hashKey, type QueryKey } from '@tanstack/react-query';
 import { appQueryClient } from '@/lib/query-client';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
-import { recordDataServe } from '@/lib/perf/data-vitals';
+import { getDocsResilient, withTimeout } from '@/lib/firestore-network-recovery';
+import { recordDataIssue, recordDataServe } from '@/lib/perf/data-vitals';
+
+/** Arka plan tazelemesi için üst sınır — zombi istek birikmesin. */
+const BACKGROUND_REVALIDATE_TIMEOUT_MS = 20_000;
 
 /** queryFn'in React Query'den aldığı context'in kullandığımız alt kümesi. */
 export type QueryFnCtx = { queryKey: QueryKey };
@@ -75,8 +78,9 @@ function scheduleInvalidate(key: string, queryKey: QueryKey): void {
 
 /**
  * Sorguyu arka planda sunucudan tazeler; başarılı olursa ilgili React
- * Query anahtarını invalidate eder. Hata (offline vb.) sessizce yutulur —
- * cache'teki veri ekranda kalmaya devam eder.
+ * Query anahtarını invalidate eder. Hata UI'yı bozmaz (cache'teki veri
+ * ekranda kalır) ama artık YUTULMAZ: telemetriye yazılır ki "kullanıcı
+ * bayat veriyi görüyor, taze veri hiç gelmiyor" durumu teşhis edilebilsin.
  */
 export function revalidateInBackground(
   ctx: QueryFnCtx,
@@ -86,13 +90,16 @@ export function revalidateInBackground(
   // Guard: invalidate sonrası yeniden çalışan queryFn'in aynı sorguları
   // tekrar tazeleyip sonsuz invalidate döngüsü kurmasını engeller.
   if (recentlySynced(key)) return;
-  getDocsFromServer(q)
+  withTimeout(getDocsFromServer(q), BACKGROUND_REVALIDATE_TIMEOUT_MS)
     .then(() => {
       markSynced(key);
       scheduleInvalidate(key, ctx.queryKey);
     })
-    .catch(() => {
-      /* offline / izin / geçici hata: cache verisiyle devam */
+    .catch((err: unknown) => {
+      const code = (err as { code?: string } | null)?.code
+        ?? (err as Error | null)?.name
+        ?? 'unknown';
+      recordDataIssue('bg-revalidate-error', `${code} key=${key.slice(0, 120)}`);
     });
 }
 

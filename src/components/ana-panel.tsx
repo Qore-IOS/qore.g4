@@ -1617,7 +1617,7 @@ export default function AnaPanel(props: AnaPanelProps) {
         }
 
         await queue.flush();
-        await touchStockMetadata();
+        await touchStockMetadata({ depotIds: [selectedDepotId], companyId: currentCompanyId });
         invalidateDepoStok();
 
         const txId = await recordMalKabulTransaction(itemsToProcess, 'unverified');
@@ -1753,7 +1753,7 @@ export default function AnaPanel(props: AnaPanelProps) {
         depotName: selectedDepot.name || '',
       }, { merge: true });
       await lineBatch.commit();
-      await touchStockMetadata();
+      await touchStockMetadata({ depotIds: [selectedDepotId], companyId: currentCompanyId });
       invalidateDepoStok();
       toast({ title: 'İrsaliye stoğa aktarıldı', description: `${irs.irsaliyeNo} için ${added} kayıt depoya eklendi.` });
     } catch (e: any) {

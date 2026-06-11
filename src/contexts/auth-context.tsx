@@ -65,7 +65,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [isAdmin, setIsAdmin] = useState(false);
   const [isAdminDeveloper, setIsAdminDeveloper] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
-  const [currentCompanyId, setCurrentCompanyId] = useState<string>(LEGACY_COMPANY_ID);
+  // STABİLİZASYON (P0.1 auth-ready gate): başlangıç değeri '' (falsy).
+  // Önceden '__legacy__' ile başlıyordu; hook'lardaki
+  // `enabled: !!currentCompanyId || isSuperAdmin` koşulu daha kullanıcı
+  // profili okunmadan TÜM sorguları tetikliyor, scopedQuery de '__legacy__'
+  // görünce filtresiz TAM koleksiyon sorgusu üretiyordu. Sonuç: açılışta
+  // yanlış-tenant sorgu fırtınası + gerçek companyId gelince her şeyin
+  // ikinci kez çekilmesi. Artık tenant netleşmeden hiçbir scoped sorgu
+  // çalışmaz; gerçek legacy kullanıcılar profil okunduktan SONRA
+  // '__legacy__' alır (davranışları değişmez).
+  const [currentCompanyId, setCurrentCompanyId] = useState<string>('');
   const [permissions, setPermissions] = useState<AppView[]>([]);
   const [isOrbAnimationEnabled, setIsOrbAnimationEnabled] = useState(true);
   const [navMode, setNavMode] = useState<NavMode>('dock');
@@ -157,6 +166,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           setIsAdmin(false);
           setIsAdminDeveloper(false);
           setIsSuperAdmin(false);
+          setCurrentCompanyId(LEGACY_COMPANY_ID);
           setPermissions([]);
         } else {
             const userDocRef = doc(db, "users", user.uid);
@@ -229,6 +239,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               setIsSuperAdmin(defaultRole === 'super_admin');
               setIsAdmin(defaultRole === 'super_admin' || defaultRole === 'admin' || defaultRole === 'admin_developer');
               setIsAdminDeveloper(defaultRole === 'super_admin' || defaultRole === 'admin_developer');
+              // Profil dokümanı yokken sorgular kilitli kalmasın: claim varsa
+              // claim'deki şirket, yoksa legacy kovası.
+              setCurrentCompanyId((tokenResult?.claims.companyId as string | undefined) || LEGACY_COMPANY_ID);
               setPermissions(defaultViews);
               // Force dark mode for 'user' role
               if (defaultRole === 'user') {
@@ -248,6 +261,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setIsAdmin(false);
         setIsAdminDeveloper(false);
         setIsSuperAdmin(false);
+        setCurrentCompanyId('');
         setPermissions([]);
       }
       setIsLoadingAuth(false);
