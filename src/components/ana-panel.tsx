@@ -27,6 +27,7 @@ import { useDepots, useProductCodes, useAddressDefinitions, useBarcodeFormatsQue
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import useHidScanner from '@/hooks/useHidScanner';
 import { ScanCommitProbe, ScanPerformanceBadge, useScanPerformance } from '@/hooks/useScanPerformance';
+import { LedStripGlow } from '@/components/ui/led-strip-glow';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
 
@@ -2041,6 +2042,7 @@ export default function AnaPanel(props: AnaPanelProps) {
 
       {/* ── Kompakt çalışma satırı: Son Okutulan + Ürün Ekle ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
+        <div className="relative">
         <div className={cn(
           "cihaz-card-strong px-4 py-3 sm:px-5 sm:py-4 transition-all duration-300 min-h-[116px]",
           scanFeedback?.type === 'success' && "ring-2 ring-green-500/60",
@@ -2109,6 +2111,8 @@ export default function AnaPanel(props: AnaPanelProps) {
               </div>
             </div>
           </div>
+        </div>
+        <LedStripGlow isReady={!isMasterDataLoading} edge="bottom" />
         </div>
 
         <div className="cihaz-card-strong px-4 py-3 sm:px-5 sm:py-4 min-h-[116px]">

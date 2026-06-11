@@ -44,6 +44,7 @@ import { Loader2, Camera, Truck, Plus, CheckCircle2, History, DatabaseZap, Chevr
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import useHidScanner from '@/hooks/useHidScanner';
 import { ScanCommitProbe, ScanPerformanceBadge, useScanPerformance } from '@/hooks/useScanPerformance';
+import { LedStripGlow } from '@/components/ui/led-strip-glow';
 import BarcodeFormatSelect, { type FormatValue } from '@/components/BarcodeFormatSelect';
 import { cn, playFeedback, sanitizeGS1, generateId } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
@@ -1288,6 +1289,7 @@ export default function DirektTransferPanel() {
           {/* ── LEFT COLUMN: Context + Add Methods ── */}
           <div className="space-y-4">
             {/* ─── Context Card ─── */}
+            <div className="relative">
             <div className="cihaz-card-strong p-4 sm:p-5 space-y-3">
               <p className="cihaz-section-label">Kaynak & Hedef</p>
 
@@ -1378,6 +1380,8 @@ export default function DirektTransferPanel() {
                   disabled={formatsLoading}
                 />
               </div>
+            </div>
+            <LedStripGlow isReady={transferDataReady} edge="right" />
             </div>
 
             {/* ─── Add Methods Card ─── */}
