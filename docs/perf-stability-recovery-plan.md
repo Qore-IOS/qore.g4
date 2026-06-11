@@ -101,6 +101,24 @@ semptomu kökten kalkar; sayfa başına ~3MB transfer kaybolur.
    6.2MB → 2.45MB (1600px). Bildirim badge/icon'u üç yerde (service worker +
    iki Cloud Functions kopyası) 0.7MB PNG yerine `/icon-192.png`.
 
+## 3.5 Kalite kapıları (3. tur — kalite raporu madde 1-2) ✅
+
+- **Madde 1:** Üretimde ReferenceError üreten 4 tanımsız-değişken bug'ı
+  düzeltildi (PR #1458): SatinAlma ek yükleme, ana-panel rollback,
+  aplikasyon işlem modalı.
+- **Madde 2:** `.github/workflows/quality-gates.yml` — PR başına üç kapı:
+  typecheck **ratchet** (dosya başına hata sayısı
+  `quality/typecheck-baseline.json`'ı aşamaz, temiz dosyaya hata eklenemez;
+  `scripts/typecheck-gate.mjs`), unit test (486 test — paket bu turda ilk
+  kez yeşile çekildi) ve üretim build'i. **Branch protection'da üç job'ı
+  "required" işaretlemeyi unutmayın.**
+- **Kök neden bulgusu:** `tsconfig.json`'da `strict: false`,
+  `strictNullChecks: false` (CLAUDE.MD'nin aksine). zod şema çıkarımlarının
+  tüm alanları opsiyonel düşürmesinin sebebi de bu (zod, strictNullChecks
+  ister) — 4 noktada belgeli güvenli cast uygulandı. **Önerilen kampanya:**
+  `strictNullChecks: true`'ya kademeli geçiş (en değerli tek tip-güvenliği
+  yatırımı; ratchet altyapısı geçişi dosya dosya yapmayı mümkün kılıyor).
+
 ### Açık kalan öneriler (kullanıcı kararı / ileri tur)
 - public/ altında hiç referans edilmeyen ~22MB varlık var (`rainy.png`,
   `tk-wp1.png`, `vehicles/*.png`, iki mp4). Silinmesi deploy boyutunu
