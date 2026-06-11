@@ -287,11 +287,6 @@ async function uploadAttachment(file: File, taskPath: string): Promise<Purchasin
   const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
   if (file.size > MAX_ATTACHMENT_SIZE_BYTES) throw new Error('Dosya boyutu 10MB sınırını aşıyor');
 
-  const timestamp = Date.now();
-  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-  const storagePath = `purchasing-tasks/${taskPath}/${timestamp}_${safeName}`;
-  const storageRef = ref(storage, storagePath);
-
   let uploadData: Blob | File = file;
   if (isImage) uploadData = await compressImage(file);
 
@@ -304,7 +299,25 @@ async function uploadAttachment(file: File, taskPath: string): Promise<Purchasin
   formData.append('folder', 'purchasing-tasks');
   formData.append('userUid', taskPath);
 
-  return { name: file.name, url, type: isImage ? 'image' : isPdf ? 'pdf' : 'file', size: uploadData.size, storagePath };
+  // Yükleme, diğer panellerle aynı admin-SDK API'sinden geçer; nihai
+  // storagePath ve imzalı URL sunucu tarafından üretilip döndürülür
+  // (bkz. src/app/api/storage/upload-file/route.ts).
+  const response = await fetch('/api/storage/upload-file', {
+    method: 'POST',
+    body: formData,
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok || !payload?.url || !payload?.path) {
+    throw new Error(payload?.error || 'Dosya yüklenemedi.');
+  }
+
+  return {
+    name: file.name,
+    url: payload.url as string,
+    type: isImage ? 'image' : isPdf ? 'pdf' : 'file',
+    size: uploadFile.size,
+    storagePath: payload.path as string,
+  };
 }
 
 // ==========================================

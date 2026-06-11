@@ -1638,7 +1638,7 @@ export default function AnaPanel(props: AnaPanelProps) {
         scannedSerialsRef.current.clear();
         previousScannedItems.forEach(item => {
           if (item.seriNumarasi && item.stokKodu) {
-            const serialKey = serialLotKey(item.stokKodu, item.lotNumarasi || '');
+            const serialKey = serialProductKey(item.stokKodu);
             if (!scannedSerialsRef.current.has(serialKey)) {
               scannedSerialsRef.current.set(serialKey, new Set());
             }
