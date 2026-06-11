@@ -23,7 +23,6 @@ import {
   orderBy,
   Timestamp,
 } from 'firebase/firestore';
-import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import { format, startOfDay, endOfDay, eachDayOfInterval } from 'date-fns';
 import { normalizeCompanyId } from '@/lib/company-scope';
 import type { DailyConsumptionStats, ConsumptionRecord } from '@/lib/types';
@@ -70,7 +69,7 @@ export async function calculateDailyStats(
     orderBy('consumptionTimestamp', 'asc'),
   );
 
-  const snap = await getDocsResilient(q);
+  const snap = await getDocs(q);
 
   const byLab: Record<string, number> = {};
   let totalCount = 0;
@@ -124,7 +123,7 @@ export async function getDailyStats(
 ): Promise<DailyConsumptionStats | null> {
   const docId = buildStatsDocId(companyId, date);
   const docRef = doc(db, COLLECTION_NAME, docId);
-  const docSnap = await getDocResilient(docRef);
+  const docSnap = await getDoc(docRef);
 
   if (!docSnap.exists()) return null;
   return { id: docSnap.id, ...docSnap.data() } as DailyConsumptionStats;
@@ -173,7 +172,7 @@ export async function incrementTodayStats(
   const docRef = doc(db, COLLECTION_NAME, docId);
   const normalizedCompany = normalizeCompanyId(companyId);
 
-  const docSnap = await getDocResilient(docRef);
+  const docSnap = await getDoc(docRef);
 
   if (docSnap.exists()) {
     const data = docSnap.data() as DailyConsumptionStats;
@@ -226,7 +225,7 @@ export async function getStatsForRange(
     orderBy('date', 'asc'),
   );
 
-  const snap = await getDocsResilient(q);
+  const snap = await getDocs(q);
   const existingStats = new Map<string, DailyConsumptionStats>();
 
   snap.docs.forEach((docSnap) => {

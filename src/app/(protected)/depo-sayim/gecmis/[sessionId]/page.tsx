@@ -3,7 +3,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { doc, getDoc } from 'firebase/firestore';
-import { getDocResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import type { DepotStockCountSession } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from '@/components/ui/card';
@@ -32,7 +31,7 @@ export default function DepoSayimDetayPage() {
       setLoading(true);
       try {
         const sessionRef = doc(db, 'depotBrandCountSessions', sessionId);
-        const sessionSnap = await getDocResilient(sessionRef);
+        const sessionSnap = await getDoc(sessionRef);
         if (sessionSnap.exists()) {
           const data = sessionSnap.data();
           setSession({

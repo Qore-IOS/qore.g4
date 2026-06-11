@@ -34,7 +34,6 @@ import {
   type DocumentData,
   type OrderByDirection,
 } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { scopedQuery } from '@/lib/firestore-helpers';
 
 export interface UseCursorPaginationOptions<T> {
@@ -133,7 +132,7 @@ export function useCursorPagination<T>(opts: UseCursorPaginationOptions<T>): Cur
         }
       }
 
-      const snap = await getDocsResilient(q);
+      const snap = await getDocs(q);
       const mapped = snap.docs.map(mapper);
       setItems(mapped);
 

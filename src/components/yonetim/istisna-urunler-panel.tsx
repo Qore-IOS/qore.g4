@@ -18,7 +18,6 @@ import { Barcode, Trash2, CheckSquare, Loader2, Search, AlertTriangle } from 'lu
 import { Switch } from "@/components/ui/switch";
 import { db } from '@/lib/firebase';
 import { collection, writeBatch, doc, getDocs, query } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { cn, generateId, playFeedback } from '@/lib/utils';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
@@ -59,9 +58,9 @@ export default function IstisnaUrunlerPanel() {
     setIsLoading(true);
     try {
       const [depotsSnap, productsSnap, formatsSnap] = await Promise.all([
-        getDocsResilient(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
-        getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
-        getDocsResilient(scopedQuery('barcodeFormats', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('barcodeFormats', currentCompanyId, isSuperAdmin)),
       ]);
       const depotList = depotsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Depot));
       setDepots(depotList);

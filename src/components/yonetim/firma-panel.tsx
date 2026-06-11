@@ -12,7 +12,6 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { PlusCircle, Edit3, Trash2, Loader2, Building2, UserCog } from 'lucide-react';
 import { collection, getDocs, setDoc, deleteDoc, doc } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { getAuth } from 'firebase/auth';
 import { db, app } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
@@ -41,8 +40,8 @@ export default function FirmaPanel() {
         await auth.currentUser.getIdToken(true);
       }
       const [companySnap, userSnap] = await Promise.all([
-        getDocsResilient(collection(db, 'companies')),
-        getDocsResilient(collection(db, 'users')),
+        getDocs(collection(db, 'companies')),
+        getDocs(collection(db, 'users')),
       ]);
       setCompanies(companySnap.docs.map(d => ({ id: d.id, ...d.data() } as Company)));
       const users = userSnap.docs.map(d => ({ uid: d.id, ...d.data() } as User));

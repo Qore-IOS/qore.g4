@@ -20,7 +20,6 @@ import {
   Timestamp,
   setDoc,
 } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import type { Hospital, Device, DeviceFaultReport, PersonalStockItem, MaintenancePlan, MaintenanceLog, PeriodicPartChange, PeriodicPartChangeLog } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
@@ -198,7 +197,7 @@ export default function TeknikServisDetayPage() {
             where('deviceId', '==', device.id),
             where('status', '==', 'closed')
           );
-          const snap = await getDocsResilient(q);
+          const snap = await getDocs(q);
           const faults = snap.docs.map(d => {
             const data = d.data();
             return {
@@ -257,7 +256,7 @@ export default function TeknikServisDetayPage() {
           collection(db, 'maintenancePlans'),
           where('deviceId', '==', device.id)
         );
-        const plansSnap = await getDocsResilient(plansQ);
+        const plansSnap = await getDocs(plansQ);
         const plans = plansSnap.docs.map(d => ({ id: d.id, ...d.data() } as MaintenancePlan));
 
         // Fetch maintenance logs for this device
@@ -265,7 +264,7 @@ export default function TeknikServisDetayPage() {
           collection(db, 'maintenanceLogs'),
           where('deviceId', '==', device.id)
         );
-        const logsSnap = await getDocsResilient(logsQ);
+        const logsSnap = await getDocs(logsQ);
         const logs = logsSnap.docs.map(d => ({ id: d.id, ...d.data() } as MaintenanceLog));
 
         for (const plan of plans) {
@@ -305,7 +304,7 @@ export default function TeknikServisDetayPage() {
           isSuperAdmin,
           where('deviceId', '==', device.id)
         );
-        const partsSnap = await getDocsResilient(partsQ);
+        const partsSnap = await getDocs(partsQ);
         const parts = partsSnap.docs.map(d => ({ id: d.id, ...d.data() } as PeriodicPartChange));
 
         // Fetch periodic part change logs for this device
@@ -315,7 +314,7 @@ export default function TeknikServisDetayPage() {
           isSuperAdmin,
           where('deviceId', '==', device.id)
         );
-        const partLogsSnap = await getDocsResilient(partLogsQ);
+        const partLogsSnap = await getDocs(partLogsQ);
         const partLogs = partLogsSnap.docs.map(d => ({ id: d.id, ...d.data() } as PeriodicPartChangeLog));
 
         for (const part of parts) {
@@ -384,7 +383,7 @@ export default function TeknikServisDetayPage() {
         where('deviceId', '==', device.id),
         where('formType', '==', 'teknik_servis')
       );
-      const draftSnap = await getDocsResilient(draftQuery);
+      const draftSnap = await getDocs(draftQuery);
 
       if (!draftSnap.empty) {
         const draftDoc = draftSnap.docs[0];
@@ -437,7 +436,7 @@ export default function TeknikServisDetayPage() {
         where('ownerUid', '==', currentUser.uid),
         where('status', '==', 'in_stock')
       );
-      const snap = await getDocsResilient(q);
+      const snap = await getDocs(q);
       const items = snap.docs.map(d => ({
         id: d.id,
         ...d.data(),
@@ -653,8 +652,8 @@ export default function TeknikServisDetayPage() {
 
   const fetchTemplateOptions = async () => {
     const [hospitalsSnap, devicesSnap] = await Promise.all([
-      getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-      getDocsResilient(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
+      getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+      getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
     ]);
 
     const hospitals = hospitalsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Hospital[];
@@ -759,8 +758,8 @@ export default function TeknikServisDetayPage() {
       }
 
       const [hospitalsSnap, devicesSnap] = await Promise.all([
-        getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-        getDocsResilient(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
       ]);
       const hospitals = hospitalsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Hospital[];
       const devices = devicesSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Device[];

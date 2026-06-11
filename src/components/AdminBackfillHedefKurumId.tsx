@@ -2,7 +2,6 @@
 import { useState, useMemo } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, writeBatch, doc, query, where } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import type { Hospital, DepoStokItem } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -24,8 +23,8 @@ export default function AdminBackfillHedefKurumId() {
     setBusy(true);
     try {
       const [labsSnap, stokSnap] = await Promise.all([
-        getDocsResilient(collection(db, 'hospitals')),
-        getDocsResilient(query(collection(db, 'depoStok'), where('isShipped', '==', true), where('hedefKurumId', '==', null))),
+        getDocs(collection(db, 'hospitals')),
+        getDocs(query(collection(db, 'depoStok'), where('isShipped', '==', true), where('hedefKurumId', '==', null))),
       ]);
       const labs: Hospital[] = filterByCompanyScope(
         labsSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) })),

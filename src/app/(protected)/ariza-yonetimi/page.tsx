@@ -144,15 +144,8 @@ export default function ArizaYonetimiPage() {
   const { toast } = useToast();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { isAdmin, currentUser } = useAuth();
-
-  // Yetki artık istemci parametresi olarak GÖNDERİLMEZ; API doğrulanmış ID
-  // token + sunucudaki kullanıcı profilinden türetir (P0.3 güvenlik fix'i).
-  const authHeader = useCallback(async (): Promise<Record<string, string>> => {
-    if (!currentUser) return {};
-    const token = await currentUser.getIdToken();
-    return { Authorization: `Bearer ${token}` };
-  }, [currentUser]);
+  const { isAdmin, currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
+  const assignedLabs = currentUserProfile?.assignedLaboratories;
 
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
@@ -195,9 +188,6 @@ export default function ArizaYonetimiPage() {
 
   // API'den veri çekme
   const fetchReports = useCallback(async (isRefresh = false) => {
-    // Auth-ready gate: oturum çözülmeden istek atma — token'sız istek 401
-    // döner ve panel "arızalar görünmüyor" durumuna düşer.
-    if (!currentUser) return;
     if (isRefresh) {
       setRefreshing(true);
     } else {
@@ -212,11 +202,15 @@ export default function ArizaYonetimiPage() {
         opener: openerFilter,
         page: currentPage.toString(),
         limit: rowsPerPage.toString(),
+        companyId: currentCompanyId,
+        isSuperAdmin: isSuperAdmin ? '1' : '0',
+        isAdmin: isAdmin ? '1' : '0',
       });
+      if (assignedLabs && assignedLabs.length > 0) {
+        params.set('assignedLabs', assignedLabs.join(','));
+      }
 
-      const response = await fetch(`/api/ariza-yonetimi?${params}`, {
-        headers: await authHeader(),
-      });
+      const response = await fetch(`/api/ariza-yonetimi?${params}`);
       const result = await response.json();
 
       if (!result.success) {
@@ -249,7 +243,7 @@ export default function ArizaYonetimiPage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [statusTab, labFilter, deviceFilter, openerFilter, currentPage, rowsPerPage, toast, currentUser, authHeader]);
+  }, [statusTab, labFilter, deviceFilter, openerFilter, currentPage, rowsPerPage, toast, currentCompanyId, isSuperAdmin, isAdmin, assignedLabs]);
 
   // İlk yükleme ve filtre değişikliklerinde veri çek
   useEffect(() => {
@@ -268,7 +262,6 @@ export default function ArizaYonetimiPage() {
     try {
       const response = await fetch(`/api/ariza-yonetimi?id=${reportId}`, {
         method: 'DELETE',
-        headers: await authHeader(),
       });
       const result = await response.json();
 
@@ -339,11 +332,15 @@ export default function ArizaYonetimiPage() {
       device: deviceFilter,
       opener: openerFilter,
       all: '1',
+      companyId: currentCompanyId,
+      isSuperAdmin: isSuperAdmin ? '1' : '0',
+      isAdmin: isAdmin ? '1' : '0',
     });
+    if (assignedLabs && assignedLabs.length > 0) {
+      params.set('assignedLabs', assignedLabs.join(','));
+    }
 
-    const response = await fetch(`/api/ariza-yonetimi?${params}`, {
-      headers: await authHeader(),
-    });
+    const response = await fetch(`/api/ariza-yonetimi?${params}`);
     const result = await response.json();
     if (!result.success) {
       throw new Error(result.error || 'Veri alınamadı');

@@ -1,7 +1,6 @@
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, getDocs, deleteDoc, doc, query, where, orderBy } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
@@ -74,12 +73,12 @@ export default function PeriyodikBakimYonetimiPage() {
     setLoading(true);
     try {
       const [plansSnap, logsSnap, partsSnap, partLogsSnap, devicesSnap, hospitalsSnap] = await Promise.all([
-        getDocsResilient(scopedQuery('maintenancePlans', currentCompanyId, isSuperAdmin)),
-        getDocsResilient(scopedQuery('maintenanceLogs', currentCompanyId, isSuperAdmin, orderBy('completedAt', 'desc'))),
-        getDocsResilient(scopedQuery('periodicPartChanges', currentCompanyId, isSuperAdmin)),
-        getDocsResilient(scopedQuery('periodicPartChangeLogs', currentCompanyId, isSuperAdmin, orderBy('completedAt', 'desc'))),
-        getDocsResilient(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
-        getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('maintenancePlans', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('maintenanceLogs', currentCompanyId, isSuperAdmin, orderBy('completedAt', 'desc'))),
+        getDocs(scopedQuery('periodicPartChanges', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('periodicPartChangeLogs', currentCompanyId, isSuperAdmin, orderBy('completedAt', 'desc'))),
+        getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
       ]);
 
       setMaintenancePlans(plansSnap.docs.map(d => ({ id: d.id, ...d.data() }) as MaintenancePlan));
@@ -230,7 +229,7 @@ export default function PeriyodikBakimYonetimiPage() {
       const logCollection = itemToDelete.type === 'plan' ? 'maintenanceLogs' : 'periodicPartChangeLogs';
       const logField = itemToDelete.type === 'plan' ? 'planId' : 'periodicPartChangeId';
       const logsQuery = scopedQuery(logCollection, currentCompanyId, isSuperAdmin, where(logField, '==', itemToDelete.id));
-      const logsSnap = await getDocsResilient(logsQuery);
+      const logsSnap = await getDocs(logsQuery);
       for (const logDoc of logsSnap.docs) {
         await deleteDoc(doc(db, logCollection, logDoc.id));
       }

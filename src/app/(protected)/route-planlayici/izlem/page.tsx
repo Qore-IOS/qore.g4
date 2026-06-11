@@ -15,7 +15,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ArrowLeft, Eye, Truck, MapPin, Navigation, Check, Clock, LogOut, Flag, Car, Search, X, Building2, Plus, ArrowUpDown, Send, AlertCircle } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, Timestamp, where } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import type { User as AppUser, Hospital, RouteRequest } from '@/lib/types';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -128,7 +127,7 @@ export default function SoforIzlemPage() {
   useEffect(() => {
     const fetchHospitals = async () => {
       try {
-        const hospitalsSnap = await getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin));
+        const hospitalsSnap = await getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin));
         const hospitalsList = hospitalsSnap.docs
           .map(d => ({ id: d.id, ...d.data() } as Hospital))
           .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'tr'));
@@ -146,8 +145,8 @@ export default function SoforIzlemPage() {
       try {
         // Tüm şoförleri ve araçları getir
         const [usersSnap, vehiclesSnap] = await Promise.all([
-          getDocsResilient(scopedQuery('users', currentCompanyId, isSuperAdmin)),
-          getDocsResilient(scopedQuery('vehicles', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('vehicles', currentCompanyId, isSuperAdmin)),
         ]);
 
         // Debug: Tüm kullanıcıları ve rollerini logla
@@ -190,7 +189,7 @@ export default function SoforIzlemPage() {
             isSuperAdmin,
             where('driverId', '==', driverId)
           );
-          const allRoutesSnap = await getDocsResilient(allRoutesQuery);
+          const allRoutesSnap = await getDocs(allRoutesQuery);
           const allRoutes = allRoutesSnap.docs.map(d => ({ id: d.id, ...d.data() } as RouteDoc));
 
           // Bugünkü rotalar

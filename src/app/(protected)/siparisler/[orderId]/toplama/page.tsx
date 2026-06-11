@@ -28,7 +28,6 @@ import { useParams, useRouter } from 'next/navigation';
 import type { Order, OrderItem, DepoStokItem, ProductCode, PickingListItem as PickingListItemType, Shipment, ShipmentItem, DeviceGroup, Hospital, Depot, ConsumptionRecord } from '@/lib/types';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDoc, writeBatch, serverTimestamp, query, where, getDocs, Timestamp, setDoc, limit } from 'firebase/firestore';
-import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import { useToast } from '@/hooks/use-toast';
 import useHidScanner from '@/hooks/useHidScanner';
 import { useAuth } from '@/contexts/auth-context';
@@ -183,7 +182,7 @@ export default function ToplamaPage() {
       setIsLoading(true);
       try {
         // 1. Fetch Order First to get depotId
-        const orderSnap = await getDocResilient(doc(db, 'orders', orderId));
+        const orderSnap = await getDoc(doc(db, 'orders', orderId));
 
         if (!orderSnap.exists()) {
           toast({ title: 'Hata', description: 'Sipariş bulunamadı.', variant: 'destructive' });
@@ -209,7 +208,7 @@ export default function ToplamaPage() {
           getScopedDocs('depoStok', currentCompanyId, isSuperAdmin, where('depotId', '==', orderData.depotId), where('isShipped', '==', false)),
           getScopedDocs('def_deviceGroups', currentCompanyId, isSuperAdmin),
           getScopedDocs('hospitals', currentCompanyId, isSuperAdmin),
-          getDocResilient(doc(db, 'depots', orderData.depotId)),
+          getDoc(doc(db, 'depots', orderData.depotId)),
         ]);
 
         const productsData = productDocs.map(d => ({ id: d.id, ...d.data() } as ProductCode));
@@ -246,7 +245,7 @@ export default function ToplamaPage() {
         if (effectiveLabId && orderData.depotId) {
           const labTransferDocId = `${effectiveLabId}_${orderData.depotId}`;
           siparisToplamaLogger.debug('Transfer tarihleri yükleniyor', { labTransferDocId });
-          const labTransferSnap = await getDocResilient(doc(db, 'labTransferDates', labTransferDocId));
+          const labTransferSnap = await getDoc(doc(db, 'labTransferDates', labTransferDocId));
           siparisToplamaLogger.debug('Transfer tarihleri sorgusu tamamlandı', {
             exists: labTransferSnap.exists(),
           });
@@ -901,7 +900,7 @@ export default function ToplamaPage() {
       // Step 1: Verify source depot stock was properly deducted (isShipped = true)
       const verificationErrors: string[] = [];
       const verifySourcePromises = itemsToShip.filter(item => item.id).map(async (item) => {
-        const verifySnap = await getDocResilient(doc(db, 'depoStok', item.id!));
+        const verifySnap = await getDoc(doc(db, 'depoStok', item.id!));
         if (trackingDisabled) {
           if (verifySnap.exists()) {
             verificationErrors.push(`Tüketim takibi kapalı lab için stok silinmeliydi: ${item.stokAdi} (${item.id})`);
@@ -938,7 +937,7 @@ export default function ToplamaPage() {
       await Promise.all(verifySourcePromises);
 
       // Step 1b: Verify target stock/consumption reflection
-      const transferDocItemsSnap = await getDocsResilient(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('transferId', '==', transferRef.id)));
+      const transferDocItemsSnap = await getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('transferId', '==', transferRef.id)));
       if (!trackingDisabled) {
         const matchedTargetStockCount = sumStockItemQuantities(transferDocItemsSnap.docs
           .filter(d => matchesCompanyScope(d.data() as any, currentCompanyId, isSuperAdmin))
@@ -950,7 +949,7 @@ export default function ToplamaPage() {
       } else {
         const consumptionDocs = await Promise.all(
           createdConsumptionDocIds.map(async (id) => {
-            const snap = await getDocResilient(doc(db, 'tuketimKayitlari', id));
+            const snap = await getDoc(doc(db, 'tuketimKayitlari', id));
             if (!snap.exists()) {
               verificationErrors.push(`Tüketim kaydı bulunamadı: ${id}`);
               return null;

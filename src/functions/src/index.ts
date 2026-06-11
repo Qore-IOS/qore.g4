@@ -104,7 +104,7 @@ export const fanOutNotifications = onDocumentCreated(
           Urgency: 'high',
         },
         notification: {
-          badge: '/icon-192.png'
+          badge: '/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG'
         }
       },
     };

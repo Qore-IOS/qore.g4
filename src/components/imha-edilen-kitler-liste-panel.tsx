@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, orderBy, query, Timestamp } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
@@ -55,8 +54,8 @@ export default function ImhaEdilenKitlerListePanel() {
             setLoading(true);
             try {
                 const [recordsSnap, labsSnap] = await Promise.all([
-                    getDocsResilient(scopedQuery('destroyedKitsReports', currentCompanyId, isSuperAdmin, orderBy('resolvedAt', 'desc'))),
-                    getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin))
+                    getDocs(scopedQuery('destroyedKitsReports', currentCompanyId, isSuperAdmin, orderBy('resolvedAt', 'desc'))),
+                    getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin))
                 ]);
 
                 setRecords(recordsSnap.docs.map(doc => {

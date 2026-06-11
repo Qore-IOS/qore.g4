@@ -3,9 +3,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { db } from '@/lib/firebase';
 import { doc, onSnapshot, setDoc } from 'firebase/firestore';
-import iconThumbs from '@/lib/generated/icon-thumbs.json';
-
-const ICON_THUMBS = new Set<string>(iconThumbs as string[]);
 
 export interface IconMappings {
   dock: Record<string, string>;       // dock item key -> icon filename
@@ -69,10 +66,5 @@ export function useIconMappings() {
 
 /** Get icon src for a given mapping value */
 export function getIconSrc(iconFile: string): string {
-  // PERF (Faz 6): ikonlar UI'da 34-40px gösterilirken kaynaklar 1.5-1.9MB ham
-  // PNG. Build sırasında üretilen 96px türev varsa onu servis et
-  // (scripts/optimize-public-icons.mjs); manifest dışındakiler (ör. runtime'da
-  // eklenen ikonlar) ham yoldan yüklenmeye devam eder.
-  if (ICON_THUMBS.has(iconFile)) return `/icons/_96/${iconFile}`;
   return `/icons/${iconFile}`;
 }

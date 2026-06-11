@@ -1,5 +1,4 @@
 import { collection, getDocs, doc, getDoc, query, where, type QueryConstraint } from 'firebase/firestore';
-import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import { buildPersonnelCode } from '@/lib/form-number';
 import { db } from '@/lib/firebase';
 import { scopedQuery } from '@/lib/firestore-helpers';
@@ -63,7 +62,7 @@ async function loadLabPools(companyId: string | null, isSuperAdmin: boolean): Pr
   const key = isSuperAdmin ? '__super__' : (companyId || '__none__');
   const cached = _labPoolsByCompany.get(key);
   if (cached && Date.now() - cached.ts < LAB_POOLS_TTL) return cached.data;
-  const snap = await getDocsResilient(scopedQuery('labPools', companyId, isSuperAdmin));
+  const snap = await getDocs(scopedQuery('labPools', companyId, isSuperAdmin));
   const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
   _labPoolsByCompany.set(key, { data, ts: Date.now() });
   return data;
@@ -82,7 +81,7 @@ export async function resolveLabDisplayName(
     if (match) {
       const pool = match as any;
       if (pool.mainLabId && pool.mainLabId !== hospitalId) {
-        const mainLabDoc = await getDocResilient(doc(db, 'hospitals', pool.mainLabId));
+        const mainLabDoc = await getDoc(doc(db, 'hospitals', pool.mainLabId));
         if (mainLabDoc.exists()) {
           return `${mainLabDoc.data().name} - ${hospitalName}`;
         }
@@ -109,7 +108,7 @@ export async function computeFormNo(
   try {
     const initials = buildPersonnelCode(personName);
     const q = scopedQuery(collectionName, companyId, isSuperAdmin, where(uidField, '==', uid), ...extraFilters);
-    const snap = await getDocsResilient(q);
+    const snap = await getDocs(q);
     const sorted = snap.docs.slice().sort((a, b) => {
       const ta = a.data()[timestampField]?.toMillis?.() || 0;
       const tb = b.data()[timestampField]?.toMillis?.() || 0;

@@ -13,7 +13,6 @@ import { withCompanyScope } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { db } from '@/lib/firebase';
 import { collection, addDoc, serverTimestamp, query, where, getDocs, writeBatch, doc, onSnapshot, orderBy, Timestamp, updateDoc } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import BackButton from '@/components/BackButton';
 import { format, differenceInMinutes, isValid } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';
@@ -179,7 +178,7 @@ export default function EkMesaiBildirimPage() {
         where('status', '==', 'pending')
       );
 
-      const querySnapshot = await getDocsResilient(q);
+      const querySnapshot = await getDocs(q);
 
       if (!querySnapshot.empty) {
         const existingDoc = querySnapshot.docs[0];
@@ -232,7 +231,7 @@ export default function EkMesaiBildirimPage() {
     setIsHistoryOpen(true);
     try {
         const q = scopedQuery('overtimeRequests', currentCompanyId, isSuperAdmin, where('userId', '==', currentUser.uid));
-        const snap = await getDocsResilient(q);
+        const snap = await getDocs(q);
         const data = snap.docs.map(d => ({id: d.id, ...d.data()} as OvertimeRequest));
         // Sort client-side
         data.sort((a, b) => b.createdAt.toMillis() - a.createdAt.toMillis());

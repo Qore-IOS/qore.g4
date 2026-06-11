@@ -14,6 +14,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { db } from '@/lib/firebase';
 import {
   collection,
+  getDocs,
   query,
   where,
   orderBy,
@@ -49,10 +50,8 @@ import type {
 } from '@/lib/types';
 import { DepotStockCountSession } from '@/lib/mal-kabul/types';
 import { SayimSession } from '@/lib/cost-analytics';
-import { filterByCompanyScope, normalizeCompanyId } from '@/lib/company-scope';
-import { getScopedDocsCacheFirst, scopedQuery } from '@/lib/firestore-helpers';
-import { getDocsCacheFirst } from '@/lib/firestore-fetch';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
+import { filterByCompanyScope } from '@/lib/company-scope';
+import { getScopedDocs, scopedQuery } from '@/lib/firestore-helpers';
 
 // Helper to convert Firestore timestamps
 const processTimestamp = (docData: any) => {
@@ -81,8 +80,8 @@ export function useProductCodes() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['productCodes', currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
-      const docs = await getScopedDocsCacheFirst(qctx, 'productCodes', currentCompanyId, isSuperAdmin);
+    queryFn: async () => {
+      const docs = await getScopedDocs('productCodes', currentCompanyId, isSuperAdmin);
       const items = docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as ProductCode));
       return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
     },
@@ -101,8 +100,8 @@ export function useDepots() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['depots', currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
-      const snap = await getDocsCacheFirst(qctx, scopedQuery('depots', currentCompanyId, isSuperAdmin));
+    queryFn: async () => {
+      const snap = await getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin));
       const depots = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Depot));
       return filterByCompanyScope(depots, currentCompanyId, isSuperAdmin);
     },
@@ -120,8 +119,8 @@ export function useHospitals() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['hospitals', currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
-      const snap = await getDocsCacheFirst(qctx, scopedQuery('hospitals', currentCompanyId, isSuperAdmin));
+    queryFn: async () => {
+      const snap = await getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin));
       const hospitals = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Hospital));
       return filterByCompanyScope(hospitals, currentCompanyId, isSuperAdmin);
     },
@@ -139,8 +138,8 @@ export function useBorcDepots() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['borcDepots', currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
-      const snap = await getDocsCacheFirst(qctx, scopedQuery('borcDepots', currentCompanyId, isSuperAdmin));
+    queryFn: async () => {
+      const snap = await getDocs(scopedQuery('borcDepots', currentCompanyId, isSuperAdmin));
       const depots = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Depot));
       return filterByCompanyScope(depots, currentCompanyId, isSuperAdmin);
     },
@@ -157,8 +156,8 @@ export function useTestDefinitions() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['testDefinitions', currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
-      const snap = await getDocsCacheFirst(qctx, scopedQuery('testDefinitions', currentCompanyId, isSuperAdmin, orderBy('sutKodu', 'asc')));
+    queryFn: async () => {
+      const snap = await getDocs(scopedQuery('testDefinitions', currentCompanyId, isSuperAdmin, orderBy('sutKodu', 'asc')));
       const defs = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as TestDefinitionGlobal));
       return filterByCompanyScope(defs, currentCompanyId, isSuperAdmin);
     },
@@ -175,8 +174,8 @@ export function useEfficiencyPools() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['efficiencyPools', currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
-      const snap = await getDocsCacheFirst(qctx, scopedQuery('efficiencyPools', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc')));
+    queryFn: async () => {
+      const snap = await getDocs(scopedQuery('efficiencyPools', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc')));
       const pools = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as EfficiencyPool));
       return filterByCompanyScope(pools, currentCompanyId, isSuperAdmin);
     },
@@ -195,8 +194,8 @@ export function useDevices() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['devices', currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
-      const snap = await getDocsCacheFirst(qctx, scopedQuery('devices', currentCompanyId, isSuperAdmin));
+    queryFn: async () => {
+      const snap = await getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin));
       const devices = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Device));
       return filterByCompanyScope(devices, currentCompanyId, isSuperAdmin);
     },
@@ -227,11 +226,11 @@ export function useDevicesForLabs(hospitalIds: string[] | null | undefined) {
     : null;
   return useQuery({
     queryKey: ['devices', 'labScoped', currentCompanyId, isSuperAdmin, ids],
-    queryFn: async (qctx) => {
-      const mapDocs = (snap: Awaited<ReturnType<typeof getDocsCacheFirst>>) =>
+    queryFn: async () => {
+      const mapDocs = (snap: Awaited<ReturnType<typeof getDocs>>) =>
         snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Device));
       const fetchAll = async () => {
-        const snap = await getDocsCacheFirst(qctx, scopedQuery('devices', currentCompanyId, isSuperAdmin));
+        const snap = await getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin));
         return filterByCompanyScope(mapDocs(snap), currentCompanyId, isSuperAdmin);
       };
       if (!ids) return fetchAll();
@@ -239,7 +238,7 @@ export function useDevicesForLabs(hospitalIds: string[] | null | undefined) {
         const chunks: string[][] = [];
         for (let i = 0; i < ids.length; i += 30) chunks.push(ids.slice(i, i + 30));
         const snaps = await Promise.all(
-          chunks.map(c => getDocsCacheFirst(qctx, scopedQuery('devices', currentCompanyId, isSuperAdmin, where('hospitalId', 'in', c)))),
+          chunks.map(c => getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin, where('hospitalId', 'in', c)))),
         );
         const merged: Device[] = [];
         const seen = new Set<string>();
@@ -268,11 +267,11 @@ export function usePurchasingTasks() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['purchasingTasks', currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
+    queryFn: async () => {
       // Faz 4 güvenlik şapkası: son 365 gün + max 5k kayıt.
       // Tarih bazlı liste için useRecentPurchasingTasks kullanın.
       const sinceTs = Timestamp.fromDate(subDays(new Date(), 365));
-      const snap = await getDocsCacheFirst(qctx, scopedQuery(
+      const snap = await getDocs(scopedQuery(
         'purchasingTasks',
         currentCompanyId,
         isSuperAdmin,
@@ -300,7 +299,6 @@ export function useExpiringProductsCount() {
       const { getExpiringProductsCountServer } = await import('@/actions/stokActions');
       return getExpiringProductsCountServer(currentCompanyId, isSuperAdmin);
     },
-    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 60 * 60 * 1000, // 1 hour
     gcTime: 2 * 60 * 60 * 1000,
   });
@@ -313,8 +311,8 @@ export function useDeviceGroups() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['deviceGroups', currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
-      const snap = await getDocsCacheFirst(qctx, scopedQuery('deviceGroups', currentCompanyId, isSuperAdmin));
+    queryFn: async () => {
+      const snap = await getDocs(scopedQuery('deviceGroups', currentCompanyId, isSuperAdmin));
       const groups = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DeviceGroup));
       return filterByCompanyScope(groups, currentCompanyId, isSuperAdmin);
     },
@@ -330,9 +328,9 @@ export function useDeviceGroups() {
 export function useMinMaxRulesForDepot(depotId: string) {
   return useQuery({
     queryKey: ['minMaxRules', 'depot', depotId],
-    queryFn: async (qctx) => {
+    queryFn: async () => {
       if (!depotId) return {};
-      const snap = await getDocsCacheFirst(qctx, collection(db, 'depots', depotId, 'minMaxRules'));
+      const snap = await getDocs(collection(db, 'depots', depotId, 'minMaxRules'));
       return snap.docs.reduce<Record<string, MinMaxRule>>((acc, d) => {
         const r = d.data() as MinMaxRule;
         if (r?.stokKodu) acc[r.stokKodu] = { ...r, id: d.id };
@@ -350,9 +348,9 @@ export function useMinMaxRulesForDepot(depotId: string) {
 export function useMinMaxRulesForHospital(hospitalId: string) {
   return useQuery({
     queryKey: ['minMaxRules', 'hospital', hospitalId],
-    queryFn: async (qctx) => {
+    queryFn: async () => {
       if (!hospitalId) return {};
-      const snap = await getDocsCacheFirst(qctx, collection(db, 'hospitals', hospitalId, 'minMaxRules'));
+      const snap = await getDocs(collection(db, 'hospitals', hospitalId, 'minMaxRules'));
       return snap.docs.reduce<Record<string, MinMaxRule>>((acc, d) => {
         const r = d.data() as MinMaxRule;
         if (r?.stokKodu) acc[r.stokKodu] = { ...r, id: d.id };
@@ -371,8 +369,8 @@ export function useLabPools() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['labPools', currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
-      const snap = await getDocsCacheFirst(qctx, scopedQuery('labPools', currentCompanyId, isSuperAdmin));
+    queryFn: async () => {
+      const snap = await getDocs(scopedQuery('labPools', currentCompanyId, isSuperAdmin));
       const labPools = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as LabPool));
       return filterByCompanyScope(labPools, currentCompanyId, isSuperAdmin);
     },
@@ -396,8 +394,8 @@ export function useBarcodeFormatsQuery() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['barcodeFormats', currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
-      const docs = await getScopedDocsCacheFirst(qctx,
+    queryFn: async () => {
+      const docs = await getScopedDocs(
         'barcodeFormats', currentCompanyId, isSuperAdmin, where('active', '==', true),
       );
       const items = docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as BarcodeFormat));
@@ -416,8 +414,8 @@ export function useAddressDefinitions() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['addressDefinitions', currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
-      const snap = await getDocsCacheFirst(qctx, scopedQuery('addressDefinitions', currentCompanyId, isSuperAdmin));
+    queryFn: async () => {
+      const snap = await getDocs(scopedQuery('addressDefinitions', currentCompanyId, isSuperAdmin));
       const addresses = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as AddressDefinition));
       return filterByCompanyScope(addresses, currentCompanyId, isSuperAdmin);
     },
@@ -434,8 +432,8 @@ export function useUsers() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['users', currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
-      const snap = await getDocsCacheFirst(qctx, scopedQuery('users', currentCompanyId, isSuperAdmin));
+    queryFn: async () => {
+      const snap = await getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin));
       const users = snap.docs.map(d => ({ uid: d.id, ...processTimestamp(d.data()) } as AppUser));
       return filterByCompanyScope(users, currentCompanyId, isSuperAdmin);
     },
@@ -453,8 +451,8 @@ export function useHospitalDeviceAssignments() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['hospitalDeviceAssignments', currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
-      const snap = await getDocsCacheFirst(qctx, scopedQuery('hospitalDeviceAssignments', currentCompanyId, isSuperAdmin));
+    queryFn: async () => {
+      const snap = await getDocs(scopedQuery('hospitalDeviceAssignments', currentCompanyId, isSuperAdmin));
       const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
       return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
     },
@@ -471,8 +469,8 @@ export function usePersonnelAvailability() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['personnelAvailability', currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
-      const snap = await getDocsCacheFirst(qctx, scopedQuery('personnelAvailability', currentCompanyId, isSuperAdmin));
+    queryFn: async () => {
+      const snap = await getDocs(scopedQuery('personnelAvailability', currentCompanyId, isSuperAdmin));
       const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
       return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
     },
@@ -491,12 +489,12 @@ export function useDeviceFaultReports() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['deviceFaultReports', currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
+    queryFn: async () => {
       // Faz 4 güvenlik şapkası: son 2 yıl + max 10k kayıt. Daha eski/büyük
       // veri için useOpenDeviceFaultReports veya useRecentDeviceFaultReports
       // variant'larını kullanın.
       const sinceTs = Timestamp.fromDate(subDays(new Date(), 730));
-      const snap = await getDocsCacheFirst(qctx, scopedQuery(
+      const snap = await getDocs(scopedQuery(
         'deviceFaultReports',
         currentCompanyId,
         isSuperAdmin,
@@ -520,10 +518,10 @@ export function useDeviceActionForms() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['deviceActionForms', currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
+    queryFn: async () => {
       // Faz 4 güvenlik şapkası: son 365 gün + max 5k kayıt.
       const sinceTs = Timestamp.fromDate(subDays(new Date(), 365));
-      const snap = await getDocsCacheFirst(qctx, scopedQuery(
+      const snap = await getDocs(scopedQuery(
         'deviceActionForms',
         currentCompanyId,
         isSuperAdmin,
@@ -547,10 +545,10 @@ export function useAplikasyonActionForms() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['aplikasyonActionForms', currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
+    queryFn: async () => {
       // Faz 4 güvenlik şapkası: son 365 gün + max 5k kayıt.
       const sinceTs = Timestamp.fromDate(subDays(new Date(), 365));
-      const snap = await getDocsCacheFirst(qctx, scopedQuery(
+      const snap = await getDocs(scopedQuery(
         'aplikasyonActionForms',
         currentCompanyId,
         isSuperAdmin,
@@ -582,9 +580,9 @@ export function useRecentDeviceFaultReports(daysWindow: number = 90) {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['deviceFaultReports', 'recent', daysWindow, currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
+    queryFn: async () => {
       const sinceTs = Timestamp.fromDate(subDays(new Date(), daysWindow));
-      const snap = await getDocsCacheFirst(qctx, scopedQuery(
+      const snap = await getDocs(scopedQuery(
         'deviceFaultReports',
         currentCompanyId,
         isSuperAdmin,
@@ -609,8 +607,8 @@ export function useOpenDeviceFaultReports() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['deviceFaultReports', 'open', currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
-      const snap = await getDocsCacheFirst(qctx, scopedQuery(
+    queryFn: async () => {
+      const snap = await getDocs(scopedQuery(
         'deviceFaultReports',
         currentCompanyId,
         isSuperAdmin,
@@ -637,9 +635,9 @@ export function useRecentPurchasingTasks(daysWindow: number = 90) {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['purchasingTasks', 'recent', daysWindow, currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
+    queryFn: async () => {
       const sinceTs = Timestamp.fromDate(subDays(new Date(), daysWindow));
-      const snap = await getDocsCacheFirst(qctx, scopedQuery(
+      const snap = await getDocs(scopedQuery(
         'purchasingTasks',
         currentCompanyId,
         isSuperAdmin,
@@ -666,8 +664,8 @@ export function useActiveDepoStok() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['depoStok', 'active', currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
-      const snap = await getDocsCacheFirst(qctx, scopedQuery(
+    queryFn: async () => {
+      const snap = await getDocs(scopedQuery(
         'depoStok',
         currentCompanyId,
         isSuperAdmin,
@@ -691,8 +689,8 @@ export function useShippedDepoStok() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['depoStok', 'shipped', currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
-      const snap = await getDocsCacheFirst(qctx, scopedQuery(
+    queryFn: async () => {
+      const snap = await getDocs(scopedQuery(
         'depoStok',
         currentCompanyId,
         isSuperAdmin,
@@ -715,9 +713,9 @@ export function useRecentConsumptionRecords(daysWindow: number = 90) {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['tuketimKayitlari', 'recent', daysWindow, currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
+    queryFn: async () => {
       const sinceTs = Timestamp.fromDate(subDays(new Date(), daysWindow));
-      const snap = await getDocsCacheFirst(qctx, scopedQuery(
+      const snap = await getDocs(scopedQuery(
         'tuketimKayitlari',
         currentCompanyId,
         isSuperAdmin,
@@ -739,8 +737,8 @@ export function useMaintenancePlans() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['maintenancePlans', currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
-      const snap = await getDocsCacheFirst(qctx, scopedQuery('maintenancePlans', currentCompanyId, isSuperAdmin));
+    queryFn: async () => {
+      const snap = await getDocs(scopedQuery('maintenancePlans', currentCompanyId, isSuperAdmin));
       const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
       return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
     },
@@ -757,8 +755,8 @@ export function useMaintenanceLogs() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['maintenanceLogs', currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
-      const snap = await getDocsCacheFirst(qctx, scopedQuery('maintenanceLogs', currentCompanyId, isSuperAdmin));
+    queryFn: async () => {
+      const snap = await getDocs(scopedQuery('maintenanceLogs', currentCompanyId, isSuperAdmin));
       const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
       return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
     },
@@ -776,8 +774,8 @@ export function useDeviceLabPools() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['deviceLabPools', 'active', currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
-      const snap = await getDocsCacheFirst(qctx,
+    queryFn: async () => {
+      const snap = await getDocs(
         scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin, where('active', '==', true)),
       );
       const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
@@ -797,9 +795,9 @@ export function useFaultDefinitions(type: 'teknik_servis' | 'aplikasyon' | null)
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['faultDefinitions', type, currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
+    queryFn: async () => {
       if (!type) return [];
-      const snap = await getDocsCacheFirst(qctx,
+      const snap = await getDocs(
         scopedQuery('faultDefinitions', currentCompanyId, isSuperAdmin, where('type', '==', type)),
       );
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
@@ -820,11 +818,11 @@ export function useMaintenancePlansForDevice(
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['maintenancePlans', 'forDevice', deviceId, planType ?? null, currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
+    queryFn: async () => {
       if (!deviceId) return [];
       const constraints = [where('deviceId', '==', deviceId)];
       if (planType) constraints.push(where('type', '==', planType));
-      const snap = await getDocsCacheFirst(qctx, scopedQuery('maintenancePlans', currentCompanyId, isSuperAdmin, ...constraints));
+      const snap = await getDocs(scopedQuery('maintenancePlans', currentCompanyId, isSuperAdmin, ...constraints));
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
     },
     enabled: !!deviceId && (!!currentCompanyId || isSuperAdmin),
@@ -840,9 +838,9 @@ export function useMaintenanceLogsForDevice(deviceId: string | null) {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['maintenanceLogs', 'forDevice', deviceId, currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
+    queryFn: async () => {
       if (!deviceId) return [];
-      const snap = await getDocsCacheFirst(qctx,
+      const snap = await getDocs(
         scopedQuery(
           'maintenanceLogs',
           currentCompanyId,
@@ -871,7 +869,7 @@ export function useDepoStokByDepot(depotId: string | null) {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['depoStok', depotId, currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
+    queryFn: async () => {
       if (!depotId) return [];
       // Legacy-aware fetch: include __legacy__/untagged depoStok docs so company
       // users see the same stock super-admins do. A plain scopedQuery applies a
@@ -881,7 +879,7 @@ export function useDepoStokByDepot(depotId: string | null) {
       // vanish from the direkt-transfer / mal-kabul panels for regular users even
       // though the box is physically in the depot, while super-admins (unscoped
       // query) still see and can transfer them.
-      const docs = await getScopedDocsCacheFirst(qctx,
+      const docs = await getScopedDocs(
         'depoStok', currentCompanyId, isSuperAdmin, where('depotId', '==', depotId),
       );
       const items = docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
@@ -1007,63 +1005,6 @@ export function usePaginatedDepotStock(params: {
 }
 
 /**
- * Server-side paginated product codes.
- *
- * Calls the `getPaginatedProductCodes` server action so that only the requested
- * page of products + column values + brand counts travel down the wire.
- * Mirrors usePaginatedDepotStock's caching strategy.
- */
-export function usePaginatedProductCodes(params: {
-  page: number;
-  pageSize: number;
-  sortField: string;
-  sortDirection: 'asc' | 'desc';
-  searchTerm?: string;
-  columnFilters?: Record<string, string[]>;
-  brandTab?: string;
-}) {
-  const { currentCompanyId, isSuperAdmin } = useAuth();
-  const {
-    page, pageSize, sortField, sortDirection, searchTerm, columnFilters, brandTab,
-  } = params;
-
-  // Stable cache key derived from sorted column filter entries.
-  const filterKey = columnFilters
-    ? Object.entries(columnFilters)
-        .map(([k, v]) => `${k}:${[...v].sort().join('|')}`)
-        .sort()
-        .join(';')
-    : '';
-
-  return useQuery({
-    queryKey: [
-      'productCodesPaginated', page, pageSize,
-      sortField, sortDirection, searchTerm ?? '',
-      filterKey, brandTab ?? 'ALL',
-      currentCompanyId, isSuperAdmin,
-    ],
-    queryFn: async () => {
-      const { getPaginatedProductCodes } = await import('@/actions/stokActions');
-      return getPaginatedProductCodes({
-        page,
-        pageSize,
-        sortField,
-        sortDirection,
-        searchTerm,
-        columnFilters,
-        brandTab,
-        companyId: currentCompanyId,
-        isSuperAdmin,
-      });
-    },
-    enabled: !!currentCompanyId || isSuperAdmin,
-    staleTime: 5 * 60 * 1000,
-    gcTime: 30 * 60 * 1000,
-    placeholderData: (prev) => prev,
-  });
-}
-
-/**
  * Unshipped depot stock - server-side filtered by (depotId, isShipped=false).
  * Used by panels that only operate on un-shipped inventory (e.g., StokYonetimi).
  * Returns ALL un-shipped items for the depot (no client-side cap).
@@ -1072,12 +1013,12 @@ export function useUnshippedDepoStokByDepot(depotId: string | null) {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['depoStok', 'unshipped', depotId, currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
+    queryFn: async () => {
       if (!depotId) return [];
       // Legacy-aware fetch — see useDepoStokByDepot. Keeps __legacy__/untagged
       // depot stock visible to company users instead of being dropped by the
       // server-side companyId filter.
-      const docs = await getScopedDocsCacheFirst(qctx,
+      const docs = await getScopedDocs(
         'depoStok',
         currentCompanyId,
         isSuperAdmin,
@@ -1101,8 +1042,8 @@ export function useDepoStok() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['depoStok', 'all', currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
-      const snap = await getDocsCacheFirst(qctx, scopedQuery('depoStok', currentCompanyId, isSuperAdmin));
+    queryFn: async () => {
+      const snap = await getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin));
       const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
       return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
     },
@@ -1130,14 +1071,14 @@ export function useLabStock(
 
   return useQuery({
     queryKey: ['depoStok', 'shipped', labIds.sort().join(','), labNames.sort().join(','), currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
+    queryFn: async () => {
       if (labIds.length === 0) return [];
       // We can only use 'in' with up to 30 values
       const ids = labIds.slice(0, 30);
       const names = labNames.slice(0, 30);
 
       // Query by hedefKurumId
-      const idSnap = await getDocsCacheFirst(qctx,
+      const idSnap = await getDocs(
         scopedQuery(
           'depoStok',
           currentCompanyId,
@@ -1151,7 +1092,7 @@ export function useLabStock(
       // Also query by hedefKurum (name) for legacy records that may not have hedefKurumId
       let legacyResults: DepoStokItem[] = [];
       if (names.length > 0) {
-        const nameSnap = await getDocsCacheFirst(qctx,
+        const nameSnap = await getDocs(
           scopedQuery(
             'depoStok',
             currentCompanyId,
@@ -1194,8 +1135,8 @@ export function useRecentConsumption(limitCount = 500) {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['tuketimKayitlari', 'recent', limitCount, currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
-      const snap = await getDocsCacheFirst(qctx,
+    queryFn: async () => {
+      const snap = await getDocs(
         scopedQuery(
           'tuketimKayitlari',
           currentCompanyId,
@@ -1222,8 +1163,8 @@ export function useDailyConsumptionStats(startDate: string, endDate: string) {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['dailyConsumptionStats', startDate, endDate, currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
-      const snap = await getDocsCacheFirst(qctx,
+    queryFn: async () => {
+      const snap = await getDocs(
         scopedQuery(
           'dailyConsumptionStats',
           currentCompanyId,
@@ -1260,13 +1201,13 @@ export function useConsumptionByDateRange(
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['tuketimKayitlari', 'dateRange', startDate?.toISOString(), endDate?.toISOString(), currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
+    queryFn: async () => {
       if (!startDate || !endDate) return [];
 
       const startTimestamp = Timestamp.fromDate(startDate);
       const endTimestamp = Timestamp.fromDate(endDate);
 
-      const snap = await getDocsCacheFirst(qctx,
+      const snap = await getDocs(
         scopedQuery(
           'tuketimKayitlari',
           currentCompanyId,
@@ -1298,7 +1239,7 @@ export async function fetchConsumptionByDateRange(
   const startTimestamp = Timestamp.fromDate(startDate);
   const endTimestamp = Timestamp.fromDate(endDate);
 
-  const snap = await getDocsResilient(
+  const snap = await getDocs(
     scopedQuery(
       'tuketimKayitlari',
       currentCompanyId,
@@ -1318,8 +1259,8 @@ export function useRecentShipments(limitCount = 200) {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['shipments', 'recent', limitCount, currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
-      const snap = await getDocsCacheFirst(qctx,
+    queryFn: async () => {
+      const snap = await getDocs(
         scopedQuery(
           'shipments',
           currentCompanyId,
@@ -1344,8 +1285,8 @@ export function useEfficiencyHistory(limitCount = 100) {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['efficiencyHistory', 'recent', limitCount, currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
-      const snap = await getDocsCacheFirst(qctx,
+    queryFn: async () => {
+      const snap = await getDocs(
         scopedQuery(
           'efficiencyHistory',
           currentCompanyId,
@@ -1369,9 +1310,9 @@ export function useEfficiencyHistory(limitCount = 100) {
 export function useMinMaxRules(hospitalId: string | null) {
   return useQuery({
     queryKey: ['minMaxRules', hospitalId],
-    queryFn: async (qctx) => {
+    queryFn: async () => {
       if (!hospitalId) return [];
-      const snap = await getDocsCacheFirst(qctx, collection(db, 'hospitals', hospitalId, 'minMaxRules'));
+      const snap = await getDocs(collection(db, 'hospitals', hospitalId, 'minMaxRules'));
       return snap.docs.map(d => d.data() as MinMaxRule);
     },
     enabled: !!hospitalId,
@@ -1386,10 +1327,10 @@ export function useMinMaxRules(hospitalId: string | null) {
 export function useDepotMinMaxRules(depotId: string | null) {
   return useQuery({
     queryKey: ['depotMinMaxRules', depotId],
-    queryFn: async (qctx) => {
+    queryFn: async () => {
       const map: Record<string, MinMaxRule> = {};
       if (!depotId) return map;
-      const snap = await getDocsCacheFirst(qctx, collection(db, 'depots', depotId, 'minMaxRules'));
+      const snap = await getDocs(collection(db, 'depots', depotId, 'minMaxRules'));
       snap.forEach((d) => {
         const rule = d.data() as MinMaxRule;
         if (rule.stokKodu) map[rule.stokKodu] = rule;
@@ -1408,11 +1349,11 @@ export function useDepotMinMaxRules(depotId: string | null) {
 export function useAllMinMaxRules(hospitalIds: string[]) {
   return useQuery({
     queryKey: ['minMaxRules', 'all', hospitalIds.sort().join(',')],
-    queryFn: async (qctx) => {
+    queryFn: async () => {
       const result: Record<string, MinMaxRule[]> = {};
       await Promise.all(
         hospitalIds.map(async (id) => {
-          const snap = await getDocsCacheFirst(qctx, collection(db, 'hospitals', id, 'minMaxRules'));
+          const snap = await getDocs(collection(db, 'hospitals', id, 'minMaxRules'));
           result[id] = snap.docs.map(d => d.data() as MinMaxRule);
         })
       );
@@ -1430,13 +1371,13 @@ export function useAllMinMaxRules(hospitalIds: string[]) {
 export function useSubPoints(hospitalId: string | null) {
   return useQuery({
     queryKey: ['subPoints', hospitalId],
-    queryFn: async (qctx) => {
+    queryFn: async () => {
       if (!hospitalId) return [];
       const q = query(
         collection(db, 'hospitals', hospitalId, 'subPoints'),
         orderBy('name', 'asc')
       );
-      const snap = await getDocsCacheFirst(qctx, q);
+      const snap = await getDocs(q);
       return snap.docs.map(d => ({ id: d.id, ...d.data() } as { id: string; name: string; isActive?: boolean }));
     },
     enabled: !!hospitalId,
@@ -1456,79 +1397,18 @@ export function useSubPoints(hospitalId: string | null) {
 const STOCK_METADATA_DOC = 'metadata/stockLastUpdated';
 
 /**
- * Stok mutasyonunun kapsamı. STABİLİZASYON (P0.6): önceden bu event
- * kapsamsızdı — herhangi bir depodaki tek işlem, BÜTÜN kullanıcıların BÜTÜN
- * depoStok/depoStokPaginated sorgularını yeniden çalıştırıyordu (thundering
- * herd). Artık yazan taraf hangi tenant/depo/lab'ı etkilediğini bildirir;
- * dinleyici yalnız ilgili query'leri invalidate eder. Kapsamsız (eski)
- * yazarlar geriye dönük uyumluluk için yine tam invalidation yapar.
- */
-export interface StockMutationScope {
-  depotIds?: string[];
-  labIds?: string[];
-  companyId?: string | null;
-}
-
-/**
  * Touch the stock metadata document to signal a stock change
  * Call this after mal kabul or transfer operations
  */
-export async function touchStockMetadata(scope?: StockMutationScope) {
+export async function touchStockMetadata() {
   try {
     await setDoc(doc(db, STOCK_METADATA_DOC), {
       lastUpdated: serverTimestamp(),
       updatedAt: new Date().toISOString(), // Fallback for offline
-      depotIds: scope?.depotIds?.filter(Boolean) ?? null,
-      labIds: scope?.labIds?.filter(Boolean) ?? null,
-      companyId: scope?.companyId || null,
     });
   } catch (error) {
     console.error('Failed to touch stock metadata:', error);
   }
-}
-
-/** Event kapsamına göre tek bir stok query key'inin bayatlayıp bayatlamadığı. */
-function stockEventTouchesKey(
-  key: readonly unknown[],
-  depotIds: string[] | null,
-  labIds: string[] | null,
-): boolean {
-  // Kapsamsız event (eski yazar) → her şey bayat say (eski davranış).
-  if (!depotIds && !labIds) return true;
-
-  if (key[0] === 'depoStokPaginated') {
-    const depotId = key[1];
-    return typeof depotId === 'string' && depotId
-      ? (depotIds?.includes(depotId) ?? false)
-      : true;
-  }
-
-  // ['depoStok', <depotId | etiket>, ...]
-  const second = key[1];
-  if (second === 'unshipped' || second === 'serialIndex') {
-    const depotId = key[2];
-    return typeof depotId === 'string' && depotId
-      ? (depotIds?.includes(depotId) ?? false)
-      : true;
-  }
-  if (second === 'shipped') {
-    // useShippedDepoStok (global) → key[2] companyId olabilir;
-    // useLabStock → key[2] virgülle birleştirilmiş lab id listesi.
-    const joined = key[2];
-    if (typeof joined !== 'string' || !joined) return true;
-    if (!labIds) return false; // lab tarafına dokunulmadıysa lab stoğu değişmedi
-    const keyLabs = joined.split(',');
-    return labIds.some((labId) => keyLabs.includes(labId));
-  }
-  if (second === 'all' || second === 'active') {
-    // Şirket geneli özetler her stok hareketinde bayatlar.
-    return true;
-  }
-  if (typeof second === 'string' && second) {
-    // useDepoStokByDepot: key[1] = depotId
-    return depotIds ? depotIds.includes(second) : false;
-  }
-  return true;
 }
 
 /**
@@ -1539,15 +1419,9 @@ function stockEventTouchesKey(
  */
 export function useStockUpdateListener() {
   const queryClient = useQueryClient();
-  const { currentUser, currentCompanyId, isSuperAdmin } = useAuth();
   const isFirstLoad = useRef(true);
 
   useEffect(() => {
-    // Auth-ready gate: oturum yokken metadata dinlemesi rules'a takılıp
-    // konsola hata basıyordu; oturum gelince zaten yeniden kurulur.
-    if (!currentUser) return;
-    isFirstLoad.current = true;
-
     const unsubscribe = onSnapshot(
       doc(db, STOCK_METADATA_DOC),
       (snapshot) => {
@@ -1556,41 +1430,12 @@ export function useStockUpdateListener() {
           isFirstLoad.current = false;
           return;
         }
-        if (!snapshot.exists()) return;
 
-        const data = snapshot.data() as {
-          companyId?: string | null;
-          depotIds?: unknown;
-          labIds?: unknown;
-        };
-
-        // Başka tenant'ın stok hareketi bu kullanıcının cache'ini ilgilendirmez.
-        const eventCompany =
-          typeof data.companyId === 'string' && data.companyId ? data.companyId : null;
-        if (
-          eventCompany &&
-          !isSuperAdmin &&
-          eventCompany !== normalizeCompanyId(currentCompanyId)
-        ) {
-          return;
+        // Invalidate all depoStok queries when metadata changes
+        if (snapshot.exists()) {
+          queryClient.invalidateQueries({ queryKey: ['depoStok'] });
+          queryClient.invalidateQueries({ queryKey: ['depoStokPaginated'] });
         }
-
-        const depotIds =
-          Array.isArray(data.depotIds) && data.depotIds.length > 0
-            ? (data.depotIds as string[])
-            : null;
-        const labIds =
-          Array.isArray(data.labIds) && data.labIds.length > 0
-            ? (data.labIds as string[])
-            : null;
-
-        queryClient.invalidateQueries({
-          predicate: (q) => {
-            const key = q.queryKey;
-            if (key[0] !== 'depoStok' && key[0] !== 'depoStokPaginated') return false;
-            return stockEventTouchesKey(key, depotIds, labIds);
-          },
-        });
       },
       (error) => {
         console.error('Stock metadata listener error:', error);
@@ -1598,7 +1443,7 @@ export function useStockUpdateListener() {
     );
 
     return () => unsubscribe();
-  }, [queryClient, currentUser, currentCompanyId, isSuperAdmin]);
+  }, [queryClient]);
 }
 
 // ============================================================================
@@ -1616,9 +1461,9 @@ export function useActiveDutyShifts() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['dutyShifts', 'active', currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
+    queryFn: async () => {
       const now = new Date();
-      const snap = await getDocsCacheFirst(qctx,
+      const snap = await getDocs(
         scopedQuery('dutyShifts', currentCompanyId, isSuperAdmin, where('status', '==', 'active')),
       );
       // Filter to only include shifts where current datetime is within range (including startTime/endTime)
@@ -1668,7 +1513,7 @@ export function useUpcomingDutyShifts(labId: string | null) {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['dutyShifts', 'upcoming30', labId, currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
+    queryFn: async () => {
       if (!labId) return [];
       const now = new Date();
       now.setHours(0, 0, 0, 0);
@@ -1676,7 +1521,7 @@ export function useUpcomingDutyShifts(labId: string | null) {
       thirtyDaysLater.setDate(thirtyDaysLater.getDate() + 30);
       thirtyDaysLater.setHours(23, 59, 59, 999);
 
-      const snap = await getDocsCacheFirst(qctx,
+      const snap = await getDocs(
         scopedQuery('dutyShifts', currentCompanyId, isSuperAdmin, where('status', '==', 'active')),
       );
       return filterByCompanyScope(
@@ -1712,8 +1557,8 @@ export function useAllDutyShifts() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['dutyShifts', 'all', currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
-      const snap = await getDocsCacheFirst(qctx, scopedQuery('dutyShifts', currentCompanyId, isSuperAdmin));
+    queryFn: async () => {
+      const snap = await getDocs(scopedQuery('dutyShifts', currentCompanyId, isSuperAdmin));
       const shifts = filterByCompanyScope(
         snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DutyShift)),
         currentCompanyId,
@@ -1741,8 +1586,8 @@ export function useDutyShiftsByStatus(status: 'active' | 'completed' | 'cancelle
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['dutyShifts', status, currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
-      const snap = await getDocsCacheFirst(qctx,
+    queryFn: async () => {
+      const snap = await getDocs(
         scopedQuery('dutyShifts', currentCompanyId, isSuperAdmin, where('status', '==', status)),
       );
       const shifts = filterByCompanyScope(
@@ -1835,9 +1680,9 @@ export function useDepotCountSessions(depotId: string | null) {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['depotCountSessions', currentCompanyId, isSuperAdmin, depotId],
-    queryFn: async (qctx) => {
+    queryFn: async () => {
       if (!depotId) return [];
-      const snap = await getDocsCacheFirst(qctx,
+      const snap = await getDocs(
         scopedQuery(
           'depotStockCountSessions',
           currentCompanyId,
@@ -1860,9 +1705,9 @@ export function useDepotCountSessions(depotId: string | null) {
 export function useScannedItems(sessionId: string | null) {
   return useQuery({
     queryKey: ['scannedItems', sessionId],
-    queryFn: async (qctx) => {
+    queryFn: async () => {
       if (!sessionId) return [];
-      const snap = await getDocsCacheFirst(qctx, collection(db, 'depotStockCountSessions', sessionId, 'scannedItems'));
+      const snap = await getDocs(collection(db, 'depotStockCountSessions', sessionId, 'scannedItems'));
       return snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
     },
     enabled: !!sessionId,
@@ -1877,9 +1722,9 @@ export function useIrsaliyeFiles(depotId: string | null) {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['irsaliyeFiles', currentCompanyId, isSuperAdmin, depotId],
-    queryFn: async (qctx) => {
+    queryFn: async () => {
       if (!depotId) return [];
-      const snap = await getDocsCacheFirst(qctx,
+      const snap = await getDocs(
         scopedQuery(
           'irsaliyeFiles',
           currentCompanyId,
@@ -1902,8 +1747,8 @@ export function useMaliyetSayimSessions() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
     queryKey: ['maliyetSayimSessions', currentCompanyId, isSuperAdmin],
-    queryFn: async (qctx) => {
-      const snap = await getDocsCacheFirst(qctx,
+    queryFn: async () => {
+      const snap = await getDocs(
         scopedQuery(
           'maliyetSayimSessions',
           currentCompanyId,

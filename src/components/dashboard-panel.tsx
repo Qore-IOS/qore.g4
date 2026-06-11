@@ -27,7 +27,6 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useDailyConsumptionStats } from '@/hooks/useFirebaseQueries';
 import { formatDateKey } from '@/lib/dailyConsumptionStats';
 import { collection, onSnapshot, query, where, getDocs, Timestamp, orderBy, limit as fsLimit } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { VIEWS } from '@/lib/constants';
 import { getExchangeRates } from '@/lib/exchange-rates';
@@ -168,12 +167,12 @@ export default function DashboardPanel({
         let stockDocs: any[] = [];
         let depotDocs: any[] = [];
 
-        try { const s = await getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)); productDocs = s.docs; } catch (e) { console.warn('[Dashboard] productCodes fetch failed:', e); }
+        try { const s = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)); productDocs = s.docs; } catch (e) { console.warn('[Dashboard] productCodes fetch failed:', e); }
         try {
           // Dashboard sadece "mevcut stok"u (sevk edilmemiş) saymak için
           // depoStok'a bakıyor. isShipped=true kayıtlar büyür ama gerekmez.
           // Composite index: (companyId, isShipped, miad).
-          const s = await getDocsResilient(scopedQuery(
+          const s = await getDocs(scopedQuery(
             'depoStok',
             currentCompanyId,
             isSuperAdmin,
@@ -181,7 +180,7 @@ export default function DashboardPanel({
           ));
           stockDocs = s.docs;
         } catch (e) { console.warn('[Dashboard] depoStok fetch failed:', e); }
-        try { const s = await getDocsResilient(scopedQuery('depots', currentCompanyId, isSuperAdmin)); depotDocs = s.docs; } catch (e) { console.warn('[Dashboard] depots fetch failed:', e); }
+        try { const s = await getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)); depotDocs = s.docs; } catch (e) { console.warn('[Dashboard] depots fetch failed:', e); }
 
         const depotNameMap = new Map<string, string>();
         depotDocs.forEach((d) => {
@@ -336,7 +335,7 @@ export default function DashboardPanel({
         const allMinMaxRules = new Map<string, { max: number; maxGun: number }>();
 
         const rulePromises = depotIds.map(async (depotId) => {
-          const rulesSnap = await getDocsResilient(collection(db, 'depots', depotId, 'minMaxRules'));
+          const rulesSnap = await getDocs(collection(db, 'depots', depotId, 'minMaxRules'));
           rulesSnap.docs.forEach((d) => {
             const rule = d.data();
             if (rule.stokKodu && rule.max && rule.maxGun) {
@@ -431,11 +430,11 @@ export default function DashboardPanel({
         let productDocs2: any[] = [];
         let consumptionDocs: any[] = [];
 
-        try { const s = await getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)); productDocs2 = s.docs; } catch (e) { console.warn('[Dashboard] yesterday productCodes fetch failed:', e); }
+        try { const s = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)); productDocs2 = s.docs; } catch (e) { console.warn('[Dashboard] yesterday productCodes fetch failed:', e); }
         try {
           // Scope bug fix: önceki sürüm companyId filtresiz tüm firmaların
           // tüketimini görüyordu. scopedQuery ile firma izolasyonu.
-          const s = await getDocsResilient(scopedQuery(
+          const s = await getDocs(scopedQuery(
             'tuketimKayitlari',
             currentCompanyId,
             isSuperAdmin,
@@ -470,7 +469,7 @@ export default function DashboardPanel({
     (async () => {
       try {
         // Verimlilik geçmişi büyür; ortalama için son 200 kayıt yeter.
-        const effSnap = await getDocsResilient(scopedQuery(
+        const effSnap = await getDocs(scopedQuery(
           'totalEfficiencyRecords',
           currentCompanyId,
           isSuperAdmin,

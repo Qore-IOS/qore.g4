@@ -11,7 +11,6 @@ import {
   Upload, Download, Search, X, Server, Check,
 } from 'lucide-react';
 import { collection, getDocs, addDoc, deleteDoc, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
@@ -76,7 +75,7 @@ export default function DeviceBrandModelModal({ open, onOpenChange }: DeviceBran
   const fetchItems = useCallback(async () => {
     setIsLoading(true);
     try {
-      const snap = await getDocsResilient(scopedQuery('deviceBrandModels', currentCompanyId, isSuperAdmin));
+      const snap = await getDocs(scopedQuery('deviceBrandModels', currentCompanyId, isSuperAdmin));
       const all = snap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceBrandModel));
       setItems(filterByCompanyScope(all, currentCompanyId, isSuperAdmin));
     } catch (err) {

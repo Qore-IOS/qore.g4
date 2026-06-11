@@ -10,7 +10,6 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, getDocs, orderBy, query } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { useAuth } from '@/contexts/auth-context';
@@ -50,8 +49,8 @@ export function StokTab({ currency }: StokTabProps) {
       setLoading(true);
       try {
         const [sessionsSnap, productsSnap, ratesValue] = await Promise.all([
-          getDocsResilient(scopedQuery('maliyetSayimSessions', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
-          getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin, orderBy('stokAdi', 'asc'))),
+          getDocs(scopedQuery('maliyetSayimSessions', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
+          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin, orderBy('stokAdi', 'asc'))),
           getExchangeRates().catch(() => ({ EUR: 1, USD: 1.08, TRY: 38.5 })),
         ]);
         if (cancelled) return;

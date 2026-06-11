@@ -62,8 +62,8 @@ messaging.onBackgroundMessage((payload) => {
       icon:
         deviceImageUrl ||
         payload.notification?.icon ||
-        "/icon-192.png",
-      badge: "/icon-192.png",
+        "/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG",
+      badge: "/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG",
       tag: d.notificationId || d.id || "notification",
       requireInteraction: isFaultOpened,
       data: {

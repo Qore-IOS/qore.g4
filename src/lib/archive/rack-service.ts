@@ -8,7 +8,6 @@ import {
   serverTimestamp,
   setDoc,
 } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { normalizeCompanyId } from '@/lib/company-scope';
 import type { Rack } from '@/lib/types';
@@ -31,7 +30,7 @@ export async function getTodaysRackCount(
     where('fridgeCode', '==', fridgeCode),
     where('date', '==', today),
   );
-  const snapshot = await getDocsResilient(q);
+  const snapshot = await getDocs(q);
   return snapshot.size;
 }
 

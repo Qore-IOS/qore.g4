@@ -6,7 +6,6 @@ import NextImage from 'next/image';
 import { Loader2, QrCode, Save, UserCheck, ShieldCheck, History, Printer, Download, ChevronLeft } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { doc, getDoc, collection, getDocs, updateDoc, addDoc, serverTimestamp, query, orderBy } from 'firebase/firestore';
-import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { filterByCompanyScope, withCompanyScope, matchesCompanyScope } from '@/lib/company-scope';
 import QRCode from 'qrcode';
@@ -145,9 +144,9 @@ export default function AssetDetailPage() {
       setLoading(true);
       try {
         const [snap, labsSnap, depotsSnap] = await Promise.all([
-          getDocResilient(doc(db, 'assets', assetId)),
-          getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-          getDocsResilient(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+          getDoc(doc(db, 'assets', assetId)),
+          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
         ]);
         if (snap.exists()) {
           const data = { id: snap.id, ...snap.data() } as Asset;
@@ -184,8 +183,8 @@ export default function AssetDetailPage() {
         setLocations([...labs, ...depots].sort((a, b) => a.name.localeCompare(b.name)));
 
         const [histSnap, custSnap] = await Promise.all([
-          getDocsResilient(query(collection(db, 'assets', assetId, 'assetHistory'), orderBy('timestamp', 'desc'))),
-          getDocsResilient(query(collection(db, 'assets', assetId, 'custodyHistory'), orderBy('timestamp', 'desc'))),
+          getDocs(query(collection(db, 'assets', assetId, 'assetHistory'), orderBy('timestamp', 'desc'))),
+          getDocs(query(collection(db, 'assets', assetId, 'custodyHistory'), orderBy('timestamp', 'desc'))),
         ]);
         setHistory(histSnap.docs.map(d => ({ id: d.id, ...d.data() } as AssetHistoryEntry)));
         setCustodyHistory(custSnap.docs.map(d => ({ id: d.id, ...d.data() } as CustodyEntry)));

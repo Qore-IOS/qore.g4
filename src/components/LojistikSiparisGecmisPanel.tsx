@@ -10,7 +10,6 @@ import {
   Timestamp,
   where,
 } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { format as formatDate } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { db } from '@/lib/firebase';
@@ -91,8 +90,8 @@ export default function LojistikSiparisGecmisPanel() {
   useEffect(() => {
     (async () => {
       const [pSnap, hSnap] = await Promise.all([
-        getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
-        getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
       ]);
       setProductCodes(
         pSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) } as ProductCode))

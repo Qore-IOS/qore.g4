@@ -6,7 +6,6 @@ import { db } from '@/lib/firebase';
 import {
   addDoc, collection, doc, serverTimestamp, Timestamp, updateDoc, getDoc, writeBatch, query, where, getDocs
 } from 'firebase/firestore';
-import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import { createNotification, emitFaultOpened, emitFaultTransferred } from '@/lib/notifications';
 import type { DeviceFaultStatus, InterventionType } from '@/lib/types';
 import { withCompanyScope } from '@/lib/company-scope';
@@ -45,7 +44,7 @@ export async function openDeviceFaultReport(input: OpenFaultInput): Promise<stri
 
   let resolvedAffectedDeviceIds = affectedDeviceIds.filter(Boolean);
   if (affectsAllDevices && resolvedAffectedDeviceIds.length === 0 && hospitalId) {
-    const allLabDevicesSnap = await getDocsResilient(
+    const allLabDevicesSnap = await getDocs(
       scopedQuery('devices', companyId ?? null, false, where('hospitalId', '==', hospitalId))
     );
     resolvedAffectedDeviceIds = allLabDevicesSnap.docs.map((d) => d.id);
@@ -206,7 +205,7 @@ export async function closeDeviceFaultReport(
   const primarySupportPersonnel = supportPersonnels[0] || null;
   const reportRef = doc(db, 'deviceFaultReports', reportId);
 
-  const reportSnap = await getDocResilient(reportRef);
+  const reportSnap = await getDoc(reportRef);
   if (!reportSnap.exists()) {
     throw new Error('Arıza raporu bulunamadı.');
   }
@@ -249,7 +248,7 @@ export async function closeDeviceFaultReport(
     const targetDeviceIds = (reportData.affectedDeviceIds as string[]).filter(Boolean);
 
     for (const targetDeviceId of targetDeviceIds) {
-      const otherOpenFaults = await getDocsResilient(
+      const otherOpenFaults = await getDocs(
         query(
           collection(db, 'deviceFaultReports'),
           where('deviceId', '==', targetDeviceId),
@@ -273,7 +272,7 @@ export async function closeDeviceFaultReport(
       }
     }
   } else if (deviceId) {
-    const otherOpenFaults = await getDocsResilient(
+    const otherOpenFaults = await getDocs(
       query(
         collection(db, 'deviceFaultReports'),
         where('deviceId', '==', deviceId),
@@ -338,7 +337,7 @@ export async function transferFaultToOtherUnit(
   actor: { uid: string; name: string }
 ): Promise<void> {
   const reportRef = doc(db, 'deviceFaultReports', reportId);
-  const reportSnap = await getDocResilient(reportRef);
+  const reportSnap = await getDoc(reportRef);
 
   if (!reportSnap.exists()) {
     throw new Error('Arıza raporu bulunamadı.');
@@ -389,7 +388,7 @@ export async function transferFaultToOtherUnit(
   let deviceImageUrl: string | undefined;
   if (reportData?.deviceId) {
     const deviceRef = doc(db, 'devices', reportData.deviceId);
-    const deviceSnap = await getDocResilient(deviceRef);
+    const deviceSnap = await getDoc(deviceRef);
     if (deviceSnap.exists()) {
       deviceImageUrl = deviceSnap.data()?.imageUrl;
     }
@@ -412,7 +411,7 @@ export async function assignFaultToSelf(
   actor: { uid: string; name: string }
 ): Promise<void> {
   const reportRef = doc(db, 'deviceFaultReports', reportId);
-  const reportSnap = await getDocResilient(reportRef);
+  const reportSnap = await getDoc(reportRef);
 
   if (!reportSnap.exists()) {
     throw new Error('Arıza raporu bulunamadı.');
@@ -464,7 +463,7 @@ export async function startIntervention(
   relatedTests?: string[]
 ): Promise<void> {
   const reportRef = doc(db, 'deviceFaultReports', reportId);
-  const reportSnap = await getDocResilient(reportRef);
+  const reportSnap = await getDoc(reportRef);
 
   if (!reportSnap.exists()) {
     throw new Error('Arıza raporu bulunamadı.');
@@ -523,7 +522,7 @@ export async function verifyLocationForIntervention(
   userLocation: { lat: number; lng: number }
 ): Promise<{ success: boolean; distance: number; message: string }> {
   const reportRef = doc(db, 'deviceFaultReports', reportId);
-  const reportSnap = await getDocResilient(reportRef);
+  const reportSnap = await getDoc(reportRef);
 
   if (!reportSnap.exists()) {
     throw new Error('Arıza raporu bulunamadı.');
@@ -538,7 +537,7 @@ export async function verifyLocationForIntervention(
 
   // Laboratuvar koordinatlarını al
   const hospitalRef = doc(db, 'hospitals', hospitalId);
-  const hospitalSnap = await getDocResilient(hospitalRef);
+  const hospitalSnap = await getDoc(hospitalRef);
 
   if (!hospitalSnap.exists()) {
     throw new Error('Laboratuvar bulunamadı.');
@@ -719,7 +718,7 @@ export async function resolveEjectedKitFault(
   closeDescription?: string
 ): Promise<void> {
   const reportRef = doc(db, 'deviceFaultReports', reportId);
-  const reportSnap = await getDocResilient(reportRef);
+  const reportSnap = await getDoc(reportRef);
 
   if (!reportSnap.exists()) {
     throw new Error('Arıza raporu bulunamadı.');
@@ -742,7 +741,7 @@ export async function resolveEjectedKitFault(
 
   // 2. Update device if deviceId exists - check for remaining open faults
   if (deviceId) {
-    const otherOpenFaults = await getDocsResilient(
+    const otherOpenFaults = await getDocs(
       query(
         collection(db, 'deviceFaultReports'),
         where('deviceId', '==', deviceId),

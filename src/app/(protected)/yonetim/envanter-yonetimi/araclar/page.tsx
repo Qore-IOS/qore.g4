@@ -12,7 +12,6 @@ import { Badge } from '@/components/ui/badge';
 import { PlusCircle, Trash2, Loader2, Car, Edit3, UserCheck, ImageIcon, Check } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { collection, getDocs, addDoc, deleteDoc, doc, setDoc, query, where } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
@@ -54,8 +53,8 @@ export default function AraclarPage() {
     setLoading(true);
     try {
       const [vehiclesSnap, usersSnap] = await Promise.all([
-        getDocsResilient(scopedQuery('vehicles', currentCompanyId, isSuperAdmin)),
-        getDocsResilient(scopedQuery('users', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('vehicles', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin)),
       ]);
 
       setVehicles(
