@@ -8,7 +8,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef, Suspense, useMemo, useDeferredValue } from 'react';
+import React, { useState, useEffect, useCallback, useRef, Suspense, useMemo, useDeferredValue, useTransition } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 
@@ -563,6 +563,7 @@ export default function AnaPanel(props: AnaPanelProps) {
   const [scannedItems, setScannedItems] = useState<ScanRow[]>([]);
   // Ölçülebilir uygulama maliyeti: senkron JS ve React'in acil UI commit süresi.
   const { startScanMeasurement, controller: scanPerformanceController } = useScanPerformance();
+  const [, startTransition] = useTransition();
 
   // A scan must stay on the urgent input path. Grouping and sorting thousands of
   // rows synchronously here used to block the next HID/keyboard event for a few
@@ -908,18 +909,19 @@ export default function AnaPanel(props: AnaPanelProps) {
             }
             scannedSerialsRef.current.get(serialKey)!.add(seriNumarasi);
             
-            // UI'ı anında güncelle (Optimistic UI)
-            setScannedItems(prev => [newItem, ...prev]);
-            if (selectedPendingIrs) {
-              const verifyKey = `${stokKodu}||${lotNumarasi || ''}||${miadFormatted || ''}`;
-              setCeomedVerifyMap((prev) => {
-                const v = prev[verifyKey];
-                if (!v) return prev;
-                const nextSet = new Set(v.verifiedSerials);
-                nextSet.add(seriNumarasi);
-                return { ...prev, [verifyKey]: { ...v, verifiedSerials: nextSet } };
-              });
-            }
+            startTransition(() => {
+              setScannedItems(prev => [newItem, ...prev]);
+              if (selectedPendingIrs) {
+                const verifyKey = `${stokKodu}||${lotNumarasi || ''}||${miadFormatted || ''}`;
+                setCeomedVerifyMap((prev) => {
+                  const v = prev[verifyKey];
+                  if (!v) return prev;
+                  const nextSet = new Set(v.verifiedSerials);
+                  nextSet.add(seriNumarasi);
+                  return { ...prev, [verifyKey]: { ...v, verifiedSerials: nextSet } };
+                });
+              }
+            });
             if (source === 'barcode') setLastScannedProduct(newItem);
 
             // PERFORMANS: Geçmişte tüketilmiş/işlem görmüş seri kontrolü artık her
@@ -936,12 +938,12 @@ export default function AnaPanel(props: AnaPanelProps) {
 
         } else {
           // It's a lot-based or quantity-based item
-          upsertGroupedRow(
+          startTransition(() => upsertGroupedRow(
             setScannedItems,
             { stokKodu: stokKodu, stokAdi: matchedProduct.stokAdi, lot: lotNumarasi, miad: miadFormatted, barkod: trimmedData },
             (r) => !!(r.isGroup && r.stokKodu === stokKodu && r.lotNumarasi === (lotNumarasi || '') && r.miad === (miadFormatted || '')),
             1
-          );
+          ));
           if (source === 'barcode') {
             const newItem = { stokKodu, stokAdi: matchedProduct.stokAdi, lotNumarasi, miad: miadFormatted, seriNumarasi: '' } as ScanRow;
             setLastScannedProduct(newItem);
