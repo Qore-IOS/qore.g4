@@ -7,6 +7,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { collection, getDocs, onSnapshot, orderBy, where } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import type { Hospital, SarfTransfer } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
@@ -110,7 +111,7 @@ export default function SarfDagitimPage() {
     (async () => {
       setLoading(true);
       try {
-        const snap = await getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin, where('isConsumablesHospital', '==', true)));
+        const snap = await getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin, where('isConsumablesHospital', '==', true)));
         const list = filterByCompanyScope(
           snap.docs.map((d) => ({ id: d.id, ...d.data() } as Hospital)),
           currentCompanyId,
@@ -122,7 +123,7 @@ export default function SarfDagitimPage() {
         const counts: Record<string, number> = {};
         await Promise.all(list.filter((l) => l.id).map(async (lab) => {
           try {
-            const rules = await getDocs(collection(db, 'hospitals', lab.id, 'minMaxRules'));
+            const rules = await getDocsResilient(collection(db, 'hospitals', lab.id, 'minMaxRules'));
             counts[lab.id] = rules.size;
           } catch {
             counts[lab.id] = 0;

@@ -3,6 +3,7 @@
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { collection, getDocs, writeBatch, doc, query, setDoc, where, getDoc } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { nanoid } from 'nanoid';
 import { format } from 'date-fns';
@@ -265,7 +266,7 @@ export const useLbysDataStore = create<LbysStore>()(
 
       loadHospitalDefinitions: async () => {
         try {
-          const snap = await getDocs(collection(db, 'config_hospitals'));
+          const snap = await getDocsResilient(collection(db, 'config_hospitals'));
           const defs: Record<string, string> = {};
           snap.forEach(d => { defs[d.id] = d.data().name });
           set({ hospitalDefinitions: defs });
@@ -374,7 +375,7 @@ export const useLbysDataStore = create<LbysStore>()(
                 where('date', '<=', endDate)
             );
 
-            const querySnapshot = await getDocs(q);
+            const querySnapshot = await getDocsResilient(q);
             const fetchedData: AggregatedRecord[] = [];
 
             querySnapshot.forEach((doc) => {
@@ -415,7 +416,7 @@ export const useLbysDataStore = create<LbysStore>()(
                 where('date', '>=', startDate)
             );
 
-            const querySnapshot = await getDocs(q);
+            const querySnapshot = await getDocsResilient(q);
             const fetchedData: AggregatedRecord[] = [];
 
             const docs = querySnapshot.docs;
@@ -757,7 +758,7 @@ export const useLbysDataStore = create<LbysStore>()(
           let totalDeleted = 0;
 
           for (const collName of collections) {
-            const snapshot = await getDocs(collection(db, collName));
+            const snapshot = await getDocsResilient(collection(db, collName));
             const total = snapshot.size;
 
             if (total === 0) continue;
@@ -810,7 +811,7 @@ export const useLbysDataStore = create<LbysStore>()(
 
         try {
           // Tüm raw verileri oku
-          const snapshot = await getDocs(collection(db, COLLECTIONS.RAW_RESULTS));
+          const snapshot = await getDocsResilient(collection(db, COLLECTIONS.RAW_RESULTS));
           const records: AggregatedRecord[] = [];
 
           snapshot.forEach((doc) => {
@@ -880,7 +881,7 @@ export const useLbysDataStore = create<LbysStore>()(
 
           if (useSummaryMode) {
             // Summary mode: daily summary koleksiyonundan tarihleri al
-            const snapshot = await getDocs(collection(db, COLLECTIONS.DAILY_SUMMARY));
+            const snapshot = await getDocsResilient(collection(db, COLLECTIONS.DAILY_SUMMARY));
             const dates: string[] = [];
             snapshot.forEach((doc) => {
               dates.push(doc.id); // doc.id = "YYYY-MM-DD"
@@ -888,7 +889,7 @@ export const useLbysDataStore = create<LbysStore>()(
             return dates;
           } else {
             // Legacy mode: analysis_results'tan unique tarihleri al
-            const snapshot = await getDocs(collection(db, 'analysis_results'));
+            const snapshot = await getDocsResilient(collection(db, 'analysis_results'));
             const dateSet = new Set<string>();
             snapshot.forEach((doc) => {
               const data = doc.data();

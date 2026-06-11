@@ -8,6 +8,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { collection, doc, getDoc, getDocs, onSnapshot, where } from 'firebase/firestore';
+import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import type { DepoStokItem, Hospital, MinMaxRule, ProductCode, SarfTransfer, SarfTransferItem } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
@@ -160,9 +161,9 @@ export default function SarfUrunTransferiPage() {
       setLoading(true);
       try {
         const [hospitalSnap, rulesSnap, transfersSnap] = await Promise.all([
-          getDoc(doc(db, 'hospitals', hospitalId)),
-          getDocs(collection(db, 'hospitals', hospitalId, 'minMaxRules')),
-          getDocs(scopedQuery('sarfTransfers', currentCompanyId, isSuperAdmin, where('hospitalId', '==', hospitalId))).catch(() => null),
+          getDocResilient(doc(db, 'hospitals', hospitalId)),
+          getDocsResilient(collection(db, 'hospitals', hospitalId, 'minMaxRules')),
+          getDocsResilient(scopedQuery('sarfTransfers', currentCompanyId, isSuperAdmin, where('hospitalId', '==', hospitalId))).catch(() => null),
         ]);
         if (!alive) return;
 

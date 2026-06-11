@@ -78,6 +78,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { LabSelector } from '@/components/common/LabSelector';
 import { Label } from '@/components/ui/label';
 import { collection, getDocs, query, orderBy, doc, setDoc, getDoc, Timestamp, where, collectionGroup } from 'firebase/firestore';
+import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
@@ -840,9 +841,9 @@ export default function TotalVerimlilikPanel({
       setIsLoading(true);
       try {
         const [effPoolsSnap, labPoolsSnap, depotsSnap] = await Promise.all([
-          getDocs(scopedQuery('efficiencyPools', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
-          getDocs(scopedQuery('labPools', currentCompanyId, isSuperAdmin)),
-          getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+          getDocsResilient(scopedQuery('efficiencyPools', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
+          getDocsResilient(scopedQuery('labPools', currentCompanyId, isSuperAdmin)),
+          getDocsResilient(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
         ]);
         setEfficiencyPools(effPoolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as EfficiencyPool)));
         setLabPools(labPoolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as LabPool)));
@@ -875,7 +876,7 @@ export default function TotalVerimlilikPanel({
   useEffect(() => {
     const fetchCostCheckpoints = async () => {
       try {
-        const checkpointsSnap = await getDocs(
+        const checkpointsSnap = await getDocsResilient(
           scopedQuery('costCheckpoints', currentCompanyId, isSuperAdmin, orderBy('year', 'desc'), orderBy('month', 'desc'))
         );
         const checkpointsList = checkpointsSnap.docs.map(d => {
@@ -910,7 +911,7 @@ export default function TotalVerimlilikPanel({
 
     const fetchCheckpointData = async () => {
       try {
-        const docSnap = await getDoc(doc(db, 'costCheckpoints', selectedCostCheckpoint));
+        const docSnap = await getDocResilient(doc(db, 'costCheckpoints', selectedCostCheckpoint));
         if (docSnap.exists()) {
           const data = docSnap.data();
           setCostCheckpointData(data.costs as Record<string, { cost: number; currency: 'EUR' | 'USD' | 'TRY' }>);
@@ -947,7 +948,7 @@ export default function TotalVerimlilikPanel({
         const entries = await Promise.all(
           selectedPool.memberIds.map(async (labId) => {
             try {
-              const hakEdisSnap = await getDocs(
+              const hakEdisSnap = await getDocsResilient(
                 query(collection(db, 'hospitals', labId, 'hakEdisDefinitions'), orderBy('sutKodu', 'asc'))
               );
               return [labId, hakEdisSnap.docs.map(d => ({ id: d.id, ...d.data() } as HakEdisDefinition))] as const;
@@ -1035,7 +1036,7 @@ export default function TotalVerimlilikPanel({
         const ruleEntries = await Promise.all(
           Array.from(labIdsToProcess).map(async (labId) => {
             try {
-              const rulesSnap = await getDocs(collection(db, 'hospitals', labId, 'minMaxRules'));
+              const rulesSnap = await getDocsResilient(collection(db, 'hospitals', labId, 'minMaxRules'));
               return [labId, rulesSnap.docs.map(d => ({ stokKodu: d.id, ...d.data() } as MinMaxRule))] as const;
             } catch (e) {
               totalVerimlilikLogger.warn('Min-max kuralları yüklenirken hata oluştu', { labId, error: e });
@@ -1056,7 +1057,7 @@ export default function TotalVerimlilikPanel({
         try {
           const ejectedSnaps = await Promise.all(
             Array.from(labIdsToProcess).map(labId =>
-              getDocs(query(collection(db, 'ejectedKitRecords'), where('laboratoryId', '==', labId)))
+              getDocsResilient(query(collection(db, 'ejectedKitRecords'), where('laboratoryId', '==', labId)))
             )
           );
           ejectedSnaps.forEach(snap => {
@@ -1170,7 +1171,7 @@ export default function TotalVerimlilikPanel({
         const prevDocId = `${selectedPoolId}-${prevYear}-${prevMonth}`;
         const prevAraKayitDocId = `araKayit-${selectedPoolId}-${prevYear}-${prevMonth}`;
         try {
-          const prevDocSnap = await getDoc(doc(db, 'totalEfficiencyRecords', prevDocId));
+          const prevDocSnap = await getDocResilient(doc(db, 'totalEfficiencyRecords', prevDocId));
 
           const applyCarryover = (prevRows: TableRow[], source: string) => {
             newRows.forEach(row => {
@@ -1193,7 +1194,7 @@ export default function TotalVerimlilikPanel({
             applyCarryover(prevRows, 'döneminden');
           } else {
             // Ay sonu kaydı yok → ara kayıt var mı kontrol et
-            const prevAraKayitSnap = await getDoc(doc(db, 'totalEfficiencyRecords', prevAraKayitDocId));
+            const prevAraKayitSnap = await getDocResilient(doc(db, 'totalEfficiencyRecords', prevAraKayitDocId));
             if (prevAraKayitSnap.exists()) {
               const prevRows = (prevAraKayitSnap.data().rows as TableRow[]) || [];
               applyCarryover(prevRows, 'ara kaydından');
@@ -1240,7 +1241,7 @@ export default function TotalVerimlilikPanel({
         // Ara kayıt kontrolü - varsa yükle
         const araKayitDocId = `araKayit-${selectedPoolId}-${selectedYear}-${selectedMonth}`;
         try {
-          const araKayitSnap = await getDoc(doc(db, 'totalEfficiencyRecords', araKayitDocId));
+          const araKayitSnap = await getDocResilient(doc(db, 'totalEfficiencyRecords', araKayitDocId));
           if (araKayitSnap.exists()) {
             const araKayitData = araKayitSnap.data();
             const araKayitRows = araKayitData.rows as TableRow[] || [];
@@ -1541,7 +1542,7 @@ export default function TotalVerimlilikPanel({
         where('timestamp', '>=', startTimestamp),
         where('timestamp', '<=', endTimestamp)
       );
-      const transfersSnap = await getDocs(transfersQuery);
+      const transfersSnap = await getDocsResilient(transfersQuery);
 
       // Seçilen lab ID'lerini Set olarak hazırla (doğrudan targetHospitalId ile eşleştirmek için)
       const selectedLabIds = new Set(Array.from(selectedLabsForSevkiyat));
@@ -1567,7 +1568,7 @@ export default function TotalVerimlilikPanel({
         if (!matchedLabId || !selectedLabIds.has(matchedLabId)) continue;
 
         // Items subcollection'ını çek (her belge = 1 adet)
-        const itemsSnap = await getDocs(collection(db, 'transfers', transferDoc.id, 'items'));
+        const itemsSnap = await getDocsResilient(collection(db, 'transfers', transferDoc.id, 'items'));
         for (const itemDoc of itemsSnap.docs) {
           const stokKodu = itemDoc.data().stokKodu;
           if (!stokKodu) continue;
@@ -2464,7 +2465,7 @@ export default function TotalVerimlilikPanel({
     try {
       // İş analizi raw verisini çek (her zaman güncel veri için yeniden çek)
       const analysisDocRef = doc(db, 'isAnaliziVerileri', 'sonVeri');
-      const docSnap = await getDoc(analysisDocRef);
+      const docSnap = await getDocResilient(analysisDocRef);
 
       if (!docSnap.exists()) {
         toast({ title: 'Uyarı', description: 'İş analizi verisi bulunamadı. Önce LBYS Veri Yönetimi panelinden veri yükleyin.', variant: 'destructive' });

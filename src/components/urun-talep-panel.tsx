@@ -42,6 +42,7 @@ import {
   setDoc,
   serverTimestamp,
 } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import type { Depot, Hospital, ProductCode, MinMaxRule, OrderItem, OrderUrgency } from '@/lib/types';
 import { Textarea } from '@/components/ui/textarea';
 import { AlertTriangle, AlertCircle, Flame } from 'lucide-react';
@@ -729,7 +730,7 @@ export default function UrunTalepPanel() {
     const fetchRules = async () => {
       setLoading(true);
       try {
-        const rulesSnap = await getDocs(
+        const rulesSnap = await getDocsResilient(
           collection(db, 'hospitals', selectedLabId, 'minMaxRules')
         );
         setLabMinMaxRules(rulesSnap.docs.map(d => d.data() as MinMaxRule));

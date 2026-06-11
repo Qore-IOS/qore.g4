@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { collection, getDocs, addDoc, doc, setDoc, deleteDoc, orderBy, query, writeBatch } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
@@ -89,11 +90,11 @@ export default function EnvanterYonetimiPage() {
     setLoading(true);
     try {
       const [categoriesSnap, assetsSnap, hospitalsSnap, depotsSnap, vehiclesSnap] = await Promise.all([
-        getDocs(scopedQuery('assetCategories', currentCompanyId, isSuperAdmin, orderBy('name'))),
-        getDocs(scopedQuery('assets', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('vehicles', currentCompanyId, isSuperAdmin)),
+        getDocsResilient(scopedQuery('assetCategories', currentCompanyId, isSuperAdmin, orderBy('name'))),
+        getDocsResilient(scopedQuery('assets', currentCompanyId, isSuperAdmin)),
+        getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocsResilient(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+        getDocsResilient(scopedQuery('vehicles', currentCompanyId, isSuperAdmin)),
       ]);
       setCategories(categoriesSnap.docs.map(doc => ({ id: doc.id, name: doc.data().name, iconSvg: doc.data().iconSvg } as AssetCategory)));
       setAssets(filterByCompanyScope(

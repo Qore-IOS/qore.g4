@@ -5,6 +5,7 @@ import {
   collection, getDocs, query, where, orderBy, limit, startAfter,
   DocumentData, Query, QueryConstraint, QueryDocumentSnapshot
 } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
@@ -218,7 +219,7 @@ async function fetchAllLogsForUserFromCollection(
       ];
       if (last) extra.push(startAfter(last));
       const qy = scopedQuery(collName, currentCompanyId, isSuperAdmin, ...extra);
-      const snap = await getDocs(qy);
+      const snap = await getDocsResilient(qy);
       if (snap.empty) break;
       snap.docs.forEach(d => items.push({ id: d.id, ...(d.data() as any) }));
       last = snap.docs[snap.docs.length - 1];
@@ -235,7 +236,7 @@ async function fetchAllLogsForUserFromCollection(
       ];
       if (last) extra.push(startAfter(last));
       const qy = scopedQuery(collName, currentCompanyId, isSuperAdmin, ...extra);
-      const snap = await getDocs(qy);
+      const snap = await getDocsResilient(qy);
       if (snap.empty) break;
       snap.docs.forEach(d => items.push({ id: d.id, ...(d.data() as any) }));
       last = snap.docs[snap.docs.length - 1];
@@ -265,7 +266,7 @@ export default function PersonelHareketEkstresiPage() {
     (async () => {
       setLoadingUsers(true);
       try {
-        const snap = await getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin));
+        const snap = await getDocsResilient(scopedQuery('users', currentCompanyId, isSuperAdmin));
         const items = snap.docs.map(d => ({ uid: d.id, ...d.data() } as AppUser))
           .sort((a, b) => (a.name || a.email || '').localeCompare(b.name || b.email || ''));
         setUsers(items);

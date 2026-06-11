@@ -8,6 +8,7 @@ import {
 } from 'firebase/auth';
 import { app, db } from '@/lib/firebase';
 import { doc, setDoc, getDoc, updateDoc, onSnapshot, collection, query, where, getDocs, deleteField } from 'firebase/firestore';
+import { getDocResilient } from '@/lib/firestore-network-recovery';
 import { useRouter } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import type { User, AppView } from '@/lib/types';
@@ -167,7 +168,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             // zorla yenileniyor. Firestore Security Rules zaten server-side token
             // claim'lerini kullanır; client companyId yalnızca scoped query'ler içindir.
             const [userDocSnap, tokenResult] = await Promise.all([
-              getDoc(userDocRef),
+              getDocResilient(userDocRef),
               user.getIdTokenResult().catch(() => null),
             ]);
             if (userDocSnap.exists()) {

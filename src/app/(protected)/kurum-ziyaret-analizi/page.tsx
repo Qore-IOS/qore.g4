@@ -12,6 +12,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { DatePickerWithRange } from '@/components/ui/date-range-picker';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { collection, doc, getDoc, getDocs, orderBy, query, serverTimestamp, setDoc, Timestamp, limit } from 'firebase/firestore';
+import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { Loader2, Building2, Users, Wrench, FlaskConical, Search, X, ChevronsUpDown, ArrowLeft, Settings2, CalendarDays } from 'lucide-react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell } from 'recharts';
@@ -269,7 +270,7 @@ export default function KurumZiyaretAnaliziPage() {
     const fetchWorkHours = async () => {
       try {
         const settingsRef = doc(db, 'appSettings', 'kurumZiyaretAnalizi');
-        const settingsSnap = await getDoc(settingsRef);
+        const settingsSnap = await getDocResilient(settingsRef);
         if (!settingsSnap.exists()) return;
         const data = settingsSnap.data();
         if (typeof data.workStartTime === 'string') {
@@ -291,15 +292,15 @@ export default function KurumZiyaretAnaliziPage() {
       setLoading(true);
       try {
         const [teknikSnap, appSnap, faultSnap, usersSnap, hospitalsSnap, deviceLabPoolsSnap] = await Promise.all([
-          getDocs(scopedQuery('teknikServisActionForms', currentCompanyId, isSuperAdmin,
+          getDocsResilient(scopedQuery('teknikServisActionForms', currentCompanyId, isSuperAdmin,
             ...dateFilter.constraints('createdAt'), orderBy('createdAt', 'desc'), limit(5000))),
-          getDocs(scopedQuery('aplikasyonActionForms', currentCompanyId, isSuperAdmin,
+          getDocsResilient(scopedQuery('aplikasyonActionForms', currentCompanyId, isSuperAdmin,
             ...dateFilter.constraints('createdAt'), orderBy('createdAt', 'desc'), limit(5000))),
-          getDocs(scopedQuery('deviceFaultReports', currentCompanyId, isSuperAdmin,
+          getDocsResilient(scopedQuery('deviceFaultReports', currentCompanyId, isSuperAdmin,
             ...dateFilter.constraints('openedAt'), orderBy('openedAt', 'desc'), limit(5000))),
-          getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin)),
-          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-          getDocs(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin)),
+          getDocsResilient(scopedQuery('users', currentCompanyId, isSuperAdmin)),
+          getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+          getDocsResilient(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin)),
         ]);
 
         const uMap = new Map<string, User>();

@@ -10,6 +10,7 @@ import {
   where,
   Timestamp
 } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
@@ -51,11 +52,11 @@ export default function UrunKullanimIstatistikPage() {
         hospitalStockSnap,
         consumptionSnap
       ] = await Promise.all([
-        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+        getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
         // Hospitals' on-hand stock (items shipped to hospitals)
-        getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true))),
-        getDocs(scopedQuery(
+        getDocsResilient(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true))),
+        getDocsResilient(scopedQuery(
           'tuketimKayitlari',
           currentCompanyId,
           isSuperAdmin,

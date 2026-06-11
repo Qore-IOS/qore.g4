@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { collection, getDocs } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { ChevronLeft, History, Loader2 } from 'lucide-react';
@@ -32,7 +33,7 @@ export default function StokGecmisPage() {
   useEffect(() => {
     const load = async () => {
       try {
-        const snap = await getDocs(scopedQuery('yedekParcaDepoLog', currentCompanyId, isSuperAdmin));
+        const snap = await getDocsResilient(scopedQuery('yedekParcaDepoLog', currentCompanyId, isSuperAdmin));
         const logs = snap.docs.map(d => {
           const data = d.data();
           return {

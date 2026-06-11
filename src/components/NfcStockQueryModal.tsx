@@ -9,6 +9,7 @@ import { Loader2, Nfc, Smartphone, XCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDoc, query, where, getDocs } from 'firebase/firestore';
+import { getDocResilient } from '@/lib/firestore-network-recovery';
 import type { ProductCode, DeviceGroup, DepoStokItem, Hospital } from '@/lib/types';
 import Image from 'next/image';
 import { resolveImageSrc } from '@/lib/image-utils';
@@ -60,7 +61,7 @@ export default function NfcStockQueryModal({
     }
 
     try {
-      const tagSnap = await getDoc(doc(db, 'lot_tags', hexUid));
+      const tagSnap = await getDocResilient(doc(db, 'lot_tags', hexUid));
       if (!tagSnap.exists()) {
         setStatus('not_found');
         return;

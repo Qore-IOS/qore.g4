@@ -10,6 +10,7 @@ import {
   orderBy,
   Timestamp,
 } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { subDays } from 'date-fns';
 import type { DepoStokItem, Shipment, ConsumptionRecord, Depot, ProductCode, Transfer } from '@/lib/types';
 import { filterByCompanyScope } from '@/lib/company-scope';
@@ -140,8 +141,8 @@ export async function searchProductLedger(
 
   if (isPotentiallySerial) {
     const serialQueries = await Promise.all([
-      getDocs(scopedQuery('depoStok', companyId, isSuperAdmin, where('seriNumarasi', '==', needleOriginal), limit(1))),
-      getDocs(scopedQuery('tuketimKayitlari', companyId, isSuperAdmin, where('seriNumarasi', '==', needleOriginal), limit(1))),
+      getDocsResilient(scopedQuery('depoStok', companyId, isSuperAdmin, where('seriNumarasi', '==', needleOriginal), limit(1))),
+      getDocsResilient(scopedQuery('tuketimKayitlari', companyId, isSuperAdmin, where('seriNumarasi', '==', needleOriginal), limit(1))),
     ]);
     if (serialQueries.some(snap => !snap.empty)) {
       searchType = 'serial';
@@ -150,7 +151,7 @@ export async function searchProductLedger(
 
   // Check for lot number if not serial
   if (searchType === 'product') {
-    const lotSnap = await getDocs(scopedQuery('depoStok', companyId, isSuperAdmin, where('lotNumarasi', '==', needleOriginal), limit(1)));
+    const lotSnap = await getDocsResilient(scopedQuery('depoStok', companyId, isSuperAdmin, where('lotNumarasi', '==', needleOriginal), limit(1)));
     if (!lotSnap.empty) searchType = 'lot';
   }
 
@@ -160,7 +161,7 @@ export async function searchProductLedger(
 
   if (searchType === 'serial') {
     // Try to find product info from depoStok first
-    const productFromSerialSnap = await getDocs(
+    const productFromSerialSnap = await getDocsResilient(
       scopedQuery('depoStok', companyId, isSuperAdmin, where('seriNumarasi', '==', needleOriginal), limit(1))
     );
     if (!productFromSerialSnap.empty) {
@@ -169,7 +170,7 @@ export async function searchProductLedger(
       targetLotNumarasi = data.lotNumarasi;
     } else {
       // If not found in depoStok, try tuketimKayitlari (for consumed items)
-      const productFromConsumptionSnap = await getDocs(
+      const productFromConsumptionSnap = await getDocsResilient(
         scopedQuery('tuketimKayitlari', companyId, isSuperAdmin, where('seriNumarasi', '==', needleOriginal), limit(1))
       );
       if (!productFromConsumptionSnap.empty) {
@@ -180,7 +181,7 @@ export async function searchProductLedger(
     }
   } else if (searchType === 'lot') {
     targetLotNumarasi = needleOriginal;
-    const productsFromLotSnap = await getDocs(
+    const productsFromLotSnap = await getDocsResilient(
       scopedQuery('depoStok', companyId, isSuperAdmin, where('lotNumarasi', '==', needleOriginal))
     );
     productsFromLotSnap.forEach(doc => stockCodesToSearch.push(doc.data().stokKodu));
@@ -206,8 +207,8 @@ export async function searchProductLedger(
   if (searchType === 'serial') {
     // First, get consumption records and depoStok by serial
     const [depoStokBySerial, consumptionBySerial] = await Promise.all([
-      getDocs(scopedQuery('depoStok', companyId, isSuperAdmin, where('seriNumarasi', '==', needleOriginal))),
-      getDocs(scopedQuery('tuketimKayitlari', companyId, isSuperAdmin, where('seriNumarasi', '==', needleOriginal))),
+      getDocsResilient(scopedQuery('depoStok', companyId, isSuperAdmin, where('seriNumarasi', '==', needleOriginal))),
+      getDocsResilient(scopedQuery('tuketimKayitlari', companyId, isSuperAdmin, where('seriNumarasi', '==', needleOriginal))),
     ]);
 
     consumptionSnap = consumptionBySerial;
@@ -218,7 +219,7 @@ export async function searchProductLedger(
     } else if (targetLotNumarasi && uniqueStockCodes.length > 0) {
       // If not found by serial but we have stokKodu and lotNumarasi from consumption,
       // fetch depoStok by stokKodu and lotNumarasi to show mal kabul records
-      depoStokSnap = await getDocs(
+      depoStokSnap = await getDocsResilient(
         query(
           collection(db, 'depoStok'),
           where('stokKodu', '==', uniqueStockCodes[0]),
@@ -230,13 +231,13 @@ export async function searchProductLedger(
     }
   } else if (searchType === 'lot') {
     [depoStokSnap, consumptionSnap] = await Promise.all([
-      getDocs(scopedQuery('depoStok', companyId, isSuperAdmin, where('lotNumarasi', '==', needleOriginal))),
-      getDocs(scopedQuery('tuketimKayitlari', companyId, isSuperAdmin, where('lotNumarasi', '==', needleOriginal))),
+      getDocsResilient(scopedQuery('depoStok', companyId, isSuperAdmin, where('lotNumarasi', '==', needleOriginal))),
+      getDocsResilient(scopedQuery('tuketimKayitlari', companyId, isSuperAdmin, where('lotNumarasi', '==', needleOriginal))),
     ]);
   } else if (uniqueStockCodes.length > 0 && uniqueStockCodes.length <= 30) {
     [depoStokSnap, consumptionSnap] = await Promise.all([
-      getDocs(scopedQuery('depoStok', companyId, isSuperAdmin, where('stokKodu', 'in', uniqueStockCodes))),
-      getDocs(scopedQuery('tuketimKayitlari', companyId, isSuperAdmin, where('stokKodu', 'in', uniqueStockCodes))),
+      getDocsResilient(scopedQuery('depoStok', companyId, isSuperAdmin, where('stokKodu', 'in', uniqueStockCodes))),
+      getDocsResilient(scopedQuery('tuketimKayitlari', companyId, isSuperAdmin, where('stokKodu', 'in', uniqueStockCodes))),
     ]);
   } else {
     return { ledgerRows: [], stockSummary: [], searchType };
@@ -246,15 +247,15 @@ export async function searchProductLedger(
   // hedefler; daha eski kayıtlar manuel arşivden alınır.
   const searchSinceTs = Timestamp.fromDate(subDays(new Date(), 730));
   const [shipmentsSnap, transfersSnap, destroyedKitsSnap] = await Promise.all([
-    getDocs(scopedQuery('shipments', companyId, isSuperAdmin,
+    getDocsResilient(scopedQuery('shipments', companyId, isSuperAdmin,
       where('timestamp', '>=', searchSinceTs),
       orderBy('timestamp', 'desc'),
       limit(5000))),
-    getDocs(scopedQuery('transfers', companyId, isSuperAdmin,
+    getDocsResilient(scopedQuery('transfers', companyId, isSuperAdmin,
       where('timestamp', '>=', searchSinceTs),
       orderBy('timestamp', 'desc'),
       limit(5000))),
-    getDocs(scopedQuery('destroyedKitsReports', companyId, isSuperAdmin)),
+    getDocsResilient(scopedQuery('destroyedKitsReports', companyId, isSuperAdmin)),
   ]);
 
   // Process fetched data
@@ -271,7 +272,7 @@ export async function searchProductLedger(
   // Fetch transfer items from subcollection for each transfer
   const transfersWithItems: (Transfer & { items: any[] })[] = await Promise.all(
     allTransfers.map(async (tr) => {
-      const itemsSnap = await getDocs(collection(db, 'transfers', tr.id, 'items'));
+      const itemsSnap = await getDocsResilient(collection(db, 'transfers', tr.id, 'items'));
       const items = itemsSnap.docs.map((d: any) => ({ id: d.id, ...d.data() }));
       return { ...tr, items };
     })

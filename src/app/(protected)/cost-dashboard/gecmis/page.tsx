@@ -5,6 +5,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Loader2, History, Search, ChevronRight, ArrowLeft,
@@ -301,7 +302,7 @@ export default function MaliyetSayimGecmisPage() {
     const load = async () => {
       setLoading(true);
       try {
-        const snap = await getDocs(scopedQuery(
+        const snap = await getDocsResilient(scopedQuery(
           'maliyetSayimSessions',
           currentCompanyId,
           isSuperAdmin,

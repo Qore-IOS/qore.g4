@@ -27,6 +27,7 @@ import {
   where,
   writeBatch,
 } from 'firebase/firestore';
+import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import { compareAsc, format as formatDateFns, parse as parseDate } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import {
@@ -152,7 +153,7 @@ export default function PeripheralOrderPage() {
     (async () => {
       setIsLoading(true);
       try {
-        const orderSnap = await getDoc(doc(db, 'orders', orderId));
+        const orderSnap = await getDocResilient(doc(db, 'orders', orderId));
         if (!orderSnap.exists()) {
           toast({ title: 'Hata', description: 'Sipariş bulunamadı.', variant: 'destructive' });
           router.push('/siparisler');
@@ -163,9 +164,9 @@ export default function PeripheralOrderPage() {
         setOrder(orderData);
 
         const [hospitalsSnap, depotsSnap, productsSnap] = await Promise.all([
-          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-          getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
-          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+          getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+          getDocsResilient(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+          getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
         ]);
         const hospitals = hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital));
         const depotList = depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
@@ -177,7 +178,7 @@ export default function PeripheralOrderPage() {
           null;
 
         // Lab stock = depoStok that was shipped to this hospital
-        const shippedSnap = await getDocs(
+        const shippedSnap = await getDocsResilient(
           scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true))
         );
         const shippedAll = filterByCompanyScope(

@@ -12,6 +12,7 @@ import {
   runTransaction,
   serverTimestamp,
 } from "firebase/firestore";
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import type { LedgerEntry } from "./finance-types";
 import { getScopedDocs, scopedQuery } from "../firestore-helpers";
 
@@ -64,7 +65,7 @@ export async function recalculateAccountBalance(
     where("cariFirmaId", "==", cariFirmaId)
   );
   
-  const snapshot = transaction ? await transaction.get(q) : await getDocs(q);
+  const snapshot = transaction ? await transaction.get(q) : await getDocsResilient(q);
   let balance = 0;
 
   snapshot.forEach((doc: any) => {

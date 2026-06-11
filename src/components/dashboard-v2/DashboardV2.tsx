@@ -28,6 +28,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useDailyConsumptionStats } from '@/hooks/useFirebaseQueries';
 import { formatDateKey } from '@/lib/dailyConsumptionStats';
 import { collection, onSnapshot, query, where, getDocs, Timestamp, limit as fsLimit } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { VIEWS } from '@/lib/constants';
 import { getExchangeRates } from '@/lib/exchange-rates';
@@ -182,11 +183,11 @@ export default function DashboardV2({
         let stockDocs: any[] = [];
         let depotDocs: any[] = [];
 
-        try { const s = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)); productDocs = s.docs; } catch (e) { console.warn('[Dashboard] productCodes fetch failed:', e); }
+        try { const s = await getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)); productDocs = s.docs; } catch (e) { console.warn('[Dashboard] productCodes fetch failed:', e); }
         try {
           // Dashboard sadece mevcut stoğu (sevk edilmemiş) sayar; isShipped=true
           // kayıtlar zaman içinde birikir ama özet için gerekmez.
-          const s = await getDocs(scopedQuery(
+          const s = await getDocsResilient(scopedQuery(
             'depoStok',
             currentCompanyId,
             isSuperAdmin,
@@ -194,7 +195,7 @@ export default function DashboardV2({
           ));
           stockDocs = s.docs;
         } catch (e) { console.warn('[Dashboard] depoStok fetch failed:', e); }
-        try { const s = await getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)); depotDocs = s.docs; } catch (e) { console.warn('[Dashboard] depots fetch failed:', e); }
+        try { const s = await getDocsResilient(scopedQuery('depots', currentCompanyId, isSuperAdmin)); depotDocs = s.docs; } catch (e) { console.warn('[Dashboard] depots fetch failed:', e); }
 
         const depotNameMap = new Map<string, string>();
         depotDocs.forEach((d) => {
@@ -349,7 +350,7 @@ export default function DashboardV2({
         const allMinMaxRules = new Map<string, { max: number; maxGun: number }>();
 
         const rulePromises = depotIds.map(async (depotId) => {
-          const rulesSnap = await getDocs(collection(db, 'depots', depotId, 'minMaxRules'));
+          const rulesSnap = await getDocsResilient(collection(db, 'depots', depotId, 'minMaxRules'));
           rulesSnap.docs.forEach((d) => {
             const rule = d.data();
             if (rule.stokKodu && rule.max && rule.maxGun) {
@@ -444,10 +445,10 @@ export default function DashboardV2({
         let productDocs2: any[] = [];
         let consumptionDocs: any[] = [];
 
-        try { const s = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)); productDocs2 = s.docs; } catch (e) { console.warn('[Dashboard] yesterday productCodes fetch failed:', e); }
+        try { const s = await getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)); productDocs2 = s.docs; } catch (e) { console.warn('[Dashboard] yesterday productCodes fetch failed:', e); }
         try {
           // Scope bug fix: önceki sürüm companyId filtresizdi.
-          const s = await getDocs(scopedQuery(
+          const s = await getDocsResilient(scopedQuery(
             'tuketimKayitlari',
             currentCompanyId,
             isSuperAdmin,
@@ -481,7 +482,7 @@ export default function DashboardV2({
   useEffect(() => {
     (async () => {
       try {
-        const effSnap = await getDocs(scopedQuery('totalEfficiencyRecords', currentCompanyId, isSuperAdmin));
+        const effSnap = await getDocsResilient(scopedQuery('totalEfficiencyRecords', currentCompanyId, isSuperAdmin));
         if (!effSnap) return;
         const efficiencies: number[] = [];
         effSnap.docs.forEach(d => {

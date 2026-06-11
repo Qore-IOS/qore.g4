@@ -6,6 +6,7 @@ import { scopedQuery } from '@/lib/firestore-helpers';
 import Link from 'next/link';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, onSnapshot, orderBy, query, where } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import type { Hospital, PurchasingTask, User } from '@/lib/types';
 import { ArrowLeft, Building2, FileText, ImageIcon, Flame, CalendarDays, Sparkles, CircleCheckBig } from 'lucide-react';
 import { endOfDay, endOfWeek, format, isAfter, isBefore, parseISO, startOfDay, startOfMonth, startOfWeek, endOfMonth, subMonths } from 'date-fns';
@@ -57,8 +58,8 @@ export default function AnalizPlanlamaPanel() {
   useEffect(() => {
     async function fetchRefs() {
       const [labSnap, usersSnap] = await Promise.all([
-        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin, where('role', 'in', ['admin', 'satin_alma']))),
+        getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocsResilient(scopedQuery('users', currentCompanyId, isSuperAdmin, where('role', 'in', ['admin', 'satin_alma']))),
       ]);
       setLabs(labSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Hospital)));
       setUsers(usersSnap.docs.map((d) => ({ uid: d.id, ...d.data() } as User)));

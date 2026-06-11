@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Loader2, Plus, Trash2, Edit2, Save, X, FileText, ChevronDown, ChevronUp, Check, ChevronsUpDown } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { collection, getDocs, addDoc, deleteDoc, doc, Timestamp, updateDoc } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import BackButton from '@/components/BackButton';
 import type { TransferTemplate, TransferTemplateItem, ProductCode } from '@/lib/types';
@@ -70,8 +71,8 @@ export default function TransferSablonlariPage() {
     const fetchData = async () => {
       try {
         const [templateSnap, productSnap] = await Promise.all([
-          getDocs(scopedQuery('transferTemplates', currentCompanyId, isSuperAdmin)),
-          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+          getDocsResilient(scopedQuery('transferTemplates', currentCompanyId, isSuperAdmin)),
+          getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
         ]);
 
         const templateList = templateSnap.docs.map(d => ({

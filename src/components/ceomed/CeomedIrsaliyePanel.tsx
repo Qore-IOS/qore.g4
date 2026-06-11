@@ -14,6 +14,7 @@ import {
   getDocs,
   setDoc,
 } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
@@ -191,7 +192,7 @@ export default function CeomedIrsaliyePanel() {
       // Approved ise depoStok'tan ceomedIrsaliyeId eşleşen kayıtları temizle
       let removedStock = 0;
       if (wasApproved) {
-        const stockSnap = await getDocs(
+        const stockSnap = await getDocsResilient(
           scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('ceomedIrsaliyeId', '==', irs.ceomedId))
         );
         removedStock = stockSnap.size;

@@ -18,6 +18,7 @@ import {
   collection, doc, getDocs, onSnapshot, query,
   serverTimestamp, Timestamp, updateDoc, where
 } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import type { User as AppUser } from '@/lib/types';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -151,7 +152,7 @@ export default function RoutePlanlayiciPage() {
 
     (async () => {
       try {
-        const uSnap = await getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin));
+        const uSnap = await getDocsResilient(scopedQuery('users', currentCompanyId, isSuperAdmin));
         const ds = uSnap.docs.map(d => ({ id: d.id, ...d.data() } as AppUser)).filter(u => (u as any).role === 'driver');
         setDrivers(ds);
       } catch {
@@ -180,7 +181,7 @@ export default function RoutePlanlayiciPage() {
     if (!driverId) { setActiveRoute(null); setActiveRouteId(null); return; }
     const dayKey = toDayKey(day);
     const qy = scopedQuery('routes', currentCompanyId, isSuperAdmin, where('driverId', '==', driverId), where('date', '==', dayKey));
-    const snap = await getDocs(qy);
+    const snap = await getDocsResilient(qy);
     if (snap.empty) { setActiveRoute(null); setActiveRouteId(null); return; }
     const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as RouteDoc[];
     const active = rows.find(r => r.isActive && r.status !== 'completed');
@@ -494,7 +495,7 @@ export default function RoutePlanlayiciPage() {
         where('driverId', '==', myUid),
         where('status', 'in', ['open', 'in_progress'])
       );
-      const snap = await getDocs(qy);
+      const snap = await getDocsResilient(qy);
       const routes = snap.docs
         .map(d => ({ id: d.id, ...(d.data() as any) }) as RouteDoc)
         .sort((a, b) => b.date - a.date); // En yeni tarih önce

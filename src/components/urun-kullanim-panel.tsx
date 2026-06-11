@@ -21,6 +21,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
 import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, addDoc, updateDoc, orderBy, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
+import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
@@ -513,7 +514,7 @@ export default function UrunKullanimPanel() {
   useEffect(() => {
     const fetchMainUnitModels = async () => {
       try {
-        const snap = await getDocs(scopedQuery('def_mainUnits', currentCompanyId, isSuperAdmin));
+        const snap = await getDocsResilient(scopedQuery('def_mainUnits', currentCompanyId, isSuperAdmin));
         const modelMap: Record<string, string> = {};
         snap.docs.forEach((d) => {
           const data = d.data() as any;
@@ -534,7 +535,7 @@ export default function UrunKullanimPanel() {
   useEffect(() => {
     const fetchDeviceGroups = async () => {
       try {
-        const dgsnap = await getDocs(scopedQuery('def_deviceGroups', currentCompanyId, isSuperAdmin));
+        const dgsnap = await getDocsResilient(scopedQuery('def_deviceGroups', currentCompanyId, isSuperAdmin));
         setDeviceGroups(dgsnap.docs.map(d => ({id: d.id, ...d.data()} as DeviceGroup)));
         urunKullanimLogger.debug('Cihaz grupları yüklendi', { count: dgsnap.docs.length });
       } catch (e) {
@@ -549,7 +550,7 @@ export default function UrunKullanimPanel() {
   useEffect(() => {
     const fetchFaultDefinitions = async () => {
       try {
-        const snap = await getDocs(scopedQuery('faultDefinitions', currentCompanyId, isSuperAdmin));
+        const snap = await getDocsResilient(scopedQuery('faultDefinitions', currentCompanyId, isSuperAdmin));
         const definitions = snap.docs.map(d => ({
           id: d.id,
           ...d.data(),
@@ -887,7 +888,7 @@ export default function UrunKullanimPanel() {
         );
       }
 
-      const snap = await getDocs(q);
+      const snap = await getDocsResilient(q);
 
       if (snap.empty) {
         // Also check legacy records without hedefKurumId
@@ -897,7 +898,7 @@ export default function UrunKullanimPanel() {
           where('isShipped', '==', true),
           where('stokKodu', '==', stokKodu)
         );
-        const legacySnap = await getDocs(legacyQuery);
+        const legacySnap = await getDocsResilient(legacyQuery);
 
         if (legacySnap.empty) {
           return null;
@@ -946,7 +947,7 @@ export default function UrunKullanimPanel() {
         where('consumptionTimestamp', '>=', Timestamp.fromDate(fiveMinutesAgo))
       );
 
-      const snap = await getDocs(q);
+      const snap = await getDocsResilient(q);
       return !snap.empty;
     } catch (error) {
       urunKullanimLogger.error('Duplicate kontrol hatası', error, { stokKodu, seriNumarasi });
@@ -1228,7 +1229,7 @@ export default function UrunKullanimPanel() {
     if (selectedLab?.perifer && selectedLabId) {
       try {
         const q = scopedQuery('users', currentCompanyId, isSuperAdmin, where('primaryLaboratories', 'array-contains', selectedLabId));
-        const snap = await getDocs(q);
+        const snap = await getDocsResilient(q);
         const allResponsible = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
         const filtered = allResponsible.filter((u: any) => u.role === faultType);
         setPeripheralResponsibleUsers(filtered);
@@ -1605,7 +1606,7 @@ export default function UrunKullanimPanel() {
       const trackingMode = resolveEffectiveTrackingMode(stokKodu, productTracking);
       if (trackingMode === 'serial') {
         const snapshotRef = doc(db, 'labManualSerialSnapshots', groupKey);
-        const snapshotSnap = await getDoc(snapshotRef);
+        const snapshotSnap = await getDocResilient(snapshotRef);
         const existingSerials = snapshotSnap.exists() ? ((snapshotSnap.data().serials || []) as string[]) : [];
         const allKnownSerials = Array.from(new Set([
           ...existingSerials,
@@ -1796,7 +1797,9 @@ export default function UrunKullanimPanel() {
   }, []);
 
   const isDayTime = currentHour >= 8 && currentHour < 16;
-  const timeBasedBackground = isDayTime ? '/dayclear.png' : '/night%20clear.png';
+  // PERF (Faz 6): dayclear kaynak 6.2MB; 1600px türevi servis edilir
+  // (scripts/optimize-public-icons.mjs).
+  const timeBasedBackground = isDayTime ? '/dayclear-1600.png' : '/night%20clear.png';
 
   return (
     <div className="relative min-h-screen overflow-x-hidden">

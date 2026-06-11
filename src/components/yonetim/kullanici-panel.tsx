@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { PlusCircle, Edit3, Trash2, Loader2, Users, Bell, ShieldAlert, Building2 } from 'lucide-react';
 import { collection, getDocs, addDoc, setDoc, deleteDoc, doc } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { getAuth } from 'firebase/auth';
 import { db, app } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
@@ -94,11 +95,11 @@ export default function KullaniciPanel() {
       }
 
       const [uSnap, hSnap, dSnap, pSnap, lgSnap] = await Promise.all([
-        getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('def_labGroups', currentCompanyId, isSuperAdmin))
+        getDocsResilient(scopedQuery('users', currentCompanyId, isSuperAdmin)),
+        getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocsResilient(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+        getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+        getDocsResilient(scopedQuery('def_labGroups', currentCompanyId, isSuperAdmin))
       ]);
       setUsers(uSnap.docs.map(d => ({ id: d.id, ...d.data() } as AppUser)));
       setHospitals(hSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
@@ -110,7 +111,7 @@ export default function KullaniciPanel() {
 
       // Süper Admin ise firma listesini çek (kullanıcıya firma atayabilmek için)
       if (isSuperAdmin) {
-        const cSnap = await getDocs(collection(db, 'companies'));
+        const cSnap = await getDocsResilient(collection(db, 'companies'));
         setCompanies(cSnap.docs.map(d => ({ id: d.id, ...d.data() } as Company)));
       }
 

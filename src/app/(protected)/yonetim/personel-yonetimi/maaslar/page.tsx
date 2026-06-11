@@ -20,6 +20,7 @@ import {
   serverTimestamp,
   updateDoc,
 } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import type { Personnel, Hospital, User } from '@/lib/types';
@@ -100,7 +101,7 @@ export default function PersonelMaaslarPage() {
     (async () => {
       setLoading((p) => ({ ...p, labs: true }));
       try {
-        const snap = await getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin, orderBy('name', 'asc')));
+        const snap = await getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin, orderBy('name', 'asc')));
         setLabs(
           filterByCompanyScope(
             snap.docs.map((d) => ({ id: d.id, ...d.data() } as Hospital)),
@@ -122,7 +123,7 @@ export default function PersonelMaaslarPage() {
     (async () => {
       setLoading((p) => ({ ...p, users: true }));
       try {
-        const snap = await getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin));
+        const snap = await getDocsResilient(scopedQuery('users', currentCompanyId, isSuperAdmin));
         const all = filterByCompanyScope(
           snap.docs.map((d) => ({ id: d.id, uid: d.id, ...d.data() } as User)),
           currentCompanyId,

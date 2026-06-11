@@ -8,6 +8,7 @@ import { scopedQuery } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { collection, getDocs, Timestamp } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { ArrowLeft, ClipboardList, History, Loader2, RefreshCw } from 'lucide-react';
 
 interface SparePartOrderHistoryRow {
@@ -43,7 +44,7 @@ export default function YedekParcaSiparisGecmisPage() {
 
     setLoading(true);
     try {
-      const snap = await getDocs(scopedQuery('yedekParcaSiparisler', currentCompanyId, isSuperAdmin));
+      const snap = await getDocsResilient(scopedQuery('yedekParcaSiparisler', currentCompanyId, isSuperAdmin));
       const scoped = filterByCompanyScope(
         snap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as any)),
         currentCompanyId,

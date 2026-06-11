@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Loader2, Plus, Trash2, Wrench, FlaskConical, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { collection, getDocs, addDoc, deleteDoc, doc, Timestamp, query, where, orderBy } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import BackButton from '@/components/BackButton';
 import type { FaultDefinition, FaultDefinitionType } from '@/lib/types';
@@ -43,7 +44,7 @@ export default function ArizaTanimlamalariPage() {
 
     const fetchFaults = async () => {
       try {
-        const snap = await getDocs(scopedQuery('faultDefinitions', currentCompanyId, isSuperAdmin));
+        const snap = await getDocsResilient(scopedQuery('faultDefinitions', currentCompanyId, isSuperAdmin));
         const faults = filterByCompanyScope(
           snap.docs.map(d => ({
             id: d.id,

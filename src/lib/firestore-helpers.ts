@@ -14,7 +14,6 @@
  */
 import {
   collection,
-  getDocs,
   getDocsFromCache,
   query,
   where,
@@ -31,6 +30,17 @@ import {
   type QueryFnCtx,
 } from '@/lib/firestore-fetch';
 import { getDocsResilient } from '@/lib/firestore-network-recovery';
+
+/**
+ * Faz 4 (perf-stability-recovery-plan): companyId alanı HİÇ olmayan çok eski
+ * kayıtlar için çalıştırılan ek "unscoped" uyumluluk sorgusunun anahtarı.
+ * Multi-tenancy migration'ı üretimde doğrulandıktan sonra
+ * NEXT_PUBLIC_LEGACY_UNTAGGED_COMPAT=off ile kapatın — scoped okuma yapılan
+ * her koleksiyon için bir tam koleksiyon sorgusu tasarruf ettirir.
+ * (`__legacy__` ETİKETLİ kayıt sorgusu bundan bağımsızdır ve açık kalır.)
+ */
+const LEGACY_UNTAGGED_COMPAT =
+  process.env.NEXT_PUBLIC_LEGACY_UNTAGGED_COMPAT !== 'off';
 
 export const GLOBAL_DEFINITION_COLLECTIONS = new Set([
   'def_brands',
@@ -92,13 +102,13 @@ export async function getScopedDocs(
   const normalized = normalizeCompanyId(currentCompanyId);
 
   if (isGlobalDefinitionCollection(collectionPath) || isSuperAdmin || normalized === '__legacy__') {
-    return (await getDocs(scopedQuery(collectionPath, currentCompanyId, isSuperAdmin, ...extraConstraints))).docs;
+    return (await getDocsResilient(scopedQuery(collectionPath, currentCompanyId, isSuperAdmin, ...extraConstraints))).docs;
   }
 
   const base = collection(db, collectionPath);
   const [companySnap, legacySnap] = await Promise.all([
-    getDocs(query(base, where('companyId', '==', normalized), ...extraConstraints)),
-    getDocs(query(base, where('companyId', '==', '__legacy__'), ...extraConstraints)),
+    getDocsResilient(query(base, where('companyId', '==', normalized), ...extraConstraints)),
+    getDocsResilient(query(base, where('companyId', '==', '__legacy__'), ...extraConstraints)),
   ]);
 
   const docsById = new Map<string, QueryDocumentSnapshot<DocumentData>>();
@@ -110,15 +120,17 @@ export async function getScopedDocs(
   // Backward compatibility for very old, untagged records. In multi-tenant
   // projects this unscoped read may be rejected by security rules; in that case
   // the explicit company/legacy query result above remains the source of truth.
-  try {
-    const unscopedSnap = await getDocs(query(base, ...extraConstraints));
-    unscopedSnap.docs
-      .filter((docSnap) => matchesCompanyScope(docSnap.data(), normalized, isSuperAdmin))
-      .forEach((docSnap) => {
-        if (!docsById.has(docSnap.id)) docsById.set(docSnap.id, docSnap);
-      });
-  } catch {
-    // Ignore permission/index failures from the compatibility path.
+  if (LEGACY_UNTAGGED_COMPAT) {
+    try {
+      const unscopedSnap = await getDocsResilient(query(base, ...extraConstraints));
+      unscopedSnap.docs
+        .filter((docSnap) => matchesCompanyScope(docSnap.data(), normalized, isSuperAdmin))
+        .forEach((docSnap) => {
+          if (!docsById.has(docSnap.id)) docsById.set(docSnap.id, docSnap);
+        });
+    } catch {
+      // Ignore permission/index failures from the compatibility path.
+    }
   }
 
   return Array.from(docsById.values());
@@ -176,18 +188,22 @@ export async function getScopedDocsCacheFirst(
     try {
       mergeSnap(await getDocsFromCache(legacyQuery));
     } catch { /* cache erişilemedi — arka plan tazelemesi telafi eder */ }
-    try {
-      mergeSnap(await getDocsFromCache(unscopedQuery), true);
-    } catch { /* ignore */ }
     revalidateInBackground(ctx, legacyQuery);
-    revalidateInBackground(ctx, unscopedQuery);
+    if (LEGACY_UNTAGGED_COMPAT) {
+      try {
+        mergeSnap(await getDocsFromCache(unscopedQuery), true);
+      } catch { /* ignore */ }
+      revalidateInBackground(ctx, unscopedQuery);
+    }
   } else {
     // İlk yükleme: tam doğruluk için orijinal sunucu yolu.
     mergeSnap(await getDocsResilient(legacyQuery));
-    try {
-      mergeSnap(await getDocsResilient(unscopedQuery), true);
-    } catch {
-      // Multi-tenant kurallarda unscoped okuma reddedilebilir — yoksay.
+    if (LEGACY_UNTAGGED_COMPAT) {
+      try {
+        mergeSnap(await getDocsResilient(unscopedQuery), true);
+      } catch {
+        // Multi-tenant kurallarda unscoped okuma reddedilebilir — yoksay.
+      }
     }
   }
 

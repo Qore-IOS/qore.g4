@@ -14,6 +14,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from '@/components/ui/table';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, doc, deleteDoc, getDocFromServer, writeBatch, Timestamp } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import type { DepoStokItem, Laboratory, MinMaxRule } from '@/lib/types';
 import { Loader2, Search, ListChecks, History, FileSpreadsheet, MoreVertical, Eye, AlertCircle, AlertTriangle, Upload, CheckCircle, Pencil, Check, X, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
 import { touchStockMetadata, useLabStock, useLabPools, useHospitals, useProductCodes, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
@@ -255,7 +256,7 @@ export default function LaboratuvarYonetimiPanel() {
     (async () => {
       try {
         const rulesRef = collection(db, 'hospitals', selectedLabId, 'minMaxRules');
-        const snapshot = await getDocs(rulesRef);
+        const snapshot = await getDocsResilient(rulesRef);
         const rules: Record<string, MinMaxRule> = {};
         snapshot.forEach(d => {
           const rule = d.data() as MinMaxRule;

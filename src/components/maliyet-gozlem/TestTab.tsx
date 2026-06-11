@@ -30,6 +30,7 @@ import type {
 import { ActivitiesPanel, InsightsCard, MiniStat, SectionHeader, Card } from './primitives';
 import { useIsMobile } from './useIsMobile';
 import { collection, getDocs, query, orderBy, where } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
@@ -1036,15 +1037,15 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
           testDefsSnap,
           ratesValue,
         ] = await Promise.all([
-          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin, orderBy('stokAdi', 'asc'))),
-          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin, orderBy('name', 'asc'))),
-          getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
-          getDocs(scopedQuery('hospitalDeviceAssignments', currentCompanyId, isSuperAdmin)),
-          getDocs(scopedQuery('assets', currentCompanyId, isSuperAdmin)),
-          getDocs(scopedQuery('personnel', currentCompanyId, isSuperAdmin)),
+          getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin, orderBy('stokAdi', 'asc'))),
+          getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin, orderBy('name', 'asc'))),
+          getDocsResilient(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
+          getDocsResilient(scopedQuery('hospitalDeviceAssignments', currentCompanyId, isSuperAdmin)),
+          getDocsResilient(scopedQuery('assets', currentCompanyId, isSuperAdmin)),
+          getDocsResilient(scopedQuery('personnel', currentCompanyId, isSuperAdmin)),
           // Sadece sevk edilmiş stok; server-side filter.
-          getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true))),
-          getDocs(scopedQuery('testDefinitions', currentCompanyId, isSuperAdmin, orderBy('sutKodu', 'asc'))),
+          getDocsResilient(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true))),
+          getDocsResilient(scopedQuery('testDefinitions', currentCompanyId, isSuperAdmin, orderBy('sutKodu', 'asc'))),
           getExchangeRates().catch(() => ({ EUR: 1, USD: 1.08, TRY: 38.5 })),
         ]);
         if (cancelled) return;

@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { db } from '@/lib/firebase';
 import { addDoc, collection, getDocs, Timestamp } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { Button } from '@/components/ui/button';
@@ -28,7 +29,7 @@ export default function SharedLabPoolModal({ open, onOpenChange }: Props) {
 
   useEffect(() => {
     (async () => {
-      const snap = await getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin));
+      const snap = await getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin));
       setLabs(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })));
     })();
   }, []);

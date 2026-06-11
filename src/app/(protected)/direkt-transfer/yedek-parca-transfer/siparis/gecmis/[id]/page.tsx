@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import { doc, getDoc, Timestamp } from 'firebase/firestore';
+import { getDocResilient } from '@/lib/firestore-network-recovery';
 import { ArrowLeft, ClipboardList, Loader2 } from 'lucide-react';
 
 interface ComparisonRow {
@@ -28,7 +29,7 @@ export default function YedekParcaSiparisDetayPage() {
       if (!orderId) return;
       setLoading(true);
       try {
-        const snap = await getDoc(doc(db, 'yedekParcaSiparisler', orderId));
+        const snap = await getDocResilient(doc(db, 'yedekParcaSiparisler', orderId));
         if (snap.exists()) setData({ id: snap.id, ...snap.data() });
       } finally {
         setLoading(false);

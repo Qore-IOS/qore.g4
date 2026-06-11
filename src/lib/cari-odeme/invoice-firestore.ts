@@ -11,6 +11,7 @@ import {
   runTransaction,
   serverTimestamp,
 } from "firebase/firestore";
+import { getDocResilient } from '@/lib/firestore-network-recovery';
 import type { Invoice } from "./invoice-types";
 import type { LedgerEntry } from "./finance-types";
 import type { CariFirma } from "./types";
@@ -46,7 +47,7 @@ export async function listInvoices(
 
 export async function getInvoice(id: string): Promise<Invoice | null> {
   const docRef = doc(db, INVOICE_COLLECTION, id);
-  const snap = await getDoc(docRef);
+  const snap = await getDocResilient(docRef);
   if (!snap.exists()) return null;
   const data = snap.data();
   return {

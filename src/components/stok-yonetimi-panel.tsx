@@ -25,6 +25,7 @@ import {
 import { Checkbox } from './ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
 import { collection, getDocs, getDoc, query, where, writeBatch, doc, Timestamp, serverTimestamp } from 'firebase/firestore';
+import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import {
   PackageSearch, Warehouse, FileSpreadsheet, Loader2,
@@ -628,7 +629,7 @@ export default function StokYonetimiPanel() {
       try {
         const { doc, getDoc } = await import('firebase/firestore');
         const { db } = await import('@/lib/firebase');
-        const snap = await getDoc(doc(db, 'ceomedDepoStok', selectedDepotId));
+        const snap = await getDocResilient(doc(db, 'ceomedDepoStok', selectedDepotId));
         if (cancelled || !snap.exists()) return;
         const data = snap.data() as any;
         const diff = (data.lastDiff || []) as Array<{ change: number }>;
@@ -883,7 +884,7 @@ export default function StokYonetimiPanel() {
         where('depotId', '==', selectedDepotId),
         where('isShipped', '==', false)
       );
-      const snapshot = await getDocs(stockQuery);
+      const snapshot = await getDocsResilient(stockQuery);
       const allItems = filterByCompanyScope(
         snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
         currentCompanyId,
@@ -1289,7 +1290,7 @@ export default function StokYonetimiPanel() {
           where('isShipped', '==', true),
           where('hedefKurumId', 'in', chunk),
         );
-        const snap = await getDocs(q);
+        const snap = await getDocsResilient(q);
         snap.docs.forEach(d => stockForSelectedLabsRaw.push({ id: d.id, ...d.data() } as DepoStokItem));
       }
       // Legacy (hedefKurumId yoksa hedefKurum adı ile eşleşenler).
@@ -1306,7 +1307,7 @@ export default function StokYonetimiPanel() {
             where('isShipped', '==', true),
             where('hedefKurum', 'in', chunk),
           );
-          const snap = await getDocs(q);
+          const snap = await getDocsResilient(q);
           snap.docs.forEach(d => {
             const data = d.data() as DepoStokItem;
             // hedefKurumId varsa zaten ilk chunk'tan geldi; sadece legacy doc'ları dahil et.
@@ -1338,7 +1339,7 @@ export default function StokYonetimiPanel() {
 
     // Find which hospitals have this product in their minMaxRules
     const labRulesPromises = hospitals.filter(h => h.id).map(async (hospital) => {
-      const rulesSnap = await getDocs(collection(db, 'hospitals', hospital.id, 'minMaxRules'));
+      const rulesSnap = await getDocsResilient(collection(db, 'hospitals', hospital.id, 'minMaxRules'));
       const rule = rulesSnap.docs.find(d => (d.data() as MinMaxRule).stokKodu === stokKodu);
       if (rule) {
         return { labId: hospital.id, labName: hospital.name || hospital.id, rule: rule.data() as MinMaxRule };
@@ -1356,7 +1357,7 @@ export default function StokYonetimiPanel() {
       where('stokKodu', '==', stokKodu),
       where('isShipped', '==', true)
     );
-    const shippedSnap = await getDocs(shippedQuery);
+    const shippedSnap = await getDocsResilient(shippedQuery);
     const shippedItems = filterByCompanyScope(
       shippedSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
       currentCompanyId,
@@ -1453,7 +1454,7 @@ export default function StokYonetimiPanel() {
         where('stokKodu', '==', stokKodu),
         where('isShipped', '==', false)
       );
-      const stockSnap = await getDocs(stockQuery);
+      const stockSnap = await getDocsResilient(stockQuery);
       const available = filterByCompanyScope(
         stockSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
         currentCompanyId,

@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogC
 import { Input } from '@/components/ui/input';
 import { PlusCircle, Edit3, Trash2, Loader2, Building } from 'lucide-react';
 import { collection, getDocs, addDoc, setDoc, deleteDoc, doc } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import type { Depot } from '@/lib/types';
@@ -25,7 +26,7 @@ export default function BorcDepoPanel() {
   const fetchBorcDepots = useCallback(async () => {
     setIsLoading(true);
     try {
-      const snap = await getDocs(scopedQuery('borcDepots', currentCompanyId, isSuperAdmin));
+      const snap = await getDocsResilient(scopedQuery('borcDepots', currentCompanyId, isSuperAdmin));
       setBorcDepots(filterByCompanyScope(
         snap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)),
         currentCompanyId,

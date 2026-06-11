@@ -67,25 +67,48 @@ cache'ten servis 0 okumadır, arka plan tazeleme bugünkü okumayla aynıdır.
 ~milisaniyeye iner; barkod, panele girer girmez çalışır; takılı loading
 semptomu kökten kalkar; sayfa başına ~3MB transfer kaybolur.
 
-## 3. Sonraki fazlar (önerilen sıra)
+## 3. Sonraki fazlar — DURUM: TAMAMLANDI (2. tur)
 
-1. **Faz 2 — Kalan doğrudan okumalar:** `src/` genelinde hook katmanı
-   dışında ~480 `getDocs` çağrısı var (panel içi tek seferlik okumalar,
-   mutasyon öncesi kontroller). Sık kullanılan panel-içi okumaları
-   `getDocsCacheFirst`/`getDocsResilient`'a taşı. (Mekanik, düşük risk.)
-2. **Faz 3 — Server action'ların önbelleği:** `getPaginatedDepotStock`,
-   `getDepotSerialIndex` gibi server action'lar Firestore local cache'i
-   atlar. Bunlara RQ `placeholderData` + `keepPreviousData` ve gerekirse
-   sunucu tarafı cache ekle.
-3. **Faz 4 — Uyumluluk sorgusunun emekliliği:** `getScopedDocs` her
-   koleksiyon için ek bir "untagged legacy" sorgusu çalıştırıyor (koleksiyon
-   başına +1 okuma seti). Migration tamamlandıysa bu yol kaldırılabilir.
-4. **Faz 5 — Ölçüm:** WebVitalsReporter'a "ilk veri görünümü" (panel mount →
-   ilk dolu render) metriği ekle; kullanıcı şikayeti geldiğinde HAR yerine
-   bu telemetriyle doğrula.
-5. **Faz 6 — Görsel hijyeni:** public/ altındaki ~20 adet 1–2MB PNG
-   (duvar kağıtları/ikon adayları) için optimize edilmiş türev seti +
-   `resolveImageSrc` üzerinden otomatik küçük-boy seçimi.
+1. **Faz 2 — Kalan doğrudan okumalar: ✅ UYGULANDI.** Hook katmanı dışındaki
+   153 dosyada 477 `getDocs` → `getDocsResilient`, 105 `getDoc` →
+   `getDocResilient` (timeout + zombi kanal kurtarma; davranış birebir aynı,
+   sadece sonsuz bekleme imkânsız). `getScopedDocs`'un iç okumaları da
+   dayanıklı. RQ queryFn'li ek siteler (merkez-siparis minMaxRules)
+   cache-first'e alındı. Mutasyon-yolu okumaları bilinçli olarak
+   cache-first YAPILMADI (yazma doğruluğu sunucu verisine bağlı kalmalı).
+   `'use server'` dosyaları (stokActions, restore) dokunulmadı — sunucuda
+   resilient zaten pass-through olurdu.
+2. **Faz 3 — Server action önbelleği: ✅ MEVCUT + BİLİNÇLİ SINIR.**
+   `usePaginatedDepotStock` ve `usePaginatedProductCodes` zaten
+   `placeholderData: (prev) => prev` kullanıyor (sayfa/filtre geçişleri
+   akıcı). Sunucu tarafı `unstable_cache` BİLEREK eklenmedi: stok verisinin
+   invalidation'ı client yazmalarına bağlanamıyor; bayat stok göstermek
+   hızdan değerli değil. İleride gerekirse `revalidateTag` mimarisiyle ele
+   alınmalı.
+3. **Faz 4 — Uyumluluk sorgusunun emekliliği: ✅ BAYRAKLANDI.** Untagged
+   compat sorgusu `NEXT_PUBLIC_LEGACY_UNTAGGED_COMPAT=off` ile kapatılabilir
+   (env.example'da belgeli; varsayılan açık = bugünkü davranış). Üretimde
+   `companyId`siz doküman kalmadığı doğrulanınca kapatın.
+4. **Faz 5 — Ölçüm: ✅ UYGULANDI.** `DATA` vital'i eklendi
+   (src/lib/perf/data-vitals.ts): cache-first veri yolundaki her ön-plan
+   servisi süre + kaynak (cache/sunucu) olarak `window.__QORE_VITALS__`
+   buffer'ına yazılır; `?vitals=1` overlay'inde DATA satırı canlı görünür.
+   Kullanıcı şikayetinde HAR yerine `window.__qoreVitals__()` çıktısı isteyin.
+5. **Faz 6 — Görsel hijyeni: ✅ UYGULANDI.** `scripts/optimize-public-icons.mjs`:
+   61 dock/mobil ikonu (42MB) → 96px türevler (0.6MB), `getIconSrc` manifest
+   üzerinden otomatik küçük-boy servis eder; manifest dışı (runtime'da
+   eklenen) ikonlar ham yoldan yüklenmeye devam eder. `dayclear.png`
+   6.2MB → 2.45MB (1600px). Bildirim badge/icon'u üç yerde (service worker +
+   iki Cloud Functions kopyası) 0.7MB PNG yerine `/icon-192.png`.
+
+### Açık kalan öneriler (kullanıcı kararı / ileri tur)
+- public/ altında hiç referans edilmeyen ~22MB varlık var (`rainy.png`,
+  `tk-wp1.png`, `vehicles/*.png`, iki mp4). Silinmesi deploy boyutunu
+  küçültür; runtime etkisi yok. Onayınızla kaldırılabilir.
+- `sharp` ortama eklenirse duvar kağıtları WebP/JPEG'e çevrilerek
+  2.45MB → ~300KB'a iner (pngjs yalnızca PNG üretebiliyor).
+- PDF logo fallback zinciri `/invlogo.png`(72KB) önceliğiyle zaten ekonomik;
+  dokunulmadı (baskı kalitesi).
 
 ## 4. Doğrulama kontrol listesi
 

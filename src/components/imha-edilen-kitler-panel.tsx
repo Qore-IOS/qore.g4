@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo, useCallback, Suspense, useRef } fr
 import dynamic from 'next/dynamic';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, writeBatch, doc, orderBy, limit, Timestamp, serverTimestamp } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Trash2, Upload, Camera, Download, History, ScanLine, FileSpreadsheet, Package, AlertTriangle, ShieldAlert, ClipboardList, Info, X, ChevronDown } from 'lucide-react';
 import type { Hospital, Depot, ProductCode, DepoStokItem, DestroyedKitRecord } from '@/lib/types';
@@ -122,10 +123,10 @@ export default function ImhaEdilenKitlerPanel() {
             setLoading(true);
             try {
                 const [hospitalsSnap, depotsSnap, productsSnap, recentSnap] = await Promise.all([
-                    getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-                    getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
-                    getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
-                    getDocs(scopedQuery('destroyedKitsReports', currentCompanyId, isSuperAdmin, orderBy('resolvedAt', 'desc'), limit(5))),
+                    getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+                    getDocsResilient(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+                    getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+                    getDocsResilient(scopedQuery('destroyedKitsReports', currentCompanyId, isSuperAdmin, orderBy('resolvedAt', 'desc'), limit(5))),
                 ]);
 
                 setHospitals(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
@@ -193,7 +194,7 @@ export default function ImhaEdilenKitlerPanel() {
             where('seriNumarasi', '==', serial),
             ...(sourceType === 'depot' ? [where('isShipped', '==', false)] : [])
         );
-        const snap = await getDocs(q);
+        const snap = await getDocsResilient(q);
         const items = snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
         return sourceType === 'depot'
             ? filterByCompanyScope(items, currentCompanyId, isSuperAdmin)
@@ -212,7 +213,7 @@ export default function ImhaEdilenKitlerPanel() {
             where('lotNumarasi', '==', lot),
             ...(sourceType === 'depot' ? [where('isShipped', '==', false)] : [])
         );
-        const snap = await getDocs(q);
+        const snap = await getDocsResilient(q);
         const allItemsRaw = snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
         const allItems = sourceType === 'depot'
             ? filterByCompanyScope(allItemsRaw, currentCompanyId, isSuperAdmin)
@@ -504,7 +505,7 @@ export default function ImhaEdilenKitlerPanel() {
                         where('stokKodu', 'in', chunk),
                         ...(sourceType === 'depot' ? [where('isShipped', '==', false)] : [])
                     );
-                    stockPromises.push(getDocs(q));
+                    stockPromises.push(getDocsResilient(q));
                 }
 
                 const snapshots = await Promise.all(stockPromises);

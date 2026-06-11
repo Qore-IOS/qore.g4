@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import { addDoc, collection, doc, getDoc, getDocs, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -48,7 +49,7 @@ export default function MerkezSiparisDetayPage() {
       if (!params.id) return;
       setLoading(true);
       try {
-        const snap = await getDoc(doc(db, 'centralOrders', params.id));
+        const snap = await getDocResilient(doc(db, 'centralOrders', params.id));
         if (!snap.exists()) {
           toast({ title: 'Hata', description: 'Sipariş bulunamadı.', variant: 'destructive' });
           return;
@@ -56,7 +57,7 @@ export default function MerkezSiparisDetayPage() {
         const data = snap.data() as CentralOrder;
         setOrder({ ...data, id: snap.id });
 
-        const logsSnap = await getDocs(collection(db, 'centralOrders', params.id, 'logs'));
+        const logsSnap = await getDocsResilient(collection(db, 'centralOrders', params.id, 'logs'));
         setLogsCount(logsSnap.size);
       } catch (error) {
         console.error(error);

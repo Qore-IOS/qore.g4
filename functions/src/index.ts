@@ -326,8 +326,8 @@ export const onNotificationCreated = functions
 
       // Build webpush notification options
       const webpushNotification: Record<string, any> = {
-        icon: deviceImageUrl || '/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG',
-        badge: '/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG',
+        icon: deviceImageUrl || '/icon-192.png',
+        badge: '/icon-192.png',
         tag: notificationId,
         requireInteraction: isFaultOpened, // Keep fault notifications visible until interaction
       };

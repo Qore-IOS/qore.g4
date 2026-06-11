@@ -31,6 +31,7 @@ import {
 import { hashKey, type QueryKey } from '@tanstack/react-query';
 import { appQueryClient } from '@/lib/query-client';
 import { getDocsResilient } from '@/lib/firestore-network-recovery';
+import { recordDataServe } from '@/lib/perf/data-vitals';
 
 /** queryFn'in React Query'den aldığı context'in kullandığımız alt kümesi. */
 export type QueryFnCtx = { queryKey: QueryKey };
@@ -109,11 +110,13 @@ export async function getDocsCacheFirst(
   // SSR / server action: local cache yok, doğrudan sunucu.
   if (typeof window === 'undefined') return getDocsResilient(q);
 
+  const t0 = performance.now();
   const key = hashKey(ctx.queryKey);
   try {
     const cached = await getDocsFromCache(q);
     if (!cached.empty) {
       if (!recentlySynced(key)) revalidateInBackground(ctx, q);
+      recordDataServe(performance.now() - t0, 'cache');
       return cached;
     }
   } catch {
@@ -125,5 +128,6 @@ export async function getDocsCacheFirst(
   // timeout + kanal kurtarma korumalıdır.
   const snap = await getDocsResilient(q);
   markSynced(key);
+  recordDataServe(performance.now() - t0, 'server');
   return snap;
 }

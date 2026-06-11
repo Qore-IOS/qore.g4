@@ -20,8 +20,11 @@
 import {
   disableNetwork,
   enableNetwork,
+  getDoc,
   getDocs,
   type DocumentData,
+  type DocumentReference,
+  type DocumentSnapshot,
   type Query,
   type QuerySnapshot,
 } from 'firebase/firestore';
@@ -88,6 +91,24 @@ export async function getDocsResilient<T = DocumentData>(
     console.warn('[firestore-recovery] Okuma takıldı, kanal tazelenip yeniden deneniyor…');
     await recoverFirestoreNetwork();
     return withTimeout(getDocs(q), RETRY_TIMEOUT_MS);
+  }
+}
+
+/**
+ * Timeout + otomatik kanal kurtarma + tek retry'lı getDoc (tekil doküman).
+ * Sağlıklı bağlantıda davranış birebir getDoc ile aynıdır.
+ */
+export async function getDocResilient<T = DocumentData>(
+  ref: DocumentReference<T>,
+): Promise<DocumentSnapshot<T>> {
+  if (typeof window === 'undefined') return getDoc(ref);
+  try {
+    return await withTimeout(getDoc(ref), FIRST_ATTEMPT_TIMEOUT_MS);
+  } catch (err) {
+    if (!(err instanceof FirestoreTimeoutError)) throw err;
+    console.warn('[firestore-recovery] Doküman okuması takıldı, kanal tazelenip yeniden deneniyor…');
+    await recoverFirestoreNetwork();
+    return withTimeout(getDoc(ref), RETRY_TIMEOUT_MS);
   }
 }
 

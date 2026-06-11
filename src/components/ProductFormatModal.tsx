@@ -7,6 +7,7 @@ import { Switch } from '@/components/ui/switch';
 import type { ProductCode, Currency } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { doc, addDoc, collection, getDocs, query, where, updateDoc, writeBatch } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { CostInput } from './CostInput';
 import { useAuth } from '@/contexts/auth-context';
@@ -271,7 +272,7 @@ export const ProductFormatModal: FC<ProductFormatModalProps> = ({
         onSave({ ...product, ...productData } as ProductCode);
       } else {
         const q = scopedQuery("productCodes", currentCompanyId, isSuperAdmin, where("stokKodu", "==", productData.stokKodu));
-        const querySnapshot = await getDocs(q);
+        const querySnapshot = await getDocsResilient(q);
         if (!querySnapshot.empty) {
           toast({ title: "Hata", description: "Bu stok kodu zaten mevcut.", variant: "destructive" });
           setIsSaving(false);

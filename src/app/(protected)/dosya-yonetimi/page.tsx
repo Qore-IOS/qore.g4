@@ -19,6 +19,7 @@ import {
   getDocs,
   updateDoc,
 } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { Progress } from '@/components/ui/progress';
@@ -238,7 +239,7 @@ export default function DosyaYonetimiPage() {
           isSuperAdmin,
           where('expiresAt', '<=', now)
         );
-        const snapshot = await getDocs(expiredQuery);
+        const snapshot = await getDocsResilient(expiredQuery);
         let deletedCount = 0;
 
         for (const docSnap of snapshot.docs) {
@@ -307,7 +308,7 @@ export default function DosyaYonetimiPage() {
         autoMatchReason: 'manuel_degistirildi',
       });
 
-      const pendingSnapshot = await getDocs(scopedQuery(
+      const pendingSnapshot = await getDocsResilient(scopedQuery(
         'bekleyenIrsaliyeler',
         currentCompanyId,
         isSuperAdmin,

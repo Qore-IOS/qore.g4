@@ -13,6 +13,7 @@ import {
   serverTimestamp,
   updateDoc,
 } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import { getScopedDocs, scopedQuery } from '@/lib/firestore-helpers';
@@ -381,16 +382,16 @@ export default function LojistikSiparisView() {
         // applied client-side so no composite index is required.
         const queryPromises: Array<Promise<FirebaseFirestore.QuerySnapshot> | null> = [];
         queryPromises.push(
-          getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('hedefKurumId', '==', hospital.id))) as any
+          getDocsResilient(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('hedefKurumId', '==', hospital.id))) as any
         );
         if (hospital.name) {
           queryPromises.push(
-            getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('hedefKurum', '==', hospital.name))) as any
+            getDocsResilient(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('hedefKurum', '==', hospital.name))) as any
           );
         }
         if (hospital.ad && hospital.ad !== hospital.name) {
           queryPromises.push(
-            getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('hedefKurum', '==', hospital.ad))) as any
+            getDocsResilient(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('hedefKurum', '==', hospital.ad))) as any
           );
         }
         const snaps = await Promise.all(queryPromises as any[]);
@@ -429,7 +430,7 @@ export default function LojistikSiparisView() {
     }
     (async () => {
       try {
-        const rulesSnap = await getDocs(collection(db, 'hospitals', selectedOrder.labId!, 'minMaxRules'));
+        const rulesSnap = await getDocsResilient(collection(db, 'hospitals', selectedOrder.labId!, 'minMaxRules'));
         const next = new Map<string, { max: number; maxGun?: number }>();
         rulesSnap.docs.forEach((d) => {
           const data = d.data() as { stokKodu?: string; max?: number; maxGun?: number };

@@ -12,6 +12,7 @@ import { useIconMappings, getIconSrc } from '@/hooks/useIconMappings';
 import Link from 'next/link';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, orderBy, query } from 'firebase/firestore';
+import { getDocsResilient } from '@/lib/firestore-network-recovery';
 
 const PUBLIC_IMAGES = [
   '234724.png', '235016.png', '236209.png', '236609.png',
@@ -53,7 +54,7 @@ export default function KisisellistirmePanel() {
 
   // Fetch envanter categories
   useEffect(() => {
-    getDocs(scopedQuery('assetCategories', currentCompanyId, isSuperAdmin, orderBy('name')))
+    getDocsResilient(scopedQuery('assetCategories', currentCompanyId, isSuperAdmin, orderBy('name')))
       .then(snap => {
         setEnvanterCategories(snap.docs.map(d => ({ id: d.id, name: d.data().name })));
       })
