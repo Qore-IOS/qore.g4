@@ -465,7 +465,7 @@ export default function DirektTransferPanel() {
       }
 
       // Toplu QR içindeki alt okutmalar ana okutmanın ölçümünü ezmesin.
-      const finishScanJsMeasurement = source !== 'bulk_item' ? beginScanMeasurement() : undefined;
+      if (source !== 'bulk_item') startScanMeasurement();
 
       const trimmedRaw = raw.trim();
       if (!trimmedRaw) return;
@@ -535,8 +535,6 @@ export default function DirektTransferPanel() {
       const mode: TrackingMode = (staticTrackingMode === 'qty_manual' || staticTrackingMode === 'qty_barcode')
         ? 'qty_barcode'
         : resolveEffectiveTrackingMode(resolved, matchedFormat, product as any);
-      finishScanJsMeasurement?.();
-
       if (mode === 'serial') {
         if (!seri) {
           playFeedback(true);
