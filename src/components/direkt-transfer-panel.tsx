@@ -1381,7 +1381,7 @@ export default function DirektTransferPanel() {
                 />
               </div>
             </div>
-            <LedStripGlow isReady={transferDataReady} edge="right" />
+            <LedStripGlow isReady={transferDataReady} corner="bottom-right" />
             </div>
 
             {/* ─── Add Methods Card ─── */}

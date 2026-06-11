@@ -2112,7 +2112,7 @@ export default function AnaPanel(props: AnaPanelProps) {
             </div>
           </div>
         </div>
-        <LedStripGlow isReady={!isMasterDataLoading} edge="bottom" />
+        <LedStripGlow isReady={!isMasterDataLoading} corner="top-right" />
         </div>
 
         <div className="cihaz-card-strong px-4 py-3 sm:px-5 sm:py-4 min-h-[116px]">
