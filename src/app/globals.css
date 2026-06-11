@@ -6481,65 +6481,47 @@ html.dark body.mg-edge-body {
 }
 
 /* ── Ambient LED Strip Glow ───────────────────────────────────────────────── */
+/*
+ * Each "strip" is a soft blurred blob centred on a card edge.
+ * The card's opaque background hides the inner half; only the outer half
+ * is visible as diffuse light on the surrounding surface — like a real
+ * LED strip tucked behind the card edge.
+ * Opacity-only animation runs entirely in the compositor (no layout/paint).
+ */
 
-/* Breathing animates opacity only (compositor-friendly); glow shape is a
-   constant box-shadow + blur so the strip reads as soft spill, not a line. */
 @keyframes led-breathe {
-  0%, 100% { opacity: 0.22; }
-  50%      { opacity: 0.65; }
+  0%, 100% { opacity: 0.30; }
+  50%       { opacity: 0.82; }
 }
-
 @keyframes led-fade-out {
-  from { opacity: 0.5; }
-  to   { opacity: 0; }
+  from { opacity: 0.60; }
+  to   { opacity: 0;    }
 }
-
 @keyframes led-green-in {
-  from { opacity: 0; }
-  to   { opacity: 0.55; }
+  from { opacity: 0;    }
+  to   { opacity: 0.72; }
 }
 
-.led-glow-amber,
-.led-glow-amber-off {
-  background-color: rgba(251, 191, 36, 0.9);
-  box-shadow:
-    0 0 12px 4px rgba(251, 191, 36, 0.45),
-    0 0 32px 9px rgba(251, 191, 36, 0.18);
-  filter: blur(3px);
+.led-blob-amber,
+.led-blob-amber-out {
+  background: rgba(251, 191, 36, 1);
+  filter: blur(18px);
+  border-radius: 9999px;
 }
-
-.led-glow-amber {
+.led-blob-amber {
   animation: led-breathe 3.6s ease-in-out infinite;
 }
-
-/* One-shot fade — the infinite breathe is replaced, so its keyframe opacity
-   can no longer override the resting state. Finished animations cost nothing. */
-.led-glow-amber-off {
+/* One-shot replaces the infinite breathe so its keyframe opacity
+   can no longer override what we want — element just fades and stops. */
+.led-blob-amber-out {
   animation: led-fade-out 0.7s ease-out forwards;
 }
-
-.led-glow-green {
-  background-color: rgba(34, 197, 94, 0.85);
-  box-shadow:
-    0 0 10px 3px rgba(34, 197, 94, 0.40),
-    0 0 26px 7px rgba(34, 197, 94, 0.15);
-  filter: blur(3px);
+.led-blob-green {
+  background: rgba(34, 197, 94, 1);
+  filter: blur(18px);
+  border-radius: 9999px;
   opacity: 0;
-  /* Slight delay lets amber fade first; `forwards` keeps it static afterwards. */
+  /* Short delay lets the amber fade first before green appears. */
   animation: led-green-in 0.9s ease-out 0.35s forwards;
-}
-
-/* Far ends of each strip melt away so the L-shaped light has no hard stops. */
-.led-mask-fade-top {
-  -webkit-mask-image: linear-gradient(to top, black 65%, transparent 100%);
-  mask-image: linear-gradient(to top, black 65%, transparent 100%);
-}
-.led-mask-fade-bottom {
-  -webkit-mask-image: linear-gradient(to bottom, black 65%, transparent 100%);
-  mask-image: linear-gradient(to bottom, black 65%, transparent 100%);
-}
-.led-mask-fade-left {
-  -webkit-mask-image: linear-gradient(to left, black 65%, transparent 100%);
-  mask-image: linear-gradient(to left, black 65%, transparent 100%);
 }
 
