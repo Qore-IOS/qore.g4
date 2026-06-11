@@ -1,13 +1,13 @@
 'use client';
 // Cihaz Üstü Reaktif Durumu (Reagent Status) TXT/CSV ayrıştırıcı.
-// Referans uygulamadan (batuhanue/reagent · src/lib/txt/parse_reagent_txt.ts) port edildi.
+// Sabit genişlikli cihaz çıktısı desteklenir: sütunlar başlık tokenlarının
+// karakter konumlarından çıkarılır, TESTS hücresi komşu sütunlarla (LOT, SEQ,
+// EXP.DATE...) sınırlandığı için yalnızca kullanılabilir test sayısı okunur.
+// Eski "Test ... Available Tests ... Type" düzeni de aynı mantıkla çalışır.
 import type { ReagentRow } from './parse-reagent';
+import { buildColumns, expandTabs, readCells, tokenize, type FixedCol } from './fixed-width';
 
-type HeaderRanges = {
-  test?: [number, number];
-  type?: [number, number];
-  tests?: [number, number]; // "Available Tests"
-};
+type Field = 'test' | 'type' | 'tests';
 
 const TRIM = (s: string) => (s ?? '').trim().replace(/^\uFEFF/, '');
 const toInt = (s: string) => {
@@ -17,13 +17,17 @@ const toInt = (s: string) => {
   return Number.isFinite(n) ? n : 0;
 };
 const norm = (s: string) =>
-  TRIM(s)
-    .toLowerCase()
-    .replaceAll('\t', ' ')
-    .replaceAll('.', '')
-    .replaceAll(',', '')
-    .replaceAll(':', '')
-    .replace(/\s+/g, ' ');
+  TRIM(s).toLowerCase().replace(/[.,:*]/g, ' ').replace(/\s+/g, ' ').trim();
+
+// "Available" ve "Tests" tokenlarının ikisi de tests alanına eşlenir; böylece
+// eski biçimdeki iki kelimelik "Available Tests" başlığı tek sütun gibi davranır.
+function fieldOf(token: string): Field | null {
+  const k = norm(token);
+  if (k === 'test') return 'test';
+  if (k === 'type') return 'type';
+  if (k === 'tests' || k === 'available') return 'tests';
+  return null;
+}
 
 function shouldSkipLine(line: string): boolean {
   const l = norm(line);
@@ -32,52 +36,36 @@ function shouldSkipLine(line: string): boolean {
     l.includes('reagent status') ||
     l.startsWith('module ') ||
     l.includes('including reagent manager') ||
+    l.includes('reagent manager') ||
+    l.startsWith('system name') ||
+    l.startsWith('inventory') ||
     /^page\s+\d+/i.test(l) ||
-    /^[-]{3,}$/.test(line.replace(/\s/g, '')) ||
+    /^[-=]{3,}$/.test(line.replace(/\s/g, '')) ||
     l === 'total' ||
     l.startsWith('total ')
   );
 }
 
-function indexOfWord(lc: string, word: string): number {
-  for (let i = 0; i <= lc.length - word.length; i++) {
-    if (lc.slice(i, i + word.length) !== word) continue;
-    const pre = i === 0 ? ' ' : lc[i - 1];
-    const post = i + word.length >= lc.length ? ' ' : lc[i + word.length];
-    if (!/[a-z]/.test(pre) && !/[a-z]/.test(post)) return i;
-  }
-  return -1;
+// mL hacimli sıvı/temizleyici satırları test sayısı değildir
+function isVolumeCell(s: string): boolean {
+  return /ml$/i.test(s.replace(/[\s*]+/g, ''));
 }
 
-function makeHeaderRanges(headerLine: string): HeaderRanges | null {
-  const lc = headerLine.toLowerCase();
-  const starts: { key: keyof HeaderRanges; x: number }[] = [];
-  const posTest = indexOfWord(lc, 'test');
-  const posType = indexOfWord(lc, 'type');
-  const posTests = indexOfWord(lc, 'tests');
-
-  if (posTest >= 0) starts.push({ key: 'test', x: posTest });
-  if (posType >= 0) starts.push({ key: 'type', x: posType });
-  if (posTests >= 0) starts.push({ key: 'tests', x: posTests });
-
-  if (!starts.find((s) => s.key === 'test') || !starts.find((s) => s.key === 'tests')) {
-    return null;
-  }
-
-  starts.sort((a, b) => a.x - b.x);
-  const ranges: HeaderRanges = {};
-  for (let i = 0; i < starts.length; i++) {
-    const cur = starts[i];
-    const next = starts[i + 1];
-    const L = cur.x;
-    const R = next ? Math.floor((cur.x + next.x) / 2) : 10000;
-    (ranges as any)[cur.key] = [L, R] as [number, number];
-  }
-  return ranges;
+// ASSAY (immüno) ve R1/R1-R2/R1-R3 (kimya kiti) tipleri gerçek testtir;
+// Dil/D1/D2/IS/DIL/CellCln vb. sistem sıvıları elenir.
+function isTestType(typeTxt: string): boolean {
+  const t = norm(typeTxt);
+  return t === 'assay' || /^r1\b/.test(t) || /^r1-/.test(t);
 }
 
-const sliceField = (line: string, rg?: [number, number]) =>
-  rg ? line.slice(rg[0], Math.min(rg[1], line.length)).trim() : '';
+function sanitizeTestName(name: string): string {
+  let t = name.trim().replace(/\s+/g, ' ');
+  for (const b of ['expired', 'yellow']) {
+    t = t.replace(new RegExp(`\\s+${b}$`, 'i'), '');
+    t = t.replace(new RegExp(`^${b}\\s+`, 'i'), '');
+  }
+  return t;
+}
 
 export async function parseReagentTxtFiles(files: File[]): Promise<ReagentRow[]> {
   const out: ReagentRow[] = [];
@@ -87,35 +75,42 @@ export async function parseReagentTxtFiles(files: File[]): Promise<ReagentRow[]>
     const lines = text.split(/\r?\n/);
     if (!lines.length) continue;
 
-    let header: HeaderRanges | null = null;
+    let cols: FixedCol<Field>[] | null = null;
     let lastTest = '';
-    const seen = new Set<string>();
+    const seen = new Set<string>(); // dosya içinde (test|adet) tekrarını önle
 
-    for (let i = 0; i < lines.length; i++) {
-      const raw = TRIM(lines[i]);
-      if (!raw) continue;
+    for (const rawLine of lines) {
+      const raw = rawLine.replace(/\s+$/, '');
+      const line = TRIM(raw);
+      if (!line) continue;
 
-      if (!header && i < 50 && norm(raw).includes('test') && norm(raw).includes('tests')) {
-        const r = makeHeaderRanges(raw);
-        if (r) {
-          header = r;
+      // Olası başlık: TEST ve TESTS/AVAILABLE sütunları birlikte bulunmalı
+      const l = norm(line);
+      if (l.includes('test') && (l.includes('tests') || l.includes('available'))) {
+        const toks = tokenize(expandTabs(raw));
+        const built = buildColumns<Field>(toks, fieldOf);
+        const fields = built.map((c) => c.field);
+        if (fields.includes('test') && fields.includes('tests')) {
+          cols = built;
           lastTest = '';
           continue;
         }
       }
 
-      if (!header) continue;
-      if (shouldSkipLine(raw)) continue;
+      if (!cols) continue; // başlık görülmeden veri okuma
+      if (shouldSkipLine(line)) continue;
 
-      const testTxt = sliceField(raw, header.test);
-      const typeTxt = sliceField(raw, header.type);
-      const testsTxt = sliceField(raw, header.tests);
+      const cells = readCells(expandTabs(raw), cols);
+      const testTxt = TRIM(cells.test ?? '');
+      const typeTxt = TRIM(cells.type ?? '');
+      const testsTxt = TRIM(cells.tests ?? '');
 
-      const test = (testTxt || lastTest).trim();
+      const test = sanitizeTestName(testTxt || lastTest);
       if (!test) continue;
       lastTest = test;
 
-      if (typeTxt && norm(typeTxt) !== 'assay') continue;
+      if (typeTxt && !isTestType(typeTxt)) continue;
+      if (isVolumeCell(testsTxt)) continue;
 
       const available = toInt(testsTxt);
       if (available <= 0) continue;

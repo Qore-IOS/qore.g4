@@ -1,17 +1,15 @@
 'use client';
-// Kümülatif Operasyon Listesi TXT/CSV ayrıştırıcı.
-// Referans uygulamadan (batuhanue/reagent · src/lib/txt/parse_txt.ts) port edildi.
+// Kümülatif Operasyon Listesi TXT/CSV ayrıştırıcı. İki biçim desteklenir:
+//  1) Ayraçlı dışa aktarımlar (tab/;/,/|) — hücreler indeksle okunur.
+//  2) Sabit genişlikli (boşluk hizalı) cihaz çıktıları — sütunlar başlık
+//     tokenlarının karakter konumlarından çıkarılır; tek boşlukla ayrılmış
+//     başlıklar (ör. "CODE ROUTINE") ve sağa hizalı sayılar doğru okunur.
 import type { CumulativeRow } from './parse-cumulative';
+import { buildColumns, expandTabs, readCells, tokenize, type FixedCol } from './fixed-width';
 
-type HeaderMap = {
-  test: number;
-  code: number;
-  routine: number;
-  calib: number;
-  control: number;
-  rerun: number;
-  total: number;
-};
+type Field = 'test' | 'code' | 'routine' | 'calib' | 'control' | 'rerun' | 'stat' | 'total';
+
+type DelimHeader = Partial<Record<Field, number>>;
 
 const TRIM = (s: string) => (s ?? '').trim().replace(/^\uFEFF/, '');
 const toInt = (s: string) => {
@@ -20,15 +18,36 @@ const toInt = (s: string) => {
   const n = Number(t);
   return Number.isFinite(n) ? n : 0;
 };
+// Noktalama karakterlerini boşluğa çevirir: "4.NO. OF SAMPLE" → "4 no of sample",
+// "CALIB." → "calib" gibi varyasyonlar tek biçime iner.
 const norm = (s: string) =>
-  TRIM(s)
-    .toLowerCase()
-    .replaceAll('.', '')
-    .replaceAll(',', '')
-    .replaceAll(':', '')
-    .replace(/\s+/g, ' ');
+  TRIM(s).toLowerCase().replace(/[.,:*]/g, ' ').replace(/\s+/g, ' ').trim();
 
-function shouldSkipLineRaw(line: string): boolean {
+const FIELD_ALIASES: Record<Field, string[]> = {
+  test: ['test', 'analit', 'analyte', 'assay', 'parametre'],
+  code: ['code', 'kod'],
+  routine: ['routine', 'rutin'],
+  calib: ['calib', 'calibration', 'kalib', 'kalibrasyon'],
+  control: ['control', 'kontrol', 'qc'],
+  rerun: ['rerun', 'repeat', 'tekrar'],
+  stat: ['stat'],
+  total: ['total', 'toplam'],
+};
+
+function fieldOf(token: string): Field | null {
+  const k = norm(token);
+  for (const [field, aliases] of Object.entries(FIELD_ALIASES) as [Field, string[]][]) {
+    if (aliases.some((a) => k === a || k.startsWith(a + ' '))) return field;
+  }
+  return null;
+}
+
+function hasTestAndMetric(fields: (Field | null)[]): boolean {
+  const metrics: Field[] = ['routine', 'calib', 'control', 'rerun', 'total'];
+  return fields.includes('test') && metrics.some((m) => fields.includes(m));
+}
+
+function shouldSkipLine(line: string): boolean {
   const l = norm(line);
   return (
     !l ||
@@ -36,111 +55,146 @@ function shouldSkipLineRaw(line: string): boolean {
     l.includes('cumulative operation') ||
     l.includes('power on time') ||
     l.includes('operation time') ||
-    l.includes('no of sample') ||
-    l.includes('no of detection') ||
+    l.includes('test count') ||
     l.startsWith('system name') ||
     l.startsWith('total') ||
-    /^[-]{3,}$/.test(line.replace(/\s/g, '')) ||
+    /^\d+\s*operation\b/.test(l) ||
+    /^[-=]{3,}$/.test(line.replace(/\s/g, '')) ||
     /^page\s+\d+/i.test(l)
   );
 }
 
-/** Ayıraç: \t, ;, ,, | yoksa 2+ boşluk */
-function detectSep(line: string): RegExp {
-  if (line.includes('\t')) return /\t/g;
-  const cands = [';', ',', '|'];
-  let best = { ch: '', cnt: 0 };
-  for (const ch of cands) {
-    const c = (line.match(new RegExp(`\\${ch}`, 'g')) || []).length;
-    if (c > best.cnt) best = { ch, cnt: c };
-  }
-  return best.cnt > 0 ? new RegExp(`\\${best.ch}`) : /\s{2,}/g;
+// "4.NO. OF SAMPLE" / "5.NO. OF DETECTION CH." bölümleri test tablosu değildir;
+// bu başlık görülünce yeni bir TEST başlığı gelene dek ayrıştırma kapatılır.
+function isSectionBreak(line: string): boolean {
+  const l = norm(line);
+  return l.includes('no of sample') || l.includes('no of detection');
 }
 
-function split(line: string, sep: RegExp): string[] {
-  if (String(sep) === String(/\s{2,}/g)) {
-    return line.trim().split(/\s{2,}/).map(TRIM);
-  }
-  return line.split(sep).map(TRIM);
+// Rack/modül kısa kodları (C1, A1-A, A2-1 gibi) gerçek test değildir
+function isRackOrModuleTest(testTxt: string, codeTxt: string): boolean {
+  const t = testTxt.trim();
+  if (/\d/.test(codeTxt)) return false;
+  if (/^[A-H]\d?-[0-9A-Z]{1,2}$/i.test(t) && t.length <= 5) return true;
+  if (/^[A-H]\d$/i.test(t)) return true;
+  return false;
 }
 
-/** Başlığı isim tabanlı, sıra bağımsız indeksle */
-function mapHeader(cells: string[]): HeaderMap | null {
-  const idx: any = { test: -1, code: -1, routine: -1, calib: -1, control: -1, rerun: -1, total: -1 };
-  const want: Record<keyof HeaderMap, string[]> = {
-    test: ['test', 'analit', 'analyte', 'assay', 'parametre'],
-    code: ['code', 'kod'],
-    routine: ['routine', 'rutin'],
-    calib: ['calib', 'kalib', 'calibration', 'kalibrasyon', 'calib.'],
-    control: ['control', 'kontrol', 'qc'],
-    rerun: ['rerun', 'repeat', 'tekrar'],
-    total: ['total', 'toplam'],
-  };
-  const hit = (k: string, keys: string[]) => keys.some((n) => k === n || k.startsWith(n + ' '));
+// Ayraçlı biçim: başlıkta belirgin ayraç var mı?
+function detectDelim(line: string): RegExp | null {
+  if (line.includes('\t')) return /\t/;
+  for (const ch of [';', '|', ',']) {
+    const cnt = (line.match(new RegExp(`\\${ch}`, 'g')) || []).length;
+    if (cnt >= 3) return new RegExp(`\\${ch}`);
+  }
+  return null;
+}
+
+function mapDelimHeader(cells: string[]): DelimHeader | null {
+  const idx: DelimHeader = {};
   cells.forEach((c, i) => {
-    const k = norm(c);
-    if (idx.test === -1 && hit(k, want.test)) idx.test = i;
-    else if (idx.code === -1 && hit(k, want.code)) idx.code = i;
-    else if (idx.routine === -1 && hit(k, want.routine)) idx.routine = i;
-    else if (idx.calib === -1 && hit(k, want.calib)) idx.calib = i;
-    else if (idx.control === -1 && hit(k, want.control)) idx.control = i;
-    else if (idx.rerun === -1 && hit(k, want.rerun)) idx.rerun = i;
-    else if (idx.total === -1 && hit(k, want.total)) idx.total = i;
+    const f = fieldOf(c);
+    if (f && idx[f] === undefined) idx[f] = i;
   });
-  const metricFound = [idx.routine, idx.calib, idx.control, idx.rerun, idx.total].some((i) => i >= 0);
-  if (idx.test === -1 || !metricFound) return null;
-  return idx as HeaderMap;
+  if (!hasTestAndMetric(Object.keys(idx) as Field[])) return null;
+  return idx;
 }
 
-const cellNum = (cells: string[], i: number) => (i >= 0 && i < cells.length ? toInt(cells[i]) : 0);
+const delimCell = (cells: string[], i?: number) => (i !== undefined && i < cells.length ? TRIM(cells[i]) : '');
 
 export async function parseCumulativeTxtFiles(files: File[]): Promise<CumulativeRow[]> {
   const out: CumulativeRow[] = [];
+
   for (const f of files) {
     const text = (await f.text()).replace(/^\uFEFF/, '');
     const lines = text.split(/\r?\n/);
     if (!lines.length) continue;
 
-    let sep: RegExp | null = null;
-    let header: HeaderMap | null = null;
+    let delimSep: RegExp | null = null;
+    let delimHeader: DelimHeader | null = null;
+    let fixedCols: FixedCol<Field>[] | null = null;
     const seenRowKeys = new Set<string>(); // aynı TXT içinde birebir tekrarları önle
 
-    for (let i = 0; i < lines.length; i++) {
-      const raw = lines[i];
+    for (const rawLine of lines) {
+      const raw = rawLine.replace(/\s+$/, '');
       const line = TRIM(raw);
       if (!line) continue;
 
-      // Olası başlık satırı
+      // Olası başlık satırı: TEST + en az bir metrik sütunu eşleşmeli
       if (norm(line).includes('test')) {
-        const det = detectSep(line);
-        const cells = split(line, det);
-        const mapped = mapHeader(cells);
-        if (mapped) {
-          sep = det;
-          header = mapped;
+        const sep = detectDelim(line);
+        if (sep) {
+          const mapped = mapDelimHeader(line.split(sep).map(TRIM));
+          if (mapped) {
+            delimSep = sep;
+            delimHeader = mapped;
+            fixedCols = null;
+            continue;
+          }
+        }
+        const toks = tokenize(expandTabs(raw));
+        const cols = buildColumns<Field>(toks, fieldOf);
+        if (hasTestAndMetric(cols.map((c) => c.field))) {
+          fixedCols = cols;
+          delimSep = null;
+          delimHeader = null;
           continue;
         }
       }
 
-      if (shouldSkipLineRaw(line)) continue;
-      if (!header || !sep) continue; // başlık görülmeden veri okuma
+      if (isSectionBreak(line)) {
+        delimSep = null;
+        delimHeader = null;
+        fixedCols = null;
+        continue;
+      }
 
-      const cells = split(line, sep);
-      const test = TRIM(cells[header.test] ?? '');
-      if (!test || test.toLowerCase() === 'test') continue;
+      if (shouldSkipLine(line)) continue;
 
-      const routine = cellNum(cells, header.routine);
-      const calib = cellNum(cells, header.calib);
-      const control = cellNum(cells, header.control);
-      const rerun = cellNum(cells, header.rerun);
-      const total = routine + rerun + calib + control;
+      let cells: Partial<Record<Field, string>> | null = null;
+      if (delimHeader && delimSep) {
+        const parts = line.split(delimSep).map(TRIM);
+        cells = {
+          test: delimCell(parts, delimHeader.test),
+          code: delimCell(parts, delimHeader.code),
+          routine: delimCell(parts, delimHeader.routine),
+          calib: delimCell(parts, delimHeader.calib),
+          control: delimCell(parts, delimHeader.control),
+          rerun: delimCell(parts, delimHeader.rerun),
+          stat: delimCell(parts, delimHeader.stat),
+          total: delimCell(parts, delimHeader.total),
+        };
+      } else if (fixedCols) {
+        cells = readCells(expandTabs(raw), fixedCols);
+      }
+      if (!cells) continue; // başlık görülmeden veri okuma
 
-      const key = `${test}|${routine}|${rerun}|${calib}|${control}|${total}`;
+      const test = TRIM(cells.test ?? '');
+      if (!test || norm(test) === 'test') continue;
+      if (isRackOrModuleTest(test, cells.code ?? '')) continue;
+
+      // Metrik sütunlarının hiçbirinde rakam yoksa veri satırı değildir
+      const metricTexts = [cells.routine, cells.calib, cells.control, cells.rerun, cells.stat, cells.total];
+      if (!metricTexts.some((t) => t && /\d/.test(t))) continue;
+
+      const routine = toInt(cells.routine ?? '');
+      const calib = toInt(cells.calib ?? '');
+      const control = toInt(cells.control ?? '');
+      const rerun = toInt(cells.rerun ?? '');
+      const stat = toInt(cells.stat ?? '');
+      let total = toInt(cells.total ?? '');
+      // Dosyadaki TOTAL boş/0 ise PDF motoruyla aynı güvenli geri dönüş
+      if (total === 0 && (routine || rerun || calib || control || stat)) {
+        total = routine + rerun + calib + control + stat;
+      }
+
+      const key = `${test}|${routine}|${rerun}|${calib}|${control}|${stat}|${total}`;
       if (seenRowKeys.has(key)) continue;
       seenRowKeys.add(key);
 
       out.push({ test, routine, rerun, calib, control, total });
     }
   }
+
   return out;
 }
