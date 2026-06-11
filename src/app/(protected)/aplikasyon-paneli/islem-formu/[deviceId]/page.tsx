@@ -1185,6 +1185,12 @@ export default function AplikasyonIslemFormuPage() {
     });
   };
 
+  const toggleOperation = (op: OperationType) => {
+    setSelectedOperations(prev =>
+      prev.includes(op) ? prev.filter(o => o !== op) : [...prev, op]
+    );
+  };
+
   const addSelectedOperations = () => {
     const now = new Date();
     const newItems: ActionItem[] = selectedOperations.map(op => ({
