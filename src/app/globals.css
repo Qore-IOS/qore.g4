@@ -6480,3 +6480,45 @@ html.dark body.mg-edge-body {
   }
 }
 
+/* ── Ambient LED Strip Glow ───────────────────────────────────────────────── */
+
+@keyframes led-breathe-amber {
+  0%, 100% {
+    opacity: 0.22;
+    box-shadow:
+      0 0 6px  2px rgba(251, 191, 36, 0.28),
+      0 0 20px 5px rgba(251, 191, 36, 0.10);
+  }
+  50% {
+    opacity: 0.60;
+    box-shadow:
+      0 0 14px 5px rgba(251, 191, 36, 0.52),
+      0 0 38px 10px rgba(251, 191, 36, 0.20);
+  }
+}
+
+@keyframes led-appear-green {
+  from {
+    opacity: 0;
+    box-shadow:
+      0 0 4px  1px rgba(34, 197, 94, 0.08),
+      0 0 12px 3px rgba(34, 197, 94, 0.04);
+  }
+  to {
+    opacity: 0.52;
+    box-shadow:
+      0 0 10px 3px rgba(34, 197, 94, 0.42),
+      0 0 28px 7px rgba(34, 197, 94, 0.16);
+  }
+}
+
+.led-glow-amber {
+  background-color: rgba(251, 191, 36, 0.85);
+  animation: led-breathe-amber 3.6s ease-in-out infinite;
+}
+
+.led-glow-green {
+  background-color: rgba(34, 197, 94, 0.80);
+  animation: led-appear-green 0.85s ease-out forwards;
+}
+
