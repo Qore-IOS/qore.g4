@@ -464,66 +464,8 @@ export default function DirektTransferPanel() {
         return;
       }
 
-      // Measure only top-level reads. Child serials unpacked from a bulk QR would
-      // otherwise overwrite the user-visible duration several times.
-      if (source !== 'bulk_item' && typeof performance !== 'undefined') {
-        const scanStartedAt = performance.now();
-        queueMicrotask(() => setLastScanJsMs(performance.now() - scanStartedAt));
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-          setLastScanMs(performance.now() - scanStartedAt);
-        }));
-      }
-
-      if (!transferDataReady) {
-        playFeedback(true);
-        flashScanFeedback('error', 'Ürün, barkod ve depo stok verileri henüz hazır değil.');
-        return;
-      }
-
       // Toplu QR içindeki alt okutmalar ana okutmanın ölçümünü ezmesin.
       const finishScanJsMeasurement = source !== 'bulk_item' ? beginScanMeasurement() : undefined;
-
-      if (!transferDataReady) {
-        playFeedback(true);
-        flashScanFeedback('error', 'Ürün, barkod ve depo stok verileri henüz hazır değil.');
-        return;
-      }
-
-      // Toplu QR içindeki alt okutmalar ana okutmanın ölçümünü ezmesin.
-      const finishScanJsMeasurement = source !== 'bulk_item' ? beginScanMeasurement() : undefined;
-
-      if (!transferDataReady) {
-        playFeedback(true);
-        flashScanFeedback('error', 'Ürün, barkod ve depo stok verileri henüz hazır değil.');
-        return;
-      }
-
-      // Toplu QR içindeki alt okutmalar ana okutmanın ölçümünü ezmesin.
-      if (source !== 'bulk_item') beginScanMeasurement();
-
-      if (!transferDataReady) {
-        playFeedback(true);
-        flashScanFeedback('error', 'Ürün, barkod ve depo stok verileri henüz hazır değil.');
-        return;
-      }
-
-      // Toplu QR içindeki alt okutmalar ana okutmanın ölçümünü ezmesin.
-      if (source !== 'bulk_item') beginScanMeasurement();
-
-      if (!transferDataReady) {
-        playFeedback(true);
-        flashScanFeedback('error', 'Ürün, barkod ve depo stok verileri henüz hazır değil.');
-        return;
-      }
-
-      // Toplu QR içindeki alt okutmalar ana okutmanın ölçümünü ezmesin.
-      if (source !== 'bulk_item') startScanMeasurement();
-
-      if (!transferDataReady) {
-        playFeedback(true);
-        flashScanFeedback('error', 'Ürün, barkod ve depo stok verileri henüz hazır değil.');
-        return;
-      }
 
       const trimmedRaw = raw.trim();
       if (!trimmedRaw) return;
