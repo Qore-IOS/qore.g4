@@ -8,7 +8,7 @@
 
 'use client';
 
-import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, Suspense, ChangeEvent } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, useTransition, Suspense, ChangeEvent } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import type { Depot, DepoStokItem, ProductCode, Hospital, ConsumptionRecord, ManualProductOption, TransferTemplate } from '@/lib/types';
@@ -308,6 +308,7 @@ export default function DirektTransferPanel() {
 
   // Ölçülebilir uygulama maliyeti: senkron JS ve React'in acil UI commit süresi.
   const { startScanMeasurement, controller: scanPerformanceController } = useScanPerformance();
+  const [, startTransition] = useTransition();
 
   // Last scanned product tracking for UI feedback
   const [lastScannedProduct, setLastScannedProduct] = useState<{
@@ -553,7 +554,7 @@ export default function DirektTransferPanel() {
           flashScanFeedback('error', `Seri No ${seri} için yeterli stok yok.`);
           return;
         }
-        addDirectTransferItem(items[0]);
+        startTransition(() => addDirectTransferItem(items[0]));
         setLastScannedProduct({ stokKodu, stokAdi, lotNumarasi: lot, miad, seriNumarasi: seri });
         flashScanFeedback('success', `${stokAdi} eklendi.`);
         playFeedback();
@@ -579,10 +580,10 @@ export default function DirektTransferPanel() {
           flashScanFeedback('error', `${stokKodu} (Lot: ${lot}) için en fazla ${lotAvailable} gönderilebilir.`);
           return;
         }
-        upsertGroupedRow(
+        startTransition(() => upsertGroupedRow(
           { stokKodu, stokAdi, lotNumarasi: lot, miad },
           1
-        );
+        ));
         setLastScannedProduct({ stokKodu, stokAdi, lotNumarasi: lot, miad });
         flashScanFeedback('success', `${stokAdi} eklendi.`);
         playFeedback();
@@ -602,10 +603,10 @@ export default function DirektTransferPanel() {
         flashScanFeedback('error', `${stokKodu} için en fazla ${codeAvailable} gönderilebilir.`);
         return;
       }
-      upsertGroupedRow(
+      startTransition(() => upsertGroupedRow(
         { stokKodu, stokAdi },
         1
-      );
+      ));
       setLastScannedProduct({ stokKodu, stokAdi });
       flashScanFeedback('success', `${stokAdi} eklendi.`);
       playFeedback();
