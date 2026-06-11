@@ -562,7 +562,7 @@ export default function AnaPanel(props: AnaPanelProps) {
 
   const [scannedItems, setScannedItems] = useState<ScanRow[]>([]);
   // Ölçülebilir uygulama maliyeti: senkron JS ve React'in acil UI commit süresi.
-  const { beginScanMeasurement, controller: scanPerformanceController } = useScanPerformance();
+  const { startScanMeasurement, controller: scanPerformanceController } = useScanPerformance();
 
   // A scan must stay on the urgent input path. Grouping and sorting thousands of
   // rows synchronously here used to block the next HID/keyboard event for a few
@@ -788,7 +788,7 @@ export default function AnaPanel(props: AnaPanelProps) {
   const processScan = useCallback(async (barcodeData: string, source: 'barcode' | 'bulk_item' = 'barcode') => {
     const scanCorrelationId = createCorrelationId();
     // Toplu QR içindeki alt okutmalar ana okutmanın ölçümünü ezmesin.
-    if (source === 'barcode') beginScanMeasurement();
+    if (source === 'barcode') startScanMeasurement();
     const trimmedData = (barcodeData || '').trim();
     if (!trimmedData) {
       malKabulLogger.warn('Scan ignored: empty payload', { source, isBulkScanMode }, { correlationId: scanCorrelationId });
@@ -970,7 +970,7 @@ export default function AnaPanel(props: AnaPanelProps) {
         setTimeout(() => setScanStatus('idle'), 3000);
       }
     }
-  }, [flashScanFeedback, productCodes, barcodeFormats, existingDepotSerials, productTracking, isBulkScanMode, beginScanMeasurement]);
+  }, [flashScanFeedback, productCodes, barcodeFormats, existingDepotSerials, productTracking, isBulkScanMode, startScanMeasurement]);
 
   // Direkt transfer paneliyle aynı davranış: tarayıcı yalnızca modal/kamera/manuel
   // giriş açıkken devre dışı. Eskiden buradaki `!isProcessingScan` koşulu HER

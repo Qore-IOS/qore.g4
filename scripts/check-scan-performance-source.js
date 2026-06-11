@@ -26,10 +26,10 @@ for (const relativePath of panelFiles) {
     }
   }
 
-  const measurementStarts = source.match(/\bbeginScanMeasurement\(\)/g) ?? [];
+  const measurementStarts = source.match(/\bstartScanMeasurement\(\)/g) ?? [];
   if (measurementStarts.length !== 1) {
     errors.push(
-      `${relativePath}: expected exactly one beginScanMeasurement() call, found ${measurementStarts.length}`,
+      `${relativePath}: expected exactly one startScanMeasurement() call, found ${measurementStarts.length}`,
     );
   }
 }

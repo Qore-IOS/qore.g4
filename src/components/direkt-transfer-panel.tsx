@@ -307,7 +307,7 @@ export default function DirektTransferPanel() {
   const [fefoViolations, setFefoViolations] = useState<FefoViolation[]>([]);
 
   // Ölçülebilir uygulama maliyeti: senkron JS ve React'in acil UI commit süresi.
-  const { beginScanMeasurement, controller: scanPerformanceController } = useScanPerformance();
+  const { startScanMeasurement, controller: scanPerformanceController } = useScanPerformance();
 
   // Last scanned product tracking for UI feedback
   const [lastScannedProduct, setLastScannedProduct] = useState<{
@@ -516,6 +516,15 @@ export default function DirektTransferPanel() {
         return;
       }
 
+      // Toplu QR içindeki alt okutmalar ana okutmanın ölçümünü ezmesin.
+      if (source !== 'bulk_item') startScanMeasurement();
+
+      if (!transferDataReady) {
+        playFeedback(true);
+        flashScanFeedback('error', 'Ürün, barkod ve depo stok verileri henüz hazır değil.');
+        return;
+      }
+
       const trimmedRaw = raw.trim();
       if (!trimmedRaw) return;
 
@@ -661,7 +670,7 @@ export default function DirektTransferPanel() {
       flashScanFeedback('success', `${stokAdi} eklendi.`);
       playFeedback();
     },
-    [selectedFormatId, barcodeFormats, products, toast, addDirectTransferItem, upsertGroupedRow, countStockBySerial, countStockByLot, countStockByCode, sumStockAdet, alreadyQueued, resolveProductFromParsed, parseAnyBarcode, parseAndResolveBarcode, directTransferItems, isBulkScanMode, flashScanFeedback, transferDataReady, beginScanMeasurement]
+    [selectedFormatId, barcodeFormats, products, toast, addDirectTransferItem, upsertGroupedRow, countStockBySerial, countStockByLot, countStockByCode, sumStockAdet, alreadyQueued, resolveProductFromParsed, parseAnyBarcode, parseAndResolveBarcode, directTransferItems, isBulkScanMode, flashScanFeedback, transferDataReady, startScanMeasurement]
   );
   
   useHidScanner({

@@ -84,12 +84,12 @@ export function useScanPerformance() {
   if (!controllerRef.current) controllerRef.current = createScanPerformanceController();
   const controller = controllerRef.current;
 
-  const beginScanMeasurement = useCallback(() => {
+  const startScanMeasurement = useCallback(() => {
     controller.begin();
   }, [controller]);
 
   return {
-    beginScanMeasurement,
+    startScanMeasurement,
     controller,
   };
 }
