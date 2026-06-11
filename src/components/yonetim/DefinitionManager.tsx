@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Plus, Trash2, Loader2, Sparkles } from 'lucide-react';
 import { collection, getDocs, addDoc, deleteDoc, doc, updateDoc } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
@@ -46,7 +45,7 @@ const DefinitionManager: React.FC<DefinitionManagerProps & { refreshKey?: number
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const snap = await getDocsResilient(scopedQuery(type, currentCompanyId, isSuperAdmin));
+      const snap = await getDocs(scopedQuery(type, currentCompanyId, isSuperAdmin));
       setItems(
         snap.docs
           .map(d => ({

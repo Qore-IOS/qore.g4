@@ -7,7 +7,7 @@
  */
 
 'use client';
-import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, Suspense } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter, useParams } from 'next/navigation';
 import type { Laboratory, DepoStokItem, ConsumptionRecord, Device, ProductCode, BarcodeFormat, LabPool, DeviceGroup, TrashBinRecord, FaultDefinition } from '@/lib/types';
@@ -21,7 +21,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
 import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, addDoc, updateDoc, orderBy, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
-import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
@@ -413,7 +412,7 @@ export default function UrunKullanimPanel() {
   const { data: devices = [] } = useDevices();
 
   // Use TanStack Query for barcode formats with caching
-  const { data: barcodeFormats = [], isLoading: barcodeFormatsLoading } = useBarcodeFormatsQuery();
+  const { data: barcodeFormats = [] } = useBarcodeFormatsQuery();
   const { invalidateConsumption, invalidateDepoStok } = useInvalidateQueries();
 
   // Fetch min/max rules for selected lab (for trash bin product filtering)
@@ -514,7 +513,7 @@ export default function UrunKullanimPanel() {
   useEffect(() => {
     const fetchMainUnitModels = async () => {
       try {
-        const snap = await getDocsResilient(scopedQuery('def_mainUnits', currentCompanyId, isSuperAdmin));
+        const snap = await getDocs(scopedQuery('def_mainUnits', currentCompanyId, isSuperAdmin));
         const modelMap: Record<string, string> = {};
         snap.docs.forEach((d) => {
           const data = d.data() as any;
@@ -535,7 +534,7 @@ export default function UrunKullanimPanel() {
   useEffect(() => {
     const fetchDeviceGroups = async () => {
       try {
-        const dgsnap = await getDocsResilient(scopedQuery('def_deviceGroups', currentCompanyId, isSuperAdmin));
+        const dgsnap = await getDocs(scopedQuery('def_deviceGroups', currentCompanyId, isSuperAdmin));
         setDeviceGroups(dgsnap.docs.map(d => ({id: d.id, ...d.data()} as DeviceGroup)));
         urunKullanimLogger.debug('Cihaz grupları yüklendi', { count: dgsnap.docs.length });
       } catch (e) {
@@ -550,7 +549,7 @@ export default function UrunKullanimPanel() {
   useEffect(() => {
     const fetchFaultDefinitions = async () => {
       try {
-        const snap = await getDocsResilient(scopedQuery('faultDefinitions', currentCompanyId, isSuperAdmin));
+        const snap = await getDocs(scopedQuery('faultDefinitions', currentCompanyId, isSuperAdmin));
         const definitions = snap.docs.map(d => ({
           id: d.id,
           ...d.data(),
@@ -638,17 +637,9 @@ export default function UrunKullanimPanel() {
   // Use TanStack Query for lab stock - much more efficient than full depoStok
   // Now also passes lab names to support legacy records without hedefKurumId
   // Wait for labPools to load before querying to ensure pool members are included
-  const { data: labStock = [], isLoading: labStockLoading } = useLabStock(poolMemberIds, poolMemberNames, {
+  const { data: labStock = [] } = useLabStock(poolMemberIds, poolMemberNames, {
     enabled: !labPoolsLoading && poolMemberIds.length > 0
   });
-
-  // STABİLİZASYON (P0.5 barkod readiness): formatlar, ürün kataloğu, lab
-  // havuzları ve lab stoğu yüklenmeden okutulan barkod artık "format hatası"
-  // veya "stokta yok" gibi YANLIŞ iş kuralı hatası üretmez. Okuma kuyruğa
-  // alınır; referans verileri gelir gelmez otomatik işlenir.
-  const barcodeEngineReady =
-    !isLoading && !barcodeFormatsLoading && !labPoolsLoading && !labStockLoading;
-  const pendingScansRef = useRef<Array<{ raw: string; at: number }>>([]);
 
   // Use TanStack Query for recent consumption (for duplicate check)
   const { data: tuketimKayitlari = [] } = useRecentConsumption(200);
@@ -896,7 +887,7 @@ export default function UrunKullanimPanel() {
         );
       }
 
-      const snap = await getDocsResilient(q);
+      const snap = await getDocs(q);
 
       if (snap.empty) {
         // Also check legacy records without hedefKurumId
@@ -906,7 +897,7 @@ export default function UrunKullanimPanel() {
           where('isShipped', '==', true),
           where('stokKodu', '==', stokKodu)
         );
-        const legacySnap = await getDocsResilient(legacyQuery);
+        const legacySnap = await getDocs(legacyQuery);
 
         if (legacySnap.empty) {
           return null;
@@ -955,7 +946,7 @@ export default function UrunKullanimPanel() {
         where('consumptionTimestamp', '>=', Timestamp.fromDate(fiveMinutesAgo))
       );
 
-      const snap = await getDocsResilient(q);
+      const snap = await getDocs(q);
       return !snap.empty;
     } catch (error) {
       urunKullanimLogger.error('Duplicate kontrol hatası', error, { stokKodu, seriNumarasi });
@@ -967,16 +958,6 @@ export default function UrunKullanimPanel() {
   const consumeByParsed = useCallback(async (rawInput: string) => {
     if (!selectedLabId) {
       toast({ title: 'Hata', description: 'Lütfen kullanım yapılacak laboratuvarı seçin.', variant: 'destructive' });
-      return;
-    }
-
-    // Readiness gate: referans verisi eksikken işleme — kuyruğa al.
-    if (!barcodeEngineReady) {
-      pendingScansRef.current.push({ raw: rawInput, at: Date.now() });
-      toast({
-        title: 'Veriler Hazırlanıyor',
-        description: 'Barkod kuyruğa alındı; stok ve format verileri yüklenince otomatik işlenecek.',
-      });
       return;
     }
 
@@ -1177,22 +1158,8 @@ export default function UrunKullanimPanel() {
     playFeedback(true);
     setTimeout(() => setScanStatus('idle'), 3000);
 
-  }, [selectedLabId, barcodeEngineReady, barcodeFormats, products, productTracking, labStock, toast, findBySerial, findByLot, findByRefOnly, recordConsumption, tuketimKayitlari, verifyStockInFirestore, checkRecentConsumption, invalidateDepoStok, invalidateConsumption]);
-
-  // Kuyruktaki okumalar referans verileri hazır olunca otomatik işlenir.
-  useEffect(() => {
-    if (!barcodeEngineReady || pendingScansRef.current.length === 0) return;
-    const queued = pendingScansRef.current.splice(0);
-    const fresh = queued.filter((scan) => Date.now() - scan.at < 60_000);
-    if (fresh.length === 0) return;
-    (async () => {
-      for (const scan of fresh) {
-        // eslint-disable-next-line no-await-in-loop
-        await consumeByParsed(scan.raw);
-      }
-    })();
-  }, [barcodeEngineReady, consumeByParsed]);
-
+  }, [selectedLabId, barcodeFormats, products, productTracking, labStock, toast, findBySerial, findByLot, findByRefOnly, recordConsumption, tuketimKayitlari, verifyStockInFirestore, checkRecentConsumption, invalidateDepoStok, invalidateConsumption]);
+  
   const onProcess = useCallback((barcode: string) => {
     if (isExpiryWarningModalOpen && lotReplaceTarget) {
         const parsed = parseAnyBarcode(barcode, barcodeFormats);
@@ -1261,7 +1228,7 @@ export default function UrunKullanimPanel() {
     if (selectedLab?.perifer && selectedLabId) {
       try {
         const q = scopedQuery('users', currentCompanyId, isSuperAdmin, where('primaryLaboratories', 'array-contains', selectedLabId));
-        const snap = await getDocsResilient(q);
+        const snap = await getDocs(q);
         const allResponsible = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
         const filtered = allResponsible.filter((u: any) => u.role === faultType);
         setPeripheralResponsibleUsers(filtered);
@@ -1638,7 +1605,7 @@ export default function UrunKullanimPanel() {
       const trackingMode = resolveEffectiveTrackingMode(stokKodu, productTracking);
       if (trackingMode === 'serial') {
         const snapshotRef = doc(db, 'labManualSerialSnapshots', groupKey);
-        const snapshotSnap = await getDocResilient(snapshotRef);
+        const snapshotSnap = await getDoc(snapshotRef);
         const existingSerials = snapshotSnap.exists() ? ((snapshotSnap.data().serials || []) as string[]) : [];
         const allKnownSerials = Array.from(new Set([
           ...existingSerials,
@@ -1829,9 +1796,7 @@ export default function UrunKullanimPanel() {
   }, []);
 
   const isDayTime = currentHour >= 8 && currentHour < 16;
-  // PERF (Faz 6): dayclear kaynak 6.2MB; 1600px türevi servis edilir
-  // (scripts/optimize-public-icons.mjs).
-  const timeBasedBackground = isDayTime ? '/dayclear-1600.png' : '/night%20clear.png';
+  const timeBasedBackground = isDayTime ? '/dayclear.png' : '/night%20clear.png';
 
   return (
     <div className="relative min-h-screen overflow-x-hidden">

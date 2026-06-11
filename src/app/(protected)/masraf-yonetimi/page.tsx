@@ -14,7 +14,6 @@ import { withCompanyScope } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDocs, orderBy, query, serverTimestamp, setDoc, where, onSnapshot, Timestamp } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { exportDataToExcel, readExcelData } from '@/lib/utils';
 import { format, parse } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -195,7 +194,7 @@ export default function MasrafYonetimiPanel() {
         where('month', '==', month),
         orderBy('updatedAt', 'desc')
       );
-      const snap = await getDocsResilient(q);
+      const snap = await getDocs(q);
 
       if (!snap.empty) {
         const data = snap.docs[0].data() as any;

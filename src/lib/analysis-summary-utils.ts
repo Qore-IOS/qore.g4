@@ -6,7 +6,6 @@
  */
 
 import { collection, doc, getDoc, getDocs, setDoc, query, where, writeBatch } from 'firebase/firestore';
-import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import type { StageStats, AggregatedRecord } from '@/store/lbys-data-store';
 import {
@@ -262,7 +261,7 @@ export async function saveDailySummary(summary: DailySummary): Promise<void> {
  */
 export async function loadDailySummary(date: string): Promise<DailySummary | null> {
   const docRef = doc(db, COLLECTIONS.DAILY_SUMMARY, date);
-  const docSnap = await getDocResilient(docRef);
+  const docSnap = await getDoc(docRef);
 
   if (!docSnap.exists()) {
     return null;
@@ -281,7 +280,7 @@ export async function loadDailySummaries(startDate: string, endDate: string): Pr
     where('date', '<=', endDate)
   );
 
-  const snapshot = await getDocsResilient(q);
+  const snapshot = await getDocs(q);
   const summaries: DailySummary[] = [];
 
   snapshot.forEach((doc) => {
@@ -416,7 +415,7 @@ export async function saveMonthlySummary(summary: MonthlySummary): Promise<void>
  */
 export async function loadMonthlySummary(monthId: string): Promise<MonthlySummary | null> {
   const docRef = doc(db, COLLECTIONS.MONTHLY_SUMMARY, monthId);
-  const docSnap = await getDocResilient(docRef);
+  const docSnap = await getDoc(docRef);
 
   if (!docSnap.exists()) {
     return null;
@@ -435,7 +434,7 @@ export async function loadMonthlySummaries(startMonth: string, endMonth: string)
     where('id', '<=', endMonth)
   );
 
-  const snapshot = await getDocsResilient(q);
+  const snapshot = await getDocs(q);
   const summaries: MonthlySummary[] = [];
 
   snapshot.forEach((doc) => {
@@ -525,7 +524,7 @@ export async function saveFilterOptions(options: FilterOptions): Promise<void> {
  */
 export async function loadFilterOptions(): Promise<FilterOptions> {
   const docRef = doc(db, COLLECTIONS.FILTER_OPTIONS, 'master');
-  const docSnap = await getDocResilient(docRef);
+  const docSnap = await getDoc(docRef);
 
   if (!docSnap.exists()) {
     return createEmptyFilterOptions();
@@ -892,7 +891,7 @@ export async function migrateExistingDataToSummaries(
     onProgress?.(0, 100, 'Mevcut veriler okunuyor...');
 
     // Tüm analysis_results'ı oku
-    const snapshot = await getDocsResilient(collection(db, COLLECTIONS.RAW_RESULTS));
+    const snapshot = await getDocs(collection(db, COLLECTIONS.RAW_RESULTS));
     const records: AggregatedRecord[] = [];
 
     snapshot.forEach((doc) => {

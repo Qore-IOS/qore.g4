@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
-import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
@@ -34,8 +33,8 @@ export default function PersonelGecmis7Page() {
       setLoading(true);
       try {
         const [userDoc, historySnap] = await Promise.all([
-          getDocResilient(doc(db, 'users', personelId)),
-          getDocsResilient(scopedQuery('personnelHistoryLogs', currentCompanyId, isSuperAdmin, where('uid', '==', personelId))),
+          getDoc(doc(db, 'users', personelId)),
+          getDocs(scopedQuery('personnelHistoryLogs', currentCompanyId, isSuperAdmin, where('uid', '==', personelId))),
         ]);
 
         const user = userDoc.exists() ? userDoc.data() : null;

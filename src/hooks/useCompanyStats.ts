@@ -22,7 +22,6 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { doc, getDoc, onSnapshot } from 'firebase/firestore';
-import { getDocResilient } from '@/lib/firestore-network-recovery';
 import { useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
@@ -68,7 +67,7 @@ export function useCompanyStats() {
       // SuperAdmin için tek bir özet anlamlı değil; null döndür.
       if (isSuperAdmin && !currentCompanyId) return null;
       const ref = doc(db, 'companyStats', normalizedId);
-      const snap = await getDocResilient(ref);
+      const snap = await getDoc(ref);
       if (!snap.exists()) return null;
       return { companyId: normalizedId, ...snap.data() } as CompanyStats;
     },

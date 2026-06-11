@@ -3,7 +3,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { collection, getDocs, orderBy, query } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { ArrowLeft, FileSpreadsheet, FileText, Loader2 } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { useProductCodes } from '@/hooks/useFirebaseQueries';
@@ -32,7 +31,7 @@ export default function BrandObservationPage() {
 
   useEffect(() => {
     const run = async () => {
-      const snap = await getDocsResilient(scopedQuery('maliyetSayimSessions', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc')));
+      const snap = await getDocs(scopedQuery('maliyetSayimSessions', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc')));
       const all = snap.docs.map((d) => ({ id: d.id, ...d.data() } as SayimSession));
       setSessions(filterByCompanyScope(all, currentCompanyId, isSuperAdmin));
       setLoading(false);

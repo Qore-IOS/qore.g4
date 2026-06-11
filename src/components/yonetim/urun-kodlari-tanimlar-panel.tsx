@@ -4,7 +4,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { BookText, Download, Loader2, Upload } from 'lucide-react';
 import { collection, doc, getDocs, writeBatch } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import * as XLSX from 'xlsx';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
@@ -89,7 +88,7 @@ export default function UrunKodlariTanimlarPanel() {
 
       const existingByType = new Map<DefinitionType, Set<string>>();
       await Promise.all(DEFINITION_CONFIG.map(async config => {
-        const snapshot = await getDocsResilient(collection(db, config.type));
+        const snapshot = await getDocs(collection(db, config.type));
         existingByType.set(
           config.type,
           new Set(snapshot.docs.map(item => String(item.data().name || '').trim().toLocaleLowerCase('tr-TR')).filter(Boolean))

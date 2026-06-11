@@ -4,7 +4,6 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import { collection, query, where, orderBy, getDocs, getDoc, doc, Timestamp } from 'firebase/firestore';
-import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from '@/components/ui/card';
 import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
@@ -38,7 +37,7 @@ export default function HistoryListPage() {
     try {
       // Fetch lab name first
       const labDocRef = doc(db, 'hospitals', labId);
-      const labDocSnap = await getDocResilient(labDocRef);
+      const labDocSnap = await getDoc(labDocRef);
       if (labDocSnap.exists()) {
         setLabName(labDocSnap.data()?.name || labId);
       } else {
@@ -50,7 +49,7 @@ export default function HistoryListPage() {
         collection(db, 'hospitals', labId, 'stockCounts'),
         orderBy('finishedAt', 'desc')
       );
-      const snap = await getDocsResilient(q);
+      const snap = await getDocs(q);
       const sessionsData = snap.docs.map(d => {
         const data = d.data();
         // Ensure timestamp is a Date object

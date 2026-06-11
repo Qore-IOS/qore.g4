@@ -11,7 +11,6 @@ import { Loader2, PackagePlus, Save, Upload, Download, FileSpreadsheet } from 'l
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDocs, setDoc, Timestamp, query, where, orderBy } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import type { Hospital, ProductCode, TestDefinition, MinMaxRule, LabPool } from '@/lib/types';
 import BackButton from './BackButton';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -73,9 +72,9 @@ export default function CihazUstuEklePanel() {
       setLoading(true);
       try {
         const [hSnap, pSnap, poolSnap] = await Promise.all([
-          getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-          getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
-          getDocsResilient(scopedQuery('labPools', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('labPools', currentCompanyId, isSuperAdmin)),
         ]);
         
         const allHospitals = hSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital));
@@ -90,7 +89,7 @@ export default function CihazUstuEklePanel() {
         setLabPools(filterByCompanyScope(allLabPools, currentCompanyId, isSuperAdmin));
 
         const rulesPromises = fetchedHospitals.map(async (h) => {
-          const rulesSnap = await getDocsResilient(collection(db, 'hospitals', h.id, 'minMaxRules'));
+          const rulesSnap = await getDocs(collection(db, 'hospitals', h.id, 'minMaxRules'));
           return {
             labId: h.id,
             rules: rulesSnap.docs.map((d) => d.data() as MinMaxRule),
@@ -130,7 +129,7 @@ export default function CihazUstuEklePanel() {
         // --- END NEW LOGIC ---
 
         const period = `${String(selectedMonth + 1).padStart(2, '0')}-${selectedYear}`;
-        const dataSnap = await getDocsResilient(scopedQuery('cihazUstuGecmisi', currentCompanyId, isSuperAdmin, where('hospitalId', '==', selectedHospitalId), where('period', '==', period)));
+        const dataSnap = await getDocs(scopedQuery('cihazUstuGecmisi', currentCompanyId, isSuperAdmin, where('hospitalId', '==', selectedHospitalId), where('period', '==', period)));
         
         const existingData: Record<string, number> = {};
         if (!dataSnap.empty) {

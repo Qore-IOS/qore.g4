@@ -185,12 +185,7 @@ Location: `src/lib/types.ts`
 ## Development Guidelines
 
 ### Code Quality
-- **TypeScript:** DİKKAT — strict mode KAPALI (`strict: false`,
-  `strictNullChecks: false`). ~580 bilinen tip hatası var; CI'daki
-  typecheck ratchet kapısı (`scripts/typecheck-gate.mjs` +
-  `quality/typecheck-baseline.json`) YENİ hata eklenmesini engeller.
-  Hata erittiyseniz `node scripts/typecheck-gate.mjs --update` ile
-  baseline'ı sıkılaştırıp commit'leyin.
+- **TypeScript:** Strict mode enabled
 - **Linting:** ESLint with Next.js config
 - **Testing:** Node.js built-in test runner
 - **Type Checking:** Run `pnpm typecheck` before commits
@@ -306,7 +301,7 @@ pnpm test:coverage # Test with coverage
 ## Testing Strategy
 
 - **Unit Tests:** Node.js test runner for barcode utilities
-- **Type Safety:** typecheck ratchet kapısı (yeni tip hatası CI'da bloklanır)
+- **Type Safety:** TypeScript strict mode
 - **Linting:** ESLint with Next.js rules
 - **Quality Assurance:** See `docs/quality-assurance.md`
 
@@ -421,7 +416,7 @@ When working on this codebase:
 3. **Use existing patterns:** Don't reinvent solutions
 4. **Test thoroughly:** Run typecheck, lint, and tests
 5. **Consider performance:** This is a production medical supply system
-6. **Maintain type safety:** typecheck ratchet kapısı uygulanır — yeni tip hatası ekleyemezsiniz (CI bloklar)
+6. **Maintain type safety:** TypeScript strict mode is enforced
 7. **Follow conventions:** Turkish field names (e.g., miad, kurum, stok)
 8. **Check recent PRs:** Learn from recent changes and patterns
 9. **Use proper tools:** Leverage hooks and contexts provided

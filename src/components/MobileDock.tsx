@@ -199,7 +199,7 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
                 style={{ WebkitTouchCallout: 'none', WebkitUserSelect: 'none' }}
               >
                 <Image
-                  src={isDark ? "/newlogoblk-160.png" : "/newlogowh-160.png"}
+                  src={isDark ? "/newlogoblk.png" : "/newlogowh.png"}
                   alt="Qore - Basılı tut: AI"
                   width={80}
                   height={80}

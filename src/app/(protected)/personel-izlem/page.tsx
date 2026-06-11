@@ -33,7 +33,6 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { collection, getDocs } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { db } from '@/lib/firebase';
 import type { Hospital } from '@/lib/types';
@@ -907,7 +906,7 @@ export default function PersonelIzlemPage() {
   useEffect(() => {
     const loadHospitals = async () => {
       try {
-        const hospitalsSnap = await getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin));
+        const hospitalsSnap = await getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin));
         const hospitalsData = hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as Hospital);
         setHospitals(hospitalsData.sort((a, b) => a.name.localeCompare(b.name, 'tr')));
       } catch (err) {

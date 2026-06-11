@@ -14,7 +14,7 @@
  */
 import {
   collection,
-  getDocsFromCache,
+  getDocs,
   query,
   where,
   type Query,
@@ -24,23 +24,6 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { matchesCompanyScope, normalizeCompanyId } from '@/lib/company-scope';
-import {
-  getDocsCacheFirst,
-  revalidateInBackground,
-  type QueryFnCtx,
-} from '@/lib/firestore-fetch';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
-
-/**
- * Faz 4 (perf-stability-recovery-plan): companyId alanı HİÇ olmayan çok eski
- * kayıtlar için çalıştırılan ek "unscoped" uyumluluk sorgusunun anahtarı.
- * Multi-tenancy migration'ı üretimde doğrulandıktan sonra
- * NEXT_PUBLIC_LEGACY_UNTAGGED_COMPAT=off ile kapatın — scoped okuma yapılan
- * her koleksiyon için bir tam koleksiyon sorgusu tasarruf ettirir.
- * (`__legacy__` ETİKETLİ kayıt sorgusu bundan bağımsızdır ve açık kalır.)
- */
-const LEGACY_UNTAGGED_COMPAT =
-  process.env.NEXT_PUBLIC_LEGACY_UNTAGGED_COMPAT !== 'off';
 
 export const GLOBAL_DEFINITION_COLLECTIONS = new Set([
   'def_brands',
@@ -102,21 +85,13 @@ export async function getScopedDocs(
   const normalized = normalizeCompanyId(currentCompanyId);
 
   if (isGlobalDefinitionCollection(collectionPath) || isSuperAdmin || normalized === '__legacy__') {
-    return (await getDocsResilient(scopedQuery(collectionPath, currentCompanyId, isSuperAdmin, ...extraConstraints))).docs;
+    return (await getDocs(scopedQuery(collectionPath, currentCompanyId, isSuperAdmin, ...extraConstraints))).docs;
   }
 
   const base = collection(db, collectionPath);
-  // Üç sorgu da paralel: uyumluluk sorgusunun seri beklenmesi, compat açıkken
-  // her scoped okumaya bir tam round-trip daha ekliyordu.
-  // Backward compatibility (unscoped sorgu): companyId alanı hiç olmayan çok
-  // eski kayıtlar için. Multi-tenant kurallarda reddedilebilir; o durumda
-  // company/legacy sonuçları geçerli kalır.
-  const [companySnap, legacySnap, unscopedSnap] = await Promise.all([
-    getDocsResilient(query(base, where('companyId', '==', normalized), ...extraConstraints)),
-    getDocsResilient(query(base, where('companyId', '==', '__legacy__'), ...extraConstraints)),
-    LEGACY_UNTAGGED_COMPAT
-      ? getDocsResilient(query(base, ...extraConstraints)).catch(() => null)
-      : Promise.resolve(null),
+  const [companySnap, legacySnap] = await Promise.all([
+    getDocs(query(base, where('companyId', '==', normalized), ...extraConstraints)),
+    getDocs(query(base, where('companyId', '==', '__legacy__'), ...extraConstraints)),
   ]);
 
   const docsById = new Map<string, QueryDocumentSnapshot<DocumentData>>();
@@ -124,84 +99,19 @@ export async function getScopedDocs(
   legacySnap.docs.forEach((docSnap) => {
     if (!docsById.has(docSnap.id)) docsById.set(docSnap.id, docSnap);
   });
-  unscopedSnap?.docs
-    .filter((docSnap) => matchesCompanyScope(docSnap.data(), normalized, isSuperAdmin))
-    .forEach((docSnap) => {
-      if (!docsById.has(docSnap.id)) docsById.set(docSnap.id, docSnap);
-    });
 
-  return Array.from(docsById.values());
-}
-
-/**
- * `getScopedDocs`'un cache-first muadili (React Query hook'ları için).
- *
- * Birincil (company) sorgu local cache'ten gelebiliyorsa sonuç milisaniyeler
- * içinde döner; legacy + untagged uyumluluk sorguları da cache'ten okunur ve
- * üçü birden arka planda sunucudan tazelenip ilgili query key invalidate
- * edilir. Birincil sorgu cache'te yoksa (ilk ziyaret) davranış birebir
- * `getScopedDocs` ile aynıdır — sadece takılan kanala karşı timeout +
- * otomatik kurtarma korumalıdır.
- */
-export async function getScopedDocsCacheFirst(
-  ctx: QueryFnCtx,
-  collectionPath: string,
-  currentCompanyId: string | null | undefined,
-  isSuperAdmin: boolean | undefined,
-  ...extraConstraints: QueryConstraint[]
-): Promise<QueryDocumentSnapshot<DocumentData>[]> {
-  const normalized = normalizeCompanyId(currentCompanyId);
-
-  if (isGlobalDefinitionCollection(collectionPath) || isSuperAdmin || normalized === '__legacy__') {
-    const snap = await getDocsCacheFirst(
-      ctx,
-      scopedQuery(collectionPath, currentCompanyId, isSuperAdmin, ...extraConstraints),
-    );
-    return snap.docs;
-  }
-
-  const base = collection(db, collectionPath);
-  const companyQuery = query(base, where('companyId', '==', normalized), ...extraConstraints);
-  const legacyQuery = query(base, where('companyId', '==', '__legacy__'), ...extraConstraints);
-  const unscopedQuery = query(base, ...extraConstraints);
-
-  const companySnap = await getDocsCacheFirst(ctx, companyQuery);
-
-  const docsById = new Map<string, QueryDocumentSnapshot<DocumentData>>();
-  companySnap.docs.forEach((docSnap) => docsById.set(docSnap.id, docSnap));
-
-  const mergeSnap = (snap: { docs: QueryDocumentSnapshot<DocumentData>[] }, scopeFilter = false) => {
-    snap.docs
-      .filter((docSnap) => !scopeFilter || matchesCompanyScope(docSnap.data(), normalized, isSuperAdmin))
+  // Backward compatibility for very old, untagged records. In multi-tenant
+  // projects this unscoped read may be rejected by security rules; in that case
+  // the explicit company/legacy query result above remains the source of truth.
+  try {
+    const unscopedSnap = await getDocs(query(base, ...extraConstraints));
+    unscopedSnap.docs
+      .filter((docSnap) => matchesCompanyScope(docSnap.data(), normalized, isSuperAdmin))
       .forEach((docSnap) => {
         if (!docsById.has(docSnap.id)) docsById.set(docSnap.id, docSnap);
       });
-  };
-
-  if (companySnap.metadata.fromCache) {
-    // Hızlı yol: uyumluluk sorguları da cache'ten gelir (boşsa eksik legacy
-    // kayıtlar arka plan tazelemesiyle ~1sn içinde görünür). Sunucuyu
-    // bloklamadan beklemek, "panel açılır açılmaz veri" garantisinin parçası.
-    try {
-      mergeSnap(await getDocsFromCache(legacyQuery));
-    } catch { /* cache erişilemedi — arka plan tazelemesi telafi eder */ }
-    revalidateInBackground(ctx, legacyQuery);
-    if (LEGACY_UNTAGGED_COMPAT) {
-      try {
-        mergeSnap(await getDocsFromCache(unscopedQuery), true);
-      } catch { /* ignore */ }
-      revalidateInBackground(ctx, unscopedQuery);
-    }
-  } else {
-    // İlk yükleme: tam doğruluk için orijinal sunucu yolu.
-    mergeSnap(await getDocsResilient(legacyQuery));
-    if (LEGACY_UNTAGGED_COMPAT) {
-      try {
-        mergeSnap(await getDocsResilient(unscopedQuery), true);
-      } catch {
-        // Multi-tenant kurallarda unscoped okuma reddedilebilir — yoksay.
-      }
-    }
+  } catch {
+    // Ignore permission/index failures from the compatibility path.
   }
 
   return Array.from(docsById.values());

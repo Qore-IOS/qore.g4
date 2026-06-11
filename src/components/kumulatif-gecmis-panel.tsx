@@ -8,7 +8,6 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { FileSpreadsheet, History, Loader2, Trash2 } from 'lucide-react';
 import { collection, deleteDoc, doc, getDocs, orderBy, query } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { exportDataToExcel } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
@@ -47,7 +46,7 @@ export default function KumulatifGecmisPanel() {
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getDocsResilient(scopedQuery('kumulatifRaporlar', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc')));
+        const snap = await getDocs(scopedQuery('kumulatifRaporlar', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc')));
         const list: HistoryItem[] = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
         setItems(list);
       } catch(e) {

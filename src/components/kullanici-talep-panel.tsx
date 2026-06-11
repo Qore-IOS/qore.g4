@@ -18,7 +18,6 @@ import {
   serverTimestamp,
   Timestamp,
 } from "firebase/firestore";
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import {
   ref,
   uploadBytes,
@@ -1501,7 +1500,7 @@ function CreateRequestModal({
 
   // Fetch admin users
   useEffect(() => {
-    getDocsResilient(scopedQuery("users", currentCompanyId, isSuperAdmin)).then((snap) => {
+    getDocs(scopedQuery("users", currentCompanyId, isSuperAdmin)).then((snap) => {
       const admins = snap.docs
         .map((d) => ({ ...d.data(), uid: d.id } as AppUser))
         .filter((u) => u.role === "admin" || u.role === "admin_developer");

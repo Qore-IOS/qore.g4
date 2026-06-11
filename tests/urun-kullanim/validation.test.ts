@@ -131,7 +131,8 @@ describe('securityCheck', () => {
   });
 
   it('should handle null input', () => {
-    const result = securityCheck(null as unknown as string);
+    // @ts-expect-error - Testing null handling
+    const result = securityCheck(null);
     assert.strictEqual(result.isSafe, true);
     assert.deepStrictEqual(result.threats, []);
   });
@@ -677,7 +678,8 @@ describe('parseAndValidateDate', () => {
   });
 
   it('should return null for null', () => {
-    const result = parseAndValidateDate(null as unknown as string);
+    // @ts-expect-error - Testing null handling
+    const result = parseAndValidateDate(null);
     assert.strictEqual(result, null);
   });
 });

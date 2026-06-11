@@ -8,7 +8,6 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Loader2, Trash2, AlertCircle } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { collection, query, where, getDocs, doc, getDoc, getDocFromServer, writeBatch, deleteDoc } from 'firebase/firestore';
-import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import type { DepoStokItem, ConsumptionRecord } from '@/lib/types';
 import BackButton from '@/components/BackButton';
 import { useToast } from '@/hooks/use-toast';
@@ -40,7 +39,7 @@ export default function LabStockDetailPage() {
     }
     setLoading(true);
     try {
-        const firstItemSnap = await getDocResilient(doc(db, 'depoStok', firstId));
+        const firstItemSnap = await getDoc(doc(db, 'depoStok', firstId));
         if (!firstItemSnap.exists()) {
             // CRITICAL FIX: Item not found in DB but might still have reference
             // Set orphanedId to allow user to force delete
@@ -70,7 +69,7 @@ export default function LabStockDetailPage() {
         if (parent.hedefKurumId) {
             // Query by hedefKurumId for new records
             const q = scopedQuery('depoStok', currentCompanyId, isSuperAdmin, ...baseConstraints, where('hedefKurumId', '==', parent.hedefKurumId));
-            const snap = await getDocsResilient(q);
+            const snap = await getDocs(q);
             fetchedItems = filterByCompanyScope(
               snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
               currentCompanyId,
@@ -81,7 +80,7 @@ export default function LabStockDetailPage() {
         // Also query by hedefKurum (name) for legacy records that may not have hedefKurumId
         if (parent.hedefKurum) {
             const legacyQ = scopedQuery('depoStok', currentCompanyId, isSuperAdmin, ...baseConstraints, where('hedefKurum', '==', parent.hedefKurum));
-            const legacySnap = await getDocsResilient(legacyQ);
+            const legacySnap = await getDocs(legacyQ);
             const legacyItems = filterByCompanyScope(
               legacySnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
               currentCompanyId,
@@ -173,7 +172,7 @@ export default function LabStockDetailPage() {
       const stockRef = doc(db, 'depoStok', id);
 
       // First verify the document exists
-      const docSnap = await getDocResilient(stockRef);
+      const docSnap = await getDoc(stockRef);
       if (!docSnap.exists()) {
         console.warn(`[LAB-DELETE] Document ${id} does not exist in database, removing from local state`);
         setItems(prev => prev.filter(item => item.id !== id));
@@ -249,7 +248,7 @@ export default function LabStockDetailPage() {
     try {
       // First verify the document exists
       const stockRef = doc(db, 'depoStok', id);
-      const docSnap = await getDocResilient(stockRef);
+      const docSnap = await getDoc(stockRef);
 
       if (!docSnap.exists()) {
         console.warn(`[LAB-DEDUCT] Document ${id} does not exist, removing from local state`);

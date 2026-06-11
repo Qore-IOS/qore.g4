@@ -4,7 +4,6 @@ import React, { useState, useEffect, useMemo, ChangeEvent } from 'react';
 import type { Depot, Hospital, ProductCode, MinMaxRule } from '@/lib/types';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDocs, writeBatch, addDoc, serverTimestamp } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope } from '@/lib/company-scope';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -60,7 +59,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
       const fetchedRules: RuleState = {};
       try {
         const rulesRef = collection(db, collectionName, targetId, "minMaxRules");
-        const snapshot = await getDocsResilient(rulesRef);
+        const snapshot = await getDocs(rulesRef);
         snapshot.forEach(d => {
           const data = d.data() as MinMaxRule;
           if (data.stokKodu) {
@@ -208,7 +207,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
       return;
     }
     const rulesCollectionRef = collection(db, collectionName, targetId, "minMaxRules");
-    const existingRulesSnapshot = await getDocsResilient(rulesCollectionRef);
+    const existingRulesSnapshot = await getDocs(rulesCollectionRef);
     const existingRuleIds = new Set(existingRulesSnapshot.docs.map(d => d.id));
 
     const batches = [];
@@ -302,7 +301,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
         return;
       }
       const rulesRef = collection(db, collectionName, targetId, "minMaxRules");
-      const snapshot = await getDocsResilient(rulesRef);
+      const snapshot = await getDocs(rulesRef);
       if (snapshot.empty) {
         toast({ title: "Bilgi", description: `Bu ${locationLabel} için zaten tanımlı kural bulunmuyor.`, variant: "default" });
         setIsLoading(false);

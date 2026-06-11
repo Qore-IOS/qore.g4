@@ -4,7 +4,6 @@ import React, { useState, useEffect, useCallback } from 'react';
 import type { Depot, Hospital, ProductCode, AddressDefinition, LabPool } from '@/lib/types';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, addDoc, setDoc, deleteDoc, doc, writeBatch, Timestamp, query, orderBy, updateDoc } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
@@ -57,10 +56,10 @@ export default function LaboratuvarPanel() {
     setIsLoading(true);
     try {
       const [hSnap, pSnap, addrSnap, poolsSnap] = await Promise.all([
-        getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-        getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
-        getDocsResilient(scopedQuery('addressDefinitions', currentCompanyId, isSuperAdmin)),
-        getDocsResilient(scopedQuery('labPools', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('addressDefinitions', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('labPools', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
       ]);
       setHospitals(hSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
       setProductCodes(pSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
@@ -85,7 +84,7 @@ export default function LaboratuvarPanel() {
         
         (async () => {
           try {
-            const snap = await getDocsResilient(query(collection(db, 'hospitals', hospital.id!, 'subPoints'), orderBy('name', 'asc')));
+            const snap = await getDocs(query(collection(db, 'hospitals', hospital.id!, 'subPoints'), orderBy('name', 'asc')));
             const items = snap.docs.map(d => {
               const data = d.data() as any;
               return { id: d.id, name: data.name, isActive: data.isActive ?? true };

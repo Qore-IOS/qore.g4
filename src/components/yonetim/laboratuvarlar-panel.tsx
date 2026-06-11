@@ -3,7 +3,6 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import type { Depot, Hospital, ProductCode, AddressDefinition, LabPool, DepoStokItem, EfficiencyPool } from '@/lib/types';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, addDoc, setDoc, deleteDoc, doc, writeBatch, Timestamp, query, orderBy, updateDoc, where } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -176,7 +175,7 @@ export default function LaboratuvarPanel() {
         
         (async () => {
           try {
-            const snap = await getDocsResilient(query(collection(db, 'hospitals', hospital.id!, 'subPoints'), orderBy('name', 'asc')));
+            const snap = await getDocs(query(collection(db, 'hospitals', hospital.id!, 'subPoints'), orderBy('name', 'asc')));
             const items = snap.docs.map(d => {
               const data = d.data() as any;
               return { id: d.id, name: data.name, isActive: data.isActive ?? true };
@@ -382,7 +381,7 @@ export default function LaboratuvarPanel() {
       );
 
       // Sadece sevk edilmiş stoğu anlık çekiyoruz
-      const stokSnap = await getDocsResilient(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true)));
+      const stokSnap = await getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true)));
       const allShippedStock = filterByCompanyScope(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)), currentCompanyId, isSuperAdmin);
 
       const stockInPool = allShippedStock.filter(

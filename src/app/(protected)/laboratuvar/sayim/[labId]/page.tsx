@@ -6,7 +6,6 @@ import { db } from '@/lib/firebase';
 import {
   collection, doc, getDocs, where, query, Timestamp, writeBatch, getDoc,
 } from 'firebase/firestore';
-import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -373,9 +372,9 @@ export default function LaboratuvarSayimPage() {
         // server-side where('companyId', '==', X) filtresi eski kayıtları
         // dışarıda bırakıyor ve sayım sayfası boş yükleniyordu.
         const [labSnap, productDocs, rulesSnap] = await Promise.all([
-          getDocResilient(labRef),
+          getDoc(labRef),
           getScopedDocs('productCodes', currentCompanyId, isSuperAdmin),
-          getDocsResilient(collection(db, 'hospitals', labId as string, 'minMaxRules')),
+          getDocs(collection(db, 'hospitals', labId as string, 'minMaxRules')),
         ]);
 
         if (!labSnap.exists()) {

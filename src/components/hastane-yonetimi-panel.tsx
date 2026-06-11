@@ -14,7 +14,6 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from '@/components/ui/table';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, doc, deleteDoc, getDocFromServer, writeBatch, Timestamp } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import type { DepoStokItem, Laboratory, MinMaxRule } from '@/lib/types';
 import { Loader2, Search, ListChecks, History, FileSpreadsheet, MoreVertical, Eye, AlertCircle, AlertTriangle, Upload, CheckCircle, Pencil, Check, X, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
 import { touchStockMetadata, useLabStock, useLabPools, useHospitals, useProductCodes, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
@@ -256,7 +255,7 @@ export default function LaboratuvarYonetimiPanel() {
     (async () => {
       try {
         const rulesRef = collection(db, 'hospitals', selectedLabId, 'minMaxRules');
-        const snapshot = await getDocsResilient(rulesRef);
+        const snapshot = await getDocs(rulesRef);
         const rules: Record<string, MinMaxRule> = {};
         snapshot.forEach(d => {
           const rule = d.data() as MinMaxRule;
@@ -671,7 +670,7 @@ export default function LaboratuvarYonetimiPanel() {
         }, currentCompanyId));
         await batch.commit();
 
-        await touchStockMetadata({ labIds: [selectedLabId], companyId: currentCompanyId });
+        await touchStockMetadata();
         await invalidateDepoStok();
         toast({ title: 'Adet Güncellendi', description: `${toAdd} adet eklendi. Yeni toplam: ${newQty}` });
       } else {
@@ -710,7 +709,7 @@ export default function LaboratuvarYonetimiPanel() {
           await batch.commit();
         }
 
-        await touchStockMetadata({ labIds: [selectedLabId], companyId: currentCompanyId });
+        await touchStockMetadata();
         await invalidateDepoStok();
         toast({ title: 'Adet Güncellendi', description: `${currentQty - newQty} adet silindi. Yeni toplam: ${newQty}` });
       }
@@ -889,7 +888,7 @@ export default function LaboratuvarYonetimiPanel() {
         setImportProgress(`Stok ekleniyor... (${written}/${docsToWrite.length})`);
       }
 
-      await touchStockMetadata({ labIds: [selectedLabId], companyId: currentCompanyId });
+      await touchStockMetadata();
 
       // Invalidate cache so useLabStock refetches
       await invalidateDepoStok();

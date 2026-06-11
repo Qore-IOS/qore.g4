@@ -19,7 +19,6 @@ import {
   collection, doc, getDoc, getDocs, onSnapshot, query,
   serverTimestamp, setDoc, Timestamp, updateDoc, where, increment
 } from 'firebase/firestore';
-import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import type { Hospital, User as AppUser, Depot } from '@/lib/types';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -132,9 +131,9 @@ export default function RotaOlusturPage() {
     (async () => {
       try {
         const [hSnap, uSnap, dSnap] = await Promise.all([
-          getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-          getDocsResilient(scopedQuery('users', currentCompanyId, isSuperAdmin)),
-          getDocsResilient(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
         ]);
         setHospitals(hSnap.docs.map(d => ({ id: d.id, ...d.data() })) as Hospital[]);
         setDepots(dSnap.docs.map(d => ({ id: d.id, ...d.data() })) as Depot[]);
@@ -282,7 +281,7 @@ export default function RotaOlusturPage() {
       const dayKey = toDayKey(planDate);
       const counterRef = doc(db, 'routeSequences', `${planDriverId}_${dayKey}`);
       await setDoc(counterRef, { seq: increment(1), updatedAt: serverTimestamp() }, { merge: true });
-      const seqSnap = await getDocResilient(counterRef);
+      const seqSnap = await getDoc(counterRef);
       const sequence = Math.max(1, Number((seqSnap.data() as any)?.seq || 1));
 
       const routeId = `${planDriverId}_${dayKey}_${sequence}`;

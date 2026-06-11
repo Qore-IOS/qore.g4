@@ -6,7 +6,6 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { PlusCircle, Trash2, Loader2, MapPin } from 'lucide-react';
 import { collection, getDocs, addDoc, deleteDoc, doc } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import type { AddressDefinition } from '@/lib/types';
@@ -26,7 +25,7 @@ export default function AdresTanimlariPanel() {
   const fetchAddresses = useCallback(async () => {
     setIsLoading(true);
     try {
-      const snap = await getDocsResilient(scopedQuery('addressDefinitions', currentCompanyId, isSuperAdmin));
+      const snap = await getDocs(scopedQuery('addressDefinitions', currentCompanyId, isSuperAdmin));
       setAddresses(filterByCompanyScope(
         snap.docs.map(d => ({ id: d.id, ...d.data() } as AddressDefinition)),
         currentCompanyId,

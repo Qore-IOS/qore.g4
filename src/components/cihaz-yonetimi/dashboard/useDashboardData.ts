@@ -3,7 +3,6 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { collection, getDocs, Timestamp, query, orderBy, where, limit as fsLimit } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { subDays, subMonths } from 'date-fns';
 import { db } from '@/lib/firebase';
 import type {
@@ -79,36 +78,36 @@ export function useDashboardData() {
         labPoolsSnap,
         assignmentsSnap,
       ] = await Promise.all([
-        getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-        getDocsResilient(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
-        getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
         // Sadece mevcut stok — sevk edilenler dashboard'da gerekmez.
-        getDocsResilient(scopedQuery('depoStok', currentCompanyId, isSuperAdmin,
+        getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin,
           where('isShipped', '==', false))),
         // Son 90 gün tüketim — yeterli trend için.
-        getDocsResilient(scopedQuery('tuketimKayitlari', currentCompanyId, isSuperAdmin,
+        getDocs(scopedQuery('tuketimKayitlari', currentCompanyId, isSuperAdmin,
           where('consumptionTimestamp', '>=', ninetyDaysAgoTs))),
         // Son 24 ay verimlilik geçmişi.
-        getDocsResilient(scopedQuery('efficiencyHistory', currentCompanyId, isSuperAdmin,
+        getDocs(scopedQuery('efficiencyHistory', currentCompanyId, isSuperAdmin,
           where('timestamp', '>=', twentyFourMonthsAgoTs))),
         // Cihaz üstü geçmiş — son 24 ay yeter (dönem bazlı analiz).
-        getDocsResilient(scopedQuery('cihazUstuGecmisi', currentCompanyId, isSuperAdmin,
+        getDocs(scopedQuery('cihazUstuGecmisi', currentCompanyId, isSuperAdmin,
           fsLimit(2000))),
         // Kümülatif raporlar — son 50 rapor yeter.
-        getDocsResilient(scopedQuery('kumulatifRaporlar', currentCompanyId, isSuperAdmin,
+        getDocs(scopedQuery('kumulatifRaporlar', currentCompanyId, isSuperAdmin,
           orderBy('createdAt', 'desc'), fsLimit(50))),
         // Son 180 gün sevkiyat.
-        getDocsResilient(scopedQuery('shipments', currentCompanyId, isSuperAdmin,
+        getDocs(scopedQuery('shipments', currentCompanyId, isSuperAdmin,
           where('timestamp', '>=', Timestamp.fromDate(subDays(new Date(), 180))))),
-        getDocsResilient(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
-        getDocsResilient(scopedQuery('labPools', currentCompanyId, isSuperAdmin)),
-        getDocsResilient(scopedQuery('hospitalDeviceAssignments', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('labPools', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('hospitalDeviceAssignments', currentCompanyId, isSuperAdmin)),
       ]);
 
       const hospitalsData = hospitalsSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Hospital));
 
       const rulesPromises = hospitalsData.map(h => 
-        getDocsResilient(collection(db, 'hospitals', h.id, 'minMaxRules'))
+        getDocs(collection(db, 'hospitals', h.id, 'minMaxRules'))
           .then(snap => ({
             labId: h.id,
             rules: snap.docs.map(d => d.data() as MinMaxRule)

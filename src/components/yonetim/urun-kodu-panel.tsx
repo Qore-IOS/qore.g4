@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, ChangeEvent, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
-import { PlusCircle, Edit3, Trash2, Loader2, Barcode, Download, Upload, Search, Filter, X, Type, Save, Calendar, MoreHorizontal, Copy, GitBranch, ChevronDown, ChevronRight, ChevronLeft, Eye, EyeOff, FileSpreadsheet } from 'lucide-react';
+import { PlusCircle, Edit3, Trash2, Loader2, Barcode, Download, Upload, Search, Filter, X, Type, Save, Calendar, MoreHorizontal, Copy, GitBranch, ChevronDown, ChevronRight, Eye, EyeOff, FileSpreadsheet } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,8 +27,6 @@ import { getScopedDocs } from '@/lib/firestore-helpers';
 import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Checkbox } from '../ui/checkbox';
-import { usePaginatedProductCodes, useProductCodes } from '@/hooks/useFirebaseQueries';
-import { useQueryClient } from '@tanstack/react-query';
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => ({
   value: i,
@@ -324,7 +322,7 @@ export default function UrunKoduPanel() {
   const router = useRouter();
   const { currentUser, currentCompanyId, isSuperAdmin } = useAuth();
   const { formats: barcodeFormats } = useSafeBarcodeFormats();
-  const queryClient = useQueryClient();
+  const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
 
   // Active tab: 'products' | 'checkpoint'
   const [activeTab, setActiveTab] = useState<'products' | 'checkpoint'>('products');
@@ -339,6 +337,7 @@ export default function UrunKoduPanel() {
   const [definitions, setDefinitions] = useState<Definitions>({
     brands: [], labGroups: [], testGroups: [], deviceGroups: [], productGroups: [], mainUnits: []
   });
+  const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Partial<ProductCode>>({});
   const [searchTerm, setSearchTerm] = useState('');
@@ -354,58 +353,17 @@ export default function UrunKoduPanel() {
   // View mode: 'compact' | 'comfortable'
   const [viewMode, setViewMode] = useState<'compact' | 'comfortable'>('comfortable');
 
-  // Server-side pagination state
-  const [currentPage, setCurrentPage] = useState(1);
-  const [rowsPerPage, setRowsPerPage] = useState(30);
-  const rowsPerPageOptions = [20, 30, 50, 100];
-
   const addFileRef = useRef<HTMLInputElement>(null);
   const updateFileRef = useRef<HTMLInputElement>(null);
 
   const debouncedSearch = useCallback(debounce((term) => setDebouncedSearchTerm(term), 300), []);
   useEffect(() => { debouncedSearch(searchTerm); }, [searchTerm, debouncedSearch]);
 
-  // Reset to page 1 when search/filters/brand change
-  useEffect(() => { setCurrentPage(1); }, [debouncedSearchTerm, selectedBrandTab]);
-
-  // ─── Server-side paginated product codes ───
-  const paginatedQuery = usePaginatedProductCodes({
-    page: currentPage,
-    pageSize: rowsPerPage,
-    sortField: 'stokAdi',
-    sortDirection: 'asc',
-    searchTerm: debouncedSearchTerm || undefined,
-    columnFilters: activeFilters.length > 0
-      ? activeFilters.reduce((acc, f) => {
-          if (!acc[f.group]) acc[f.group] = [];
-          acc[f.group].push(f.value);
-          return acc;
-        }, {} as Record<string, string[]>)
-      : undefined,
-    brandTab: selectedBrandTab,
-  });
-
-  const paginatedRows = useMemo(() => (paginatedQuery.data?.rows ?? []) as ProductCode[], [paginatedQuery.data]);
-  const paginatedTotalRows = paginatedQuery.data?.totalRows ?? 0;
-  const paginatedTotalPages = paginatedQuery.data?.totalPages ?? 1;
-  const brandCounts = paginatedQuery.data?.brandCounts ?? {};
-  const isLoading = paginatedQuery.isLoading;
-  const isPending = paginatedQuery.isLoading || paginatedQuery.isFetching;
-
-  // On-demand full product codes for export and cost checkpoint
-  const allProductCodesQuery = useProductCodes();
-  const allProductCodes = useMemo(() => allProductCodesQuery.data ?? [], [allProductCodesQuery.data]);
-
-  // Invalidate paginated queries after mutations
-  const invalidateProductCodes = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ['productCodesPaginated'] });
-    queryClient.invalidateQueries({ queryKey: ['productCodes'] });
-  }, [queryClient]);
-
-  // Definitions fetch (for modal dropdowns) — small collections, keep as-is
-  const fetchDefinitions = useCallback(async () => {
+  const fetchAllData = useCallback(async () => {
+    setIsLoading(true);
     try {
-      const [brandsSnap, labGroupsSnap, testGroupsSnap, deviceGroupsSnap, productGroupsSnap, mainUnitsSnap] = await Promise.all([
+      const [productsSnap, brandsSnap, labGroupsSnap, testGroupsSnap, deviceGroupsSnap, productGroupsSnap, mainUnitsSnap] = await Promise.all([
+        getScopedDocs('productCodes', currentCompanyId, isSuperAdmin),
         getScopedDocs('def_brands', currentCompanyId, isSuperAdmin),
         getScopedDocs('def_labGroups', currentCompanyId, isSuperAdmin),
         getScopedDocs('def_testGroups', currentCompanyId, isSuperAdmin),
@@ -413,6 +371,7 @@ export default function UrunKoduPanel() {
         getScopedDocs('def_productGroups', currentCompanyId, isSuperAdmin),
         getScopedDocs('def_mainUnits', currentCompanyId, isSuperAdmin),
       ]);
+      setProductCodes(productsSnap.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
       setDefinitions({
         brands: brandsSnap.map(d => d.data().name as string).sort(),
         labGroups: labGroupsSnap.map(d => d.data().name as string).sort(),
@@ -422,11 +381,13 @@ export default function UrunKoduPanel() {
         mainUnits: mainUnitsSnap.map(d => d.data().name as string).sort(),
       });
     } catch (e) {
-      toast({ title: 'Hata', description: 'Tanım verileri yüklenemedi.', variant: 'destructive' });
+      toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
+    } finally {
+      setIsLoading(false);
     }
   }, [toast, currentCompanyId, isSuperAdmin]);
 
-  useEffect(() => { fetchDefinitions(); }, [fetchDefinitions]);
+  useEffect(() => { fetchAllData(); }, [fetchAllData]);
 
   // Fetch cost checkpoints
   useEffect(() => {
@@ -453,14 +414,14 @@ export default function UrunKoduPanel() {
 
   // Save cost checkpoint
   const handleSaveCostCheckpoint = async () => {
-    if (allProductCodes.length === 0) {
+    if (productCodes.length === 0) {
       toast({ title: 'Hata', description: 'Önce ürün kodları yüklenmelidir.', variant: 'destructive' });
       return;
     }
     setIsSavingCheckpoint(true);
     try {
       const costs: Record<string, { cost: number; currency: 'EUR' | 'USD' | 'TRY' }> = {};
-      allProductCodes.forEach(product => {
+      productCodes.forEach(product => {
         if (product.cost && product.cost > 0) {
           costs[product.stokKodu] = {
             cost: product.cost,
@@ -517,7 +478,12 @@ export default function UrunKoduPanel() {
   };
 
   const handleSave = (product: ProductCode) => {
-    invalidateProductCodes();
+    if (product.id && !productCodes.some(p => p.id === product.id)) {
+      setProductCodes(prev => [...prev, product]);
+    } else {
+      setProductCodes(prev => prev.map(p => p.id === product.id ? product : p));
+    }
+    fetchAllData();
   };
 
   // Version grouping: products with same stokAdi (excluding stokKodu suffix) are versions of each other
@@ -527,16 +493,16 @@ export default function UrunKoduPanel() {
 
   const versionsByGroup = useMemo(() => {
     const map = new Map<string, ProductCode[]>();
-    paginatedRows.forEach(p => {
+    productCodes.forEach(p => {
       const groupId = getVersionGroupId(p);
       if (!map.has(groupId)) map.set(groupId, []);
       map.get(groupId)!.push(p);
     });
     return map;
-  }, [paginatedRows]);
+  }, [productCodes]);
 
   const handleSetActiveVersion = async (versionId: string) => {
-    const next = allProductCodes.find((p) => p.id === versionId);
+    const next = productCodes.find((p) => p.id === versionId);
     if (!next) return;
     const groupId = getVersionGroupId(next);
     const groupVersions = versionsByGroup.get(groupId) || [];
@@ -547,20 +513,21 @@ export default function UrunKoduPanel() {
     await batch.commit();
     toast({ title: 'Başarılı', description: 'Aktif versiyon güncellendi.' });
     setSelectedProduct(next);
-    invalidateProductCodes();
+    fetchAllData();
   };
 
   const handleDelete = async (id: string) => {
     if (confirm('Bu ürünü silmek istediğinizden emin misiniz?')) {
       await deleteDoc(doc(db, 'productCodes', id));
       toast({ title: 'Silindi', description: 'Ürün silindi.', variant: 'destructive' });
-      invalidateProductCodes();
+      fetchAllData();
     }
   };
 
   const handleDeleteSelected = async () => {
     if (selectedProductIds.size === 0) return;
     if (confirm(`${selectedProductIds.size} adet ürünü silmek istediğinizden emin misiniz?`)) {
+      setIsLoading(true);
       const batch = writeBatch(db);
       selectedProductIds.forEach(id => {
         batch.delete(doc(db, 'productCodes', id));
@@ -568,7 +535,7 @@ export default function UrunKoduPanel() {
       await batch.commit();
       toast({ title: 'Silindi', description: `${selectedProductIds.size} ürün silindi.` });
       setSelectedProductIds(new Set());
-      invalidateProductCodes();
+      fetchAllData();
     }
   };
 
@@ -578,6 +545,7 @@ export default function UrunKoduPanel() {
       return;
     }
     if (confirm(`${selectedProductIds.size} adet ürünün takip türünü "${TRACKING_MODE_LABEL[bulkTrackingMode]}" olarak ayarlamak istediğinizden emin misiniz?`)) {
+      setIsLoading(true);
       const batch = writeBatch(db);
       selectedProductIds.forEach(id => {
         batch.update(doc(db, 'productCodes', id), { trackingMode: bulkTrackingMode });
@@ -586,9 +554,11 @@ export default function UrunKoduPanel() {
         await batch.commit();
         toast({ title: 'Başarılı', description: `${selectedProductIds.size} ürünün takip türü güncellendi.` });
         setSelectedProductIds(new Set());
-        invalidateProductCodes();
+        fetchAllData();
       } catch (e) {
         toast({ title: 'Hata', description: 'Toplu güncelleme sırasında bir hata oluştu.', variant: 'destructive' });
+      } finally {
+        setIsLoading(false);
       }
     }
   };
@@ -637,7 +607,7 @@ export default function UrunKoduPanel() {
   };
 
   const handleExport = () => {
-    const dataToExport = allProductCodes.map(p => ({
+    const dataToExport = productCodes.map(p => ({
       stokKodu: p.stokKodu,
       stokAdi: p.stokAdi,
       urunGrubu: p.urunGrubu,
@@ -667,6 +637,7 @@ export default function UrunKoduPanel() {
   const handleImport = async (event: ChangeEvent<HTMLInputElement>, mode: 'update' | 'add') => {
     const file = event.target.files?.[0];
     if (!file) return;
+    setIsLoading(true);
     try {
       const jsonData = await readExcelDataSmart(file, 'product', toast);
       const batch = writeBatch(db);
@@ -719,7 +690,7 @@ export default function UrunKoduPanel() {
         const cleanedProductData = Object.fromEntries(
           Object.entries(productData).filter(([, value]) => value !== undefined)
         );
-        const existing = allProductCodes.find(p => p.stokKodu === stokKodu);
+        const existing = productCodes.find(p => p.stokKodu === stokKodu);
         if (mode === 'update') {
           if (existing) { batch.set(doc(db, 'productCodes', existing.id), cleanedProductData, { merge: true }); updatedCount++; }
           else { skippedCount++; }
@@ -730,32 +701,68 @@ export default function UrunKoduPanel() {
       }
       if (successCount > 0 || updatedCount > 0) await batch.commit();
       toast({ title: "Yükleme Tamamlandı", description: `${successCount} kayıt eklendi, ${updatedCount} kayıt güncellendi. ${skippedCount} satır atlandı. ${errorCount} satır hatalı.` });
-      if (successCount > 0 || updatedCount > 0) invalidateProductCodes();
+      if (successCount > 0 || updatedCount > 0) fetchAllData();
     } catch (error) {
       toast({ title: "Excel Yükleme Hatası", description: "Dosya işlenirken hata oluştu.", variant: "destructive" });
     } finally {
+      setIsLoading(false);
       if (event.target) (event.target as HTMLInputElement).value = '';
     }
   };
 
   const availableFilterGroups = useMemo(() => {
-    const colValues = paginatedQuery.data?.columnValues;
+    const markaSet = new Set<string>();
+    const urunGrubuSet = new Set<'kit' | 'sarf' | 'yedek_parca'>();
+    productCodes.forEach(p => {
+      if (p.marka) markaSet.add(p.marka);
+      if (p.urunGrubu) urunGrubuSet.add(p.urunGrubu);
+    });
     return {
-      marka: colValues?.marka ?? [],
-      urunGrubu: colValues?.urunGrubu ?? []
+      marka: Array.from(markaSet).sort(),
+      urunGrubu: Array.from(urunGrubuSet).sort()
     };
-  }, [paginatedQuery.data]);
+  }, [productCodes]);
 
-  // Server-side filtered/paginated rows are already in paginatedRows
-  const filteredProductCodes = paginatedRows;
+  const filteredProductCodes = useMemo(() => {
+    let items = productCodes;
+    if (selectedBrandTab !== 'ALL') {
+      if (selectedBrandTab === 'Diğer') {
+        items = items.filter(p => !p.marka);
+      } else {
+        items = items.filter(p => p.marka === selectedBrandTab);
+      }
+    }
+    if (activeFilters.length > 0) {
+      items = items.filter(p => {
+        return activeFilters.every(filter => {
+          if (filter.group === 'marka') return p.marka === filter.value;
+          if (filter.group === 'urunGrubu') return p.urunGrubu === filter.value;
+          return true;
+        });
+      });
+    }
+    if (debouncedSearchTerm) {
+      const lowercasedTerm = debouncedSearchTerm.toLowerCase();
+      items = items.filter(p =>
+        p.stokKodu.toLowerCase().includes(lowercasedTerm) ||
+        p.stokAdi.toLowerCase().includes(lowercasedTerm)
+      );
+    }
+    return items;
+  }, [productCodes, debouncedSearchTerm, activeFilters, selectedBrandTab]);
 
   const brandTabOptions = useMemo(() => {
-    const items = Object.entries(brandCounts)
+    const counts: Record<string, number> = {};
+    productCodes.forEach(p => {
+      const brand = p.marka || 'Diğer';
+      counts[brand] = (counts[brand] || 0) + 1;
+    });
+    const items = Object.entries(counts)
       .map(([brand, count]) => ({ brand, count }))
       .sort((a, b) => a.brand.localeCompare(b.brand, 'tr'));
-    const total = Object.values(brandCounts).reduce((sum, c) => sum + c, 0);
+    const total = productCodes.length;
     return { total, items };
-  }, [brandCounts]);
+  }, [productCodes]);
 
   const handleSelectAll = (checked: boolean | 'indeterminate') => {
     if (checked === true) {
@@ -820,7 +827,7 @@ export default function UrunKoduPanel() {
               Ürün Kodu Yönetimi
             </h1>
             <p className="text-xs sm:text-sm text-[var(--dashboard-muted)] mt-0.5">
-              {brandTabOptions.total} ürün kayıtlı
+              {productCodes.length} ürün kayıtlı
             </p>
           </div>
 
@@ -1108,38 +1115,10 @@ export default function UrunKoduPanel() {
                     </tbody>
                   </table>
                 </div>
-                {/* Pagination Bar */}
-                {paginatedTotalRows > 0 && (
-                  <div className="sticky bottom-0 bg-[var(--dashboard-surface)] border-t border-[var(--dashboard-stroke)] px-4 py-2.5 flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-xs text-[var(--dashboard-muted)]">
-                      <span>Sayfa başına:</span>
-                      <Select value={String(rowsPerPage)} onValueChange={v => { setRowsPerPage(Number(v)); setCurrentPage(1); }}>
-                        <SelectTrigger className="w-16 h-7 text-xs bg-[var(--dashboard-surface)] border-[var(--dashboard-stroke)]"><SelectValue /></SelectTrigger>
-                        <SelectContent>{rowsPerPageOptions.map(n => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}</SelectContent>
-                      </Select>
-                      <span className="text-[var(--dashboard-muted)]">{paginatedTotalRows} ürün</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        className="cihaz-tool-item flex items-center justify-center w-8 h-8 disabled:opacity-40"
-                        onClick={() => setCurrentPage(p => p - 1)}
-                        disabled={currentPage <= 1 || isPending}
-                      >
-                        <ChevronLeft className="h-4 w-4" />
-                      </button>
-                      <span className="text-xs text-[var(--dashboard-muted)] px-2">
-                        <span className="text-[var(--dashboard-text)] font-bold">{currentPage}</span> / {paginatedTotalPages}
-                      </span>
-                      <button
-                        className="cihaz-tool-item flex items-center justify-center w-8 h-8 disabled:opacity-40"
-                        onClick={() => setCurrentPage(p => p + 1)}
-                        disabled={currentPage >= paginatedTotalPages || isPending}
-                      >
-                        <ChevronRight className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                )}
+                {/* Results count */}
+                <div className="px-4 py-2.5 border-t border-[var(--dashboard-stroke)] text-xs text-[var(--dashboard-muted)]">
+                  {filteredProductCodes.length} / {productCodes.length} ürün gösteriliyor
+                </div>
               </div>
 
               {/* Mobile Card List */}
@@ -1167,39 +1146,8 @@ export default function UrunKoduPanel() {
                   />
                 ))}
                 <div className="text-xs text-center text-[var(--dashboard-muted)] py-2">
-                  {paginatedTotalRows} ürün
+                  {filteredProductCodes.length} / {productCodes.length} ürün
                 </div>
-                {/* Mobile Pagination Bar */}
-                {paginatedTotalRows > 0 && (
-                  <div className="flex items-center justify-between px-1 py-2">
-                    <div className="flex items-center gap-2 text-xs text-[var(--dashboard-muted)]">
-                      <span>Sayfa başına:</span>
-                      <Select value={String(rowsPerPage)} onValueChange={v => { setRowsPerPage(Number(v)); setCurrentPage(1); }}>
-                        <SelectTrigger className="w-16 h-7 text-xs bg-[var(--dashboard-surface)] border-[var(--dashboard-stroke)]"><SelectValue /></SelectTrigger>
-                        <SelectContent>{rowsPerPageOptions.map(n => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}</SelectContent>
-                      </Select>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        className="cihaz-tool-item flex items-center justify-center w-8 h-8 disabled:opacity-40"
-                        onClick={() => setCurrentPage(p => p - 1)}
-                        disabled={currentPage <= 1 || isPending}
-                      >
-                        <ChevronLeft className="h-4 w-4" />
-                      </button>
-                      <span className="text-xs text-[var(--dashboard-muted)] px-2">
-                        <span className="text-[var(--dashboard-text)] font-bold">{currentPage}</span> / {paginatedTotalPages}
-                      </span>
-                      <button
-                        className="cihaz-tool-item flex items-center justify-center w-8 h-8 disabled:opacity-40"
-                        onClick={() => setCurrentPage(p => p + 1)}
-                        disabled={currentPage >= paginatedTotalPages || isPending}
-                      >
-                        <ChevronRight className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </div>
-                )}
               </div>
             </>
           )}
@@ -1227,8 +1175,8 @@ export default function UrunKoduPanel() {
                 <Save className="h-5 w-5 text-[var(--device-accent)]" />
               </div>
               <div className="text-xs text-[var(--dashboard-text)]">
-                <p className="font-semibold">{allProductCodes.filter(p => p.cost && p.cost > 0).length} ürünün maliyeti tanımlı</p>
-                <p className="text-[var(--dashboard-muted)] mt-0.5">Toplam {allProductCodes.length} kayıtlı ürün</p>
+                <p className="font-semibold">{productCodes.filter(p => p.cost && p.cost > 0).length} ürünün maliyeti tanımlı</p>
+                <p className="text-[var(--dashboard-muted)] mt-0.5">Toplam {productCodes.length} kayıtlı ürün</p>
               </div>
             </div>
 
@@ -1263,7 +1211,7 @@ export default function UrunKoduPanel() {
               <div className="col-span-2">
                 <button
                   onClick={handleSaveCostCheckpoint}
-                  disabled={isSavingCheckpoint || allProductCodes.length === 0}
+                  disabled={isSavingCheckpoint || productCodes.length === 0}
                   className="neu-btn-universal neu-text-primary w-full px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   {isSavingCheckpoint ? (
@@ -1316,8 +1264,8 @@ export default function UrunKoduPanel() {
           open={isModalOpen}
           initial={selectedProduct}
           onSave={handleSave}
-          onClose={() => { setIsModalOpen(false); }}
-          productCodes={allProductCodes}
+          onClose={() => setIsModalOpen(false)}
+          productCodes={productCodes}
           definitions={definitions}
           versions={versionsByGroup.get(getVersionGroupId(selectedProduct)) || []}
           onSetActiveVersion={handleSetActiveVersion}
