@@ -671,7 +671,7 @@ export default function LaboratuvarYonetimiPanel() {
         }, currentCompanyId));
         await batch.commit();
 
-        await touchStockMetadata();
+        await touchStockMetadata({ labIds: [selectedLabId], companyId: currentCompanyId });
         await invalidateDepoStok();
         toast({ title: 'Adet Güncellendi', description: `${toAdd} adet eklendi. Yeni toplam: ${newQty}` });
       } else {
@@ -710,7 +710,7 @@ export default function LaboratuvarYonetimiPanel() {
           await batch.commit();
         }
 
-        await touchStockMetadata();
+        await touchStockMetadata({ labIds: [selectedLabId], companyId: currentCompanyId });
         await invalidateDepoStok();
         toast({ title: 'Adet Güncellendi', description: `${currentQty - newQty} adet silindi. Yeni toplam: ${newQty}` });
       }
@@ -889,7 +889,7 @@ export default function LaboratuvarYonetimiPanel() {
         setImportProgress(`Stok ekleniyor... (${written}/${docsToWrite.length})`);
       }
 
-      await touchStockMetadata();
+      await touchStockMetadata({ labIds: [selectedLabId], companyId: currentCompanyId });
 
       // Invalidate cache so useLabStock refetches
       await invalidateDepoStok();

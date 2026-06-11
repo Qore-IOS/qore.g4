@@ -493,7 +493,7 @@ export default function LaboratuvarYonetimiPanel() {
       }
 
       // Invalidate cache and touch metadata
-      await touchStockMetadata();
+      await touchStockMetadata({ labIds: [selectedLabId], companyId: currentCompanyId });
       invalidateDepoStok();
 
       toast({
@@ -553,7 +553,7 @@ export default function LaboratuvarYonetimiPanel() {
       }
 
       await batch.commit();
-      await touchStockMetadata();
+      await touchStockMetadata({ labIds: [selectedLabId], companyId: currentCompanyId });
 
       // Reconcile against any "Hazırlanan" peripheral orders for this lab.
       // Closes orders whose entire item set is covered, or appends a partial

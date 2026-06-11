@@ -49,7 +49,7 @@ import type {
 } from '@/lib/types';
 import { DepotStockCountSession } from '@/lib/mal-kabul/types';
 import { SayimSession } from '@/lib/cost-analytics';
-import { filterByCompanyScope } from '@/lib/company-scope';
+import { filterByCompanyScope, normalizeCompanyId } from '@/lib/company-scope';
 import { getScopedDocsCacheFirst, scopedQuery } from '@/lib/firestore-helpers';
 import { getDocsCacheFirst } from '@/lib/firestore-fetch';
 import { getDocsResilient } from '@/lib/firestore-network-recovery';
@@ -300,6 +300,7 @@ export function useExpiringProductsCount() {
       const { getExpiringProductsCountServer } = await import('@/actions/stokActions');
       return getExpiringProductsCountServer(currentCompanyId, isSuperAdmin);
     },
+    enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 60 * 60 * 1000, // 1 hour
     gcTime: 2 * 60 * 60 * 1000,
   });
@@ -1455,18 +1456,79 @@ export function useSubPoints(hospitalId: string | null) {
 const STOCK_METADATA_DOC = 'metadata/stockLastUpdated';
 
 /**
+ * Stok mutasyonunun kapsamı. STABİLİZASYON (P0.6): önceden bu event
+ * kapsamsızdı — herhangi bir depodaki tek işlem, BÜTÜN kullanıcıların BÜTÜN
+ * depoStok/depoStokPaginated sorgularını yeniden çalıştırıyordu (thundering
+ * herd). Artık yazan taraf hangi tenant/depo/lab'ı etkilediğini bildirir;
+ * dinleyici yalnız ilgili query'leri invalidate eder. Kapsamsız (eski)
+ * yazarlar geriye dönük uyumluluk için yine tam invalidation yapar.
+ */
+export interface StockMutationScope {
+  depotIds?: string[];
+  labIds?: string[];
+  companyId?: string | null;
+}
+
+/**
  * Touch the stock metadata document to signal a stock change
  * Call this after mal kabul or transfer operations
  */
-export async function touchStockMetadata() {
+export async function touchStockMetadata(scope?: StockMutationScope) {
   try {
     await setDoc(doc(db, STOCK_METADATA_DOC), {
       lastUpdated: serverTimestamp(),
       updatedAt: new Date().toISOString(), // Fallback for offline
+      depotIds: scope?.depotIds?.filter(Boolean) ?? null,
+      labIds: scope?.labIds?.filter(Boolean) ?? null,
+      companyId: scope?.companyId || null,
     });
   } catch (error) {
     console.error('Failed to touch stock metadata:', error);
   }
+}
+
+/** Event kapsamına göre tek bir stok query key'inin bayatlayıp bayatlamadığı. */
+function stockEventTouchesKey(
+  key: readonly unknown[],
+  depotIds: string[] | null,
+  labIds: string[] | null,
+): boolean {
+  // Kapsamsız event (eski yazar) → her şey bayat say (eski davranış).
+  if (!depotIds && !labIds) return true;
+
+  if (key[0] === 'depoStokPaginated') {
+    const depotId = key[1];
+    return typeof depotId === 'string' && depotId
+      ? (depotIds?.includes(depotId) ?? false)
+      : true;
+  }
+
+  // ['depoStok', <depotId | etiket>, ...]
+  const second = key[1];
+  if (second === 'unshipped' || second === 'serialIndex') {
+    const depotId = key[2];
+    return typeof depotId === 'string' && depotId
+      ? (depotIds?.includes(depotId) ?? false)
+      : true;
+  }
+  if (second === 'shipped') {
+    // useShippedDepoStok (global) → key[2] companyId olabilir;
+    // useLabStock → key[2] virgülle birleştirilmiş lab id listesi.
+    const joined = key[2];
+    if (typeof joined !== 'string' || !joined) return true;
+    if (!labIds) return false; // lab tarafına dokunulmadıysa lab stoğu değişmedi
+    const keyLabs = joined.split(',');
+    return labIds.some((labId) => keyLabs.includes(labId));
+  }
+  if (second === 'all' || second === 'active') {
+    // Şirket geneli özetler her stok hareketinde bayatlar.
+    return true;
+  }
+  if (typeof second === 'string' && second) {
+    // useDepoStokByDepot: key[1] = depotId
+    return depotIds ? depotIds.includes(second) : false;
+  }
+  return true;
 }
 
 /**
@@ -1477,9 +1539,15 @@ export async function touchStockMetadata() {
  */
 export function useStockUpdateListener() {
   const queryClient = useQueryClient();
+  const { currentUser, currentCompanyId, isSuperAdmin } = useAuth();
   const isFirstLoad = useRef(true);
 
   useEffect(() => {
+    // Auth-ready gate: oturum yokken metadata dinlemesi rules'a takılıp
+    // konsola hata basıyordu; oturum gelince zaten yeniden kurulur.
+    if (!currentUser) return;
+    isFirstLoad.current = true;
+
     const unsubscribe = onSnapshot(
       doc(db, STOCK_METADATA_DOC),
       (snapshot) => {
@@ -1488,12 +1556,41 @@ export function useStockUpdateListener() {
           isFirstLoad.current = false;
           return;
         }
+        if (!snapshot.exists()) return;
 
-        // Invalidate all depoStok queries when metadata changes
-        if (snapshot.exists()) {
-          queryClient.invalidateQueries({ queryKey: ['depoStok'] });
-          queryClient.invalidateQueries({ queryKey: ['depoStokPaginated'] });
+        const data = snapshot.data() as {
+          companyId?: string | null;
+          depotIds?: unknown;
+          labIds?: unknown;
+        };
+
+        // Başka tenant'ın stok hareketi bu kullanıcının cache'ini ilgilendirmez.
+        const eventCompany =
+          typeof data.companyId === 'string' && data.companyId ? data.companyId : null;
+        if (
+          eventCompany &&
+          !isSuperAdmin &&
+          eventCompany !== normalizeCompanyId(currentCompanyId)
+        ) {
+          return;
         }
+
+        const depotIds =
+          Array.isArray(data.depotIds) && data.depotIds.length > 0
+            ? (data.depotIds as string[])
+            : null;
+        const labIds =
+          Array.isArray(data.labIds) && data.labIds.length > 0
+            ? (data.labIds as string[])
+            : null;
+
+        queryClient.invalidateQueries({
+          predicate: (q) => {
+            const key = q.queryKey;
+            if (key[0] !== 'depoStok' && key[0] !== 'depoStokPaginated') return false;
+            return stockEventTouchesKey(key, depotIds, labIds);
+          },
+        });
       },
       (error) => {
         console.error('Stock metadata listener error:', error);
@@ -1501,7 +1598,7 @@ export function useStockUpdateListener() {
     );
 
     return () => unsubscribe();
-  }, [queryClient]);
+  }, [queryClient, currentUser, currentCompanyId, isSuperAdmin]);
 }
 
 // ============================================================================

@@ -1516,7 +1516,11 @@ export default function StokYonetimiPanel() {
       }, currentCompanyId));
 
       await batch.commit();
-      await touchStockMetadata();
+      await touchStockMetadata({
+        depotIds: [selectedDepotId],
+        labIds: [suggestion.labId],
+        companyId: currentCompanyId,
+      });
 
       // Emit notification
       await createNotification({

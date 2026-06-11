@@ -910,7 +910,11 @@ export default function DirektTransferPanel() {
 
         await batch.commit();
 
-        await touchStockMetadata();
+        await touchStockMetadata({
+          depotIds: [selectedDepotId],
+          labIds: targetId ? [targetId] : undefined,
+          companyId: currentCompanyId,
+        });
 
         toast({ title: 'Transfer Tamamlandı', description: `${totalShippedAdet} adet ürün başarıyla transfer edildi.` });
         setLastTransferCount(totalShippedAdet);

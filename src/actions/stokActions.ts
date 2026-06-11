@@ -2,37 +2,32 @@
 'use server';
 
 import { adminDb } from '@/lib/firebase-admin';
-import { db } from '@/lib/firebase';
+import { Timestamp as AdminTimestamp, FieldValue } from 'firebase-admin/firestore';
 import type { DepoStokItem, ProductCode } from '@/lib/types';
-import {
-  collection,
-  query,
-  where,
-  getDocs,
-  getCountFromServer,
-  Timestamp,
-  QueryDocumentSnapshot,
-  DocumentData,
-  doc,
-  updateDoc,
-  setDoc,
-  getDoc,
-  serverTimestamp,
-} from 'firebase/firestore';
 import { safeCompareByMiad, toDateSafe } from "@/lib/date";
 import { differenceInDays, parse, isValid, compareAsc } from 'date-fns';
 import { filterByCompanyScope, matchesCompanyScope } from '@/lib/company-scope';
 import fs from 'fs/promises';
 import path from 'path';
 
+/*
+ * STABİLİZASYON: bu dosyadaki bazı server action'lar daha önce CLIENT
+ * Firebase SDK'sını ('@/lib/firebase' → getDocs/updateDoc) SUNUCUDA
+ * çağırıyordu. Sunucuda client SDK'nın oturumu yoktur → security rules
+ * (`isSignedIn()`) tüm bu okuma/yazmaları reddediyordu: miad sayacı hep 0
+ * dönüyor, lab transfer tarihleri hiç yazılmıyordu — üstelik hatalar
+ * catch'lerde yutulduğu için kimse görmüyordu. Tamamı Admin SDK'ya taşındı.
+ */
 
-// Helper: convert Firestore Timestamps → JS Dates
-function processDoc(doc: QueryDocumentSnapshot<DocumentData>): DepoStokItem {
+// Helper: convert Firestore Timestamps → JS Dates (Admin SDK dokümanları)
+function processAdminDoc(
+  doc: FirebaseFirestore.QueryDocumentSnapshot,
+): DepoStokItem {
   const data = doc.data();
-  // Firestore'dan gelen Timestamp'ları Date objesine çevir
   Object.keys(data).forEach(key => {
-    if (data[key] instanceof Timestamp) {
-      data[key] = data[key].toDate();
+    const v = data[key];
+    if (v && typeof v === 'object' && typeof (v as any).toDate === 'function') {
+      data[key] = (v as any).toDate();
     }
   });
   return { id: doc.id, ...data } as DepoStokItem;
@@ -49,10 +44,11 @@ export async function getFullDepotStock(
   isSuperAdmin?: boolean,
 ): Promise<{ items: DepoStokItem[] }> {
   try {
-    const ref = collection(db, 'depoStok');
-    const q = query(ref, where('depotId', '==', depotId));
-    const snap = await getDocs(q);
-    const items = filterByCompanyScope(snap.docs.map(processDoc), companyId, isSuperAdmin);
+    const snap = await adminDb
+      .collection('depoStok')
+      .where('depotId', '==', depotId)
+      .get();
+    const items = filterByCompanyScope(snap.docs.map(processAdminDoc), companyId, isSuperAdmin);
     return { items };
   } catch (err) {
     console.error('Error fetching full depot stock:', err);
@@ -133,15 +129,12 @@ export async function getExpiringItems(
   companyId?: string | null,
   isSuperAdmin?: boolean,
 ): Promise<DepoStokItem[]> {
-    const depoStokRef = collection(db, 'depoStok');
-    const q = query(
-        depoStokRef,
-        where('depotId', '==', depotId),
-        where('isShipped', '==', false)
-    );
-
-    const snapshot = await getDocs(q);
-    const allItems = filterByCompanyScope(snapshot.docs.map(processDoc), companyId, isSuperAdmin);
+    const snapshot = await adminDb
+      .collection('depoStok')
+      .where('depotId', '==', depotId)
+      .where('isShipped', '==', false)
+      .get();
+    const allItems = filterByCompanyScope(snapshot.docs.map(processAdminDoc), companyId, isSuperAdmin);
 
     const today = new Date();
     today.setHours(0, 0, 0, 0); // Normalize to the start of the day
@@ -165,9 +158,12 @@ export async function getExpiringProductsCountServer(
   isSuperAdmin?: boolean,
 ): Promise<number> {
   try {
-    const depoStokRef = collection(db, 'depoStok');
-    const q = query(depoStokRef, where('isShipped', '==', false));
-    const snapshot = await getDocs(q);
+    // select() projeksiyonu: sayaç için dokümanların yalnız 4 alanı gerekir.
+    const snapshot = await adminDb
+      .collection('depoStok')
+      .where('isShipped', '==', false)
+      .select('stokKodu', 'lotNumarasi', 'miad', 'companyId')
+      .get();
     const allItems = filterByCompanyScope(
       snapshot.docs.map(d => ({ stokKodu: d.data().stokKodu, lotNumarasi: d.data().lotNumarasi, miad: d.data().miad, companyId: d.data().companyId })),
       companyId,
@@ -228,7 +224,7 @@ export async function updateHospitalLastTransferDates(
   if (!hospitalId || !items || items.length === 0) return;
 
   try {
-    const hospitalRef = doc(db, 'hospitals', hospitalId);
+    const hospitalRef = adminDb.collection('hospitals').doc(hospitalId);
     const updatePayload: Record<string, Date> = {};
     const now = new Date();
 
@@ -240,7 +236,7 @@ export async function updateHospitalLastTransferDates(
     });
 
     if (Object.keys(updatePayload).length > 0) {
-      await updateDoc(hospitalRef, updatePayload);
+      await hospitalRef.update(updatePayload);
     }
   } catch (error) {
     // This is an auxiliary update, so it shouldn't crash the main flow.
@@ -265,53 +261,89 @@ export async function updateLabTransferDates(
 
   try {
     const docId = `${labId}_${depotId}`;
-    const docRef = doc(db, 'labTransferDates', docId);
+    const docRef = adminDb.collection('labTransferDates').doc(docId);
     const now = new Date();
 
     // Check if document exists
-    const existingDoc = await getDoc(docRef);
+    const existingDoc = await docRef.get();
 
-    if (existingDoc.exists()) {
+    if (existingDoc.exists) {
       // Update existing document with dot notation
       const updatePayload: Record<string, any> = {
-        updatedAt: serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       };
 
       items.forEach((item) => {
         if (item.stokKodu) {
           updatePayload[`transfers.${item.stokKodu}`] = {
-            lastTransferDate: Timestamp.fromDate(now),
-            lastTransferBy: transferredBy || undefined,
+            lastTransferDate: AdminTimestamp.fromDate(now),
+            lastTransferBy: transferredBy ?? null,
           };
         }
       });
 
-      await updateDoc(docRef, updatePayload);
+      await docRef.update(updatePayload);
     } else {
       // Create new document
-      const transfers: Record<string, { lastTransferDate: any; lastTransferBy?: string }> = {};
+      const transfers: Record<string, { lastTransferDate: any; lastTransferBy?: string | null }> = {};
 
       items.forEach((item) => {
         if (item.stokKodu) {
           transfers[item.stokKodu] = {
-            lastTransferDate: Timestamp.fromDate(now),
-            lastTransferBy: transferredBy || undefined,
+            lastTransferDate: AdminTimestamp.fromDate(now),
+            lastTransferBy: transferredBy ?? null,
           };
         }
       });
 
-      await setDoc(docRef, {
+      await docRef.set({
         labId,
         depotId,
         labName,
         depotName,
         transfers,
-        updatedAt: serverTimestamp(),
+        updatedAt: FieldValue.serverTimestamp(),
       });
     }
   } catch (error) {
     console.error('Error updating lab transfer dates:', error);
   }
+}
+
+/* ================================================================
+   Ürün kataloğu sunucu önbelleği
+   ================================================================
+   getPaginatedDepotStock ve getPaginatedProductCodes her sayfa/sıralama/
+   filtre değişiminde TÜM productCodes koleksiyonunu yeniden okuyordu.
+   Katalog dakikalar içinde değişmez; kısa TTL'li instance içi önbellek
+   tablo gezinmesini Firestore'a tekrar tekrar tam tarama yaptırmaktan
+   kurtarır. (Serverless instance başına ayrı önbellek — kabul edilebilir
+   bayatlık: en fazla TTL kadar.) */
+
+type CatalogDoc = { id: string; data: Record<string, any> };
+
+const PRODUCT_CATALOG_TTL_MS = 60_000;
+let productCatalogCache: { at: number; docs: CatalogDoc[] } | null = null;
+let productCatalogInFlight: Promise<CatalogDoc[]> | null = null;
+
+async function getProductCatalogDocs(): Promise<CatalogDoc[]> {
+  const now = Date.now();
+  if (productCatalogCache && now - productCatalogCache.at < PRODUCT_CATALOG_TTL_MS) {
+    return productCatalogCache.docs;
+  }
+  // Eşzamanlı istekler tek okuma paylaşır (request coalescing).
+  if (productCatalogInFlight) return productCatalogInFlight;
+  productCatalogInFlight = (async () => {
+    try {
+      const snap = await adminDb.collection('productCodes').get();
+      const docs = snap.docs.map((d) => ({ id: d.id, data: d.data() }));
+      productCatalogCache = { at: Date.now(), docs };
+      return docs;
+    } finally {
+      productCatalogInFlight = null;
+    }
+  })();
+  return productCatalogInFlight;
 }
 
 /* ================================================================
@@ -408,17 +440,17 @@ export async function getPaginatedDepotStock(params: {
 
   let allItems: DepoStokItem[] = [];
   let rulesSnap: FirebaseFirestore.QuerySnapshot;
-  let productsSnap: FirebaseFirestore.QuerySnapshot;
+  let productDocs: CatalogDoc[];
 
   if (isCeomedDepot) {
     // Ceomed entegre depo: ceomedDepoStok/{depotId} dokümanından oku
     const [ceomedDoc, rules, products] = await Promise.all([
       adminDb.collection('ceomedDepoStok').doc(depotId).get(),
       adminDb.collection('depots').doc(depotId).collection('minMaxRules').get(),
-      adminDb.collection('productCodes').get(),
+      getProductCatalogDocs(),
     ]);
     rulesSnap = rules;
-    productsSnap = products;
+    productDocs = products;
 
     if (ceomedDoc.exists) {
       const data = ceomedDoc.data() as any;
@@ -446,10 +478,10 @@ export async function getPaginatedDepotStock(params: {
         .where('isShipped', '==', false)
         .get(),
       adminDb.collection('depots').doc(depotId).collection('minMaxRules').get(),
-      adminDb.collection('productCodes').get(),
+      getProductCatalogDocs(),
     ]);
     rulesSnap = rules;
-    productsSnap = products;
+    productDocs = products;
     allItems = filterByCompanyScope(
       snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
       companyId,
@@ -466,17 +498,17 @@ export async function getPaginatedDepotStock(params: {
 
   const productByCode = new Map<string, { anaBirim?: string; trackingMode?: string; defaultTrackingMode?: string; marka?: string }>();
   const lotTrackedStokCodes = new Set<string>();
-  productsSnap.forEach((d) => {
-    const data = d.data() as Record<string, any>;
+  for (const d of productDocs) {
+    const data = d.data as Record<string, any>;
     const stokKodu: string | undefined = data.stokKodu;
-    if (!stokKodu) return;
+    if (!stokKodu) continue;
     productByCode.set(stokKodu, data);
     // Mirror resolveDefaultTrackingMode without importing client-only utilities.
     const trackingMode = data.defaultTrackingMode || data.trackingMode || data.takipModu;
     if (trackingMode === 'serial' || trackingMode === 'lot_barcode' || trackingMode === 'lot_manual') {
       lotTrackedStokCodes.add(stokKodu);
     }
-  });
+  }
 
   // Group by (stokKodu, lotNumarasi, miad)
   const grouped: Record<string, GroupedStockRow> = {};
@@ -701,12 +733,11 @@ export async function getExpiringProductsCount(
   isSuperAdmin?: boolean,
 ): Promise<number> {
   try {
-    // Composite query: isShipped (requires Firestore index)
-    const stockQuery = query(
-      collection(db, 'depoStok'),
-      where('isShipped', '==', false)
-    );
-    const snapshot = await getDocs(stockQuery);
+    const snapshot = await adminDb
+      .collection('depoStok')
+      .where('isShipped', '==', false)
+      .select('stokKodu', 'lotNumarasi', 'miad', 'companyId')
+      .get();
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
@@ -799,11 +830,12 @@ export async function getPaginatedProductCodes(params: {
   };
 
   try {
-    // Fetch all product codes via Admin SDK
-    const snapshot = await adminDb.collection('productCodes').get();
+    // Fetch all product codes via Admin SDK (TTL'li instance önbelleği —
+    // sayfa/sıralama/filtre geçişleri tam koleksiyonu yeniden okutmaz)
+    const catalogDocs = await getProductCatalogDocs();
 
-    let allProducts: ProductCode[] = snapshot.docs.map(d => {
-      const data = d.data();
+    let allProducts: ProductCode[] = catalogDocs.map(d => {
+      const data = { ...d.data };
       // Convert Firestore Timestamps → plain values (same as processDoc)
       Object.keys(data).forEach(key => {
         if (data[key] && typeof data[key] === 'object' && typeof data[key].toDate === 'function') {
