@@ -26,6 +26,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useDepots, useProductCodes, useAddressDefinitions, useBarcodeFormatsQuery, useUsers, useDepotSerialIndex, useInvalidateQueries, touchStockMetadata, useDepotCountSessions, useScannedItems, useIrsaliyeFiles } from '@/hooks/useFirebaseQueries';
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import useHidScanner from '@/hooks/useHidScanner';
+import { ScanCommitProbe, ScanPerformanceBadge, useScanPerformance } from '@/hooks/useScanPerformance';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
 
@@ -536,7 +537,7 @@ export default function AnaPanel(props: AnaPanelProps) {
   const { data: depots = [], isPending: depotsPending } = useDepots();
   const { data: productCodes = [], isPending: productsPending } = useProductCodes();
   const { data: addressDefinitions = [] } = useAddressDefinitions();
-  const { data: barcodeFormats = [] } = useBarcodeFormatsQuery();
+  const { data: barcodeFormats = [], isPending: barcodeFormatsPending } = useBarcodeFormatsQuery();
   const { data: users = [] } = useUsers();
   const { invalidateDepoStok } = useInvalidateQueries();
 
@@ -552,16 +553,16 @@ export default function AnaPanel(props: AnaPanelProps) {
 
   // Skeleton yalnızca veri gerçekten hiç cache'de yoksa (isPending) gösterilir.
   // Arka planda yenileme (isFetching) sırasında UI bloke edilmez.
-  const isLoading = depotsPending || productsPending;
+  const isLoading = depotsPending || productsPending || barcodeFormatsPending;
+  const masterDataProgress = useMemo(() => {
+    const completedSources = Number(!productsPending) + Number(!barcodeFormatsPending);
+    return Math.round((completedSources / 2) * 100);
+  }, [productsPending, barcodeFormatsPending]);
+  const isMasterDataLoading = masterDataProgress < 100;
 
   const [scannedItems, setScannedItems] = useState<ScanRow[]>([]);
-  // Canlı okutma süresi ölçer: barkod okutmadan, sonucu ekrana boyayan (paint)
-  // kareye kadar geçen gerçek süre (ms). Cihaz üstünde gerçek INP'yi gösterir —
-  // trace almadan darboğazı (JS mi, render mi) anlamak için.
-  const [lastScanMs, setLastScanMs] = useState<number | null>(null);
-  // JS (parse + state) süresi ayrı: senkron gövde bitince mikrotask'ta ölçülür.
-  // "JS" düşük ama toplam yüksekse darboğaz render/paint; "JS" yüksekse parse.
-  const [lastScanJsMs, setLastScanJsMs] = useState<number | null>(null);
+  // Ölçülebilir uygulama maliyeti: senkron JS ve React'in acil UI commit süresi.
+  const { beginScanMeasurement, controller: scanPerformanceController } = useScanPerformance();
 
   // A scan must stay on the urgent input path. Grouping and sorting thousands of
   // rows synchronously here used to block the next HID/keyboard event for a few
@@ -588,6 +589,7 @@ export default function AnaPanel(props: AnaPanelProps) {
   const [isOcrModalOpen, setIsOcrModalOpen] = useState(false);
   const [pendingIrsaliyeCount, setPendingIrsaliyeCount] = useState(0);
   const [pendingCeomedIrsaliye, setPendingCeomedIrsaliye] = useState<PendingCeomedIrsaliye[]>([]);
+  const [pendingFileIrsaliyeCount, setPendingFileIrsaliyeCount] = useState(0);
   const [isPendingCeomedModalOpen, setIsPendingCeomedModalOpen] = useState(false);
   const [ceomedApprovingId, setCeomedApprovingId] = useState<string | null>(null);
   const [selectedPendingIrs, setSelectedPendingIrs] = useState<PendingCeomedIrsaliye | null>(null);
@@ -704,6 +706,24 @@ export default function AnaPanel(props: AnaPanelProps) {
   }, [irsaliyeQuery.data, selectedDepotId]);
 
   useEffect(() => {
+    if (!selectedDepotId) {
+      setPendingFileIrsaliyeCount(0);
+      return;
+    }
+    const pendingFilesQuery = scopedQuery('bekleyenIrsaliyeler', currentCompanyId, isSuperAdmin, orderBy('scannedAt', 'desc'));
+    const unsubscribe = onSnapshot(pendingFilesQuery, (snapshot) => {
+      const count = snapshot.docs.reduce((total, document) => {
+        const data = document.data() as any;
+        if (!matchesCompanyScope(data, currentCompanyId, isSuperAdmin)) return total;
+        const belongsToDepot = data.locationType === 'depot' && data.locationId === selectedDepotId;
+        return total + Number(data.status === 'pending' && belongsToDepot);
+      }, 0);
+      setPendingFileIrsaliyeCount(count);
+    }, () => setPendingFileIrsaliyeCount(0));
+    return () => unsubscribe();
+  }, [selectedDepotId, currentCompanyId, isSuperAdmin]);
+
+  useEffect(() => {
     const cari = ((selectedDepot as any)?.ceomedCariKodu || '').toString().trim().toUpperCase();
     if (!cari) {
       setPendingCeomedIrsaliye([]);
@@ -767,20 +787,8 @@ export default function AnaPanel(props: AnaPanelProps) {
 
   const processScan = useCallback(async (barcodeData: string, source: 'barcode' | 'bulk_item' = 'barcode') => {
     const scanCorrelationId = createCorrelationId();
-    // Okutma→paint süresini ölç (yalnızca üst seviye barkod okutmalarında).
-    // Bu okutmadaki tüm setState'ler React 18 tarafından tek render'da batch'lenip
-    // boyandıktan SONRA çift requestAnimationFrame ile ölçeriz → ekranda gördüğün
-    // gerçek gecikme. Bulk alt-okutmalar (source==='bulk_item') ölçülmez.
-    if (source === 'barcode' && typeof performance !== 'undefined') {
-      const scanStartedAt = performance.now();
-      // JS süresi: senkron processScan gövdesi (parse + state queue) bitince
-      // çalışan mikrotask → saf JS maliyeti (render/paint hariç).
-      queueMicrotask(() => setLastScanJsMs(performance.now() - scanStartedAt));
-      // Toplam scan→paint: tüm setState'ler boyandıktan sonra (çift rAF).
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        setLastScanMs(performance.now() - scanStartedAt);
-      }));
-    }
+    // Toplu QR içindeki alt okutmalar ana okutmanın ölçümünü ezmesin.
+    if (source === 'barcode') beginScanMeasurement();
     const trimmedData = (barcodeData || '').trim();
     if (!trimmedData) {
       malKabulLogger.warn('Scan ignored: empty payload', { source, isBulkScanMode }, { correlationId: scanCorrelationId });
@@ -961,7 +969,7 @@ export default function AnaPanel(props: AnaPanelProps) {
         setTimeout(() => setScanStatus('idle'), 3000);
       }
     }
-  }, [flashScanFeedback, productCodes, barcodeFormats, existingDepotSerials, productTracking, isBulkScanMode]);
+  }, [flashScanFeedback, productCodes, barcodeFormats, existingDepotSerials, productTracking, isBulkScanMode, beginScanMeasurement]);
 
   // Direkt transfer paneliyle aynı davranış: tarayıcı yalnızca modal/kamera/manuel
   // giriş açıkken devre dışı. Eskiden buradaki `!isProcessingScan` koşulu HER
@@ -1939,6 +1947,7 @@ export default function AnaPanel(props: AnaPanelProps) {
 
   return (
     <div className="cihaz-shell px-3 py-4 sm:px-5 sm:py-6 space-y-4 sm:space-y-5 min-h-screen">
+      <ScanCommitProbe controller={scanPerformanceController} />
 
       {/* ── STEP 1: Header – Depo Seçimi ── */}
       <header className="cihaz-card-strong px-4 py-4 sm:px-6 sm:py-5">
@@ -1981,182 +1990,156 @@ export default function AnaPanel(props: AnaPanelProps) {
             </Select>
           </div>
 
+          {isMasterDataLoading && (
+            <div
+              className="w-full sm:w-28 self-center sm:ml-auto"
+              role="progressbar"
+              aria-label="Ürün kodları ve barkod formatları yükleniyor"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={masterDataProgress}
+            >
+              <div className="mb-1 flex items-center justify-between text-[9px] font-medium text-[var(--dashboard-muted)]">
+                <span>Veriler</span>
+                <span className="tabular-nums">%{masterDataProgress}</span>
+              </div>
+              <div className="h-1 overflow-hidden rounded-full bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
+                <div
+                  className="h-full rounded-full bg-[var(--dashboard-accent)] transition-[width] duration-300"
+                  style={{ width: `${masterDataProgress}%` }}
+                />
+              </div>
+            </div>
+          )}
+
           <button
             onClick={() => router.push(selectedDepotId ? `/mal-kabul/gecmis?depotId=${encodeURIComponent(selectedDepotId)}` : '/mal-kabul/gecmis')}
-            className="cihaz-tool-item flex items-center gap-2 px-4 py-2.5 text-sm font-medium self-start sm:self-center sm:ml-auto"
+            className={cn(
+              "cihaz-tool-item flex items-center gap-2 px-4 py-2.5 text-sm font-medium self-start sm:self-center",
+              !isMasterDataLoading && "sm:ml-auto"
+            )}
           >
             <History className="h-4 w-4" />
             <span>Geçmiş</span>
           </button>
           <button
             onClick={() => setIsPendingCeomedModalOpen(true)}
-            disabled={!selectedDepotId || !((selectedDepot as any)?.ceomedCariKodu)}
+            disabled={!selectedDepotId}
             className="cihaz-tool-item relative flex items-center gap-2 px-4 py-2.5 text-sm font-medium self-start sm:self-center"
           >
             <FileText className="h-4 w-4" />
             <span>Bekleyen İrsaliyeler</span>
-            {pendingCeomedIrsaliye.length > 0 && (
+            {(pendingCeomedIrsaliye.length + pendingFileIrsaliyeCount) > 0 && (
               <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center animate-pulse">
-                {pendingCeomedIrsaliye.length}
+                {pendingCeomedIrsaliye.length + pendingFileIrsaliyeCount}
               </span>
             )}
           </button>
         </div>
       </header>
 
-      {/* ── Bekleyen İrsaliyeler (dosya yönetiminde taranıp onaylanmış) ── */}
-      {selectedDepotId && selectedDepot && (
-        <BekleyenIrsaliyelerPanel
-          locationType="depot"
-          locationId={selectedDepotId}
-          locationName={selectedDepot.name || ''}
-        />
-      )}
-
-      {/* ── KPI Row – Son Okutulan Detay + Okuma Adetleri + Ürün Ekle ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 min-h-[180px]">
-        {/* Col 1: Son Okutulan Detay (with scan feedback) */}
+      {/* ── Kompakt çalışma satırı: Son Okutulan + Ürün Ekle ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
         <div className={cn(
-          "cihaz-card-strong px-4 py-4 sm:px-5 sm:py-5 transition-all duration-300 min-h-[180px]",
+          "cihaz-card-strong px-4 py-3 sm:px-5 sm:py-4 transition-all duration-300 min-h-[116px]",
           scanFeedback?.type === 'success' && "ring-2 ring-green-500/60",
           scanFeedback?.type === 'error' && "ring-2 ring-red-500/60"
         )}>
-          <div className="flex items-center justify-between mb-3">
-            <p className="cihaz-overline text-xs">Son Okutulan Detay</p>
-            <div className="flex items-center gap-2">
-              {lastScanMs !== null && (
-                <span
-                  className={cn(
-                    "text-[10px] font-mono font-bold px-1.5 py-0.5 rounded tabular-nums",
-                    lastScanMs < 50 ? "bg-green-500/15 text-green-600"
-                      : lastScanMs < 200 ? "bg-amber-500/15 text-amber-600"
-                      : "bg-red-500/15 text-red-600"
+          <div className="grid h-full grid-cols-1 sm:grid-cols-5 gap-3 sm:gap-4">
+            <div className="sm:col-span-3 min-w-0">
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <p className="cihaz-overline text-[10px] sm:text-xs">Son Okutulan Ürün</p>
+                <div className="flex items-center gap-2 shrink-0">
+                  <ScanPerformanceBadge controller={scanPerformanceController} />
+                  {scanFeedback && (
+                    <span className={cn(
+                      "text-[9px] font-bold uppercase tracking-wide",
+                      scanFeedback.type === 'success' ? "text-green-600" : "text-red-600"
+                    )}>
+                      {scanFeedback.type === 'success' ? '✓ Başarılı' : '✗ Hata'}
+                    </span>
                   )}
-                  title="JS = parse + state (saf JS). Toplam = okutma→paint (render dahil). JS düşük + toplam yüksek ⇒ darboğaz render."
-                >
-                  {lastScanJsMs !== null && (
-                    <span className="opacity-60 font-normal">JS {Math.round(lastScanJsMs)} · </span>
+                </div>
+              </div>
+              {scanFeedback?.type === 'error' && !lastScannedProduct ? (
+                <p className="text-sm font-bold text-red-600 truncate">{scanFeedback.message}</p>
+              ) : lastScannedProduct ? (
+                <div className="space-y-1">
+                  <p className={cn(
+                    "text-sm sm:text-base font-semibold truncate",
+                    scanFeedback?.type === 'error' ? "text-red-600" : "text-[var(--dashboard-text)]"
+                  )}>
+                    {scanFeedback?.type === 'error' ? scanFeedback.message : (lastScannedProduct.stokAdi || '')}
+                  </p>
+                  {scanFeedback?.type !== 'error' && (
+                    <>
+                      <p className="text-[10px] sm:text-xs text-[var(--dashboard-muted)] font-mono truncate">{lastScannedProduct.stokKodu}</p>
+                      <div className="flex flex-wrap gap-1.5 mt-1">
+                        {lastScannedProduct.seriNumarasi && <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-800">SN: {lastScannedProduct.seriNumarasi}</span>}
+                        {lastScannedProduct.lotNumarasi && <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-purple-100 text-purple-800">Lot: {lastScannedProduct.lotNumarasi}</span>}
+                        {lastScannedProduct.miad && <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-800">SKT: {lastScannedProduct.miad}</span>}
+                      </div>
+                    </>
                   )}
-                  {Math.round(lastScanMs)} ms
-                </span>
-              )}
-              {scanFeedback && (
-                <span className={cn(
-                  "text-[10px] font-bold uppercase tracking-wide",
-                  scanFeedback.type === 'success' ? "text-green-600" : "text-red-600"
-                )}>
-                  {scanFeedback.type === 'success' ? '✓ Başarılı' : '✗ Hata'}
-                </span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 py-1">
+                  <Package className="h-4 w-4 text-[var(--dashboard-muted)]" />
+                  <p className="text-xs text-[var(--dashboard-muted)]">Barkod okutun</p>
+                </div>
               )}
             </div>
-          </div>
-          {scanFeedback?.type === 'error' && !lastScannedProduct ? (
-            <p className="text-sm font-bold text-red-600 truncate">{scanFeedback.message}</p>
-          ) : lastScannedProduct ? (
-            <div className="space-y-1">
-              <p className={cn(
-                "text-sm sm:text-base font-semibold truncate",
-                scanFeedback?.type === 'error' ? "text-red-600" : "text-[var(--dashboard-text)]"
-              )}>
-                {scanFeedback?.type === 'error' ? scanFeedback.message : (lastScannedProduct.stokAdi || '')}
-              </p>
-              {scanFeedback?.type !== 'error' && (
-                <>
-                  <p className="text-[10px] sm:text-xs text-[var(--dashboard-muted)] font-mono truncate">{lastScannedProduct.stokKodu}</p>
-                  <div className="flex flex-wrap gap-1.5 mt-1">
-                    {lastScannedProduct.seriNumarasi && (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-800">
-                        SN: {lastScannedProduct.seriNumarasi}
-                      </span>
-                    )}
-                    {lastScannedProduct.lotNumarasi && (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-purple-100 text-purple-800">
-                        Lot: {lastScannedProduct.lotNumarasi}
-                      </span>
-                    )}
-                    {lastScannedProduct.miad && (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-800">
-                        SKT: {lastScannedProduct.miad}
-                      </span>
-                    )}
+
+            <div className="sm:col-span-2 border-t sm:border-t-0 sm:border-l border-[var(--dashboard-stroke)] pt-3 sm:pt-0 sm:pl-4">
+              <p className="cihaz-overline text-[10px] sm:text-xs mb-2">Okuma Adetleri</p>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-xl bg-[var(--dashboard-surface-2)] px-3 py-2 shadow-[var(--dashboard-pressed)]">
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-xl sm:text-2xl font-bold text-[var(--dashboard-accent)]">{lotCount}</span>
+                    <span className="text-[10px] sm:text-xs text-[var(--dashboard-muted)]">lot</span>
                   </div>
-                </>
-              )}
+                </div>
+                <div className="rounded-xl bg-[var(--dashboard-surface-2)] px-3 py-2 shadow-[var(--dashboard-pressed)]">
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-xl sm:text-2xl font-semibold text-[var(--dashboard-text)]">{totalCountForProduct}</span>
+                    <span className="text-[10px] sm:text-xs text-[var(--dashboard-muted)]">ürün</span>
+                  </div>
+                </div>
+              </div>
             </div>
-          ) : (
-            <div className="flex items-center gap-2 py-1">
-              <Package className="h-4 w-4 text-[var(--dashboard-muted)]" />
-              <p className="text-xs text-[var(--dashboard-muted)]">Barkod okutun</p>
-            </div>
-          )}
-        </div>
-
-        {/* Col 2: Okuma Adetleri (bigger fonts) */}
-        <div className="cihaz-card px-3 py-3 sm:px-4 sm:py-4 min-h-[180px]">
-          <p className="cihaz-overline text-[10px] sm:text-xs mb-2">Okuma Adetleri</p>
-          <div className="flex items-baseline gap-1.5">
-            <span className="text-2xl sm:text-3xl font-bold text-[var(--dashboard-accent)]">{lotCount}</span>
-            <span className="text-xs sm:text-sm text-[var(--dashboard-muted)]">lot</span>
-          </div>
-          <div className="flex items-baseline gap-1.5 mt-1">
-            <span className="text-lg sm:text-xl font-semibold text-[var(--dashboard-text)]">{totalCountForProduct}</span>
-            <span className="text-xs sm:text-sm text-[var(--dashboard-muted)]">ürün</span>
           </div>
         </div>
 
-        {/* Col 3: Ürün Ekle (action tiles) */}
-        <div className="cihaz-card-strong px-3 py-3 sm:px-4 sm:py-4 min-h-[180px]">
+        <div className="cihaz-card-strong px-4 py-3 sm:px-5 sm:py-4 min-h-[116px]">
           <p className="cihaz-overline text-[10px] sm:text-xs mb-2">Ürün Ekle</p>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={() => { setIsBatchScanning(false); setIsCameraScannerOpen(true); }}
-              className="cihaz-action-tile flex flex-col items-center justify-center gap-1 py-2.5 text-center"
-            >
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+            <button onClick={() => { setIsBatchScanning(false); setIsCameraScannerOpen(true); }} className="cihaz-action-tile flex min-h-14 flex-col items-center justify-center gap-1 px-2 py-2 text-center">
               <Camera className="h-4 w-4 text-[var(--dashboard-accent)]" />
-              <span className="text-[10px] sm:text-xs font-medium text-[var(--dashboard-text)]">Tekli Tara</span>
+              <span className="text-[10px] font-medium text-[var(--dashboard-text)]">Tekli Tara</span>
             </button>
-            <button
-              onClick={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }}
-              className="cihaz-action-tile flex flex-col items-center justify-center gap-1 py-2.5 text-center"
-              style={{ background: 'linear-gradient(135deg, #0d9488 0%, #14b8a6 100%)', color: '#fff', border: 'none' }}
-            >
+            <button onClick={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }} className="cihaz-action-tile flex min-h-14 flex-col items-center justify-center gap-1 px-2 py-2 text-center" style={{ background: 'linear-gradient(135deg, #0d9488 0%, #14b8a6 100%)', color: '#fff', border: 'none' }}>
               <Camera className="h-4 w-4" />
-              <span className="text-[10px] sm:text-xs font-medium">Seri Tarama</span>
+              <span className="text-[10px] font-medium">Seri Tarama</span>
             </button>
-            <button
-              onClick={() => setShowManualInline(v => !v)}
-              className={cn("cihaz-action-tile flex flex-col items-center justify-center gap-1 py-2.5 text-center", showManualInline && "cihaz-pressed")}
-            >
+            <button onClick={() => setShowManualInline(v => !v)} className={cn("cihaz-action-tile flex min-h-14 flex-col items-center justify-center gap-1 px-2 py-2 text-center", showManualInline && "cihaz-pressed")}>
               <PlusCircle className="h-4 w-4 text-[var(--dashboard-accent)]" />
-              <span className="text-[10px] sm:text-xs font-medium text-[var(--dashboard-text)]">Manuel Ekle</span>
+              <span className="text-[10px] font-medium text-[var(--dashboard-text)]">Manuel Ekle</span>
+            </button>
+            <button onClick={() => setIsOcrModalOpen(true)} className="cihaz-action-tile relative flex min-h-14 flex-col items-center justify-center gap-1 px-2 py-2 text-center">
+              <ScanLine className="h-4 w-4 text-[var(--dashboard-accent)]" />
+              <span className="text-[10px] font-medium text-[var(--dashboard-text)]">İrsaliye Tara</span>
+              {pendingIrsaliyeCount > 0 && <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">{pendingIrsaliyeCount}</span>}
             </button>
             <button
-              onClick={() => setIsOcrModalOpen(true)}
-              className="cihaz-action-tile relative flex flex-col items-center justify-center gap-1 py-2.5 text-center"
+              onClick={handleDepotSerialCheck}
+              disabled={isCheckingDepotSerials || !selectedDepotId}
+              className="cihaz-action-tile col-span-2 sm:col-span-1 flex min-h-14 flex-col items-center justify-center gap-1 px-2 py-2 text-center disabled:opacity-50"
+              title="Listedeki serileri seçili depodaki stokla karşılaştır."
             >
-              <ScanLine className="h-4 w-4 text-[var(--dashboard-accent)]" />
-              <span className="text-[10px] sm:text-xs font-medium text-[var(--dashboard-text)]">İrsaliye Tara</span>
-              {pendingIrsaliyeCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
-                  {pendingIrsaliyeCount}
-                </span>
-              )}
+              {isCheckingDepotSerials ? <Loader2 className="h-4 w-4 animate-spin text-[var(--dashboard-accent)]" /> : <Search className="h-4 w-4 text-[var(--dashboard-accent)]" />}
+              <span className="text-[10px] font-medium text-[var(--dashboard-text)]">{isCheckingDepotSerials ? 'Sorgulanıyor…' : 'Depoda Kontrol'}</span>
             </button>
           </div>
-          {/* Depo seri kontrolü — yalnızca basıldığında depoyu sorgular */}
-          <button
-            onClick={handleDepotSerialCheck}
-            disabled={isCheckingDepotSerials || !selectedDepotId}
-            className="cihaz-action-tile mt-2 w-full flex items-center justify-center gap-2 py-2.5 text-center disabled:opacity-50"
-            title="Listedeki serileri seçili depodaki stokla karşılaştır. Depoda zaten mevcut serileri listeden çıkarır. Sorgu yalnızca bu butona basınca yapılır."
-          >
-            {isCheckingDepotSerials
-              ? <Loader2 className="h-4 w-4 animate-spin text-[var(--dashboard-accent)]" />
-              : <Search className="h-4 w-4 text-[var(--dashboard-accent)]" />}
-            <span className="text-[11px] sm:text-xs font-medium text-[var(--dashboard-text)]">
-              {isCheckingDepotSerials ? 'Depo Sorgulanıyor…' : 'Depoda Kontrol Et'}
-            </span>
-          </button>
         </div>
       </div>
 
@@ -2685,65 +2668,82 @@ export default function AnaPanel(props: AnaPanelProps) {
         </DialogContent>
       </Dialog>
 
-      {/* OCR Modal */}
+      {/* CEOMED ve dosya yönetimi kaynaklı bekleyen irsaliyeler */}
       <Dialog open={isPendingCeomedModalOpen} onOpenChange={setIsPendingCeomedModalOpen}>
-        <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
+        <DialogContent className="max-w-5xl max-h-[88vh] overflow-hidden flex flex-col">
           <DialogHeader>
-            <DialogTitle>Bekleyen Ceomed İrsaliyeleri</DialogTitle>
+            <DialogTitle>Bekleyen İrsaliyeler</DialogTitle>
             <DialogDescription>
-              Seçili deponun cari kodu ile eşleşen ve "İrsaliye Yazdırılabilir / İrsaliye Yazdırıldı / Kuruma Sevk Edildi" durumundaki kayıtlar.
+              CEOMED entegrasyonundan ve dosya yönetiminde taranan PDF'lerden gelen kayıtları tek alandan yönetin.
             </DialogDescription>
           </DialogHeader>
-          <div className="flex-1 overflow-y-auto space-y-3 pr-1">
-            {pendingCeomedIrsaliye.length === 0 ? (
-              <div className="text-sm text-[var(--dashboard-muted)] py-10 text-center">Bekleyen irsaliye bulunamadı.</div>
-            ) : pendingCeomedIrsaliye.map((irs) => {
-              const lines = buildPendingLines(irs);
-              const brands = Array.from(new Set(lines.map(l => l.marka).filter(Boolean)));
-              const isSelected = selectedPendingIrs?.id === irs.id;
-              return (
-                <Card key={irs.id} className={cn("cursor-pointer", isSelected && "ring-1 ring-[var(--dashboard-accent)]")} onClick={() => setSelectedPendingIrs(irs)}>
-                  <CardHeader className="py-3">
-                    <CardTitle className="text-sm flex items-center justify-between">
-                      <span>{irs.irsaliyeNo}</span>
-                      <span className="text-xs font-normal text-[var(--dashboard-muted)]">{irs.cariKodu}</span>
-                    </CardTitle>
-                    <CardDescription className="text-xs truncate">
-                      {brands.length ? `Markalar: ${brands.join(', ')}` : 'Marka bilgisi yok'}
-                    </CardDescription>
-                  </CardHeader>
-                  {isSelected && (
-                  <CardContent className="space-y-2 pt-0">
-                    {lines.map((g, idx) => (
-                      <Accordion key={`${g.stokKodu}-${g.lot}-${idx}`} type="single" collapsible>
-                        <AccordionItem value="s">
-                          <AccordionTrigger>
-                            <div className="flex w-full justify-between pr-2 text-sm">
-                              <span>{g.stokKodu} - {g.stokAdi} • Lot: {g.lot || '-'} • SKT: {g.miad || '-'}</span>
-                              <span className="font-semibold">Adet: {g.adet}</span>
-                            </div>
-                          </AccordionTrigger>
-                          <AccordionContent>
-                            <div className="text-xs grid grid-cols-2 md:grid-cols-4 gap-1 font-mono">
-                              {g.serials.length ? g.serials.map((s, i) => <span key={`${s}-${i}`} className="px-2 py-1 rounded border border-red-300 text-red-600">{s}</span>) : <span>Seri yok</span>}
-                            </div>
-                          </AccordionContent>
-                        </AccordionItem>
-                      </Accordion>
-                    ))}
-                    <div className="flex justify-end gap-2">
-                      <Button variant="outline" onClick={() => handleStartVerifiedCeomedReceipt(irs)}>
-                        Doğrulamalı Stoğa Aktar
-                      </Button>
-                      <Button onClick={() => handleApproveCeomedToDepot(irs)} disabled={ceomedApprovingId === irs.id}>
-                        {ceomedApprovingId === irs.id ? 'Aktarılıyor...' : 'Stoğa Aktar'}
-                      </Button>
-                    </div>
-                  </CardContent>
-                  )}
-                </Card>
-              );
-            })}
+          <div className="flex-1 overflow-y-auto space-y-6 pr-1">
+            <section className="space-y-3">
+              <div className="flex items-center gap-2">
+                <FileText className="h-4 w-4 text-[var(--dashboard-accent)]" />
+                <h3 className="text-sm font-semibold">CEOMED Entegrasyonu</h3>
+                <span className="text-xs text-[var(--dashboard-muted)]">({pendingCeomedIrsaliye.length})</span>
+              </div>
+              {!((selectedDepot as any)?.ceomedCariKodu) ? (
+                <div className="rounded-xl border border-dashed border-[var(--dashboard-stroke)] px-4 py-6 text-center text-sm text-[var(--dashboard-muted)]">
+                  Seçili depo için CEOMED cari kodu tanımlı değil.
+                </div>
+              ) : pendingCeomedIrsaliye.length === 0 ? (
+                <div className="rounded-xl border border-dashed border-[var(--dashboard-stroke)] px-4 py-6 text-center text-sm text-[var(--dashboard-muted)]">Bekleyen CEOMED irsaliyesi bulunamadı.</div>
+              ) : pendingCeomedIrsaliye.map((irs) => {
+                const lines = buildPendingLines(irs);
+                const brands = Array.from(new Set(lines.map(l => l.marka).filter(Boolean)));
+                const isSelected = selectedPendingIrs?.id === irs.id;
+                return (
+                  <Card key={irs.id} className={cn("cursor-pointer", isSelected && "ring-1 ring-[var(--dashboard-accent)]")} onClick={() => setSelectedPendingIrs(irs)}>
+                    <CardHeader className="py-3">
+                      <CardTitle className="text-sm flex items-center justify-between">
+                        <span>{irs.irsaliyeNo}</span>
+                        <span className="text-xs font-normal text-[var(--dashboard-muted)]">{irs.cariKodu}</span>
+                      </CardTitle>
+                      <CardDescription className="text-xs truncate">{brands.length ? `Markalar: ${brands.join(', ')}` : 'Marka bilgisi yok'}</CardDescription>
+                    </CardHeader>
+                    {isSelected && (
+                      <CardContent className="space-y-2 pt-0">
+                        {lines.map((g, idx) => (
+                          <Accordion key={`${g.stokKodu}-${g.lot}-${idx}`} type="single" collapsible>
+                            <AccordionItem value="s">
+                              <AccordionTrigger>
+                                <div className="flex w-full justify-between pr-2 text-sm">
+                                  <span>{g.stokKodu} - {g.stokAdi} • Lot: {g.lot || '-'} • SKT: {g.miad || '-'}</span>
+                                  <span className="font-semibold">Adet: {g.adet}</span>
+                                </div>
+                              </AccordionTrigger>
+                              <AccordionContent>
+                                <div className="text-xs grid grid-cols-2 md:grid-cols-4 gap-1 font-mono">
+                                  {g.serials.length ? g.serials.map((serial, index) => <span key={`${serial}-${index}`} className="px-2 py-1 rounded border border-red-300 text-red-600">{serial}</span>) : <span>Seri yok</span>}
+                                </div>
+                              </AccordionContent>
+                            </AccordionItem>
+                          </Accordion>
+                        ))}
+                        <div className="flex justify-end gap-2">
+                          <Button variant="outline" onClick={() => handleStartVerifiedCeomedReceipt(irs)}>Doğrulamalı Stoğa Aktar</Button>
+                          <Button onClick={() => handleApproveCeomedToDepot(irs)} disabled={ceomedApprovingId === irs.id}>
+                            {ceomedApprovingId === irs.id ? 'Aktarılıyor...' : 'Stoğa Aktar'}
+                          </Button>
+                        </div>
+                      </CardContent>
+                    )}
+                  </Card>
+                );
+              })}
+            </section>
+
+            <section className="border-t border-[var(--dashboard-stroke)] pt-5">
+              {selectedDepotId && selectedDepot && (
+                <BekleyenIrsaliyelerPanel
+                  locationType="depot"
+                  locationId={selectedDepotId}
+                  locationName={selectedDepot.name || ''}
+                />
+              )}
+            </section>
           </div>
         </DialogContent>
       </Dialog>
