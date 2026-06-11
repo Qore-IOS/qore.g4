@@ -460,6 +460,36 @@ export default function DirektTransferPanel() {
   const handleScan = useCallback(
     async (raw: string, source: 'hid' | 'camera' | 'manual' | 'bulk_item' = 'hid') => {
       if (!raw) return;
+      if (!transferDataReady) {
+        playFeedback(true);
+        flashScanFeedback('error', 'Ürün, barkod ve depo stok verileri henüz hazır değil.');
+        return;
+      }
+
+      // Measure only top-level reads. Child serials unpacked from a bulk QR would
+      // otherwise overwrite the user-visible duration several times.
+      if (source !== 'bulk_item' && typeof performance !== 'undefined') {
+        const scanStartedAt = performance.now();
+        queueMicrotask(() => setLastScanJsMs(performance.now() - scanStartedAt));
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          setLastScanMs(performance.now() - scanStartedAt);
+        }));
+      }
+
+      if (!transferDataReady) {
+        playFeedback(true);
+        flashScanFeedback('error', 'Ürün, barkod ve depo stok verileri henüz hazır değil.');
+        return;
+      }
+
+      // Toplu QR içindeki alt okutmalar ana okutmanın ölçümünü ezmesin.
+      const finishScanJsMeasurement = source !== 'bulk_item' ? beginScanMeasurement() : undefined;
+
+      if (!transferDataReady) {
+        playFeedback(true);
+        flashScanFeedback('error', 'Ürün, barkod ve depo stok verileri henüz hazır değil.');
+        return;
+      }
 
       // Toplu QR içindeki alt okutmalar ana okutmanın ölçümünü ezmesin.
       const finishScanJsMeasurement = source !== 'bulk_item' ? beginScanMeasurement() : undefined;
