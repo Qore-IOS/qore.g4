@@ -462,7 +462,10 @@ export function validateManualDeduction(
 ): { success: true; data: ManualDeductionPayload } | { success: false; errors: z.ZodError } {
   const result = ManualDeductionPayloadSchema.safeParse(payload);
   if (result.success) {
-    return { success: true, data: result.data };
+    // NOT: strictNullChecks=false iken zod, output tipini tüm alanlar
+    // opsiyonelmiş gibi çıkarır (zod strict mode gereksinimi). Runtime
+    // garantisi şemanın kendisinde; cast bu yüzden güvenli.
+    return { success: true, data: result.data as ManualDeductionPayload };
   }
   return { success: false, errors: result.error };
 }
@@ -505,7 +508,10 @@ export function validateFaultReport(
 ): { success: true; data: FaultReportPayload } | { success: false; errors: z.ZodError } {
   const result = FaultReportPayloadSchema.safeParse(payload);
   if (result.success) {
-    return { success: true, data: result.data };
+    // NOT: strictNullChecks=false iken zod, output tipini tüm alanlar
+    // opsiyonelmiş gibi çıkarır (zod strict mode gereksinimi). Runtime
+    // garantisi şemanın kendisinde; cast bu yüzden güvenli.
+    return { success: true, data: result.data as FaultReportPayload };
   }
   return { success: false, errors: result.error };
 }
