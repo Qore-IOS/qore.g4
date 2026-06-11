@@ -6482,62 +6482,52 @@ html.dark body.mg-edge-body {
 
 /* ── Ambient LED Strip Glow ───────────────────────────────────────────────── */
 /*
- * Thin strip hugging the card edge; the visible "light" is the box-shadow
- * spill, the core is faint. Opacity-only animation = compositor-friendly.
+ * An inset-0 absolute element (same footprint as the card, border-radius
+ * matched) sits behind the card in DOM. Its box-shadow leaks OUTSIDE the
+ * card boundary; the card's opaque background hides the element itself.
+ * Result: soft directional light on the surface around the card edge —
+ * like a hidden LED strip tucked behind it. Opacity animation = compositor.
  */
 
+/* bottom-right corner: light on right edge + bottom edge */
+.led-shadow-amber-br {
+  box-shadow:
+    18px  0    36px -6px rgba(251, 191, 36, 0.55),
+    0     18px 36px -6px rgba(251, 191, 36, 0.55);
+}
+.led-shadow-green-br {
+  box-shadow:
+    18px  0    32px -6px rgba(34, 197, 94, 0.50),
+    0     18px 32px -6px rgba(34, 197, 94, 0.50);
+}
+
+/* top-right corner: light on right edge + top edge */
+.led-shadow-amber-tr {
+  box-shadow:
+    18px  0    36px -6px rgba(251, 191, 36, 0.55),
+    0    -18px 36px -6px rgba(251, 191, 36, 0.55);
+}
+.led-shadow-green-tr {
+  box-shadow:
+    18px  0    32px -6px rgba(34, 197, 94, 0.50),
+    0    -18px 32px -6px rgba(34, 197, 94, 0.50);
+}
+
 @keyframes led-breathe {
-  0%, 100% { opacity: 0.25; }
-  50%       { opacity: 0.70; }
+  0%, 100% { opacity: 0.22; }
+  50%       { opacity: 0.80; }
 }
 @keyframes led-fade-out {
-  from { opacity: 0.5; }
-  to   { opacity: 0;   }
+  from { opacity: 0.55; }
+  to   { opacity: 0;    }
 }
-@keyframes led-green-in {
-  from { opacity: 0;    }
-  to   { opacity: 0.60; }
-}
-
-.led-glow-amber,
-.led-glow-amber-off {
-  background-color: rgba(251, 191, 36, 0.55);
-  box-shadow:
-    0 0 10px 3px rgba(251, 191, 36, 0.40),
-    0 0 26px 8px rgba(251, 191, 36, 0.16);
-  filter: blur(2px);
-}
-.led-glow-amber {
-  animation: led-breathe 3.6s ease-in-out infinite;
-}
-/* One-shot replaces the infinite breathe so its keyframe opacity no longer
-   overrides the resting state — element fades out and stays out. */
-.led-glow-amber-off {
-  animation: led-fade-out 0.7s ease-out forwards;
+@keyframes led-appear {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
-.led-glow-green {
-  background-color: rgba(34, 197, 94, 0.50);
-  box-shadow:
-    0 0 9px 3px rgba(34, 197, 94, 0.35),
-    0 0 22px 7px rgba(34, 197, 94, 0.13);
-  filter: blur(2px);
-  opacity: 0;
-  /* Delay lets amber fade first; `forwards` keeps green static afterwards. */
-  animation: led-green-in 0.9s ease-out 0.35s forwards;
-}
-
-/* Far ends of each strip melt away so the L has no hard stops. */
-.led-mask-fade-top {
-  -webkit-mask-image: linear-gradient(to top, black 60%, transparent 100%);
-  mask-image: linear-gradient(to top, black 60%, transparent 100%);
-}
-.led-mask-fade-bottom {
-  -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
-  mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
-}
-.led-mask-fade-left {
-  -webkit-mask-image: linear-gradient(to left, black 60%, transparent 100%);
-  mask-image: linear-gradient(to left, black 60%, transparent 100%);
-}
+.led-anim-breathe { animation: led-breathe 3.6s ease-in-out infinite; }
+.led-anim-out     { animation: led-fade-out 0.7s ease-out forwards; }
+/* opacity:0 initial + delay lets amber fade before green appears */
+.led-anim-in      { opacity: 0; animation: led-appear 0.9s ease-out 0.35s forwards; }
 
