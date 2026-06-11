@@ -2043,6 +2043,7 @@ export default function AnaPanel(props: AnaPanelProps) {
       {/* ── Kompakt çalışma satırı: Son Okutulan + Ürün Ekle ── */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
         <div className="relative">
+        <LedStripGlow isReady={!isMasterDataLoading} corner="top-right" />
         <div className={cn(
           "cihaz-card-strong px-4 py-3 sm:px-5 sm:py-4 transition-all duration-300 min-h-[116px]",
           scanFeedback?.type === 'success' && "ring-2 ring-green-500/60",
@@ -2112,7 +2113,6 @@ export default function AnaPanel(props: AnaPanelProps) {
             </div>
           </div>
         </div>
-        <LedStripGlow isReady={!isMasterDataLoading} corner="top-right" />
         </div>
 
         <div className="cihaz-card-strong px-4 py-3 sm:px-5 sm:py-4 min-h-[116px]">

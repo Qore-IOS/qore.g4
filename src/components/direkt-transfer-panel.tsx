@@ -1290,6 +1290,7 @@ export default function DirektTransferPanel() {
           <div className="space-y-4">
             {/* ─── Context Card ─── */}
             <div className="relative">
+            <LedStripGlow isReady={transferDataReady} corner="bottom-right" />
             <div className="cihaz-card-strong p-4 sm:p-5 space-y-3">
               <p className="cihaz-section-label">Kaynak & Hedef</p>
 
@@ -1381,7 +1382,6 @@ export default function DirektTransferPanel() {
                 />
               </div>
             </div>
-            <LedStripGlow isReady={transferDataReady} corner="bottom-right" />
             </div>
 
             {/* ─── Add Methods Card ─── */}
