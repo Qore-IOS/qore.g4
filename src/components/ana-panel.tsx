@@ -864,8 +864,6 @@ export default function AnaPanel(props: AnaPanelProps) {
         const mode = (staticTrackingMode === 'qty_manual' || staticTrackingMode === 'qty_barcode')
           ? 'qty_barcode'
           : resolveEffectiveTrackingMode(resolved, matchedFormat, matchedProduct as any);
-        finishScanJsMeasurement?.();
-
         const isLotOnlyBarcode = (mode === 'serial') && !!lotNumarasi && !seriNumarasi;
 
         if ((mode === 'serial') && !isLotOnlyBarcode) {
