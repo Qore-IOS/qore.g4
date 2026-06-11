@@ -507,6 +507,15 @@ export default function DirektTransferPanel() {
         return;
       }
 
+      // Toplu QR içindeki alt okutmalar ana okutmanın ölçümünü ezmesin.
+      if (source !== 'bulk_item') beginScanMeasurement();
+
+      if (!transferDataReady) {
+        playFeedback(true);
+        flashScanFeedback('error', 'Ürün, barkod ve depo stok verileri henüz hazır değil.');
+        return;
+      }
+
       const trimmedRaw = raw.trim();
       if (!trimmedRaw) return;
 
