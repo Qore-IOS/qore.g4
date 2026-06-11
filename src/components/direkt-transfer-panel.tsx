@@ -305,6 +305,10 @@ export default function DirektTransferPanel() {
   
   const [fefoViolations, setFefoViolations] = useState<FefoViolation[]>([]);
 
+  // Scan latency: synchronous parse/state cost and total scan-to-paint duration.
+  const [lastScanMs, setLastScanMs] = useState<number | null>(null);
+  const [lastScanJsMs, setLastScanJsMs] = useState<number | null>(null);
+
   // Last scanned product tracking for UI feedback
   const [lastScannedProduct, setLastScannedProduct] = useState<{
     stokKodu: string;
@@ -454,6 +458,22 @@ export default function DirektTransferPanel() {
   const handleScan = useCallback(
     async (raw: string, source: 'hid' | 'camera' | 'manual' | 'bulk_item' = 'hid') => {
       if (!raw) return;
+      if (!transferDataReady) {
+        playFeedback(true);
+        flashScanFeedback('error', 'Ürün, barkod ve depo stok verileri henüz hazır değil.');
+        return;
+      }
+
+      // Measure only top-level reads. Child serials unpacked from a bulk QR would
+      // otherwise overwrite the user-visible duration several times.
+      if (source !== 'bulk_item' && typeof performance !== 'undefined') {
+        const scanStartedAt = performance.now();
+        queueMicrotask(() => setLastScanJsMs(performance.now() - scanStartedAt));
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          setLastScanMs(performance.now() - scanStartedAt);
+        }));
+      }
+
       if (!transferDataReady) {
         playFeedback(true);
         flashScanFeedback('error', 'Ürün, barkod ve depo stok verileri henüz hazır değil.');
@@ -1380,16 +1400,32 @@ export default function DirektTransferPanel() {
                     ? "ring-2 ring-red-500/60 bg-red-50/60 dark:bg-red-950/20"
                     : "cihaz-pressed"
                 )}>
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <p className="text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Son Okutulan</p>
-                    {scanFeedback && (
-                      <span className={cn(
-                        "text-[10px] font-bold uppercase tracking-wide",
-                        scanFeedback.type === 'success' ? "text-green-600" : "text-red-600"
-                      )}>
-                        {scanFeedback.type === 'success' ? '✓ Başarılı' : '✗ Hata'}
-                      </span>
-                    )}
+                    <div className="flex shrink-0 items-center gap-2">
+                      {lastScanMs !== null && (
+                        <span
+                          className={cn(
+                            "rounded px-1.5 py-0.5 font-mono text-[9px] font-bold tabular-nums",
+                            lastScanMs < 50 ? "bg-green-500/15 text-green-600"
+                              : lastScanMs < 200 ? "bg-amber-500/15 text-amber-600"
+                              : "bg-red-500/15 text-red-600"
+                          )}
+                          title="JS = parse + state (saf JS). Toplam = okutma→paint (render dahil)."
+                        >
+                          {lastScanJsMs !== null && <span className="font-normal opacity-60">JS {Math.round(lastScanJsMs)} · </span>}
+                          {Math.round(lastScanMs)} ms
+                        </span>
+                      )}
+                      {scanFeedback && (
+                        <span className={cn(
+                          "text-[9px] font-bold uppercase tracking-wide",
+                          scanFeedback.type === 'success' ? "text-green-600" : "text-red-600"
+                        )}>
+                          {scanFeedback.type === 'success' ? '✓ Başarılı' : '✗ Hata'}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   {scanFeedback?.type === 'error' && !lastScannedProduct ? (
                     <p className="text-sm font-bold text-red-600 truncate">{scanFeedback.message}</p>
