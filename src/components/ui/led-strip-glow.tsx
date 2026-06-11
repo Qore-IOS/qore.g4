@@ -12,39 +12,40 @@ interface LedStripGlowProps {
   corner: 'bottom-right' | 'top-right';
 }
 
+// Two thin strips hug the card edges and meet at the corner; the glow comes
+// from the box-shadow, the far ends melt away via mask so there are no hard
+// stops. The strip core is nearly invisible — only the spill reads as light.
+const stripClasses: Record<LedStripGlowProps['corner'], [string, string]> = {
+  'bottom-right': [
+    'right-0 top-[10%] bottom-0 w-[2px] led-mask-fade-top',
+    'bottom-0 left-[10%] right-0 h-[2px] led-mask-fade-left',
+  ],
+  'top-right': [
+    'right-0 bottom-[10%] top-0 w-[2px] led-mask-fade-bottom',
+    'top-0 left-[10%] right-0 h-[2px] led-mask-fade-left',
+  ],
+};
+
 /**
- * Two blurred blobs positioned BEFORE the card in DOM so the card's opaque
- * background covers the inner halves; only the outer halves are visible as
- * soft light spilling from a "hidden" strip behind the card edge.
- *
- * React.memo → re-renders only when isReady changes (once, at load).
- * All animation runs in the CSS compositor; zero JS cost during scanning.
+ * Ambient LED strip effect tied only to data-ready state.
+ * React.memo + finished one-shot CSS animations mean zero work during scans.
  */
 export const LedStripGlow = React.memo(function LedStripGlow({
   isReady,
   corner,
 }: LedStripGlowProps) {
-  const br = corner === 'bottom-right';
-
-  // Vertical blob centred on the right edge
-  const vClass = cn(
-    'pointer-events-none absolute -right-6 w-12',
-    br ? 'top-[12%] -bottom-6' : '-top-6 bottom-[12%]',
-  );
-  // Horizontal blob centred on the bottom/top edge
-  const hClass = cn(
-    'pointer-events-none absolute h-12 left-[12%] -right-6',
-    br ? '-bottom-6' : '-top-6',
-  );
-
-  const amberCls = isReady ? 'led-blob-amber-out' : 'led-blob-amber';
+  const strips = stripClasses[corner];
+  const base = 'pointer-events-none absolute rounded-full';
+  const amberCls = isReady ? 'led-glow-amber-off' : 'led-glow-amber';
 
   return (
     <>
-      <div aria-hidden className={cn(vClass, amberCls)} />
-      <div aria-hidden className={cn(hClass, amberCls)} />
-      {isReady && <div aria-hidden className={cn(vClass, 'led-blob-green')} />}
-      {isReady && <div aria-hidden className={cn(hClass, 'led-blob-green')} />}
+      {strips.map((cls, i) => (
+        <div key={`a${i}`} aria-hidden className={cn(base, cls, amberCls)} />
+      ))}
+      {isReady && strips.map((cls, i) => (
+        <div key={`g${i}`} aria-hidden className={cn(base, cls, 'led-glow-green')} />
+      ))}
     </>
   );
 });
