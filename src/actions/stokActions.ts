@@ -119,8 +119,10 @@ export async function getDepotSerialIndex(
     }
     return index;
   } catch (err) {
+    // Sahte boş sonuç YOK: boş index "depoda hiç seri yok" anlamına gelir ve
+    // mükerrer okutma korumasını sessizce devre dışı bırakır. Hata yüzeye çıksın.
     console.error('[getDepotSerialIndex] Error for depot', depotId, ':', err);
-    return {};
+    throw new Error('Depo seri indeksi sunucudan okunamadı. Detay için sunucu loglarına bakın.');
   }
 }
 
@@ -189,8 +191,10 @@ export async function getExpiringProductsCountServer(
 
     return count;
   } catch (err) {
+    // Sahte 0 YOK: hata yutulup 0 dönünce dashboard sayacı "her şey yolunda"
+    // gösteriyordu. React Query error state'i artık gerçeği yansıtır.
     console.error('Error getting expiring products count:', err);
-    return 0;
+    throw new Error('Miad sayacı sunucudan okunamadı.');
   }
 }
 
@@ -717,8 +721,12 @@ export async function getPaginatedDepotStock(params: {
   };
 
   } catch (err) {
+    // Sahte boş sonuç YOK (gözlemlenebilirlik): önceden buradaki hata yutulup
+    // emptyResult dönüyordu — Admin SDK izni koptuğunda paneller "hatasız ama
+    // bomboş" görünüyor, sorun günlerce fark edilmiyordu. Hata artık yüzeye
+    // çıkar; React Query error state'i panelde "veri yüklenemedi" gösterir.
     console.error('[getPaginatedDepotStock] Error for depot', depotId, ':', err);
-    return emptyResult;
+    throw new Error('Depo stok verisi sunucudan okunamadı. Detay için sunucu loglarına bakın.');
   }
 }
 
@@ -770,8 +778,9 @@ export async function getExpiringProductsCount(
 
     return count;
   } catch (error) {
+    // Sahte 0 YOK — bkz. getExpiringProductsCountServer catch'indeki not.
     console.error('Error counting expiring products:', error);
-    return 0;
+    throw new Error('Miad sayacı sunucudan okunamadı.');
   }
 }
 
@@ -925,7 +934,8 @@ export async function getPaginatedProductCodes(params: {
       brandCounts,
     };
   } catch (err) {
+    // Sahte boş sonuç YOK — bkz. getPaginatedDepotStock catch'indeki not.
     console.error('[getPaginatedProductCodes] Error:', err);
-    return emptyResult;
+    throw new Error('Ürün kataloğu sunucudan okunamadı. Detay için sunucu loglarına bakın.');
   }
 }

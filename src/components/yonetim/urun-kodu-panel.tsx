@@ -3,7 +3,8 @@
 import React, { useState, useEffect, useCallback, ChangeEvent, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
-import { PlusCircle, Edit3, Trash2, Loader2, Barcode, Download, Upload, Search, Filter, X, Type, Save, Calendar, MoreHorizontal, Copy, GitBranch, ChevronDown, ChevronRight, ChevronLeft, Eye, EyeOff, FileSpreadsheet } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { PlusCircle, Edit3, Trash2, Loader2, Barcode, Download, Upload, Search, Filter, X, Type, Save, Calendar, MoreHorizontal, Copy, GitBranch, ChevronDown, ChevronRight, ChevronLeft, Eye, EyeOff, FileSpreadsheet, AlertTriangle, RefreshCw } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -391,6 +392,9 @@ export default function UrunKoduPanel() {
   const brandCounts = paginatedQuery.data?.brandCounts ?? {};
   const isLoading = paginatedQuery.isLoading;
   const isPending = paginatedQuery.isLoading || paginatedQuery.isFetching;
+  // Sahte boş durum koruması: sunucu okuması hata verirse "Ürün bulunamadı"
+  // yerine açık hata + yeniden dene gösterilir.
+  const isLoadError = paginatedQuery.isError;
 
   // On-demand full product codes for export and cost checkpoint
   const allProductCodesQuery = useProductCodes();
@@ -1024,6 +1028,17 @@ export default function UrunKoduPanel() {
             <div className="cihaz-card flex items-center justify-center py-20">
               <Loader2 className="h-6 w-6 animate-spin text-[var(--device-accent)]" />
               <span className="ml-2 text-sm text-[var(--dashboard-muted)]">Yükleniyor...</span>
+            </div>
+          ) : isLoadError ? (
+            <div className="cihaz-card flex flex-col items-center justify-center py-16 text-center px-4">
+              <AlertTriangle className="h-12 w-12 text-destructive opacity-60 mb-3" />
+              <p className="text-sm font-semibold text-[var(--dashboard-text)]">Ürün verileri yüklenemedi</p>
+              <p className="text-xs text-[var(--dashboard-muted)] mt-1">
+                Sunucu okuması başarısız oldu. Sorun sürerse yöneticinize bildirin.
+              </p>
+              <Button variant="outline" size="sm" className="mt-4" onClick={() => paginatedQuery.refetch()}>
+                <RefreshCw className="h-4 w-4 mr-2" /> Yeniden Dene
+              </Button>
             </div>
           ) : filteredProductCodes.length === 0 ? (
             <div className="cihaz-card flex flex-col items-center justify-center py-16 text-center px-4">

@@ -1857,7 +1857,20 @@ export default function StokYonetimiPanel() {
                 </tr>
               </thead>
               <tbody>
-                {rows.length === 0 ? (
+                {paginatedQuery.isError ? (
+                  // Sahte boş durum koruması: sunucu okuması hata verdiyse
+                  // "Sonuç bulunamadı" yerine açık hata + yeniden dene göster.
+                  <tr>
+                    <td colSpan={8} className="text-center py-16 text-[var(--dashboard-muted)]">
+                      <AlertTriangle className="h-10 w-10 mx-auto mb-3 text-destructive opacity-60" />
+                      <p className="font-medium text-[var(--dashboard-text)]">Stok verileri yüklenemedi</p>
+                      <p className="text-xs mt-1">Sunucu okuması başarısız oldu. Sorun sürerse yöneticinize bildirin.</p>
+                      <Button variant="outline" size="sm" className="mt-4" onClick={() => paginatedQuery.refetch()}>
+                        Yeniden Dene
+                      </Button>
+                    </td>
+                  </tr>
+                ) : rows.length === 0 ? (
                   <tr>
                     <td colSpan={8} className="text-center py-16 text-[var(--dashboard-muted)]">
                       <PackageSearch className="h-10 w-10 mx-auto mb-3 opacity-30" />
