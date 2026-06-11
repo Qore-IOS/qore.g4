@@ -2,7 +2,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
@@ -45,7 +44,7 @@ export default function LabelPrinter({
     try {
       // only locations that actually have assets (konum not empty)
       const qAssets = scopedQuery('assets', currentCompanyId, isSuperAdmin, where('konum', '!=', ''));
-      const snap = await getDocsResilient(qAssets);
+      const snap = await getDocs(qAssets);
       const items: Asset[] = snap.docs.map((d) => {
         const dt = d.data() as any;
         return {

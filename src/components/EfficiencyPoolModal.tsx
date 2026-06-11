@@ -11,7 +11,6 @@ import { LabSelector } from '@/components/common/LabSelector';
 import { Loader2, Users, Building2, Crown } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { collection, getDocs, addDoc, Timestamp, query, orderBy } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
@@ -47,8 +46,8 @@ export default function EfficiencyPoolModal({ open, onOpenChange, onPoolCreated 
     setIsLoading(true);
     try {
       const [hospitalsSnap, poolsSnap] = await Promise.all([
-        getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin, orderBy('name', 'asc'))),
-        getDocsResilient(scopedQuery('labPools', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin, orderBy('name', 'asc'))),
+        getDocs(scopedQuery('labPools', currentCompanyId, isSuperAdmin)),
       ]);
 
       setHospitals(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));

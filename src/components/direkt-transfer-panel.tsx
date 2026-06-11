@@ -36,7 +36,6 @@ import {
   onSnapshot,
   limit,
 } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { useToast } from '@/hooks/use-toast';
 import { useDepoStokByDepot, touchStockMetadata, useDepots, useProductCodes, useHospitals, useBorcDepots, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -138,7 +137,7 @@ const checkFefoOptimized = async (
       where('stokKodu', 'in', batchCodes),
       where('isShipped', '==', false)
     );
-    const snap = await getDocsResilient(q);
+    const snap = await getDocs(q);
     snap.docs.forEach(d => {
       const data = d.data();
       if (!matchesCompanyScope(data as any, currentCompanyId, isSuperAdmin)) return;
@@ -340,7 +339,7 @@ export default function DirektTransferPanel() {
     if (templates.length > 0) return; // Already loaded
     setTemplatesLoading(true);
     try {
-      const snap = await getDocsResilient(scopedQuery('transferTemplates', currentCompanyId, isSuperAdmin));
+      const snap = await getDocs(scopedQuery('transferTemplates', currentCompanyId, isSuperAdmin));
       const templateList = snap.docs.map(d => ({
         id: d.id,
         ...d.data(),
@@ -629,7 +628,7 @@ export default function DirektTransferPanel() {
         where('stokKodu', 'in', batchCodes),
         where('isShipped', '==', false)
       );
-      const snap = await getDocsResilient(q);
+      const snap = await getDocs(q);
       snap.docs.forEach(d => {
         const data = d.data();
         if (!matchesCompanyScope(data as any, currentCompanyId, isSuperAdmin)) return;
@@ -910,11 +909,7 @@ export default function DirektTransferPanel() {
 
         await batch.commit();
 
-        await touchStockMetadata({
-          depotIds: [selectedDepotId],
-          labIds: targetId ? [targetId] : undefined,
-          companyId: currentCompanyId,
-        });
+        await touchStockMetadata();
 
         toast({ title: 'Transfer Tamamlandı', description: `${totalShippedAdet} adet ürün başarıyla transfer edildi.` });
         setLastTransferCount(totalShippedAdet);
@@ -1051,7 +1046,7 @@ export default function DirektTransferPanel() {
   const handleAddAllStock = async () => {
     if (!selectedDepotId) return;
     const q = scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('depotId', '==', selectedDepotId), where('isShipped', '==', false));
-    const snap = await getDocsResilient(q);
+    const snap = await getDocs(q);
     // Lot/adet takipli ürünler `adet: N` taşıyan tek bir doküman; seri takipli
     // ürünler doküman başına `adet: 1`. Her ikisinde de dokümandaki gerçek
     // adet kullanılmalı — yoksa lot dokümanları listede 1 birim olarak görünür.

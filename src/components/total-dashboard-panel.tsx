@@ -27,7 +27,6 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { collection, getDocs, query, orderBy, where, limit } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
@@ -622,14 +621,14 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
       setIsLoading(true);
       try {
         // Fetch efficiency pools
-        const poolsSnap = await getDocsResilient(
+        const poolsSnap = await getDocs(
           scopedQuery('efficiencyPools', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))
         );
         const pools = poolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as EfficiencyPool));
         setEfficiencyPools(pools);
 
         // Fetch all efficiency records (without compound index - sort in JS)
-        const recordsSnap = await getDocsResilient(scopedQuery('totalEfficiencyRecords', currentCompanyId, isSuperAdmin));
+        const recordsSnap = await getDocs(scopedQuery('totalEfficiencyRecords', currentCompanyId, isSuperAdmin));
         const records = recordsSnap.docs
           .map(d => {
             const data = d.data();
@@ -650,7 +649,7 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
         setEfficiencyRecords(records);
 
         // Fetch device fault reports — tarih penceresi + hard cap
-        const faultsSnap = await getDocsResilient(
+        const faultsSnap = await getDocs(
           scopedQuery(
             'deviceFaultReports',
             currentCompanyId,

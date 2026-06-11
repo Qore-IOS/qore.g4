@@ -2,7 +2,6 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
-import { getDocResilient } from '@/lib/firestore-network-recovery';
 import { Calendar, History, Loader2 } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -59,7 +58,7 @@ export default function TotalVerimlilikHesapDetayPanel({ recordId, labId }: Prop
   useEffect(() => {
     const fetchRecord = async () => {
       try {
-        const docSnap = await getDocResilient(doc(db, 'totalEfficiencyRecords', recordId));
+        const docSnap = await getDoc(doc(db, 'totalEfficiencyRecords', recordId));
         if (!docSnap.exists()) {
           toast({ title: 'Hata', description: 'Kayıt bulunamadı.', variant: 'destructive' });
           return;

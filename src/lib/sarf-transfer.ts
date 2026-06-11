@@ -10,7 +10,6 @@
 import {
   collection, doc, getDoc, getDocs, serverTimestamp, setDoc, updateDoc, where, writeBatch,
 } from 'firebase/firestore';
-import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import { compareAsc, parse } from 'date-fns';
 import { db } from '@/lib/firebase';
 import { scopedQuery } from '@/lib/firestore-helpers';
@@ -156,7 +155,7 @@ export async function confirmSarfDelivery({ transfer, companyId, isSuperAdmin, u
   let depotId = transfer.depotId || null;
   if (!depotId && transfer.hospitalId) {
     try {
-      const hospitalSnap = await getDocResilient(doc(db, 'hospitals', transfer.hospitalId));
+      const hospitalSnap = await getDoc(doc(db, 'hospitals', transfer.hospitalId));
       depotId = (hospitalSnap.exists() ? (hospitalSnap.data() as Hospital).defaultDepotId : null) || null;
     } catch { /* mahal okunamazsa tüm depolardan düşülür */ }
   }
@@ -170,7 +169,7 @@ export async function confirmSarfDelivery({ transfer, companyId, isSuperAdmin, u
       where('isShipped', '==', false),
       ...(depotId ? [where('depotId', '==', depotId)] : []),
     ];
-    const snap = await getDocsResilient(scopedQuery('depoStok', companyId, isSuperAdmin, ...constraints));
+    const snap = await getDocs(scopedQuery('depoStok', companyId, isSuperAdmin, ...constraints));
     const available = filterByCompanyScope(
       snap.docs.map((d) => ({ id: d.id, ...d.data() } as DepoStokItem)),
       companyId,

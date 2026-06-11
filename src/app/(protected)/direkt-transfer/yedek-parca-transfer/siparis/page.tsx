@@ -9,7 +9,6 @@ import { useToast } from '@/hooks/use-toast';
 import { withCompanyScope, filterByCompanyScope } from '@/lib/company-scope';
 import type { MinMaxRule, ProductCode, YedekParcaDepoStokItem } from '@/lib/types';
 import { addDoc, collection, getDocs, Timestamp } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { ArrowLeft, CheckCircle2, ClipboardList, History, Loader2, Plus, RefreshCw, ShoppingCart, Trash2, Warehouse } from 'lucide-react';
 
 interface SparePartOrderItem {
@@ -67,9 +66,9 @@ export default function YedekParcaSiparisPage() {
     setLoading(true);
     try {
       const [rulesSnap, depoStockSnap, productsSnap] = await Promise.all([
-        getDocsResilient(collection(db, 'yedekParcaDepoMinMax', currentCompanyId, 'minMaxRules')),
-        getDocsResilient(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin)),
-        getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+        getDocs(collection(db, 'yedekParcaDepoMinMax', currentCompanyId, 'minMaxRules')),
+        getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
       ]);
 
       const fetchedRules = rulesSnap.docs

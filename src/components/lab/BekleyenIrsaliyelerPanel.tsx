@@ -220,11 +220,7 @@ export default function BekleyenIrsaliyelerPanel({
         ...(transactionId ? { malKabulTransactionId: transactionId } : {}),
       });
       await batch.commit();
-      await touchStockMetadata({
-        depotIds: isDepot ? [locationId] : undefined,
-        labIds: isDepot ? undefined : [locationId],
-        companyId: currentCompanyId,
-      });
+      await touchStockMetadata();
       await invalidateDepoStok();
 
       toast({

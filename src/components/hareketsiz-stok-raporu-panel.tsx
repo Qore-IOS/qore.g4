@@ -3,7 +3,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, Timestamp, query, where, writeBatch, doc, orderBy } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { format, subMonths, isValid } from 'date-fns';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
@@ -61,13 +60,13 @@ export default function HareketsizStokRaporuPanel() {
 
       // Sadece eşikten SONRA hareket olanları çek — büyük optimizasyon.
       const [depSnap, shipSnap, consSnap, prodSnap] = await Promise.all([
-        getDocsResilient(scopedQuery('depoStok', currentCompanyId, isSuperAdmin,
+        getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin,
           where('eklenmeTarihi', '>=', thresholdTs))),
-        getDocsResilient(scopedQuery('shipments', currentCompanyId, isSuperAdmin,
+        getDocs(scopedQuery('shipments', currentCompanyId, isSuperAdmin,
           where('timestamp', '>=', thresholdTs))),
-        getDocsResilient(scopedQuery('tuketimKayitlari', currentCompanyId, isSuperAdmin,
+        getDocs(scopedQuery('tuketimKayitlari', currentCompanyId, isSuperAdmin,
           where('consumptionTimestamp', '>=', thresholdTs))),
-        getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
       ]);
 
       const productCodes = prodSnap.docs.map(doc => doc.data() as ProductCode);
@@ -173,7 +172,7 @@ export default function HareketsizStokRaporuPanel() {
 
         for (const chunk of codeChunks) {
             const q = scopedQuery('productCodes', currentCompanyId, isSuperAdmin, where('stokKodu', 'in', chunk));
-            const snap = await getDocsResilient(q);
+            const snap = await getDocs(q);
             snap.forEach(doc => docsToDelete.push(doc.id));
         }
         

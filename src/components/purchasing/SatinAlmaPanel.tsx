@@ -22,7 +22,6 @@ import {
   writeBatch,
   arrayUnion,
 } from 'firebase/firestore';
-import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import type {
   PurchasingTask,
   PurchasingTaskAttachment,
@@ -287,6 +286,11 @@ async function uploadAttachment(file: File, taskPath: string): Promise<Purchasin
   const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
   if (file.size > MAX_ATTACHMENT_SIZE_BYTES) throw new Error('Dosya boyutu 10MB sınırını aşıyor');
 
+  const timestamp = Date.now();
+  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+  const storagePath = `purchasing-tasks/${taskPath}/${timestamp}_${safeName}`;
+  const storageRef = ref(storage, storagePath);
+
   let uploadData: Blob | File = file;
   if (isImage) uploadData = await compressImage(file);
 
@@ -299,25 +303,7 @@ async function uploadAttachment(file: File, taskPath: string): Promise<Purchasin
   formData.append('folder', 'purchasing-tasks');
   formData.append('userUid', taskPath);
 
-  // Yükleme, diğer panellerle aynı admin-SDK API'sinden geçer; nihai
-  // storagePath ve imzalı URL sunucu tarafından üretilip döndürülür
-  // (bkz. src/app/api/storage/upload-file/route.ts).
-  const response = await fetch('/api/storage/upload-file', {
-    method: 'POST',
-    body: formData,
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || !payload?.url || !payload?.path) {
-    throw new Error(payload?.error || 'Dosya yüklenemedi.');
-  }
-
-  return {
-    name: file.name,
-    url: payload.url as string,
-    type: isImage ? 'image' : isPdf ? 'pdf' : 'file',
-    size: uploadFile.size,
-    storagePath: payload.path as string,
-  };
+  return { name: file.name, url, type: isImage ? 'image' : isPdf ? 'pdf' : 'file', size: uploadData.size, storagePath };
 }
 
 // ==========================================
@@ -734,7 +720,7 @@ export default function SatinAlmaPanel() {
         if (mutation.action === 'create' && mutation.payload) {
           await setDoc(taskRef, mutation.payload, { merge: true });
         } else if (mutation.action === 'update' && mutation.payload) {
-          const remote = await getDocResilient(taskRef);
+          const remote = await getDoc(taskRef);
           if (!remote.exists()) {
             await setDoc(taskRef, mutation.payload, { merge: true });
           } else {
@@ -797,9 +783,9 @@ export default function SatinAlmaPanel() {
     async function fetchReferenceData() {
       try {
         const [hospSnap, poolSnap, usersSnap] = await Promise.all([
-          getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-          getDocsResilient(scopedQuery('labPools', currentCompanyId, isSuperAdmin)),
-          getDocsResilient(scopedQuery('users', currentCompanyId, isSuperAdmin, where('role', 'in', ['admin', 'satin_alma']))),
+          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('labPools', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin, where('role', 'in', ['admin', 'satin_alma']))),
         ]);
         if (cancelled) return;
         setLaboratories(hospSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Hospital)));
@@ -1175,7 +1161,7 @@ export default function SatinAlmaPanel() {
   const fetchCompanyResponsible = useCallback(async (companyId?: string) => {
     if (!companyId) return null;
     try {
-      const snap = await getDocResilient(doc(db, 'companies', companyId));
+      const snap = await getDoc(doc(db, 'companies', companyId));
       if (!snap.exists()) return null;
       const data = snap.data() as any;
       if (!data.responsibleUid) return null;

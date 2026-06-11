@@ -507,10 +507,7 @@ export function validateManualLotPayload(
 ): { success: true; data: ManualLotPayload } | { success: false; errors: z.ZodError } {
   const result = ManualLotPayloadSchema.safeParse(payload);
   if (result.success) {
-    // NOT: strictNullChecks=false iken zod, output tipini tüm alanlar
-    // opsiyonelmiş gibi çıkarır (zod strict mode gereksinimi). Runtime
-    // garantisi şemanın kendisinde; cast bu yüzden güvenli.
-    return { success: true, data: result.data as ManualLotPayload };
+    return { success: true, data: result.data };
   }
   return { success: false, errors: result.error };
 }
@@ -525,10 +522,7 @@ export function validateManualQtyPayload(
 ): { success: true; data: ManualQtyPayload } | { success: false; errors: z.ZodError } {
   const result = ManualQtyPayloadSchema.safeParse(payload);
   if (result.success) {
-    // NOT: strictNullChecks=false iken zod, output tipini tüm alanlar
-    // opsiyonelmiş gibi çıkarır (zod strict mode gereksinimi). Runtime
-    // garantisi şemanın kendisinde; cast bu yüzden güvenli.
-    return { success: true, data: result.data as ManualQtyPayload };
+    return { success: true, data: result.data };
   }
   return { success: false, errors: result.error };
 }

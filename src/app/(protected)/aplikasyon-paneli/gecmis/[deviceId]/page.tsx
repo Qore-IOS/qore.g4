@@ -3,7 +3,6 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import { doc, getDoc, collection, query, where, orderBy, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
-import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import type { Device, Hospital } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
@@ -138,7 +137,7 @@ export default function AplikasyonGecmisPage() {
     setLoading(true);
     (async () => {
       try {
-        const deviceSnap = await getDocResilient(doc(db, 'devices', deviceId));
+        const deviceSnap = await getDoc(doc(db, 'devices', deviceId));
         if (!deviceSnap.exists()) {
           toast({ title: 'Hata', description: 'Cihaz bulunamadı.', variant: 'destructive' });
           router.back();
@@ -148,7 +147,7 @@ export default function AplikasyonGecmisPage() {
         setDevice(deviceData);
 
         if (deviceData.hospitalId) {
-          const hospitalSnap = await getDocResilient(doc(db, 'hospitals', deviceData.hospitalId));
+          const hospitalSnap = await getDoc(doc(db, 'hospitals', deviceData.hospitalId));
           if (hospitalSnap.exists()) {
             setHospital({ id: hospitalSnap.id, ...hospitalSnap.data() } as Hospital);
           }
@@ -172,7 +171,7 @@ export default function AplikasyonGecmisPage() {
           where('deviceId', '==', deviceId),
           where('formType', '==', 'aplikasyon')
         );
-        const snap = await getDocsResilient(q);
+        const snap = await getDocs(q);
         setTotalRecords(snap.size);
       } catch (err) {
         console.error("Error fetching count:", err);
@@ -205,7 +204,7 @@ export default function AplikasyonGecmisPage() {
             orderBy('createdAt', 'desc'),
             limit(PAGE_SIZE * page)
           );
-          const snap = await getDocsResilient(q);
+          const snap = await getDocs(q);
           const docs = snap.docs;
           // Get the last PAGE_SIZE docs
           const startIdx = Math.max(0, docs.length - PAGE_SIZE);
@@ -232,7 +231,7 @@ export default function AplikasyonGecmisPage() {
         );
       }
 
-      const snap = await getDocsResilient(q);
+      const snap = await getDocs(q);
       const historyItems = snap.docs.map(d => ({ id: d.id, ...d.data() }) as ActionFormRecord);
 
       // Store last doc for pagination

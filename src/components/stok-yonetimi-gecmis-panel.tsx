@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, Timestamp, where, orderBy, limit as fsLimit } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import type { Depot, DepoStokItem, ConsumptionRecord } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
@@ -72,7 +71,7 @@ export default function StokYonetimiGecmisPanel() {
   const fetchDepots = useCallback(async () => {
     setLoading(true);
     try {
-      const depotsSnap = await getDocsResilient(scopedQuery('depots', currentCompanyId, isSuperAdmin));
+      const depotsSnap = await getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin));
       setDepots(depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)));
     } catch (error) {
       toast({ title: 'Hata', description: 'Depo listesi yüklenemedi.', variant: 'destructive' });
@@ -108,7 +107,7 @@ export default function StokYonetimiGecmisPanel() {
       orderBy('eklenmeTarihi', 'desc'),
       fsLimit(20000),
     );
-    const snap = await getDocsResilient(q);
+    const snap = await getDocs(q);
     return snap.docs.map((d) => {
       const data = d.data();
       Object.keys(data).forEach(key => {

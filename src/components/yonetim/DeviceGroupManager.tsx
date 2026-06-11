@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Plus, Edit, Trash2, Loader2, Server } from 'lucide-react';
 import { collection, getDocs, addDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
@@ -36,7 +35,7 @@ export default function DeviceGroupManager({ refreshKey }: { refreshKey?: number
     setLoading(true);
     try {
       const [snap, images] = await Promise.all([
-          getDocsResilient(scopedQuery('def_deviceGroups', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('def_deviceGroups', currentCompanyId, isSuperAdmin)),
           getDeviceImages()
       ]);
       setItems(snap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceGroup)).sort((a, b) => a.name.localeCompare(b.name)));

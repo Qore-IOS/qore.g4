@@ -4,7 +4,6 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { Timestamp, addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, updateDoc, where, writeBatch, orderBy, limit as fsLimit } from 'firebase/firestore';
-import { getDocsResilient, getDocResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { cn } from '@/lib/utils';
 import { resolveImageSrc } from '@/lib/image-utils';
@@ -135,7 +134,7 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
       // Tarih penceresi + hard cap. Önceki sürüm tüm tutanakları indiriyordu.
       const dateConstraints = dateFilter.constraints('createdAt');
       const [teknikSnap, aplikasyonSnap] = await Promise.all([
-        getDocsResilient(scopedQuery(
+        getDocs(scopedQuery(
           getCollectionName('teknik-servis'),
           currentCompanyId,
           isSuperAdmin,
@@ -143,7 +142,7 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
           orderBy('createdAt', 'desc'),
           fsLimit(2000),
         )),
-        getDocsResilient(scopedQuery(
+        getDocs(scopedQuery(
           getCollectionName('aplikasyon-paneli'),
           currentCompanyId,
           isSuperAdmin,
@@ -406,12 +405,12 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
     const fetchForm = async () => {
       setLoading(true);
       const ref = doc(db, getCollectionName(moduleType), formId);
-      const snap = await getDocResilient(ref);
+      const snap = await getDoc(ref);
       const nextForm = snap.exists() ? ({ id: snap.id, ...snap.data() } as ActionRecord) : null;
       setForm(nextForm);
 
       if (nextForm?.deviceId) {
-        const deviceSnap = await getDocResilient(doc(db, 'devices', nextForm.deviceId));
+        const deviceSnap = await getDoc(doc(db, 'devices', nextForm.deviceId));
         if (deviceSnap.exists()) {
           const data = deviceSnap.data() as Device;
           setDeviceImageUrl(data.imageUrl || null);
@@ -420,7 +419,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
 
       if (nextForm?.hospitalId) {
         const q = scopedQuery('devices', currentCompanyId, isSuperAdmin, where('hospitalId', '==', nextForm.hospitalId));
-        const devicesSnap = await getDocsResilient(q);
+        const devicesSnap = await getDocs(q);
         const candidates = devicesSnap.docs
           .map((item) => ({ id: item.id, ...item.data() } as Device))
           .filter((item) => item.id !== nextForm.deviceId);
@@ -463,7 +462,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
           where('ownerUid', '==', currentUserProfile.uid),
           where('status', '==', 'in_stock')
         );
-        const snap = await getDocsResilient(q);
+        const snap = await getDocs(q);
         setPersonalStock(snap.docs.map((d) => ({ id: d.id, ...d.data() } as PersonalStockItem)));
       } catch (error) {
         console.error('Error fetching personal stock:', error);
@@ -477,7 +476,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
     if (!isAddPartModalOpen || !form?.hospitalId) return;
     (async () => {
       try {
-        const poolsSnap = await getDocsResilient(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin));
+        const poolsSnap = await getDocs(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin));
         const allPools = poolsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as DeviceLabPool));
         const scopedPools = filterByCompanyScope(allPools, currentCompanyId, isSuperAdmin);
         const matchingPoolIds = scopedPools
@@ -489,7 +488,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
           return;
         }
 
-        const depotsSnap = await getDocsResilient(scopedQuery('depots', currentCompanyId, isSuperAdmin));
+        const depotsSnap = await getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin));
         const allDepots = depotsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Depot));
         const scopedDepots = filterByCompanyScope(allDepots, currentCompanyId, isSuperAdmin);
         const poolWarehouseIds = scopedDepots
@@ -510,7 +509,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
             where('poolWarehouseId', '==', warehouseId),
             where('status', '==', 'in_stock')
           );
-          const stockSnap = await getDocsResilient(stockQ);
+          const stockSnap = await getDocs(stockQ);
           stockSnap.docs.forEach((d) => {
             const data = { id: d.id, ...d.data() } as PoolWarehouseStockItem;
             if (matchesCompanyScope(data as any, currentCompanyId, isSuperAdmin)) {
@@ -532,7 +531,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
     if (!isAddPartModalOpen) return;
     (async () => {
       try {
-        const snap = await getDocsResilient(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
+        const snap = await getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
         setDepotStockItems(
           snap.docs.map((d) => {
             const data = d.data();
@@ -866,19 +865,19 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
 
       // Re-add the stock item back to the local stock lists
       if (action.personalStockId) {
-        const stockSnap = await getDocResilient(doc(db, 'personalStock', action.personalStockId));
+        const stockSnap = await getDoc(doc(db, 'personalStock', action.personalStockId));
         if (stockSnap.exists()) {
           setPersonalStock((prev) => [...prev, { id: stockSnap.id, ...stockSnap.data() } as PersonalStockItem]);
         }
       }
       if (action.poolStockId) {
-        const poolSnap = await getDocResilient(doc(db, 'poolWarehouseStock', action.poolStockId));
+        const poolSnap = await getDoc(doc(db, 'poolWarehouseStock', action.poolStockId));
         if (poolSnap.exists()) {
           setPoolStockItems((prev) => [...prev, { id: poolSnap.id, ...poolSnap.data() } as PoolWarehouseStockItem]);
         }
       }
       if (action.isDepotSelection) {
-        const restoredDepotSnap = await getDocsResilient(scopedQuery(
+        const restoredDepotSnap = await getDocs(scopedQuery(
           'yedekParcaDepoStok',
           currentCompanyId,
           isSuperAdmin,
@@ -1103,7 +1102,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         for (const entryId of sourceIds) {
           if (remaining <= 0) break;
           const depotRef = doc(db, 'yedekParcaDepoStok', entryId);
-          const depotSnap = await getDocResilient(depotRef);
+          const depotSnap = await getDoc(depotRef);
           if (!depotSnap.exists()) continue;
           const depotData = depotSnap.data() as YedekParcaDepoStokItem;
           const availableQuantity = Math.max(1, depotData.quantity || 1);

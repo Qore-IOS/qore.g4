@@ -3,7 +3,6 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { collection, getDocs, addDoc, serverTimestamp, query, where } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import type { Hospital, Depot, ProductCode, MinMaxRule } from '@/lib/types';
 import { Input } from '@/components/ui/input';
@@ -751,7 +750,7 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
       : `depots/${selectedLocationId}/minMaxRules`;
 
     setIsLoadingRules(true);
-    getDocsResilient(collection(db, collectionPath))
+    getDocs(collection(db, collectionPath))
       .then(snap => {
         setLocationMinMaxRules(snap.docs.map(d => d.data() as MinMaxRule));
       })
@@ -774,7 +773,7 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
         let stockItems: { stokKodu: string }[] = [];
         if (locationType === 'depot') {
           // Depot: unshipped items in this depot
-          const snap = await getDocsResilient(
+          const snap = await getDocs(
             scopedQuery(
               'depoStok',
               currentCompanyId,
@@ -788,7 +787,7 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
         } else {
           // Lab: shipped items targeted to this lab
           const labName = hospitals.find(h => h.id === selectedLocationId)?.name;
-          const snap = await getDocsResilient(
+          const snap = await getDocs(
             scopedQuery(
               'depoStok',
               currentCompanyId,

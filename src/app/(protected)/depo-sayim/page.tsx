@@ -14,7 +14,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Loader2, History, ListChecks, Check, Search, Plus, PackagePlus, AlertTriangle, Pencil, Eye, CircleCheck, CircleAlert, ArrowUpCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { collection, getDocs, writeBatch, doc, Timestamp, setDoc, serverTimestamp, addDoc, query, where } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import type { Depot, ProductCode, DepoStokItem, ConsumptionRecord, DepotStockCountSession } from '@/lib/types';
 import type { MalKabulHeader, MalKabulLine } from '@/lib/mal-kabul/types';
@@ -152,9 +151,9 @@ export default function DepoSayimPage() {
         setIsLoading(true);
         try {
             const [depotsSnap, productsSnap, stockSnap] = await Promise.all([
-                getDocsResilient(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
-                getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
-                getDocsResilient(scopedQuery('depoStok', currentCompanyId, isSuperAdmin)),
+                getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+                getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+                getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin)),
             ]);
             const depotList = depotsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Depot));
             const filteredDepots = filterOperationalSourceDepots(depotList, currentUserProfile);
@@ -724,7 +723,7 @@ Devam edilsin mi?`;
                 collection(db, 'depoStok'),
                 where('depotId', '==', selectedDepotId)
             );
-            const scopedSnap = await getDocsResilient(scopedQuery);
+            const scopedSnap = await getDocs(scopedQuery);
             const expectedByGroup = new Map<string, number>();
 
             brandCountItems.forEach(group => {

@@ -4,7 +4,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { doc, getDoc } from 'firebase/firestore';
-import { getDocResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import type { ProductCode, Currency } from '@/lib/types';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -186,7 +185,7 @@ export default function MaliyetSayimDetayPage() {
       setLoading(true);
       try {
         const [sessionSnap, ratesData] = await Promise.all([
-          getDocResilient(doc(db, 'maliyetSayimSessions', sessionId)),
+          getDoc(doc(db, 'maliyetSayimSessions', sessionId)),
           fetchExchangeRates(),
         ]);
         setRates(ratesData);

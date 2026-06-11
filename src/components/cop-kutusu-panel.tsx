@@ -8,7 +8,6 @@ import { Trash2, Check, ChevronsUpDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { db } from '@/lib/firebase';
 import { collection, writeBatch, doc, getDocs, Timestamp } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
@@ -63,7 +62,7 @@ export default function CopKutusuPanel() {
   useEffect(() => {
     const fetchDeviceGroups = async () => {
       try {
-        const dgsnap = await getDocsResilient(scopedQuery('def_deviceGroups', currentCompanyId, isSuperAdmin));
+        const dgsnap = await getDocs(scopedQuery('def_deviceGroups', currentCompanyId, isSuperAdmin));
         setDeviceGroups(dgsnap.docs.map(d => ({id: d.id, ...d.data()} as DeviceGroup)));
       } catch (e) {
         toast({title: 'Hata', description: 'Cihaz grupları yüklenemedi.', variant: 'destructive'});

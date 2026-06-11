@@ -57,7 +57,6 @@ import {
   query,
   orderBy,
 } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import type {
   Hospital,
   SummaryRow as SummaryRowType,
@@ -153,9 +152,9 @@ export default function KumulatifHesaplamaPage() {
       setIsLoading(true);
       try {
         const [hSnap, pSnap, poolSnap] = await Promise.all([
-          getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin, orderBy('name'))),
-          getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
-          getDocsResilient(scopedQuery('labPools', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin, orderBy('name'))),
+          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('labPools', currentCompanyId, isSuperAdmin)),
         ]);
 
         const fetchedHospitals = hSnap.docs.map(
@@ -173,7 +172,7 @@ export default function KumulatifHesaplamaPage() {
         const rulesPromises = fetchedHospitals
           .filter((h) => h.id)
           .map(async (h) => {
-          const rulesSnap = await getDocsResilient(
+          const rulesSnap = await getDocs(
             collection(db, 'hospitals', h.id!, 'minMaxRules')
           );
           return {

@@ -4,7 +4,6 @@ import React, { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
-import { getDocResilient } from '@/lib/firestore-network-recovery';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -31,7 +30,7 @@ export default function HistoryDetailPage() {
     if (!labId || !sessionId) return;
     (async () => {
       try {
-        const snap = await getDocResilient(doc(db, 'hospitals', labId, 'stockCounts', sessionId));
+        const snap = await getDoc(doc(db, 'hospitals', labId, 'stockCounts', sessionId));
         if (snap.exists()) {
           const data = snap.data();
           const finishedAt = data.finishedAt?.toDate ? data.finishedAt.toDate() : new Date();

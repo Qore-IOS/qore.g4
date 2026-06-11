@@ -3,7 +3,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { collection, onSnapshot, orderBy, query, Timestamp, getDocs, limit } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import type { Device, Hospital, ProductCode } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
@@ -171,14 +170,14 @@ export default function ArizaIstatistikleriPage() {
     );
 
     // Fetch product codes
-    getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)).then(snapshot => {
+    getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)).then(snapshot => {
       setProductCodes(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
     }).catch(err => {
       console.error('Error fetching product codes:', err);
     });
 
     // Fetch fault definitions
-    getDocsResilient(scopedQuery('faultDefinitions', currentCompanyId, isSuperAdmin)).then(snapshot => {
+    getDocs(scopedQuery('faultDefinitions', currentCompanyId, isSuperAdmin)).then(snapshot => {
       setFaultDefinitions(filterByCompanyScope(
         snapshot.docs.map(d => ({ id: d.id, ...d.data() } as FaultDefinition)),
         currentCompanyId,
@@ -204,7 +203,7 @@ export default function ArizaIstatistikleriPage() {
 
       for (const hospital of hospitals) {
         try {
-          const minMaxSnap = await getDocsResilient(collection(db, 'hospitals', hospital.id, 'minMaxRules'));
+          const minMaxSnap = await getDocs(collection(db, 'hospitals', hospital.id, 'minMaxRules'));
           const stokKodulari = new Set(minMaxSnap.docs.map(d => d.id));
           rulesMap.set(hospital.id, stokKodulari);
         } catch (err) {

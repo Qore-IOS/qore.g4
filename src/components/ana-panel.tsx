@@ -47,7 +47,6 @@ import { Trash2, CheckSquare, PlusCircle, Loader2, Search, History, Camera, Scan
 // Firebase
 import { db } from '@/lib/firebase';
 import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, orderBy, limit } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 
 // Utilities
 import { cn, generateId, playFeedback } from '@/lib/utils';
@@ -918,7 +917,7 @@ export default function AnaPanel(props: AnaPanelProps) {
 
             // PERFORMANS: Geçmişte tüketilmiş/işlem görmüş seri kontrolü artık her
             // okutmada Firestore'a sorgu atmıyor. Eskiden burada her seri için
-            // `getDocsResilient(serialHistory/{seri}/events)` çağrısı yapılıyordu; "fire and
+            // `getDocs(serialHistory/{seri}/events)` çağrısı yapılıyordu; "fire and
             // forget" olsa bile her okutmada Firestore IndexedDB persistence katmanını
             // ve ağı tetikliyordu. Hızlı okutmalarda bu sorgular birikip ana iş
             // parçacığını boğuyor, her tuşa basıştan sonra boyamayı (paint) geciktiriyordu
@@ -1522,7 +1521,7 @@ export default function AnaPanel(props: AnaPanelProps) {
           await Promise.all(
             serialsToCheck.map(async ({ serial, stokKodu }) => {
               try {
-                const historySnap = await getDocsResilient(
+                const historySnap = await getDocs(
                   query(
                     collection(db, `serialHistory/${serial}/events`),
                     limit(1)
@@ -1617,7 +1616,7 @@ export default function AnaPanel(props: AnaPanelProps) {
         }
 
         await queue.flush();
-        await touchStockMetadata({ depotIds: [selectedDepotId], companyId: currentCompanyId });
+        await touchStockMetadata();
         invalidateDepoStok();
 
         const txId = await recordMalKabulTransaction(itemsToProcess, 'unverified');
@@ -1638,7 +1637,7 @@ export default function AnaPanel(props: AnaPanelProps) {
         scannedSerialsRef.current.clear();
         previousScannedItems.forEach(item => {
           if (item.seriNumarasi && item.stokKodu) {
-            const serialKey = serialProductKey(item.stokKodu);
+            const serialKey = serialLotKey(item.stokKodu, item.lotNumarasi || '');
             if (!scannedSerialsRef.current.has(serialKey)) {
               scannedSerialsRef.current.set(serialKey, new Set());
             }
@@ -1753,7 +1752,7 @@ export default function AnaPanel(props: AnaPanelProps) {
         depotName: selectedDepot.name || '',
       }, { merge: true });
       await lineBatch.commit();
-      await touchStockMetadata({ depotIds: [selectedDepotId], companyId: currentCompanyId });
+      await touchStockMetadata();
       invalidateDepoStok();
       toast({ title: 'İrsaliye stoğa aktarıldı', description: `${irs.irsaliyeNo} için ${added} kayıt depoya eklendi.` });
     } catch (e: any) {

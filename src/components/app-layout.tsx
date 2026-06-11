@@ -60,26 +60,6 @@ const PushNotificationsClient = dynamic(
 const QoreTechnicShell = dynamic(() => import('./qore-technic-shell'), { ssr: false });
 const LojistikTerminalShell = dynamic(() => import('./lojistik-terminal-shell'), { ssr: false });
 
-/**
- * STABİLİZASYON (P0.1): master-data ön yüklemesi artık panelin kendi kritik
- * sorgularıyla YARIŞMAZ. Önceden bu altı hook AppLayout gövdesinde eager
- * çalışıyordu — auth çözülür çözülmez 6 koleksiyon birden açılıyor, açılan
- * panelin asıl verisiyle aynı WebChannel'ı paylaşıp thundering herd
- * oluşturuyordu. Şimdi: auth + tenant hazır olduktan sonra kısa bir boşta
- * gecikmesiyle mount edilir; kullanıcının açtığı panel kendi verisini
- * zaten kendi hook'uyla anında çeker (React Query aynı anahtarı paylaşır).
- */
-function MasterDataPrefetcher() {
-  useProductCodes();
-  useBarcodeFormatsQuery();
-  useDepots();
-  useAddressDefinitions();
-  useUsers();
-  useHospitals(); // Siparisler paneli ve LojistikSiparisView için
-  return null;
-}
-
-const MASTER_DATA_PREFETCH_DELAY_MS = 2_000;
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const {
@@ -92,13 +72,13 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     toggleNavMode,
   } = useAuth();
 
-  const [prefetchMasterData, setPrefetchMasterData] = useState(false);
-  useEffect(() => {
-    if (isLoadingAuth || !currentUser) return;
-    const timer = setTimeout(() => setPrefetchMasterData(true), MASTER_DATA_PREFETCH_DELAY_MS);
-    return () => clearTimeout(timer);
-  }, [isLoadingAuth, currentUser]);
-  const masterDataPrefetcher = prefetchMasterData ? <MasterDataPrefetcher /> : null;
+  // Prefetch static master-data in the background to speed up panel loading (cached for 30m-1h)
+  useProductCodes();
+  useBarcodeFormatsQuery();
+  useDepots();
+  useAddressDefinitions();
+  useUsers();
+  useHospitals(); // Siparisler paneli ve LojistikSiparisView için
 
   const pathname = usePathname();
   const [calendarOpen, setCalendarOpen] = useState(false);
@@ -181,7 +161,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (isSarfDagitimPersonel) {
     return (
       <>
-        {masterDataPrefetcher}
         <PushNotificationsErrorBoundary>
           <PushNotificationsClient />
         </PushNotificationsErrorBoundary>
@@ -198,7 +177,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (isLojistikTerminalRole && isLojistikTerminalPath) {
     return (
       <>
-        {masterDataPrefetcher}
         <PushNotificationsErrorBoundary>
           <PushNotificationsClient />
         </PushNotificationsErrorBoundary>
@@ -220,7 +198,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (isQoreTechnicRole) {
     return (
       <>
-        {masterDataPrefetcher}
         <PushNotificationsErrorBoundary>
           <PushNotificationsClient />
         </PushNotificationsErrorBoundary>
@@ -245,7 +222,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
     return (
       <SidebarProvider>
-        {masterDataPrefetcher}
         <PushNotificationsErrorBoundary>
           <PushNotificationsClient />
         </PushNotificationsErrorBoundary>
@@ -253,7 +229,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <SidebarHeader>
             <div className="flex items-center gap-2 p-2">
               <Image
-                src="/icon-192.png"
+                src="/A0D5B407-8ADE-4410-B97B-520A830DA0FF.PNG"
                 alt="Logo"
                 width={32}
                 height={32}
@@ -350,7 +326,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // Default to Dock view
   return (
     <div className="flex min-h-screen flex-col items-center">
-      {masterDataPrefetcher}
       <PresenceManager />
       <PushNotificationsErrorBoundary>
         <PushNotificationsClient />

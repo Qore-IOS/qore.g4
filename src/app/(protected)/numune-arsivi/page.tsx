@@ -9,7 +9,6 @@ import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, doc, setDoc } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import type { Hospital as Laboratory, Rack } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
@@ -83,7 +82,7 @@ export default function NumuneArsiviPage() {
     async function fetchLaboratories() {
       setLoading({ labs: true, fridges: false });
       try {
-        const labsSnap = await getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin));
+        const labsSnap = await getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin));
         const labsData = labsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Laboratory));
         setLaboratories(labsData.sort((a,b) => (a.name || '').localeCompare(b.name || '')));
       } catch (error) {

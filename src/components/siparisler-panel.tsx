@@ -55,7 +55,6 @@ import {
   serverTimestamp,
   deleteDoc,
 } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { generateId, parseBarcode, exportDataToExcel, readExcelData, playFeedback, sanitizeGS1 } from '@/lib/utils';
 import { Input } from '@/components/ui/input';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
@@ -543,7 +542,7 @@ export default function SiparislerPanel(): JSX.Element {
     const sheets: Record<string, any[]> = {};
 
     const fetchRules = async (path: 'depots' | 'hospitals', id: string): Promise<Record<string, MinMaxRule>> => {
-      const snap = await getDocsResilient(collection(db, path, id, 'minMaxRules'));
+      const snap = await getDocs(collection(db, path, id, 'minMaxRules'));
       const rules: Record<string, MinMaxRule> = {};
       snap.forEach(doc => {
         const d = doc.data() as MinMaxRule;
@@ -609,7 +608,7 @@ export default function SiparislerPanel(): JSX.Element {
     const hospital = hospitals.find(h => h.id === selectedLabId);
     if (!hospital || !hospital.id) return;
 
-    const rulesSnap = await getDocsResilient(collection(db, 'hospitals', hospital.id, 'minMaxRules'));
+    const rulesSnap = await getDocs(collection(db, 'hospitals', hospital.id, 'minMaxRules'));
     const rules: Record<string, MinMaxRule> = {};
     rulesSnap.forEach(doc => {
       const d = doc.data() as MinMaxRule;

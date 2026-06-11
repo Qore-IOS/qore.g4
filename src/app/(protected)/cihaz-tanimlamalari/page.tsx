@@ -5,7 +5,6 @@ import CihazTanimlamaClient from '@/components/CihazTanimlamaClient';
 import { getDeviceImages } from '@/actions/stokActions';
 import { Loader2 } from 'lucide-react';
 import { collection, getDocs } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import type { Hospital } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
@@ -24,7 +23,7 @@ export default function CihazTanimlamalariPage() {
       try {
         const [images, hospitalsSnap] = await Promise.all([
           getDeviceImages(),
-          getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin))
+          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin))
         ]);
         setImageFiles(images);
         setHospitals(filterByCompanyScope(

@@ -10,7 +10,6 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { PlusCircle, Edit3, Trash2, Loader2, Users, Bell, ShieldAlert, Search, Building2, ShieldCheck } from 'lucide-react';
 import { collection, getDocs, setDoc, deleteDoc, doc } from 'firebase/firestore';
-import { getDocsResilient } from '@/lib/firestore-network-recovery';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import type { User as AppUser, Hospital, Depot, AppView, ProductCode, Company } from '@/lib/types';
@@ -101,13 +100,13 @@ export default function KullaniciPanel() {
     setIsLoading(true);
     try {
       const [uSnap, hSnap, dSnap, pSnap, cSnap, lgSnap] = await Promise.all([
-        getDocsResilient(scopedQuery('users', currentCompanyId, isSuperAdmin)),
-        getDocsResilient(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-        getDocsResilient(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
-        getDocsResilient(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
         // companies — SuperAdmin all, normal user own doc only (special rule)
-        isSuperAdmin ? getDocsResilient(collection(db, 'companies')) : Promise.resolve({ docs: [] } as any),
-        getDocsResilient(scopedQuery('def_labGroups', currentCompanyId, isSuperAdmin)),
+        isSuperAdmin ? getDocs(collection(db, 'companies')) : Promise.resolve({ docs: [] } as any),
+        getDocs(scopedQuery('def_labGroups', currentCompanyId, isSuperAdmin)),
       ]);
       setUsers(filterByCompanyScope(
         uSnap.docs.map(d => ({ id: d.id, ...d.data() } as AppUser)),
