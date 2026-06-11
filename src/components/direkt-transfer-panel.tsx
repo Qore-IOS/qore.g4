@@ -43,7 +43,7 @@ import { Input } from '@/components/ui/input';
 import { Loader2, Camera, Truck, Plus, CheckCircle2, History, DatabaseZap, ChevronsUpDown, Check, Trash2, AlertTriangle, Package, FileText, ListChecks, ArrowRight, Minus, MoreHorizontal, X, ChevronDown, ChevronUp, Search, QrCode } from 'lucide-react';
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import useHidScanner from '@/hooks/useHidScanner';
-import { useScanPerformance } from '@/hooks/useScanPerformance';
+import { ScanCommitProbe, ScanPerformanceBadge, useScanPerformance } from '@/hooks/useScanPerformance';
 import BarcodeFormatSelect, { type FormatValue } from '@/components/BarcodeFormatSelect';
 import { cn, playFeedback, sanitizeGS1, generateId } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
@@ -307,9 +307,7 @@ export default function DirektTransferPanel() {
   const [fefoViolations, setFefoViolations] = useState<FefoViolation[]>([]);
 
   // Ölçülebilir uygulama maliyeti: senkron JS ve React'in acil UI commit süresi.
-  const { beginScanMeasurement, sample: scanPerformance } = useScanPerformance();
-  const lastScanMs = scanPerformance?.commitMs ?? null;
-  const lastScanJsMs = scanPerformance?.jsMs ?? null;
+  const { beginScanMeasurement, controller: scanPerformanceController } = useScanPerformance();
 
   // Last scanned product tracking for UI feedback
   const [lastScannedProduct, setLastScannedProduct] = useState<{
@@ -493,6 +491,15 @@ export default function DirektTransferPanel() {
 
       // Toplu QR içindeki alt okutmalar ana okutmanın ölçümünü ezmesin.
       const finishScanJsMeasurement = source !== 'bulk_item' ? beginScanMeasurement() : undefined;
+
+      if (!transferDataReady) {
+        playFeedback(true);
+        flashScanFeedback('error', 'Ürün, barkod ve depo stok verileri henüz hazır değil.');
+        return;
+      }
+
+      // Toplu QR içindeki alt okutmalar ana okutmanın ölçümünü ezmesin.
+      if (source !== 'bulk_item') beginScanMeasurement();
 
       if (!transferDataReady) {
         playFeedback(true);
@@ -1236,6 +1243,7 @@ export default function DirektTransferPanel() {
 
   return (
     <>
+      <ScanCommitProbe controller={scanPerformanceController} />
       <div
         className="cihaz-shell px-3 py-3 sm:px-5 sm:py-4 space-y-3 sm:space-y-4 min-h-screen"
         role="main"
@@ -1428,20 +1436,7 @@ export default function DirektTransferPanel() {
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Son Okutulan</p>
                     <div className="flex shrink-0 items-center gap-2">
-                      {lastScanMs !== null && (
-                        <span
-                          className={cn(
-                            "rounded px-1.5 py-0.5 font-mono text-[9px] font-bold tabular-nums",
-                            lastScanMs < 10 ? "bg-green-500/15 text-green-600"
-                              : lastScanMs < 16.7 ? "bg-amber-500/15 text-amber-600"
-                              : "bg-red-500/15 text-red-600"
-                          )}
-                          title="JS = barkod çözümleme süresi. UI = React acil commit süresi."
-                        >
-                          {lastScanJsMs !== null && <span className="font-normal opacity-60">JS {Math.round(lastScanJsMs)} · </span>}
-                          UI {Math.round(lastScanMs)} ms
-                        </span>
-                      )}
+                      <ScanPerformanceBadge controller={scanPerformanceController} />
                       {scanFeedback && (
                         <span className={cn(
                           "text-[9px] font-bold uppercase tracking-wide",

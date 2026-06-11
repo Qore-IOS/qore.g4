@@ -26,7 +26,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useDepots, useProductCodes, useAddressDefinitions, useBarcodeFormatsQuery, useUsers, useDepotSerialIndex, useInvalidateQueries, touchStockMetadata, useDepotCountSessions, useScannedItems, useIrsaliyeFiles } from '@/hooks/useFirebaseQueries';
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import useHidScanner from '@/hooks/useHidScanner';
-import { useScanPerformance } from '@/hooks/useScanPerformance';
+import { ScanCommitProbe, ScanPerformanceBadge, useScanPerformance } from '@/hooks/useScanPerformance';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
 
@@ -562,9 +562,7 @@ export default function AnaPanel(props: AnaPanelProps) {
 
   const [scannedItems, setScannedItems] = useState<ScanRow[]>([]);
   // Ölçülebilir uygulama maliyeti: senkron JS ve React'in acil UI commit süresi.
-  const { beginScanMeasurement, sample: scanPerformance } = useScanPerformance();
-  const lastScanMs = scanPerformance?.commitMs ?? null;
-  const lastScanJsMs = scanPerformance?.jsMs ?? null;
+  const { beginScanMeasurement, controller: scanPerformanceController } = useScanPerformance();
 
   // A scan must stay on the urgent input path. Grouping and sorting thousands of
   // rows synchronously here used to block the next HID/keyboard event for a few
@@ -790,7 +788,7 @@ export default function AnaPanel(props: AnaPanelProps) {
   const processScan = useCallback(async (barcodeData: string, source: 'barcode' | 'bulk_item' = 'barcode') => {
     const scanCorrelationId = createCorrelationId();
     // Toplu QR içindeki alt okutmalar ana okutmanın ölçümünü ezmesin.
-    const finishScanJsMeasurement = source === 'barcode' ? beginScanMeasurement() : undefined;
+    if (source === 'barcode') beginScanMeasurement();
     const trimmedData = (barcodeData || '').trim();
     if (!trimmedData) {
       malKabulLogger.warn('Scan ignored: empty payload', { source, isBulkScanMode }, { correlationId: scanCorrelationId });
@@ -1950,6 +1948,7 @@ export default function AnaPanel(props: AnaPanelProps) {
 
   return (
     <div className="cihaz-shell px-3 py-4 sm:px-5 sm:py-6 space-y-4 sm:space-y-5 min-h-screen">
+      <ScanCommitProbe controller={scanPerformanceController} />
 
       {/* ── STEP 1: Header – Depo Seçimi ── */}
       <header className="cihaz-card-strong px-4 py-4 sm:px-6 sm:py-5">
@@ -2052,20 +2051,7 @@ export default function AnaPanel(props: AnaPanelProps) {
               <div className="flex items-center justify-between gap-2 mb-2">
                 <p className="cihaz-overline text-[10px] sm:text-xs">Son Okutulan Ürün</p>
                 <div className="flex items-center gap-2 shrink-0">
-                  {lastScanMs !== null && (
-                    <span
-                      className={cn(
-                        "text-[9px] font-mono font-bold px-1.5 py-0.5 rounded tabular-nums",
-                        lastScanMs < 10 ? "bg-green-500/15 text-green-600"
-                          : lastScanMs < 16.7 ? "bg-amber-500/15 text-amber-600"
-                          : "bg-red-500/15 text-red-600"
-                      )}
-                      title="JS = barkod çözümleme süresi. UI = React acil commit süresi."
-                    >
-                      {lastScanJsMs !== null && <span className="opacity-60 font-normal">JS {Math.round(lastScanJsMs)} · </span>}
-                      UI {Math.round(lastScanMs)} ms
-                    </span>
-                  )}
+                  <ScanPerformanceBadge controller={scanPerformanceController} />
                   {scanFeedback && (
                     <span className={cn(
                       "text-[9px] font-bold uppercase tracking-wide",
