@@ -123,8 +123,10 @@ export async function getDepotSerialIndex(
     }
     return index;
   } catch (err) {
+    // Sahte boş sonuç YOK: boş index "depoda hiç seri yok" anlamına gelir ve
+    // mükerrer okutma korumasını sessizce devre dışı bırakır. Hata yüzeye çıksın.
     console.error('[getDepotSerialIndex] Error for depot', depotId, ':', err);
-    return {};
+    throw new Error('Depo seri indeksi sunucudan okunamadı. Detay için sunucu loglarına bakın.');
   }
 }
 
@@ -193,8 +195,10 @@ export async function getExpiringProductsCountServer(
 
     return count;
   } catch (err) {
+    // Sahte 0 YOK: hata yutulup 0 dönünce dashboard sayacı "her şey yolunda"
+    // gösteriyordu. React Query error state'i artık gerçeği yansıtır.
     console.error('Error getting expiring products count:', err);
-    return 0;
+    throw new Error('Miad sayacı sunucudan okunamadı.');
   }
 }
 
@@ -685,8 +689,12 @@ export async function getPaginatedDepotStock(params: {
   };
 
   } catch (err) {
+    // Sahte boş sonuç YOK (gözlemlenebilirlik): önceden buradaki hata yutulup
+    // emptyResult dönüyordu — Admin SDK izni koptuğunda paneller "hatasız ama
+    // bomboş" görünüyor, sorun günlerce fark edilmiyordu. Hata artık yüzeye
+    // çıkar; React Query error state'i panelde "veri yüklenemedi" gösterir.
     console.error('[getPaginatedDepotStock] Error for depot', depotId, ':', err);
-    return emptyResult;
+    throw new Error('Depo stok verisi sunucudan okunamadı. Detay için sunucu loglarına bakın.');
   }
 }
 
@@ -739,7 +747,164 @@ export async function getExpiringProductsCount(
 
     return count;
   } catch (error) {
+    // Sahte 0 YOK — bkz. getExpiringProductsCountServer catch'indeki not.
     console.error('Error counting expiring products:', error);
-    return 0;
+    throw new Error('Miad sayacı sunucudan okunamadı.');
+  }
+}
+
+/* ================================================================
+   Paginated Product Codes – returned from server-side pagination
+   ================================================================ */
+
+export interface PaginatedProductCodesResult {
+  rows: ProductCode[];
+  totalRows: number;
+  totalPages: number;
+  currentPage: number;
+  /** Unique values per column – used for Excel-like column filters */
+  columnValues: {
+    marka: string[];
+    urunGrubu: string[];
+    testGrubu: string[];
+    cihazGrubu: string[];
+    laboratuvarGrubu: string[];
+  };
+  /** Brand → count map for the brand tab chips (computed from ALL products, not just the page). */
+  brandCounts: Record<string, number>;
+}
+
+/**
+ * Server-side paginated product codes.
+ * Fetches the entire productCodes collection via Admin SDK, applies search/filter/sort,
+ * and returns only the requested page to the client.
+ *
+ * This mirrors getPaginatedDepotStock's pattern so that large product catalogs
+ * don't need to be shipped to the client in full just to render a table.
+ */
+export async function getPaginatedProductCodes(params: {
+  page: number;
+  pageSize: number;
+  sortField: string;
+  sortDirection: 'asc' | 'desc';
+  searchTerm?: string;
+  /** Column filters: key = field name on ProductCode, values = allowed values. */
+  columnFilters?: Record<string, string[]>;
+  /** When set, acts as a brand tab filter (equivalent to columnFilters.marka). */
+  brandTab?: string;
+  companyId?: string | null;
+  isSuperAdmin?: boolean;
+}): Promise<PaginatedProductCodesResult> {
+  const {
+    page, pageSize, sortField, sortDirection,
+    searchTerm, columnFilters, brandTab,
+    companyId, isSuperAdmin,
+  } = params;
+
+  const emptyResult: PaginatedProductCodesResult = {
+    rows: [], totalRows: 0, totalPages: 0, currentPage: 1,
+    columnValues: { marka: [], urunGrubu: [], testGrubu: [], cihazGrubu: [], laboratuvarGrubu: [] },
+    brandCounts: {},
+  };
+
+  try {
+    // Fetch all product codes via Admin SDK (TTL'li instance önbelleği —
+    // sayfa/sıralama/filtre geçişleri tam koleksiyonu yeniden okutmaz)
+    const catalogDocs = await getProductCatalogDocs();
+
+    let allProducts: ProductCode[] = catalogDocs.map(d => {
+      const data = { ...d.data };
+      // Convert Firestore Timestamps → plain values (same as processDoc)
+      Object.keys(data).forEach(key => {
+        if (data[key] && typeof data[key] === 'object' && typeof data[key].toDate === 'function') {
+          data[key] = data[key].toDate();
+        }
+      });
+      return { id: d.id, ...data } as ProductCode;
+    });
+
+    // Company scope filtering
+    allProducts = filterByCompanyScope(allProducts, companyId, isSuperAdmin);
+
+    // ─── Brand counts (before any filtering, so tabs always show full counts) ───
+    const brandCounts: Record<string, number> = {};
+    allProducts.forEach(p => {
+      const brand = p.marka || 'Diğer';
+      brandCounts[brand] = (brandCounts[brand] || 0) + 1;
+    });
+
+    // ─── Collect unique column values BEFORE filtering ───
+    const columnValues: PaginatedProductCodesResult['columnValues'] = {
+      marka: [...new Set(allProducts.map(p => p.marka).filter((m): m is string => !!m))].sort((a, b) => a.localeCompare(b, 'tr')),
+      urunGrubu: [...new Set(allProducts.map(p => p.urunGrubu).filter((u): u is string => !!u))].sort(),
+      testGrubu: [...new Set(allProducts.map(p => p.testGrubu).filter((t): t is string => !!t))].sort((a, b) => a.localeCompare(b, 'tr')),
+      cihazGrubu: [...new Set(allProducts.map(p => p.cihazGrubu).filter((c): c is string => !!c))].sort((a, b) => a.localeCompare(b, 'tr')),
+      laboratuvarGrubu: [...new Set(allProducts.map(p => p.laboratuvarGrubu).filter((l): l is string => !!l))].sort((a, b) => a.localeCompare(b, 'tr')),
+    };
+
+    let rows = allProducts;
+
+    // ─── Brand tab filter ───
+    if (brandTab && brandTab !== 'ALL') {
+      if (brandTab === 'Diğer') {
+        rows = rows.filter(p => !p.marka);
+      } else {
+        rows = rows.filter(p => p.marka === brandTab);
+      }
+    }
+
+    // ─── Column filters ───
+    if (columnFilters) {
+      for (const [col, values] of Object.entries(columnFilters)) {
+        if (values.length === 0) continue;
+        rows = rows.filter(r => {
+          const fieldVal = (r as any)[col];
+          return values.includes(String(fieldVal ?? ''));
+        });
+      }
+    }
+
+    // ─── Search ───
+    if (searchTerm) {
+      const lower = searchTerm.toLowerCase();
+      rows = rows.filter(p =>
+        p.stokKodu.toLowerCase().includes(lower) ||
+        p.stokAdi.toLowerCase().includes(lower)
+      );
+    }
+
+    // ─── Sort ───
+    rows.sort((a, b) => {
+      const aVal = (a as any)[sortField] ?? '';
+      const bVal = (b as any)[sortField] ?? '';
+
+      if (typeof aVal === 'number' && typeof bVal === 'number') {
+        return sortDirection === 'asc' ? aVal - bVal : bVal - aVal;
+      }
+
+      return sortDirection === 'asc'
+        ? String(aVal).localeCompare(String(bVal), 'tr')
+        : String(bVal).localeCompare(String(aVal), 'tr');
+    });
+
+    // ─── Paginate ───
+    const totalRows = rows.length;
+    const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+    const safePage = Math.min(Math.max(1, page), totalPages);
+    const start = (safePage - 1) * pageSize;
+    const pageRows = rows.slice(start, start + pageSize);
+
+    return {
+      rows: pageRows,
+      totalRows,
+      totalPages,
+      currentPage: safePage,
+      columnValues,
+      brandCounts,
+    };
+  } catch (err) {
+    // Sahte boş sonuç YOK — bkz. getPaginatedDepotStock catch'indeki not.
+    console.error('[getPaginatedProductCodes] Error:', err);
+    throw new Error('Ürün kataloğu sunucudan okunamadı. Detay için sunucu loglarına bakın.');
   }
 }
