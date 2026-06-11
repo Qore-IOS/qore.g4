@@ -562,7 +562,9 @@ export default function AnaPanel(props: AnaPanelProps) {
 
   const [scannedItems, setScannedItems] = useState<ScanRow[]>([]);
   // Ölçülebilir uygulama maliyeti: senkron JS ve React'in acil UI commit süresi.
-  const { beginScanMeasurement, lastScanMs, lastScanJsMs } = useScanPerformance();
+  const { beginScanMeasurement, sample: scanPerformance } = useScanPerformance();
+  const lastScanMs = scanPerformance?.commitMs ?? null;
+  const lastScanJsMs = scanPerformance?.jsMs ?? null;
 
   // A scan must stay on the urgent input path. Grouping and sorting thousands of
   // rows synchronously here used to block the next HID/keyboard event for a few

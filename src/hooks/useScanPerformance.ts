@@ -63,7 +63,6 @@ export function useScanPerformance() {
 
   return {
     beginScanMeasurement,
-    lastScanJsMs: sample?.jsMs ?? null,
-    lastScanMs: sample?.commitMs ?? null,
+    sample,
   };
 }

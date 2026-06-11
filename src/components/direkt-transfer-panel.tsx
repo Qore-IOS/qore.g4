@@ -307,7 +307,9 @@ export default function DirektTransferPanel() {
   const [fefoViolations, setFefoViolations] = useState<FefoViolation[]>([]);
 
   // Ölçülebilir uygulama maliyeti: senkron JS ve React'in acil UI commit süresi.
-  const { beginScanMeasurement, lastScanMs, lastScanJsMs } = useScanPerformance();
+  const { beginScanMeasurement, sample: scanPerformance } = useScanPerformance();
+  const lastScanMs = scanPerformance?.commitMs ?? null;
+  const lastScanJsMs = scanPerformance?.jsMs ?? null;
 
   // Last scanned product tracking for UI feedback
   const [lastScannedProduct, setLastScannedProduct] = useState<{
@@ -473,6 +475,15 @@ export default function DirektTransferPanel() {
           setLastScanMs(performance.now() - scanStartedAt);
         }));
       }
+
+      if (!transferDataReady) {
+        playFeedback(true);
+        flashScanFeedback('error', 'Ürün, barkod ve depo stok verileri henüz hazır değil.');
+        return;
+      }
+
+      // Toplu QR içindeki alt okutmalar ana okutmanın ölçümünü ezmesin.
+      const finishScanJsMeasurement = source !== 'bulk_item' ? beginScanMeasurement() : undefined;
 
       if (!transferDataReady) {
         playFeedback(true);
