@@ -1,7 +1,12 @@
 'use client';
 import React, { useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
 import { Button } from './ui/button';
-import { Redo, Trash2 } from 'lucide-react';
+import { Redo } from 'lucide-react';
+import {
+  getSignatureExportDimensions,
+  getSignaturePixelRatio,
+  MAX_SIGNATURE_HISTORY_ENTRIES,
+} from '@/lib/signature-canvas';
 
 interface SignaturePadProps {
   width?: number;
@@ -30,6 +35,10 @@ const SignaturePad = forwardRef<SignaturePadRef, SignaturePadProps>(({ width = 5
         history.current = history.current.slice(0, historyStep.current + 1);
     }
     history.current.push(ctx.getImageData(0, 0, canvasRef.current.width, canvasRef.current.height));
+    if (history.current.length > MAX_SIGNATURE_HISTORY_ENTRIES) {
+      // Keep the blank initial state and discard the oldest drawn snapshot.
+      history.current.splice(1, 1);
+    }
     historyStep.current = history.current.length - 1;
   };
 
@@ -47,7 +56,7 @@ const SignaturePad = forwardRef<SignaturePadRef, SignaturePadProps>(({ width = 5
     if (!ctx) return;
 
     // Set initial canvas size and context properties
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = getSignaturePixelRatio(window.devicePixelRatio);
     canvas.width = width * dpr;
     canvas.height = height * dpr;
     canvas.style.width = `${width}px`;
@@ -116,15 +125,17 @@ const SignaturePad = forwardRef<SignaturePadRef, SignaturePadProps>(({ width = 5
   useImperativeHandle(ref, () => ({
     getSignature: () => {
       const canvas = canvasRef.current;
-      if (!canvas) return;
-      // Check if canvas is blank
-      const ctx = getContext();
-      if (!ctx) return;
-      const pixelBuffer = new Uint32Array(ctx.getImageData(0, 0, canvas.width, canvas.height).data.buffer);
-      const isBlank = !pixelBuffer.some(color => color !== 0);
-      if (isBlank) return undefined;
+      if (!canvas || historyStep.current <= 0) return undefined;
 
-      return canvas.toDataURL('image/png');
+      const exportSize = getSignatureExportDimensions(width, height);
+      const exportCanvas = document.createElement('canvas');
+      exportCanvas.width = exportSize.width;
+      exportCanvas.height = exportSize.height;
+      const exportContext = exportCanvas.getContext('2d');
+      if (!exportContext) return undefined;
+
+      exportContext.drawImage(canvas, 0, 0, exportSize.width, exportSize.height);
+      return exportCanvas.toDataURL('image/png');
     },
     clear: () => {
       const ctx = getContext();
@@ -133,7 +144,7 @@ const SignaturePad = forwardRef<SignaturePadRef, SignaturePadProps>(({ width = 5
       history.current = [ctx.getImageData(0, 0, canvasRef.current.width, canvasRef.current.height)];
       historyStep.current = 0;
     },
-  }));
+  }), [width, height]);
 
   return (
     <div className={`relative w-[${width}px] h-[${height}px] ${className}`}>

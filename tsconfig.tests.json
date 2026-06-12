@@ -23,7 +23,8 @@
     "src/lib/device-faults.ts",
     "src/lib/types.ts",
     "src/lib/tracking.ts",
-    "src/@types/**/*.d.ts"
+    "src/@types/**/*.d.ts",
+    "src/lib/signature-canvas.ts"
   ],
   "exclude": [
     "node_modules",
