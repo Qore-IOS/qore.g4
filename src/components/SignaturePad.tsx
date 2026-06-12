@@ -1,4 +1,3 @@
-
 'use client';
 import React, { useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
 import { Button } from './ui/button';
@@ -33,27 +32,27 @@ const SignaturePad = forwardRef<SignaturePadRef, SignaturePadProps>(({ width = 5
     history.current.push(ctx.getImageData(0, 0, canvasRef.current.width, canvasRef.current.height));
     historyStep.current = history.current.length - 1;
   };
-  
+
   const undo = () => {
     const ctx = getContext();
     if (!ctx || historyStep.current <= 0) return;
     historyStep.current -= 1;
     ctx.putImageData(history.current[historyStep.current], 0, 0);
   };
-  
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = getContext();
     if (!ctx) return;
-    
+
     // Set initial canvas size and context properties
     const dpr = window.devicePixelRatio || 1;
     canvas.width = width * dpr;
     canvas.height = height * dpr;
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
-    
+
     ctx.scale(dpr, dpr);
     ctx.lineCap = 'round';
     ctx.lineWidth = 3;
@@ -107,13 +106,13 @@ const SignaturePad = forwardRef<SignaturePadRef, SignaturePadProps>(({ width = 5
         canvas.removeEventListener('mousemove', draw);
         canvas.removeEventListener('mouseup', endDrawing);
         canvas.removeEventListener('mouseleave', endDrawing);
-        
+
         canvas.removeEventListener('touchstart', startDrawing);
         canvas.removeEventListener('touchmove', draw);
         canvas.removeEventListener('touchend', endDrawing);
     };
   }, [width, height]);
-  
+
   useImperativeHandle(ref, () => ({
     getSignature: () => {
       const canvas = canvasRef.current;
@@ -124,7 +123,7 @@ const SignaturePad = forwardRef<SignaturePadRef, SignaturePadProps>(({ width = 5
       const pixelBuffer = new Uint32Array(ctx.getImageData(0, 0, canvas.width, canvas.height).data.buffer);
       const isBlank = !pixelBuffer.some(color => color !== 0);
       if (isBlank) return undefined;
-      
+
       return canvas.toDataURL('image/png');
     },
     clear: () => {
