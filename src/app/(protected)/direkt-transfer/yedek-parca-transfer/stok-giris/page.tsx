@@ -15,7 +15,7 @@ import {
 } from 'firebase/firestore';
 import type { ProductCode } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery, getScopedDocs } from '@/lib/firestore-helpers';
 import { withCompanyScope, filterByCompanyScope } from '@/lib/company-scope';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
@@ -117,12 +117,12 @@ export default function YedekParcaStokGirisPage() {
 
     const fetchData = async () => {
       try {
-        const [productsSnap, brandsSnap, ordersSnap] = await Promise.all([
-          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+        const [productDocs, brandsSnap, ordersSnap] = await Promise.all([
+          getScopedDocs('productCodes', currentCompanyId, isSuperAdmin),
           getDocs(scopedQuery('def_brands', currentCompanyId, isSuperAdmin)),
           getDocs(scopedQuery('yedekParcaSiparisler', currentCompanyId, isSuperAdmin)),
         ]);
-        const allProducts = productsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
+        const allProducts = productDocs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
         const sparePartProducts = allProducts.filter(p => p.urunGrubu !== 'kit' && p.urunGrubu !== 'sarf');
         const brands = brandsSnap.docs
           .map(d => String(d.data().name || '').trim())
@@ -146,7 +146,7 @@ export default function YedekParcaStokGirisPage() {
     };
 
     fetchData();
-  }, [isAuthorized, toast]);
+  }, [isAuthorized, currentCompanyId, isSuperAdmin, toast]);
 
   const filteredProducts = useMemo(() => {
     if (!productSearchQuery) return spareParts.slice(0, 50);
@@ -712,8 +712,8 @@ export default function YedekParcaStokGirisPage() {
         await createMissingSparePartCards(missing, selectedBrandForCards);
         toast({ title: 'Stok Kartları Açıldı', description: `${missing.length} ürün için yedek parça stok kartı oluşturuldu.` });
 
-        const refreshedSnap = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin));
-        const refreshed = refreshedSnap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
+        const refreshedDocs = await getScopedDocs('productCodes', currentCompanyId, isSuperAdmin);
+        const refreshed = refreshedDocs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
         setAllProductCodes(refreshed);
         setSpareParts(refreshed.filter(p => p.urunGrubu !== 'kit' && p.urunGrubu !== 'sarf'));
       } catch (err) {
