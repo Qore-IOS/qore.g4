@@ -2,6 +2,11 @@
 import React, { useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
 import { Button } from './ui/button';
 import { Redo } from 'lucide-react';
+import {
+  getSignatureExportDimensions,
+  getSignaturePixelRatio,
+  MAX_SIGNATURE_HISTORY_ENTRIES,
+} from '@/lib/signature-canvas';
 
 interface SignaturePadProps {
   width?: number;
@@ -34,8 +39,8 @@ const SignaturePad = forwardRef<SignaturePadRef, SignaturePadProps>(({ width = 5
     }
 
     history.current.push(ctx.getImageData(0, 0, canvasRef.current.width, canvasRef.current.height));
-    if (history.current.length > MAX_HISTORY_ENTRIES) {
-      // Preserve the initial blank snapshot so undo/blank detection stay correct.
+    if (history.current.length > MAX_SIGNATURE_HISTORY_ENTRIES) {
+      // Keep the blank initial state and discard the oldest drawn snapshot.
       history.current.splice(1, 1);
     }
     historyStep.current = history.current.length - 1;
@@ -54,13 +59,10 @@ const SignaturePad = forwardRef<SignaturePadRef, SignaturePadProps>(({ width = 5
     const ctx = getContext();
     if (!ctx) return;
 
-    // iOS devices commonly report DPR=3. Keeping a full-resolution undo snapshot
-    // for every stroke at that scale consumes several MB per entry and makes
-    // Safari stall while exporting the signature. DPR=2 is visually sufficient
-    // for the PDF while keeping memory and Firestore payload sizes bounded.
-    const dpr = Math.min(window.devicePixelRatio || 1, MAX_CANVAS_PIXEL_RATIO);
-    canvas.width = Math.round(width * dpr);
-    canvas.height = Math.round(height * dpr);
+    // Set initial canvas size and context properties
+    const dpr = getSignaturePixelRatio(window.devicePixelRatio);
+    canvas.width = width * dpr;
+    canvas.height = height * dpr;
     canvas.style.width = `${width}px`;
     canvas.style.height = `${height}px`;
 
@@ -112,13 +114,14 @@ const SignaturePad = forwardRef<SignaturePadRef, SignaturePadProps>(({ width = 5
     canvas.addEventListener('touchend', endDrawing);
 
     return () => {
-      canvas.removeEventListener('mousedown', startDrawing);
-      canvas.removeEventListener('mousemove', draw);
-      canvas.removeEventListener('mouseup', endDrawing);
-      canvas.removeEventListener('mouseleave', endDrawing);
-      canvas.removeEventListener('touchstart', startDrawing);
-      canvas.removeEventListener('touchmove', draw);
-      canvas.removeEventListener('touchend', endDrawing);
+        canvas.removeEventListener('mousedown', startDrawing);
+        canvas.removeEventListener('mousemove', draw);
+        canvas.removeEventListener('mouseup', endDrawing);
+        canvas.removeEventListener('mouseleave', endDrawing);
+
+        canvas.removeEventListener('touchstart', startDrawing);
+        canvas.removeEventListener('touchmove', draw);
+        canvas.removeEventListener('touchend', endDrawing);
     };
   }, [width, height]);
 
@@ -127,15 +130,14 @@ const SignaturePad = forwardRef<SignaturePadRef, SignaturePadProps>(({ width = 5
       const canvas = canvasRef.current;
       if (!canvas || historyStep.current <= 0) return undefined;
 
-      // Export at logical form dimensions instead of the device backing-store
-      // resolution. The signature is rendered much smaller in the generated PDF;
-      // retaining DPR=3 pixels only inflates the base64 stored in Firestore.
+      const exportSize = getSignatureExportDimensions(width, height);
       const exportCanvas = document.createElement('canvas');
-      exportCanvas.width = width;
-      exportCanvas.height = height;
+      exportCanvas.width = exportSize.width;
+      exportCanvas.height = exportSize.height;
       const exportContext = exportCanvas.getContext('2d');
       if (!exportContext) return undefined;
-      exportContext.drawImage(canvas, 0, 0, width, height);
+
+      exportContext.drawImage(canvas, 0, 0, exportSize.width, exportSize.height);
       return exportCanvas.toDataURL('image/png');
     },
     clear: () => {
