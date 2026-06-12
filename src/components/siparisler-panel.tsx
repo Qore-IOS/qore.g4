@@ -63,7 +63,7 @@ import { format as formatDate, parse, compareAsc, isValid } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { Loader2, PlusCircle, Trash2, Check, FileSpreadsheet, History, Calculator, ChevronsUpDown, Undo, ClipboardPlus, ShoppingCart, Package, Plus, Minus, MoreHorizontal, ArrowRight, Search, CheckCircle2, Edit3, Save, Send, Share2 } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
-import { useDepots, useHospitals, useProductCodes, useDepoStok, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
+import { useDepots, useHospitals, useProductCodes, useDepoStokForOrders, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import * as XLSX from 'xlsx';
@@ -268,7 +268,7 @@ export default function SiparislerPanel(): JSX.Element {
   const { data: allDepotsData = [] } = useDepots();
   const { data: hospitals = [] } = useHospitals();
   const { data: productCodes = [] } = useProductCodes();
-  const { data: depoStok = [] } = useDepoStok();
+  const { data: depoStok = [] } = useDepoStokForOrders();
 
   const depots = useMemo(() => filterOperationalSourceDepots(allDepotsData, currentUserProfile), [allDepotsData, currentUserProfile]);
 
