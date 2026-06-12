@@ -19,6 +19,9 @@ export interface SignaturePadRef {
   clear: () => void;
 }
 
+const MAX_CANVAS_PIXEL_RATIO = 2;
+const MAX_HISTORY_ENTRIES = 10;
+
 const SignaturePad = forwardRef<SignaturePadRef, SignaturePadProps>(({ width = 500, height = 200, className }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const isDrawing = useRef(false);
@@ -30,10 +33,11 @@ const SignaturePad = forwardRef<SignaturePadRef, SignaturePadProps>(({ width = 5
   const saveState = () => {
     const ctx = getContext();
     if (!ctx || !canvasRef.current) return;
-    // Trim history if we've undone
+
     if (historyStep.current < history.current.length - 1) {
-        history.current = history.current.slice(0, historyStep.current + 1);
+      history.current = history.current.slice(0, historyStep.current + 1);
     }
+
     history.current.push(ctx.getImageData(0, 0, canvasRef.current.width, canvasRef.current.height));
     if (history.current.length > MAX_SIGNATURE_HISTORY_ENTRIES) {
       // Keep the blank initial state and discard the oldest drawn snapshot.
@@ -67,47 +71,46 @@ const SignaturePad = forwardRef<SignaturePadRef, SignaturePadProps>(({ width = 5
     ctx.lineWidth = 3;
     ctx.strokeStyle = 'hsl(var(--foreground))';
 
-    saveState(); // Save initial blank state
+    saveState();
 
     const getPosition = (e: MouseEvent | TouchEvent) => {
-        const rect = canvas.getBoundingClientRect();
-        const event = 'touches' in e ? e.touches[0] : e;
-        return {
-            x: event.clientX - rect.left,
-            y: event.clientY - rect.top,
-        };
+      const rect = canvas.getBoundingClientRect();
+      const event = 'touches' in e ? e.touches[0] : e;
+      return {
+        x: ((event.clientX - rect.left) / rect.width) * width,
+        y: ((event.clientY - rect.top) / rect.height) * height,
+      };
     };
 
     const startDrawing = (e: MouseEvent | TouchEvent) => {
-        e.preventDefault();
-        const { x, y } = getPosition(e);
-        isDrawing.current = true;
-        ctx.beginPath();
-        ctx.moveTo(x, y);
+      e.preventDefault();
+      const { x, y } = getPosition(e);
+      isDrawing.current = true;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
     };
 
     const draw = (e: MouseEvent | TouchEvent) => {
-        if (!isDrawing.current) return;
-        e.preventDefault();
-        const { x, y } = getPosition(e);
-        ctx.lineTo(x, y);
-        ctx.stroke();
+      if (!isDrawing.current) return;
+      e.preventDefault();
+      const { x, y } = getPosition(e);
+      ctx.lineTo(x, y);
+      ctx.stroke();
     };
 
     const endDrawing = () => {
-        if (!isDrawing.current) return;
-        isDrawing.current = false;
-        ctx.closePath();
-        saveState();
+      if (!isDrawing.current) return;
+      isDrawing.current = false;
+      ctx.closePath();
+      saveState();
     };
 
     canvas.addEventListener('mousedown', startDrawing);
     canvas.addEventListener('mousemove', draw);
     canvas.addEventListener('mouseup', endDrawing);
     canvas.addEventListener('mouseleave', endDrawing);
-
-    canvas.addEventListener('touchstart', startDrawing);
-    canvas.addEventListener('touchmove', draw);
+    canvas.addEventListener('touchstart', startDrawing, { passive: false });
+    canvas.addEventListener('touchmove', draw, { passive: false });
     canvas.addEventListener('touchend', endDrawing);
 
     return () => {
@@ -148,10 +151,10 @@ const SignaturePad = forwardRef<SignaturePadRef, SignaturePadProps>(({ width = 5
 
   return (
     <div className={`relative w-[${width}px] h-[${height}px] ${className}`}>
-      <canvas ref={canvasRef} className="border rounded-md bg-background" />
+      <canvas ref={canvasRef} className="border rounded-md bg-background touch-none" />
       <div className="absolute top-2 right-2 flex gap-1">
         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={undo} title="Geri Al">
-            <Redo className="h-4 w-4" style={{transform: 'scaleX(-1)'}} />
+          <Redo className="h-4 w-4" style={{ transform: 'scaleX(-1)' }} />
         </Button>
       </div>
     </div>
