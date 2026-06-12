@@ -21,9 +21,38 @@ import {
 } from 'firebase/firestore';
 import { safeCompareByMiad, toDateSafe } from "@/lib/date";
 import { differenceInDays, parse, isValid, compareAsc } from 'date-fns';
-import { filterByCompanyScope, matchesCompanyScope } from '@/lib/company-scope';
+import { filterByCompanyScope, matchesCompanyScope, normalizeCompanyId } from '@/lib/company-scope';
 import fs from 'fs/promises';
 import path from 'path';
+
+// ─── Admin SDK scoping helper ────────────────────────────────────────────────
+// Mirrors getScopedDocs queries 1+2 (company + legacy) but skips the unscoped
+// fallback which reads entire collections through IndexedDB on the client.
+type AdminDocSnap = FirebaseFirestore.QueryDocumentSnapshot<FirebaseFirestore.DocumentData>;
+
+async function adminScopedDocs(
+  collectionPath: string,
+  companyId: string | null | undefined,
+  isSuperAdmin: boolean | undefined,
+): Promise<AdminDocSnap[]> {
+  const normalized = normalizeCompanyId(companyId);
+  const coll = adminDb.collection(collectionPath);
+  if (isSuperAdmin || normalized === '__legacy__') {
+    return (await coll.get()).docs as AdminDocSnap[];
+  }
+  const [cs, ls] = await Promise.all([
+    coll.where('companyId', '==', normalized).get(),
+    coll.where('companyId', '==', '__legacy__').get(),
+  ]);
+  const seen = new Set<string>();
+  const out: AdminDocSnap[] = [];
+  for (const snap of [cs, ls]) {
+    for (const d of snap.docs as AdminDocSnap[]) {
+      if (!seen.has(d.id)) { seen.add(d.id); out.push(d); }
+    }
+  }
+  return out;
+}
 
 
 // Helper: convert Firestore Timestamps → JS Dates
@@ -172,6 +201,154 @@ export async function getDepotStockForTransfer(
   } catch (err) {
     console.error('[getDepotStockForTransfer] Error for depot', depotId, ':', err);
     return [];
+  }
+}
+
+/**
+ * All depot stock with field projection for the Siparişler panel min/max qty maps.
+ * Uses two parallel Admin SDK queries (company + legacy) instead of the full-doc
+ * web SDK fetch through IndexedDB. Fetches only the 7 fields needed for quantity
+ * aggregation — no miad/stokAdi/seriNumarasi etc.
+ */
+export async function getDepoStokForOrders(
+  companyId?: string | null,
+  isSuperAdmin?: boolean,
+): Promise<DepoStokItem[]> {
+  try {
+    const normalized = normalizeCompanyId(companyId);
+    const selectFields = ['stokKodu', 'adet', 'isShipped', 'depotId', 'hedefKurumId', 'hedefKurum', 'companyId'] as const;
+    let docs: AdminDocSnap[];
+
+    if (isSuperAdmin || normalized === '__legacy__') {
+      docs = (await adminDb.collection('depoStok').select(...selectFields).get()).docs as AdminDocSnap[];
+    } else {
+      const [cs, ls] = await Promise.all([
+        adminDb.collection('depoStok').where('companyId', '==', normalized).select(...selectFields).get(),
+        adminDb.collection('depoStok').where('companyId', '==', '__legacy__').select(...selectFields).get(),
+      ]);
+      const seen = new Set<string>();
+      docs = [];
+      for (const snap of [cs, ls]) {
+        for (const d of snap.docs as AdminDocSnap[]) {
+          if (!seen.has(d.id)) { seen.add(d.id); docs.push(d); }
+        }
+      }
+    }
+
+    return docs.map(d => {
+      const data = d.data() as Record<string, any>;
+      return {
+        id: d.id,
+        stokKodu: data.stokKodu ?? '',
+        stokAdi: '',
+        miad: '',
+        adet: data.adet,
+        isShipped: data.isShipped,
+        depotId: data.depotId,
+        hedefKurumId: data.hedefKurumId,
+        hedefKurum: data.hedefKurum,
+        companyId: data.companyId,
+      } as DepoStokItem;
+    });
+  } catch (err) {
+    console.error('[getDepoStokForOrders] Error:', err);
+    return [];
+  }
+}
+
+/**
+ * Bootstrap data for the Sipariş Toplama page.
+ *
+ * Replaces 4× getScopedDocs calls (≈10 Firestore reads through IndexedDB) with
+ * 4–6 parallel Admin SDK queries — no IndexedDB, ~1–2 s instead of 10–15 s.
+ * depoStok uses field projection (10 fields); other collections are full-doc but
+ * fetched server-side so IndexedDB is never involved.
+ */
+export async function getToplamaBootstrapData(
+  depotId: string,
+  companyId?: string | null,
+  isSuperAdmin?: boolean,
+): Promise<{
+  depoStok: DepoStokItem[];
+  productCodes: Record<string, any>[];
+  deviceGroups: Record<string, any>[];
+  hospitals: Record<string, any>[];
+}> {
+  if (!depotId) throw new Error('depotId required');
+  try {
+    const normalized = normalizeCompanyId(companyId);
+    const depoStokSelectFields = [
+      'stokKodu', 'stokAdi', 'lotNumarasi', 'miad', 'seriNumarasi',
+      'rafAdresi', 'adet', 'isShipped', 'companyId', 'depotId',
+    ] as const;
+
+    // Build depoStok queries (depot filter + field projection)
+    const makeDepoStokQuery = (extraWhere?: [string, FirebaseFirestore.WhereFilterOp, string]) => {
+      let q = adminDb.collection('depoStok').where('depotId', '==', depotId);
+      if (extraWhere) q = q.where(extraWhere[0], extraWhere[1], extraWhere[2]);
+      return q.select(...depoStokSelectFields);
+    };
+
+    const [depoStokDocs, productCodeDocs, deviceGroupDocs, hospitalDocs] = await Promise.all([
+      // depoStok: depot-filtered, company/legacy scoped, with field projection
+      (async (): Promise<AdminDocSnap[]> => {
+        if (isSuperAdmin || normalized === '__legacy__') {
+          return (await makeDepoStokQuery().get()).docs as AdminDocSnap[];
+        }
+        const [cs, ls] = await Promise.all([
+          makeDepoStokQuery(['companyId', '==', normalized]).get(),
+          makeDepoStokQuery(['companyId', '==', '__legacy__']).get(),
+        ]);
+        const seen = new Set<string>();
+        const out: AdminDocSnap[] = [];
+        for (const snap of [cs, ls]) {
+          for (const d of snap.docs as AdminDocSnap[]) {
+            if (!seen.has(d.id)) { seen.add(d.id); out.push(d); }
+          }
+        }
+        return out;
+      })(),
+      adminScopedDocs('productCodes', companyId, isSuperAdmin),
+      // def_deviceGroups is a global collection — no company scoping
+      adminDb.collection('def_deviceGroups').get().then(s => s.docs as AdminDocSnap[]),
+      adminScopedDocs('hospitals', companyId, isSuperAdmin),
+    ]);
+
+    const depoStok: DepoStokItem[] = [];
+    depoStokDocs.forEach(d => {
+      const data = d.data() as Record<string, any>;
+      if (!matchesCompanyScope(data, companyId, isSuperAdmin)) return;
+      if (data.isShipped === true) return;
+      let miad = data.miad;
+      if (miad && typeof miad.toDate === 'function') miad = miad.toDate();
+      depoStok.push({
+        id: d.id,
+        stokKodu: data.stokKodu ?? '',
+        stokAdi: data.stokAdi ?? '',
+        lotNumarasi: data.lotNumarasi,
+        miad: miad ?? '',
+        seriNumarasi: data.seriNumarasi,
+        rafAdresi: data.rafAdresi,
+        adet: data.adet,
+        isShipped: data.isShipped,
+        companyId: data.companyId,
+        depotId: data.depotId,
+      } as DepoStokItem);
+    });
+
+    return {
+      depoStok,
+      productCodes: productCodeDocs
+        .filter(d => matchesCompanyScope(d.data(), companyId, isSuperAdmin))
+        .map(d => ({ id: d.id, ...d.data() })),
+      deviceGroups: deviceGroupDocs.map(d => ({ id: d.id, ...d.data() })),
+      hospitals: hospitalDocs
+        .filter(d => matchesCompanyScope(d.data(), companyId, isSuperAdmin))
+        .map(d => ({ id: d.id, ...d.data() })),
+    };
+  } catch (err) {
+    console.error('[getToplamaBootstrapData] Error for depot', depotId, ':', err);
+    throw err;
   }
 }
 

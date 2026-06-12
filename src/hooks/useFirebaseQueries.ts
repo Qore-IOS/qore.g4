@@ -1080,6 +1080,28 @@ export function useDepoStok() {
 }
 
 /**
+ * Lean depot stock for the Siparişler panel min/max quantity maps.
+ *
+ * Fetches only 7 fields (stokKodu, adet, isShipped, depotId, hedefKurumId,
+ * hedefKurum, companyId) via a single Admin SDK server action instead of
+ * downloading full documents through the web SDK + IndexedDB persistence layer.
+ * Expected load time: ~15 s → ~1–2 s.
+ */
+export function useDepoStokForOrders() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['depoStok', 'forOrders', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const { getDepoStokForOrders } = await import('@/actions/stokActions');
+      return getDepoStokForOrders(currentCompanyId, isSuperAdmin);
+    },
+    enabled: !!currentCompanyId || isSuperAdmin === true,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+}
+
+/**
  * Shipped stock for a specific lab (or pool of labs)
  * Now also queries by hedefKurum (name) for legacy records that may not have hedefKurumId
  * @param labIds - Array of lab IDs to query
