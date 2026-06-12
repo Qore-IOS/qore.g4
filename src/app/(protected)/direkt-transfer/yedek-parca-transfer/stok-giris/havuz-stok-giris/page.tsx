@@ -111,7 +111,7 @@ export default function HavuzStokGirisPage() {
           getDoc(doc(db, 'depots', poolWarehouseId)),
         ]);
         const allProducts = productsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
-        const sparePartProducts = allProducts.filter(p => p.urunGrubu === 'yedek_parca');
+        const sparePartProducts = allProducts.filter(p => p.urunGrubu !== 'kit' && p.urunGrubu !== 'sarf');
         const brands = brandsSnap.docs
           .map(d => String(d.data().name || '').trim())
           .filter(Boolean)
@@ -553,7 +553,7 @@ export default function HavuzStokGirisPage() {
         const refreshedSnap = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin));
         const refreshed = refreshedSnap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
         setAllProductCodes(refreshed);
-        setSpareParts(refreshed.filter(p => p.urunGrubu === 'yedek_parca'));
+        setSpareParts(refreshed.filter(p => p.urunGrubu !== 'kit' && p.urunGrubu !== 'sarf'));
       } catch (err) {
         console.error('Error auto-creating product cards:', err);
         toast({ title: 'Hata', description: 'Stok kartları oluşturulamadı.', variant: 'destructive' });
