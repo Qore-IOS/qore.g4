@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import type { Order } from '@/lib/types';
 import { db } from '@/lib/firebase';
 import {
@@ -22,7 +22,7 @@ import { tr } from 'date-fns/locale';
 import {
   Loader2, Plus, ArrowRight, Trash2, MoreHorizontal,
   History, ClipboardPlus, Undo, FileSpreadsheet, ShoppingCart,
-  Package, CheckCircle2,
+  Package, CheckCircle2, Search, X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -297,7 +297,8 @@ export default function SiparislerPanel() {
 
   const { data: allDepotsData = [] } = useDepots();
   const depots = useMemo(
-    () => filterOperationalSourceDepots(allDepotsData, currentUserProfile),
+    // id'siz depo → Radix SelectItem boş value ile patlar; ele.
+    () => filterOperationalSourceDepots(allDepotsData, currentUserProfile).filter(d => !!d.id),
     [allDepotsData, currentUserProfile],
   );
 
@@ -306,12 +307,41 @@ export default function SiparislerPanel() {
   const [selectedDepotId, setSelectedDepotId] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'acik' | 'kismi' | 'tamamlanan'>('acik');
+  // Aktif sekme URL'den okunur (?tab=) — Tamamlanan'a geçince URL değişir.
+  const searchParams = useSearchParams();
+  const tabFromUrl = searchParams?.get('tab');
+  const initialTab: 'acik' | 'kismi' | 'tamamlanan' =
+    tabFromUrl === 'kismi' || tabFromUrl === 'tamamlanan' ? tabFromUrl : 'acik';
+  const [activeTab, setActiveTab] = useState<'acik' | 'kismi' | 'tamamlanan'>(initialTab);
   const [tamamlananOrders, setTamamlananOrders] = useState<Record<string, any>[]>([]);
   const [tamamlananPage, setTamamlananPage] = useState(1);
   const [tamamlananHasMore, setTamamlananHasMore] = useState(false);
   const [tamamlananLoading, setTamamlananLoading] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+
+  // Tamamlanan araması: searchInput anlık girdi, searchQuery uygulanan (debounce'lu) terim.
+  const [searchInput, setSearchInput] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Sekme değiştir + URL'i güncelle (geçmişi kirletmeden replace).
+  const changeTab = useCallback((tab: 'acik' | 'kismi' | 'tamamlanan') => {
+    setActiveTab(tab);
+    if (tab === 'tamamlanan') setTamamlananPage(1);
+    const qs = tab === 'acik' ? '/siparisler' : `/siparisler?tab=${tab}`;
+    router.replace(qs, { scroll: false });
+  }, [router]);
+
+  // URL sekme parametresi dışarıdan değişirse (geri/ileri) state'i eşitle.
+  useEffect(() => {
+    if (initialTab !== activeTab) setActiveTab(initialTab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabFromUrl]);
+
+  // Arama girdisini debounce ederek uygulanan terime aktar.
+  useEffect(() => {
+    const t = setTimeout(() => { setSearchQuery(searchInput.trim()); setTamamlananPage(1); }, 350);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
   // Lojistik sorumlusu: only perifer orders, no create/depot flow
   const isLojistikSorumlusu = currentUserProfile?.role === 'lojistik_sorumlusu';
@@ -397,10 +427,12 @@ export default function SiparislerPanel() {
   // ── Tamamlanan orders (ordersArchive) ──
   useEffect(() => {
     if (activeTab !== 'tamamlanan' || !selectedDepotId) return;
+    let canceled = false;
     setTamamlananLoading(true);
     import('@/actions/stokActions').then(m =>
-      m.getArchivedOrders(selectedDepotId, currentCompanyId, isSuperAdmin ?? false, tamamlananPage, 20)
+      m.getArchivedOrders(selectedDepotId, currentCompanyId, isSuperAdmin ?? false, tamamlananPage, 20, searchQuery || null)
     ).then(({ orders, hasMore }) => {
+      if (canceled) return;
       const mapped = orders.map((o: any) => ({
         ...o,
         createdAt: o.createdAt instanceof Date ? o.createdAt : o.createdAt ? new Date(o.createdAt) : new Date(),
@@ -409,8 +441,9 @@ export default function SiparislerPanel() {
       setTamamlananOrders(tamamlananPage === 1 ? mapped : prev => [...prev, ...mapped]);
       setTamamlananHasMore(hasMore);
       setTamamlananLoading(false);
-    }).catch(() => setTamamlananLoading(false));
-  }, [activeTab, selectedDepotId, tamamlananPage, currentCompanyId, isSuperAdmin]);
+    }).catch(() => { if (!canceled) setTamamlananLoading(false); });
+    return () => { canceled = true; };
+  }, [activeTab, selectedDepotId, tamamlananPage, currentCompanyId, isSuperAdmin, searchQuery]);
 
   // Reset tamamlanan page when depot changes
   useEffect(() => { setTamamlananPage(1); setTamamlananOrders([]); }, [selectedDepotId]);
@@ -498,7 +531,12 @@ export default function SiparislerPanel() {
         @keyframes sipSpin { to { transform: rotate(360deg); } }
       `}</style>
 
+      {/* Full-bleed cream backdrop — paneli toplama ekranıyla aynı krem tonla
+          baştan başa sarar, arkadaki gri tema zemini görünmez. */}
+      <div aria-hidden style={{ position: 'fixed', inset: 0, background: C.surface2, zIndex: 0 }} />
+
       <div style={{
+        position: 'relative', zIndex: 1,
         maxWidth: 860, margin: '0 auto',
         padding: '28px 20px 90px',
         minHeight: '100vh',
@@ -607,7 +645,7 @@ export default function SiparislerPanel() {
             return (
               <button
                 key={tb.id}
-                onClick={() => { setActiveTab(tb.id); if (tb.id === 'tamamlanan') setTamamlananPage(1); }}
+                onClick={() => changeTab(tb.id)}
                 style={{
                   all: 'unset', cursor: 'pointer',
                   display: 'inline-flex', alignItems: 'center', gap: 8,
@@ -634,6 +672,39 @@ export default function SiparislerPanel() {
           })}
         </div>
 
+        {/* ── Tamamlanan arama ── */}
+        {activeTab === 'tamamlanan' && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16,
+            padding: '0 14px', height: 50, borderRadius: C.rsm,
+            background: C.surface2, boxShadow: C.clayInset,
+          }}>
+            <Search style={{ width: 17, height: 17, color: C.ink3, flexShrink: 0 }} />
+            <input
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Kuruma veya kişiye göre ara…"
+              style={{
+                all: 'unset', flex: 1, height: '100%',
+                fontSize: 14, fontWeight: 600, color: C.ink1,
+              }}
+            />
+            {searchInput && (
+              <button
+                onClick={() => setSearchInput('')}
+                aria-label="Aramayı temizle"
+                style={{
+                  all: 'unset', cursor: 'pointer', flexShrink: 0,
+                  width: 26, height: 26, borderRadius: '50%', display: 'grid', placeItems: 'center',
+                  background: C.surface, boxShadow: C.clayFlat, color: C.ink2,
+                }}
+              >
+                <X style={{ width: 13, height: 13 }} />
+              </button>
+            )}
+          </div>
+        )}
+
         {/* ── Order list ── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {activeTab === 'tamamlanan' && tamamlananLoading && tamamlananOrders.length === 0 ? (
@@ -644,6 +715,7 @@ export default function SiparislerPanel() {
             <EmptyState label={
               activeTab === 'acik' ? 'Açık sipariş yok' :
               activeTab === 'kismi' ? 'Kısmi tamamlanan sipariş yok' :
+              searchQuery ? `"${searchQuery}" için sonuç yok` :
               'Tamamlanan sipariş bulunamadı'
             } />
           ) : (

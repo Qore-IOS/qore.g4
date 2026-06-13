@@ -302,6 +302,12 @@ export async function getToplamaBootstrapData(
   depotId: string,
   companyId?: string | null,
   isSuperAdmin?: boolean,
+  // Toplama ekranı yalnızca siparişteki stok kodlarına ait depo stoğunu kullanır
+  // (bkz. availableWarehouseStock kullanımları). Tüm depo stoğunu (binlerce kayıt)
+  // RSC sınırından serialize edip taşımak açılışı 20 sn+ yavaşlatıyordu; sipariş
+  // kalemlerinin kodlarını verip stoğu sunucu tarafında daraltmak payload'ı
+  // küçültür ve açılışı saniyeler seviyesine indirir.
+  orderStokKodlari?: string[] | null,
 ): Promise<{
   depoStok: DepoStokItem[];
   productCodes: Record<string, any>[];
@@ -310,6 +316,9 @@ export async function getToplamaBootstrapData(
 }> {
   if (!depotId) throw new Error('depotId required');
   try {
+    const codeSet = orderStokKodlari && orderStokKodlari.length > 0
+      ? new Set(orderStokKodlari.filter(Boolean))
+      : null;
     const normalized = normalizeCompanyId(companyId);
     const depoStokSelectFields = [
       'stokKodu', 'stokAdi', 'lotNumarasi', 'miad', 'seriNumarasi',
@@ -353,6 +362,8 @@ export async function getToplamaBootstrapData(
       const data = d.data() as Record<string, any>;
       if (!matchesCompanyScope(data, companyId, isSuperAdmin)) return;
       if (data.isShipped === true) return;
+      // Yalnızca siparişteki kalemlerin stoğunu döndür (payload'ı küçült).
+      if (codeSet && !codeSet.has(data.stokKodu)) return;
       let miad = data.miad;
       if (miad && typeof miad.toDate === 'function') miad = miad.toDate();
       depoStok.push({
@@ -1048,14 +1059,47 @@ export async function getArchivedOrders(
   isSuperAdmin: boolean,
   page: number = 1,
   pageSize: number = 20,
+  searchTerm?: string | null,
 ): Promise<{ orders: Record<string, any>[]; hasMore: boolean }> {
   try {
     const coll = adminDb.collection('ordersArchive');
-    let q: FirebaseFirestore.Query = coll.where('depotId', '==', depotId);
-
-    // Try ordered query (requires composite index on depotId + archivedAt).
-    // Falls back to unordered if the index doesn't exist yet.
+    const q: FirebaseFirestore.Query = coll.where('depotId', '==', depotId);
     const offset = (page - 1) * pageSize;
+
+    // Tamamlanan = arşivlenmiş, eksiksiz teslim edilen siparişler.
+    // "eksik" statülü kayıtları ele.
+    const isComplete = (data: Record<string, any>) => data?.status !== 'eksik';
+    const archivedMillis = (data: Record<string, any>) =>
+      data?.archivedAt?.toMillis?.() ?? data?.transferredAt?.toMillis?.() ?? data?.createdAt?.toMillis?.() ?? 0;
+
+    const term = (searchTerm ?? '').trim().toLocaleLowerCase('tr');
+
+    // ── Arama: kurumAdi / createdBy üzerinde substring araması ──
+    // Firestore native substring araması yapamadığından, arama varken son
+    // geçmişten geniş bir pencere (Admin SDK, hızlı okuma) çekip sunucu
+    // tarafında filtreleyip sayfalarız. Yalnızca sayfa istemciye taşınır.
+    if (term) {
+      const SCAN_CAP = 1000;
+      let scanned: FirebaseFirestore.QueryDocumentSnapshot[];
+      try {
+        const snap = await q.orderBy('archivedAt', 'desc').limit(SCAN_CAP).get();
+        scanned = snap.docs as FirebaseFirestore.QueryDocumentSnapshot[];
+      } catch {
+        const snap = await q.limit(SCAN_CAP).get();
+        scanned = (snap.docs as FirebaseFirestore.QueryDocumentSnapshot[])
+          .sort((a, b) => archivedMillis(b.data()) - archivedMillis(a.data()));
+      }
+      const matched = scanned.filter(d => {
+        const data = d.data();
+        if (!isComplete(data)) return false;
+        const hay = `${data.kurumAdi ?? ''} ${data.createdBy ?? ''} ${data.transferredBy ?? ''}`.toLocaleLowerCase('tr');
+        return hay.includes(term);
+      });
+      const pageDocs = matched.slice(offset, offset + pageSize);
+      return { orders: pageDocs.map(serializeDoc), hasMore: matched.length > offset + pageSize };
+    }
+
+    // ── Aramasız: indeksli offset sayfalama ──
     let docs: FirebaseFirestore.QueryDocumentSnapshot[];
     try {
       const snap = await q
@@ -1065,19 +1109,16 @@ export async function getArchivedOrders(
         .get();
       docs = snap.docs as FirebaseFirestore.QueryDocumentSnapshot[];
     } catch {
-      // Index missing — fetch without ordering, sort client-side
+      // Index missing — fetch without ordering, sort in memory
       const snap = await q.limit(offset + pageSize + 1).get();
       const all = (snap.docs as FirebaseFirestore.QueryDocumentSnapshot[])
-        .sort((a, b) => {
-          const at = a.data().archivedAt?.toMillis?.() ?? a.data().createdAt?.toMillis?.() ?? 0;
-          const bt = b.data().archivedAt?.toMillis?.() ?? b.data().createdAt?.toMillis?.() ?? 0;
-          return bt - at;
-        });
+        .sort((a, b) => archivedMillis(b.data()) - archivedMillis(a.data()));
       docs = all.slice(offset);
     }
 
-    const hasMore = docs.length > pageSize;
-    const page_docs = docs.slice(0, pageSize);
+    const complete = docs.filter(d => isComplete(d.data()));
+    const hasMore = complete.length > pageSize;
+    const page_docs = complete.slice(0, pageSize);
     return { orders: page_docs.map(serializeDoc), hasMore };
   } catch (err) {
     console.error('getArchivedOrders error:', err);
