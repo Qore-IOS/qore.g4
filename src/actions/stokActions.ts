@@ -1099,26 +1099,26 @@ export async function getArchivedOrders(
       return { orders: pageDocs.map(serializeDoc), hasMore: matched.length > offset + pageSize };
     }
 
-    // ── Aramasız: indeksli offset sayfalama ──
-    let docs: FirebaseFirestore.QueryDocumentSnapshot[];
+    // ── Aramasız: tüm depo arşivini çek, filtrele, say ──
+    // isComplete filtresini limit() SONRASI uygulamak yanlış: Firestore'dan
+    // gelen 21 doc'tan kaçı 'eksik' ise o kadar az sonuç döner (bug).
+    // Depo arşivi çok büyük olmaz; Admin SDK ile 2000 doc'a kadar belleğe alıp
+    // filtreyip sayfalamak hem doğru hem hızlıdır.
+    const SCAN_CAP = 2000;
+    let allDocs: FirebaseFirestore.QueryDocumentSnapshot[];
     try {
-      const snap = await q
-        .orderBy('archivedAt', 'desc')
-        .offset(offset)
-        .limit(pageSize + 1)
-        .get();
-      docs = snap.docs as FirebaseFirestore.QueryDocumentSnapshot[];
+      const snap = await q.orderBy('archivedAt', 'desc').limit(SCAN_CAP).get();
+      allDocs = snap.docs as FirebaseFirestore.QueryDocumentSnapshot[];
     } catch {
       // Index missing — fetch without ordering, sort in memory
-      const snap = await q.limit(offset + pageSize + 1).get();
-      const all = (snap.docs as FirebaseFirestore.QueryDocumentSnapshot[])
+      const snap = await q.limit(SCAN_CAP).get();
+      allDocs = (snap.docs as FirebaseFirestore.QueryDocumentSnapshot[])
         .sort((a, b) => archivedMillis(b.data()) - archivedMillis(a.data()));
-      docs = all.slice(offset);
     }
 
-    const complete = docs.filter(d => isComplete(d.data()));
-    const hasMore = complete.length > pageSize;
-    const page_docs = complete.slice(0, pageSize);
+    const complete = allDocs.filter(d => isComplete(d.data()));
+    const hasMore = complete.length > offset + pageSize;
+    const page_docs = complete.slice(offset, offset + pageSize);
     return { orders: page_docs.map(serializeDoc), hasMore };
   } catch (err) {
     console.error('getArchivedOrders error:', err);
