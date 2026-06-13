@@ -200,9 +200,14 @@ export default function ToplamaPage() {
         // 2. Fetch Dependent Data via Admin SDK server action.
         // Replaces 4× getScopedDocs (≈10 Firestore reads through IndexedDB) with
         // 4–6 parallel Admin SDK queries — no IndexedDB, ~1–2 s vs 10–15 s.
+        // Sadece siparişteki stok kodlarına ait depo stoğunu çek — tüm depo
+        // stoğunu taşımak açılışı 20 sn+ yavaşlatıyordu.
+        const orderStokKodlari = Array.from(
+          new Set((orderData.items || []).map(i => i.stokKodu).filter(Boolean) as string[])
+        );
         const [bootstrapData, depotSnap] = await Promise.all([
           import('@/actions/stokActions').then(m =>
-            m.getToplamaBootstrapData(orderData.depotId, currentCompanyId, isSuperAdmin)
+            m.getToplamaBootstrapData(orderData.depotId, currentCompanyId, isSuperAdmin, orderStokKodlari)
           ),
           getDoc(doc(db, 'depots', orderData.depotId)),
         ]);
@@ -1201,7 +1206,10 @@ export default function ToplamaPage() {
       @keyframes tplWaterRise { from { opacity: 0; } to { opacity: 1; } }
       @keyframes tplScanPop { 0% { opacity:0; transform:translateY(-6px) scale(0.96); } 100% { opacity:1; transform:none; } }
     `}</style>
-    <div style={{ minHeight: '100dvh', background: T.surface2 }} className="px-3 py-4 sm:px-5 sm:py-6 pb-28 sm:pb-6">
+    {/* Full-bleed cream backdrop — PageShell kenar boşluklarındaki gri zeminin
+        görünmesini engeller, ekranı tek renk krem sarar. */}
+    <div aria-hidden style={{ position: 'fixed', inset: 0, background: T.surface2, zIndex: 0 }} />
+    <div style={{ position: 'relative', zIndex: 1, minHeight: '100dvh', background: T.surface2 }} className="px-3 py-4 sm:px-5 sm:py-6 pb-28 sm:pb-6">
 
       {/* ── Back ── */}
       <button

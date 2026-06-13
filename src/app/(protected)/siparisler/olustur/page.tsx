@@ -13,7 +13,6 @@ import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { getStockItemQuantity } from '@/lib/stock-quantity';
 import { withCompanyScope } from '@/lib/company-scope';
 import { generateId } from '@/lib/utils';
-import { emitOrderCreatedFromRequest } from '@/lib/notifications';
 import { LabSelector } from '@/components/common/LabSelector';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -149,15 +148,19 @@ function GreenBtn({
 export default function SiparisOlusturPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin, isLoadingAuth } = useAuth();
 
   const { data: allDepotsData = [] } = useDepots();
-  const { data: hospitals = [] } = useHospitals();
-  const { data: productCodes = [] } = useProductCodes();
+  const { data: rawHospitals = [] } = useHospitals();
+  const { data: rawProductCodes = [] } = useProductCodes();
   const { data: depoStok = [] } = useDepoStokForOrders();
 
+  // Geçersiz id'li kayıtları ele — Radix Select / cmdk boş ("") value ile patlar.
+  const hospitals = useMemo(() => rawHospitals.filter(h => !!h.id), [rawHospitals]);
+  const productCodes = useMemo(() => rawProductCodes.filter(p => !!p.stokKodu), [rawProductCodes]);
+
   const depots = useMemo(
-    () => filterOperationalSourceDepots(allDepotsData, currentUserProfile),
+    () => filterOperationalSourceDepots(allDepotsData, currentUserProfile).filter(d => !!d.id),
     [allDepotsData, currentUserProfile],
   );
 
@@ -324,6 +327,7 @@ export default function SiparisOlusturPage() {
       const preview = orderItems.slice(0, 3).map(i => `${i.stokAdi} x${i.adet}`).join(', ');
       const extra = orderItems.length > 3 ? ` (+${orderItems.length - 3} kalem)` : '';
 
+      const { emitOrderCreatedFromRequest } = await import('@/lib/notifications');
       await emitOrderCreatedFromRequest({
         actor: { uid: currentUserProfile?.uid ?? '', name: currentUserProfile?.name ?? '' },
         orderId,
@@ -352,6 +356,19 @@ export default function SiparisOlusturPage() {
     }
   }, [isCreateReady, selectedDepotId, selectedLabId, orderItems, hospitals, currentUser, currentUserProfile, currentCompanyId, router, toast]);
 
+  // Auth çözülene kadar render etme — profil/şirket bilgisi null iken alt
+  // bileşenlerin (Select / cmdk) erken render'ı kırılgan; kısa bir yükleme göster.
+  if (isLoadingAuth) {
+    return (
+      <>
+        <div aria-hidden style={{ position: 'fixed', inset: 0, background: C.surface2, zIndex: 0 }} />
+        <div style={{ position: 'relative', zIndex: 1, minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
+          <Loader2 style={{ width: 30, height: 30, color: C.accent, animation: 'spin 1s linear infinite' }} />
+        </div>
+      </>
+    );
+  }
+
   return (
     <>
       <style>{`
@@ -359,7 +376,10 @@ export default function SiparisOlusturPage() {
         @keyframes olusturIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
       `}</style>
 
-      <div style={{ maxWidth: 860, margin: '0 auto', padding: '24px 16px 100px', minHeight: '100vh', background: C.bg }}>
+      {/* Full-bleed cream backdrop — ekranı tek krem tonla sarar. */}
+      <div aria-hidden style={{ position: 'fixed', inset: 0, background: C.surface2, zIndex: 0 }} />
+
+      <div style={{ position: 'relative', zIndex: 1, maxWidth: 860, margin: '0 auto', padding: '24px 16px 100px', minHeight: '100vh' }}>
 
         {/* ── Back ── */}
         <button
