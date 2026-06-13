@@ -412,7 +412,7 @@ export default function UrunKullanimPanel() {
   const { data: devices = [] } = useDevices();
 
   // Use TanStack Query for barcode formats with caching
-  const { data: barcodeFormats = [] } = useBarcodeFormatsQuery();
+  const { data: barcodeFormats = [], isLoading: formatsLoading } = useBarcodeFormatsQuery();
   const { invalidateConsumption, invalidateDepoStok } = useInvalidateQueries();
 
   // Fetch min/max rules for selected lab (for trash bin product filtering)
@@ -1187,7 +1187,7 @@ export default function UrunKullanimPanel() {
   }, [consumeByParsed, isExpiryWarningModalOpen, lotReplaceTarget, barcodeFormats, toast, findBySerial, recordConsumption]);
   
   useHidScanner({
-    enabled: !isCameraScannerOpen && !isExpiryWarningModalOpen && !faultModalOpen && !isManualDeductionOpen,
+    enabled: !isLoading && !formatsLoading && !isCameraScannerOpen && !isExpiryWarningModalOpen && !faultModalOpen && !isManualDeductionOpen,
     onScan: ({ raw }) => onProcess(raw)
   });
 
