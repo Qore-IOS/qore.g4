@@ -30,6 +30,40 @@ import path from 'path';
 // fallback which reads entire collections through IndexedDB on the client.
 type AdminDocSnap = FirebaseFirestore.QueryDocumentSnapshot<FirebaseFirestore.DocumentData>;
 
+/**
+ * Deep-convert Admin SDK Firestore values (Timestamp, GeoPoint, DocumentRef)
+ * into plain JSON-serializable values so they can cross the Next.js server
+ * action boundary. Admin `Timestamp` is a class instance — returning it raw
+ * throws "Only plain objects … can be passed to Client Components".
+ */
+function serializeFirestoreValue(value: any): any {
+  if (value === null || value === undefined) return value;
+  // Firestore Timestamp (admin or web): has toDate()
+  if (typeof value === 'object' && typeof value.toDate === 'function') {
+    return value.toDate();
+  }
+  if (value instanceof Date) return value;
+  if (Array.isArray(value)) return value.map(serializeFirestoreValue);
+  if (typeof value === 'object') {
+    // Skip non-plain objects we don't expect (e.g. DocumentReference) by
+    // converting them to a path string when possible, otherwise dropping.
+    if (typeof value.path === 'string' && typeof value.id === 'string' && typeof value.collection === 'function') {
+      return value.path; // DocumentReference → path string
+    }
+    const out: Record<string, any> = {};
+    for (const key of Object.keys(value)) {
+      out[key] = serializeFirestoreValue(value[key]);
+    }
+    return out;
+  }
+  return value;
+}
+
+/** Map an Admin doc snapshot to a plain serializable object. */
+function serializeDoc(d: AdminDocSnap): Record<string, any> {
+  return serializeFirestoreValue({ id: d.id, ...d.data() });
+}
+
 async function adminScopedDocs(
   collectionPath: string,
   companyId: string | null | undefined,
@@ -338,13 +372,15 @@ export async function getToplamaBootstrapData(
 
     return {
       depoStok,
+      // serializeDoc deep-converts Admin Timestamp/GeoPoint/Ref instances into
+      // plain values so the payload can cross the server-action boundary.
       productCodes: productCodeDocs
         .filter(d => matchesCompanyScope(d.data(), companyId, isSuperAdmin))
-        .map(d => ({ id: d.id, ...d.data() })),
-      deviceGroups: deviceGroupDocs.map(d => ({ id: d.id, ...d.data() })),
+        .map(serializeDoc),
+      deviceGroups: deviceGroupDocs.map(serializeDoc),
       hospitals: hospitalDocs
         .filter(d => matchesCompanyScope(d.data(), companyId, isSuperAdmin))
-        .map(d => ({ id: d.id, ...d.data() })),
+        .map(serializeDoc),
     };
   } catch (err) {
     console.error('[getToplamaBootstrapData] Error for depot', depotId, ':', err);
