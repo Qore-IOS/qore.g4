@@ -81,15 +81,13 @@ export function useProductCodes() {
   return useQuery({
     queryKey: ['productCodes', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const docs = await getScopedDocs('productCodes', currentCompanyId, isSuperAdmin);
-      const items = docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as ProductCode));
-      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+      const { getProductCodesAction } = await import('@/actions/stokActions');
+      const items = await getProductCodesAction(currentCompanyId, isSuperAdmin ?? false);
+      return items as ProductCode[];
     },
     enabled: !!currentCompanyId || isSuperAdmin,
-    staleTime: 60 * 60 * 1000, // 1 hour
-    gcTime: 2 * 60 * 60 * 1000, // 2 hours
-    // PERF (Faz 2): refetchOnWindowFocus kaldırıldı → global false miras alınır.
-    // Statik master-data; her tab-focus'ta tüm koleksiyonu yeniden çekmeye gerek yok.
+    staleTime: 60 * 60 * 1000,
+    gcTime: 2 * 60 * 60 * 1000,
   });
 }
 
@@ -395,11 +393,9 @@ export function useBarcodeFormatsQuery() {
   return useQuery({
     queryKey: ['barcodeFormats', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const docs = await getScopedDocs(
-        'barcodeFormats', currentCompanyId, isSuperAdmin, where('active', '==', true),
-      );
-      const items = docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as BarcodeFormat));
-      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+      const { getBarcodeFormatsAction } = await import('@/actions/stokActions');
+      const items = await getBarcodeFormatsAction(currentCompanyId, isSuperAdmin ?? false);
+      return items as BarcodeFormat[];
     },
     enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 60 * 60 * 1000,
