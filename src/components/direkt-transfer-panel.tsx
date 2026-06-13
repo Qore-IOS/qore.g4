@@ -275,15 +275,21 @@ export default function DirektTransferPanel() {
   }, [depotStockData]);
 
   const transferDataProgress = useMemo(() => {
+    // Readiness must reflect the actual arrays the scan handler parses against,
+    // not just the isLoading flags. After depotStock became fast (Admin SDK),
+    // the green light could turn on while productCodes / barcodeFormats were
+    // still streaming in via the slower getScopedDocs path — the first scan then
+    // hit an empty formats/products array and failed to parse, while a retry a
+    // second later (data arrived) succeeded. Gating on length closes that race.
     const sourcesReady = [
       !depotsLoading,
-      !productsLoading,
+      !productsLoading && products.length > 0,
       !hospitalsLoading,
-      !formatsLoading,
+      !formatsLoading && barcodeFormats.length > 0,
       Boolean(selectedDepotId) && !depotStockPending,
     ];
     return Math.round((sourcesReady.filter(Boolean).length / sourcesReady.length) * 100);
-  }, [depotsLoading, productsLoading, hospitalsLoading, formatsLoading, selectedDepotId, depotStockPending]);
+  }, [depotsLoading, productsLoading, products.length, hospitalsLoading, formatsLoading, barcodeFormats.length, selectedDepotId, depotStockPending]);
   const isTransferDataLoading = transferDataProgress < 100;
   const transferDataReady = !isTransferDataLoading;
 
