@@ -310,7 +310,7 @@ export interface Order {
   kurumAdi: string;
   items: OrderItem[];
   createdAt: TimestampLike;
-  status: 'pending' | 'toplaniyor' | 'completed' | 'eksik' | string;
+  status: 'pending' | 'toplaniyor' | 'completed' | 'eksik' | 'kismi' | string;
   transferredAt?: TimestampLike | null;
   olusturmaTarihi?: TimestampLike;
   depotName?: string;

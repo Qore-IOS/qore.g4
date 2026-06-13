@@ -879,9 +879,11 @@ export default function ToplamaPage() {
               completedAt: serverTimestamp(),
           });
       } else if (order.id) {
+          // Partial transfer: mark as 'kismi' so the Kısmi Tamamlanan tab picks it up
           batch.update(doc(db, 'orders', order.id), {
               items: remainingItems,
-              status: 'toplaniyor'
+              status: 'kismi',
+              partialTransferAt: serverTimestamp(),
           });
       }
 
@@ -1172,74 +1174,159 @@ export default function ToplamaPage() {
     );
   };
 
-  return (
-    <div className="cihaz-shell px-3 py-4 sm:px-5 sm:py-6 pb-28 sm:pb-6" style={{ minHeight: '100dvh' }}>
+  // ── Design tokens for visual refresh ──
+  const T = {
+    surface: '#FCFAF5',
+    surface2: '#F5F1E8',
+    ink1: '#3D382F',
+    ink2: '#908872',
+    ink3: '#BBB2A0',
+    accent: '#C98A57',
+    accentLight: '#E0B776',
+    accentGlow: 'rgba(201,138,87,0.24)',
+    water: 'rgba(124,191,140,0.22)',
+    waterSolid: '#6FB585',
+    clay: 'inset 0 1px 1px rgba(255,255,255,0.9), inset 0 -3px 7px rgba(178,160,128,0.14), 0 10px 24px -12px rgba(150,128,96,0.34), 0 2px 6px -2px rgba(150,128,96,0.16)',
+    clayInset: 'inset 0 2px 5px rgba(178,160,128,0.30), inset 0 -1px 0 rgba(255,255,255,0.55)',
+    clayFlat: 'inset 0 1px 1px rgba(255,255,255,0.85), 0 4px 12px -7px rgba(150,128,96,0.28)',
+    ease: 'cubic-bezier(.22, 1, .36, 1)',
+    r: '24px',
+    rsm: '16px',
+    rpill: '999px',
+  };
 
-      {/* ── Back + Header ── */}
+  return (
+    <>
+    <style>{`
+      @keyframes tplWaterRise { from { opacity: 0; } to { opacity: 1; } }
+      @keyframes tplScanPop { 0% { opacity:0; transform:translateY(-6px) scale(0.96); } 100% { opacity:1; transform:none; } }
+    `}</style>
+    <div style={{ minHeight: '100dvh', background: T.surface2 }} className="px-3 py-4 sm:px-5 sm:py-6 pb-28 sm:pb-6">
+
+      {/* ── Back ── */}
       <button
         onClick={() => router.push('/siparisler')}
-        className="cihaz-tool-item inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium mb-4"
-        style={{ color: 'var(--dashboard-muted)' }}
+        style={{
+          all: 'unset', cursor: 'pointer',
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          padding: '7px 14px', marginBottom: 16, borderRadius: T.rpill,
+          background: `linear-gradient(180deg, #fff, ${T.surface2})`,
+          boxShadow: T.clayFlat,
+          color: T.ink2, fontSize: 12.5, fontWeight: 700,
+        }}
       >
         <ChevronLeft className="w-3.5 h-3.5" /> Siparişler
       </button>
 
-      <header className="cihaz-card-strong p-4 sm:p-5 mb-4 sm:mb-5">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div className="min-w-0">
-            <h1 className="text-lg sm:text-xl font-bold truncate" style={{ color: 'var(--dashboard-text)' }}>
-              Toplama: {order.kurumAdi}
-            </h1>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
-              {order.depotName && (
-                <span className="text-xs font-medium" style={{ color: 'var(--dashboard-muted)' }}>
-                  Depo: {order.depotName}
-                </span>
-              )}
-              {order.createdBy && (
-                <span className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>
-                  Açan: {order.createdBy}
-                </span>
-              )}
-              {orderDate && (
-                <span className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>
-                  {orderDate}
-                </span>
-              )}
-              <span className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>
-                {pickingList.length} grup · {totalNeeded} adet
+      {/* ── Sticky header ── */}
+      <header style={{
+        borderRadius: T.r, marginBottom: 18,
+        background: `linear-gradient(180deg, ${T.surface} 0%, ${T.surface2} 100%)`,
+        boxShadow: T.clay, overflow: 'hidden',
+      }}>
+        {/* Top bar: title + last scan + CTA */}
+        <div style={{ padding: '18px 22px 0', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <h1 style={{ margin: 0, fontSize: 18, fontWeight: 800, letterSpacing: '-0.01em', color: T.ink1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {order.kurumAdi}
+              </h1>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 12px', marginTop: 4 }}>
+                {order.depotName && (
+                  <span style={{ fontSize: 11.5, color: T.ink2, fontWeight: 600 }}>Depo: {order.depotName}</span>
+                )}
+                {order.createdBy && (
+                  <span style={{ fontSize: 11.5, color: T.ink2 }}>Açan: {order.createdBy}</span>
+                )}
+                {orderDate && (
+                  <span style={{ fontSize: 11.5, color: T.ink3 }}>{orderDate}</span>
+                )}
+                <span style={{ fontSize: 11.5, color: T.ink3 }}>{pickingList.length} grup · {totalNeeded} adet</span>
+              </div>
+            </div>
+
+            {/* Desktop CTA */}
+            <button
+              onClick={commitTransfer}
+              disabled={!isTransferReady}
+              className="hidden sm:flex"
+              style={{
+                all: 'unset', cursor: isTransferReady ? 'pointer' : 'not-allowed',
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '10px 20px', borderRadius: T.rsm, flexShrink: 0,
+                background: isTransferReady
+                  ? 'linear-gradient(180deg, #8FD3A6 0%, #6FB585 100%)'
+                  : T.surface2,
+                boxShadow: isTransferReady
+                  ? 'inset 0 1px 0 rgba(255,255,255,0.4), 0 10px 20px -8px rgba(111,181,133,0.5)'
+                  : T.clayInset,
+                color: isTransferReady ? '#fff' : T.ink3,
+                fontSize: 13.5, fontWeight: 800,
+                transition: `all 300ms ${T.ease}`,
+                opacity: isTransferReady ? 1 : 0.7,
+              }}
+            >
+              {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Truck style={{ width: 15, height: 15 }} />}
+              Transfer Et & Kapat
+            </button>
+          </div>
+
+          {/* Son Okutulan card (shown when scan feed has items) */}
+          {scanFeed.length > 0 && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '10px 14px', borderRadius: T.rsm,
+              background: scanFeed[0].ok ? 'rgba(111,181,133,0.12)' : 'rgba(192,121,106,0.10)',
+              border: `1px solid ${scanFeed[0].ok ? 'rgba(111,181,133,0.28)' : 'rgba(192,121,106,0.22)'}`,
+              animation: `tplScanPop 300ms ${T.ease}`,
+            }}>
+              {scanFeed[0].ok
+                ? <CheckCircle2 style={{ width: 15, height: 15, flexShrink: 0, color: '#4E9E6B' }} />
+                : <XCircle style={{ width: 15, height: 15, flexShrink: 0, color: '#B91C1C' }} />
+              }
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ margin: 0, fontSize: 12.5, fontWeight: 700, color: scanFeed[0].ok ? '#4E9E6B' : '#B91C1C', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {scanFeed[0].message}
+                </p>
+                <p style={{ margin: 0, fontSize: 10.5, color: T.ink3 }}>
+                  Son okutma · {new Date(scanFeed[0].ts).toLocaleTimeString('tr-TR')}
+                </p>
+              </div>
+              <span style={{ fontSize: 12, fontWeight: 800, color: T.ink2, flexShrink: 0 }}>
+                {totalScanned}/{totalNeeded}
               </span>
             </div>
-          </div>
-
-          {/* Desktop CTA (hidden on mobile — sticky bar handles it) */}
-          <button
-            onClick={commitTransfer}
-            disabled={!isTransferReady}
-            className="hidden sm:inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl text-sm font-semibold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-            style={{ background: isTransferReady ? '#16A34A' : '#9CA3AF', boxShadow: isTransferReady ? 'var(--dashboard-raised-soft)' : 'none' }}
-          >
-            {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Truck className="w-4 h-4" />}
-            Transfer Et & Kapat
-          </button>
+          )}
         </div>
 
-        {/* Overall progress */}
-        <div className="mt-3">
-          <div className="flex items-center justify-between text-xs font-medium mb-1">
-            <span style={{ color: 'var(--dashboard-muted)' }}>Genel İlerleme</span>
-            <span style={{ color: overallPct === 100 ? '#16A34A' : 'var(--dashboard-text)' }}>
-              {totalScanned}/{totalNeeded} ({overallPct}%)
+        {/* Progress bar */}
+        <div style={{ padding: '14px 22px 18px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: T.ink3, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Genel İlerleme
+            </span>
+            <span style={{
+              fontSize: 13, fontWeight: 800,
+              color: overallPct === 100 ? '#4E9E6B' : T.ink1,
+              transition: `color 400ms ${T.ease}`,
+            }}>
+              {totalScanned}/{totalNeeded} <span style={{ fontWeight: 600, fontSize: 12, color: T.ink2 }}>({overallPct}%)</span>
             </span>
           </div>
-          <div className="cihaz-pressed h-2.5 overflow-hidden" style={{ borderRadius: 8 }}>
-            <div
-              className="h-full rounded-full transition-all duration-500"
-              style={{
-                width: `${overallPct}%`,
-                background: overallPct === 100 ? '#16A34A' : 'var(--dashboard-accent)',
-              }}
-            />
+          <div style={{
+            height: 10, borderRadius: T.rpill,
+            background: T.surface2, boxShadow: T.clayInset,
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              height: '100%', borderRadius: T.rpill,
+              width: `${overallPct}%`,
+              background: overallPct === 100
+                ? 'linear-gradient(90deg, #8FD3A6, #4E9E6B)'
+                : `linear-gradient(90deg, ${T.accentLight}, ${T.accent})`,
+              transition: `width 600ms ${T.ease}`,
+              boxShadow: overallPct > 0 ? `0 0 10px -3px ${overallPct === 100 ? 'rgba(78,158,107,0.5)' : T.accentGlow}` : 'none',
+            }} />
           </div>
         </div>
       </header>
@@ -1251,13 +1338,22 @@ export default function ToplamaPage() {
         <div className="flex-1 min-w-0 space-y-3">
 
           {/* Scanner status + filter chips */}
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-            <div className="cihaz-pressed inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium" style={{ borderRadius: 12, color: '#16A34A' }}>
-              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: 8,
+              padding: '7px 14px', borderRadius: T.rpill,
+              background: `linear-gradient(180deg, #fff, ${T.surface2})`,
+              boxShadow: T.clayFlat,
+              fontSize: 12, fontWeight: 700, color: '#4E9E6B',
+            }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#6FB585', display: 'inline-block', animation: 'pulse 2s infinite' }} />
               Barkod okuyucu aktif
             </div>
 
-            <div className="flex gap-1.5">
+            <div style={{
+              display: 'inline-flex', padding: 3, borderRadius: T.rpill,
+              background: T.surface2, boxShadow: T.clayInset, gap: 2,
+            }}>
               {(['all', 'remaining', 'done'] as const).map(f => {
                 const labels = { all: 'Tümü', remaining: 'Eksik', done: 'Tamamlanan' };
                 const counts = { all: enrichedList.length, remaining: remainingCount, done: doneCount };
@@ -1266,14 +1362,26 @@ export default function ToplamaPage() {
                   <button
                     key={f}
                     onClick={() => setGroupFilter(f)}
-                    className="px-3 py-1 rounded-full text-xs font-medium transition-all"
                     style={{
-                      background: isActive ? 'var(--dashboard-surface)' : 'transparent',
-                      color: isActive ? 'var(--dashboard-text)' : 'var(--dashboard-muted)',
-                      boxShadow: isActive ? 'var(--dashboard-raised-soft)' : 'none',
+                      all: 'unset', cursor: 'pointer',
+                      display: 'inline-flex', alignItems: 'center', gap: 5,
+                      height: 34, padding: '0 14px', borderRadius: T.rpill,
+                      background: isActive ? `linear-gradient(180deg, #fff, ${T.surface2})` : 'transparent',
+                      boxShadow: isActive ? T.clay : 'none',
+                      color: isActive ? T.ink1 : T.ink3,
+                      fontSize: 12.5, fontWeight: 700,
+                      transition: `color 200ms ${T.ease}`,
                     }}
                   >
-                    {labels[f]} ({counts[f]})
+                    {labels[f]}
+                    <span style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      minWidth: 18, height: 18, padding: '0 5px', borderRadius: 999,
+                      background: isActive ? T.accent : 'rgba(150,128,96,0.16)',
+                      color: isActive ? '#fff' : T.ink3, fontSize: 10, fontWeight: 800,
+                    }}>
+                      {counts[f]}
+                    </span>
                   </button>
                 );
               })}
@@ -1281,50 +1389,76 @@ export default function ToplamaPage() {
           </div>
 
           {/* Group section label */}
-          <p className="cihaz-section-label">Toplanacak Gruplar</p>
+          <p style={{ margin: 0, fontSize: 10, fontWeight: 700, color: T.ink3, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Toplanacak Gruplar</p>
 
           {/* Group cards */}
           {filteredList.length === 0 ? (
-            <div className="cihaz-card p-8 text-center" style={{ color: 'var(--dashboard-muted)' }}>
-              <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
-              <p className="text-sm font-medium">
+            <div style={{
+              padding: '40px 24px', textAlign: 'center', borderRadius: T.r,
+              background: `linear-gradient(180deg, ${T.surface}, ${T.surface2})`,
+              boxShadow: T.clay, color: T.ink3,
+            }}>
+              <Package style={{ width: 40, height: 40, margin: '0 auto 10px', opacity: 0.35 }} />
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: T.ink2 }}>
                 {groupFilter === 'done' ? 'Henüz tamamlanan grup yok.' : groupFilter === 'remaining' ? 'Tüm gruplar tamamlandı!' : 'Toplanacak ürün bulunamadı.'}
               </p>
             </div>
           ) : (
-            <div className="space-y-2.5">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {filteredList.map(item => {
                 const isCollapsed = item.isComplete && collapsedGroups.has(item.id);
                 const isLastScanned = scanFeed[0]?.stokKodu === item.stokKodu && Date.now() - (scanFeed[0]?.ts ?? 0) < 2000;
+                const borderColor = item.status === 'blocked' ? '#B91C1C' : item.status === 'active' ? T.accent : item.status === 'done' ? '#6FB585' : 'transparent';
 
                 return (
                   <article
                     key={item.id}
-                    className={cn(
-                      'cihaz-card p-3 sm:p-4 transition-all duration-300 relative overflow-hidden',
-                      isLastScanned && 'ring-2 ring-offset-1',
-                    )}
                     style={{
-                      borderLeft: item.status === 'blocked' ? '3px solid #B91C1C' : item.status === 'active' ? '3px solid var(--dashboard-accent)' : item.status === 'done' ? '3px solid #16A34A' : '3px solid transparent',
-                      opacity: item.isComplete ? 0.7 : 1,
-                      ...(isLastScanned ? { '--tw-ring-color': 'var(--dashboard-accent)' } as any : {}),
+                      position: 'relative', overflow: 'hidden',
+                      borderRadius: T.r, padding: '16px 18px',
+                      background: `linear-gradient(180deg, ${T.surface} 0%, ${T.surface2} 100%)`,
+                      boxShadow: isLastScanned
+                        ? `${T.clay}, 0 0 0 2px ${T.accent}`
+                        : T.clay,
+                      borderLeft: `3px solid ${borderColor}`,
+                      opacity: item.isComplete ? 0.82 : 1,
+                      transition: `opacity 400ms ${T.ease}, box-shadow 300ms ${T.ease}`,
                     }}
                   >
+                    {/* Water fill — rises from bottom as pct increases */}
+                    <div
+                      aria-hidden="true"
+                      style={{
+                        position: 'absolute', left: 0, right: 0, bottom: 0,
+                        height: `${item.pct}%`,
+                        background: item.isComplete
+                          ? 'rgba(111,181,133,0.18)'
+                          : item.isInsufficient
+                            ? 'rgba(217,119,6,0.10)'
+                            : 'rgba(124,191,140,0.16)',
+                        transition: `height 600ms ${T.ease}`,
+                        pointerEvents: 'none',
+                      }}
+                    />
+
                     {/* Top row: name + status badge + actions */}
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="text-sm sm:text-base font-semibold truncate" style={{ color: 'var(--dashboard-text)' }}>
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          <h3 style={{
+                            margin: 0, fontSize: 14.5, fontWeight: 700, color: T.ink1,
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          }}>
                             {item.stokAdi}
                           </h3>
                           {statusBadge(item.status)}
                         </div>
-                        <p className="text-[11px] font-mono mt-0.5" style={{ color: 'var(--dashboard-muted)' }}>
+                        <p style={{ margin: '3px 0 0', fontSize: 11, fontFamily: 'monospace', color: T.ink3 }}>
                           {item.stokKodu}
                         </p>
                       </div>
 
-                      <div className="flex items-center gap-1 flex-shrink-0">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
                         {item.isComplete && (
                           <button
                             onClick={() => setCollapsedGroups(prev => {
@@ -1332,34 +1466,47 @@ export default function ToplamaPage() {
                               next.has(item.id) ? next.delete(item.id) : next.add(item.id);
                               return next;
                             })}
-                            className="p-1 rounded-lg hover:bg-black/5 transition"
+                            style={{ all: 'unset', cursor: 'pointer', padding: 4, borderRadius: 8, color: T.ink3 }}
                           >
-                            {isCollapsed ? <ChevronDown className="w-4 h-4" style={{ color: 'var(--dashboard-muted)' }} /> : <ChevronUp className="w-4 h-4" style={{ color: 'var(--dashboard-muted)' }} />}
+                            {isCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
                           </button>
                         )}
                         {/* More menu with delete confirm */}
-                        <div className="relative">
+                        <div style={{ position: 'relative' }}>
                           <button
                             onClick={() => setConfirmDeleteId(confirmDeleteId === item.id ? null : item.id)}
-                            className="p-1 rounded-lg hover:bg-black/5 transition"
+                            style={{ all: 'unset', cursor: 'pointer', padding: 4, borderRadius: 8, color: T.ink3 }}
                           >
-                            <MoreHorizontal className="w-4 h-4" style={{ color: 'var(--dashboard-muted)' }} />
+                            <MoreHorizontal className="w-4 h-4" />
                           </button>
                           {confirmDeleteId === item.id && (
-                            <div className="absolute right-0 top-8 z-20 cihaz-card-strong p-3 w-48 space-y-2" style={{ borderRadius: 14 }}>
-                              <p className="text-xs font-medium" style={{ color: 'var(--dashboard-text)' }}>Bu grubu kaldır?</p>
-                              <div className="flex gap-2">
+                            <div style={{
+                              position: 'absolute', right: 0, top: 32, zIndex: 20,
+                              borderRadius: 14, padding: 12, width: 180,
+                              background: `linear-gradient(180deg, ${T.surface}, ${T.surface2})`,
+                              boxShadow: T.clay,
+                            }}>
+                              <p style={{ margin: '0 0 8px', fontSize: 12, fontWeight: 700, color: T.ink1 }}>Bu grubu kaldır?</p>
+                              <div style={{ display: 'flex', gap: 8 }}>
                                 <button
                                   onClick={() => { deletePickingItem(item.stokKodu); setConfirmDeleteId(null); }}
-                                  className="flex-1 px-2 py-1.5 rounded-xl text-xs font-semibold text-white"
-                                  style={{ background: '#B91C1C' }}
+                                  style={{
+                                    all: 'unset', cursor: 'pointer', flex: 1,
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                                    padding: '7px 0', borderRadius: T.rsm, fontSize: 12, fontWeight: 700,
+                                    background: '#B91C1C', color: '#fff',
+                                  }}
                                 >
-                                  <Trash2 className="w-3 h-3 inline mr-1" /> Kaldır
+                                  <Trash2 className="w-3 h-3" /> Kaldır
                                 </button>
                                 <button
                                   onClick={() => setConfirmDeleteId(null)}
-                                  className="flex-1 px-2 py-1.5 rounded-xl text-xs font-medium cihaz-pressed"
-                                  style={{ color: 'var(--dashboard-muted)' }}
+                                  style={{
+                                    all: 'unset', cursor: 'pointer', flex: 1,
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    padding: '7px 0', borderRadius: T.rsm, fontSize: 12, fontWeight: 600,
+                                    background: T.surface2, boxShadow: T.clayInset, color: T.ink2,
+                                  }}
                                 >
                                   İptal
                                 </button>
@@ -1372,41 +1519,23 @@ export default function ToplamaPage() {
 
                     {/* Collapsible content */}
                     {!isCollapsed && (
-                      <>
-                        {/* Progress bar */}
-                        <div className="mt-2.5">
-                          <div className="flex items-center justify-between text-[11px] font-medium mb-1">
-                            <span style={{ color: 'var(--dashboard-muted)' }}>Toplanan / Gerekli</span>
-                            <span style={{ color: item.isComplete ? '#16A34A' : 'var(--dashboard-text)' }}>
-                              {item.scannedCount} / {item.needed}
-                            </span>
-                          </div>
-                          <div className="cihaz-pressed h-1.5 overflow-hidden" style={{ borderRadius: 6 }}>
-                            <div
-                              className="h-full rounded-full transition-all duration-500"
-                              style={{
-                                width: `${item.pct}%`,
-                                background: item.isComplete ? '#16A34A' : item.isInsufficient ? '#D97706' : 'var(--dashboard-accent)',
-                              }}
-                            />
-                          </div>
-                        </div>
-
+                      <div style={{ position: 'relative' }}>
                         {/* Counters + image */}
-                        <div className="flex items-center gap-3 mt-2.5">
-                          <div className="flex gap-2 flex-1">
-                            <div className="cihaz-pressed px-3 py-1.5 text-center" style={{ borderRadius: 10, minWidth: 70 }}>
-                              <p className="text-[10px] font-medium" style={{ color: 'var(--dashboard-muted)' }}>Gerekli</p>
-                              <p className="text-lg font-bold" style={{ color: 'var(--dashboard-text)' }}>{item.needed}</p>
-                            </div>
-                            <div className="cihaz-pressed px-3 py-1.5 text-center" style={{ borderRadius: 10, minWidth: 70 }}>
-                              <p className="text-[10px] font-medium" style={{ color: 'var(--dashboard-muted)' }}>Toplanan</p>
-                              <p className="text-lg font-bold" style={{ color: item.scannedCount > 0 ? '#16A34A' : 'var(--dashboard-text)' }}>{item.scannedCount}</p>
-                            </div>
-                            <div className="cihaz-pressed px-3 py-1.5 text-center" style={{ borderRadius: 10, minWidth: 70 }}>
-                              <p className="text-[10px] font-medium" style={{ color: 'var(--dashboard-muted)' }}>Depoda</p>
-                              <p className="text-lg font-bold" style={{ color: item.totalInDepot === 0 ? '#B91C1C' : 'var(--dashboard-text)' }}>{item.totalInDepot}</p>
-                            </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14 }}>
+                          <div style={{ display: 'flex', gap: 8, flex: 1 }}>
+                            {[
+                              { label: 'Gerekli', value: item.needed, color: T.ink1 },
+                              { label: 'Toplanan', value: item.scannedCount, color: item.scannedCount > 0 ? '#4E9E6B' : T.ink1 },
+                              { label: 'Depoda', value: item.totalInDepot, color: item.totalInDepot === 0 ? '#B91C1C' : T.ink1 },
+                            ].map(stat => (
+                              <div key={stat.label} style={{
+                                padding: '8px 12px', textAlign: 'center', borderRadius: 12,
+                                background: T.surface2, boxShadow: T.clayInset, minWidth: 64, flex: 1,
+                              }}>
+                                <p style={{ margin: 0, fontSize: 10, fontWeight: 700, color: T.ink3, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{stat.label}</p>
+                                <p style={{ margin: 0, fontSize: 18, fontWeight: 800, color: stat.color, lineHeight: 1.3 }}>{stat.value}</p>
+                              </div>
+                            ))}
                           </div>
                           {item.cihazGrubuImageUrl && (
                             <div className="flex-shrink-0 hidden sm:block">
@@ -1416,9 +1545,9 @@ export default function ToplamaPage() {
                         </div>
 
                         {/* Recommendation chips */}
-                        <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
                           {item.lotNumarasi !== 'STOK YOK' && (item.lotNumarasi || (item.miad && item.miad !== '-')) && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium" style={{ background: 'rgba(245,158,11,.10)', color: '#B45309' }}>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 10px', borderRadius: T.rpill, fontSize: 11, fontWeight: 600, background: 'rgba(224,163,62,0.12)', color: '#B45309' }}>
                               Öneri:
                               {item.lotNumarasi && ` Lot ${item.lotNumarasi}`}
                               {item.lotNumarasi && item.miad && item.miad !== '-' && ' • '}
@@ -1426,22 +1555,22 @@ export default function ToplamaPage() {
                             </span>
                           )}
                           {item.rafAdresiOnerilen && item.rafAdresiOnerilen !== '-' && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium" style={{ background: 'rgba(107,114,128,.08)', color: '#6B7280' }}>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 10px', borderRadius: T.rpill, fontSize: 11, fontWeight: 600, background: 'rgba(144,136,114,0.10)', color: T.ink2 }}>
                               Raf: {item.rafAdresiOnerilen}
                             </span>
                           )}
                           {item.isInsufficient && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-semibold" style={{ background: 'rgba(185,28,28,.10)', color: '#B91C1C' }}>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 10px', borderRadius: T.rpill, fontSize: 11, fontWeight: 700, background: 'rgba(185,28,28,0.10)', color: '#B91C1C' }}>
                               <AlertTriangle className="w-3 h-3" /> Yetersiz: {item.totalInDepot}
                             </span>
                           )}
                         </div>
 
                         {/* Last transfer meta */}
-                        <div className="mt-1.5">
+                        <div style={{ marginTop: 8 }}>
                           <LastTransferLine date={lastTransferDates[item.stokKodu]} className="!text-[11px]" />
                         </div>
-                      </>
+                      </div>
                     )}
                   </article>
                 );
@@ -1452,31 +1581,39 @@ export default function ToplamaPage() {
 
         {/* RIGHT COLUMN: Scan feed (desktop only) */}
         <aside className="hidden lg:block w-80 xl:w-96 flex-shrink-0 space-y-3">
-          <p className="cihaz-section-label">Son Okutmalar</p>
-          <div className="cihaz-card-strong p-4 space-y-2" style={{ maxHeight: 'calc(100dvh - 220px)', overflowY: 'auto' }}>
+          <p style={{ margin: 0, fontSize: 10, fontWeight: 700, color: T.ink3, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Son Okutmalar</p>
+          <div style={{
+            borderRadius: T.r, padding: 16,
+            background: `linear-gradient(180deg, ${T.surface}, ${T.surface2})`,
+            boxShadow: T.clay,
+            maxHeight: 'calc(100dvh - 220px)', overflowY: 'auto',
+            display: 'flex', flexDirection: 'column', gap: 6,
+          }}>
             {scanFeed.length === 0 ? (
-              <div className="text-center py-8" style={{ color: 'var(--dashboard-muted)' }}>
-                <ScanBarcode className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                <p className="text-xs">Henüz okutma yok</p>
-                <p className="text-[10px] mt-1">Barkod okuyucu ile taramaya başlayın</p>
+              <div style={{ textAlign: 'center', padding: '32px 0', color: T.ink3 }}>
+                <ScanBarcode style={{ width: 30, height: 30, margin: '0 auto 8px', opacity: 0.3 }} />
+                <p style={{ margin: 0, fontSize: 12 }}>Henüz okutma yok</p>
+                <p style={{ margin: '4px 0 0', fontSize: 11 }}>Barkod okuyucu ile taramaya başlayın</p>
               </div>
             ) : (
               scanFeed.map(evt => (
                 <div
                   key={evt.id}
-                  className="flex items-start gap-2 p-2 rounded-xl transition-all"
-                  style={{ background: evt.ok ? 'rgba(22,163,74,.06)' : 'rgba(185,28,28,.06)' }}
+                  style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 10px', borderRadius: T.rsm,
+                    background: evt.ok ? 'rgba(111,181,133,0.10)' : 'rgba(185,28,28,0.07)',
+                  }}
                 >
                   {evt.ok ? (
-                    <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: '#16A34A' }} />
+                    <CheckCircle2 style={{ width: 14, height: 14, flexShrink: 0, marginTop: 2, color: '#4E9E6B' }} />
                   ) : (
-                    <XCircle className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: '#B91C1C' }} />
+                    <XCircle style={{ width: 14, height: 14, flexShrink: 0, marginTop: 2, color: '#B91C1C' }} />
                   )}
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-medium truncate" style={{ color: evt.ok ? '#16A34A' : '#B91C1C' }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <p style={{ margin: 0, fontSize: 12, fontWeight: 600, color: evt.ok ? '#4E9E6B' : '#B91C1C', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {evt.message}
                     </p>
-                    <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>
+                    <p style={{ margin: 0, fontSize: 10.5, color: T.ink3 }}>
                       {new Date(evt.ts).toLocaleTimeString('tr-TR')}
                     </p>
                   </div>
@@ -1488,18 +1625,22 @@ export default function ToplamaPage() {
           {/* Issues / exceptions summary */}
           {enrichedList.some(i => i.isOutOfStock || i.isInsufficient) && (
             <>
-              <p className="cihaz-section-label">Sorunlar</p>
-              <div className="cihaz-card p-3 space-y-2">
+              <p style={{ margin: '14px 0 6px', fontSize: 10, fontWeight: 700, color: T.ink3, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Sorunlar</p>
+              <div style={{
+                borderRadius: T.rsm, padding: '10px 14px',
+                background: `linear-gradient(180deg, ${T.surface}, ${T.surface2})`,
+                boxShadow: T.clay, display: 'flex', flexDirection: 'column', gap: 6,
+              }}>
                 {enrichedList.filter(i => i.isOutOfStock).map(i => (
-                  <div key={`issue-${i.id}`} className="flex items-center gap-2 px-2 py-1.5 rounded-xl" style={{ background: 'rgba(185,28,28,.06)' }}>
-                    <XCircle className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#B91C1C' }} />
-                    <span className="text-xs font-medium truncate" style={{ color: '#B91C1C' }}>{i.stokAdi} – Stok yok</span>
+                  <div key={`issue-${i.id}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: T.rsm, background: 'rgba(185,28,28,.06)' }}>
+                    <XCircle style={{ width: 13, height: 13, flexShrink: 0, color: '#B91C1C' }} />
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#B91C1C', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{i.stokAdi} – Stok yok</span>
                   </div>
                 ))}
                 {enrichedList.filter(i => i.isInsufficient && !i.isOutOfStock).map(i => (
-                  <div key={`issue-${i.id}`} className="flex items-center gap-2 px-2 py-1.5 rounded-xl" style={{ background: 'rgba(245,158,11,.08)' }}>
-                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#D97706' }} />
-                    <span className="text-xs font-medium truncate" style={{ color: '#D97706' }}>{i.stokAdi} – Yetersiz ({i.totalInDepot}/{i.needed})</span>
+                  <div key={`issue-${i.id}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: T.rsm, background: 'rgba(217,119,6,.08)' }}>
+                    <AlertTriangle style={{ width: 13, height: 13, flexShrink: 0, color: '#D97706' }} />
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#D97706', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{i.stokAdi} – Yetersiz ({i.totalInDepot}/{i.needed})</span>
                   </div>
                 ))}
               </div>
@@ -1508,55 +1649,49 @@ export default function ToplamaPage() {
         </aside>
       </div>
 
-      {/* ── Mobile scan feed (single last event, shown above sticky CTA) ── */}
-      {scanFeed.length > 0 && (
-        <div className="fixed bottom-[72px] left-3 right-3 z-30 lg:hidden">
-          <div
-            className="cihaz-card p-2.5 flex items-center gap-2 animate-in slide-in-from-bottom-2 duration-300"
-            style={{ borderRadius: 14 }}
-          >
-            {scanFeed[0].ok ? (
-              <CheckCircle2 className="w-4 h-4 flex-shrink-0" style={{ color: '#16A34A' }} />
-            ) : (
-              <XCircle className="w-4 h-4 flex-shrink-0" style={{ color: '#B91C1C' }} />
-            )}
-            <p className="text-xs font-medium flex-1 truncate" style={{ color: scanFeed[0].ok ? '#16A34A' : '#B91C1C' }}>
-              {scanFeed[0].message}
-            </p>
-          </div>
-        </div>
-      )}
-
       {/* ── Mobile sticky bottom CTA ── */}
       <div
         className="fixed bottom-0 left-0 right-0 z-40 sm:hidden"
         style={{
-          background: 'var(--dashboard-surface)',
-          borderTop: '1px solid var(--dashboard-stroke)',
-          boxShadow: '0 -4px 20px rgba(0,0,0,.08)',
+          background: T.surface,
+          borderTop: `1px solid rgba(90,72,40,0.08)`,
+          boxShadow: '0 -8px 28px rgba(150,128,96,0.16)',
           paddingBottom: 'max(12px, env(safe-area-inset-bottom))',
         }}
       >
-        <div className="flex items-center justify-between px-4 py-3">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px' }}>
           <div>
-            <p className="text-xs font-medium" style={{ color: 'var(--dashboard-muted)' }}>
+            <p style={{ margin: 0, fontSize: 11.5, fontWeight: 600, color: T.ink2 }}>
               {remainingCount > 0 ? `${remainingCount} grup kaldı` : 'Tüm gruplar tamam'}
             </p>
-            <p className="text-sm font-bold" style={{ color: 'var(--dashboard-text)' }}>
+            <p style={{ margin: '2px 0 0', fontSize: 14, fontWeight: 800, color: T.ink1 }}>
               {totalScanned}/{totalNeeded} toplanan
             </p>
           </div>
           <button
             onClick={commitTransfer}
             disabled={!isTransferReady}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl text-sm font-semibold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-            style={{ background: isTransferReady ? '#16A34A' : '#9CA3AF' }}
+            style={{
+              all: 'unset', cursor: isTransferReady ? 'pointer' : 'not-allowed',
+              display: 'inline-flex', alignItems: 'center', gap: 8,
+              padding: '11px 20px', borderRadius: 20, fontSize: 13.5, fontWeight: 800,
+              background: isTransferReady
+                ? 'linear-gradient(180deg, #8FD3A6 0%, #6FB585 100%)'
+                : T.surface2,
+              boxShadow: isTransferReady
+                ? 'inset 0 1px 0 rgba(255,255,255,0.4), 0 10px 20px -8px rgba(111,181,133,0.5)'
+                : 'inset 0 2px 5px rgba(178,160,128,0.30)',
+              color: isTransferReady ? '#fff' : T.ink3,
+              opacity: isTransferReady ? 1 : 0.7,
+              transition: `all 300ms cubic-bezier(.22,1,.36,1)`,
+            }}
           >
-            {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Truck className="w-4 h-4" />}
+            {isProcessing ? <Loader2 style={{ width: 15, height: 15, animation: 'tplWaterRise 1s linear infinite' }} /> : <Truck style={{ width: 15, height: 15 }} />}
             Transfer Et
           </button>
         </div>
       </div>
     </div>
+    </>
   );
 }

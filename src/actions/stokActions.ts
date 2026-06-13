@@ -1037,3 +1037,50 @@ export async function getBarcodeFormatsAction(
     })
     .map(serializeDoc);
 }
+
+/**
+ * Returns a page of completed orders from ordersArchive for a specific depot.
+ * Uses Admin SDK for speed; results are sorted newest-first and paginated.
+ */
+export async function getArchivedOrders(
+  depotId: string,
+  companyId: string | null | undefined,
+  isSuperAdmin: boolean,
+  page: number = 1,
+  pageSize: number = 20,
+): Promise<{ orders: Record<string, any>[]; hasMore: boolean }> {
+  try {
+    const coll = adminDb.collection('ordersArchive');
+    let q: FirebaseFirestore.Query = coll.where('depotId', '==', depotId);
+
+    // Try ordered query (requires composite index on depotId + archivedAt).
+    // Falls back to unordered if the index doesn't exist yet.
+    const offset = (page - 1) * pageSize;
+    let docs: FirebaseFirestore.QueryDocumentSnapshot[];
+    try {
+      const snap = await q
+        .orderBy('archivedAt', 'desc')
+        .offset(offset)
+        .limit(pageSize + 1)
+        .get();
+      docs = snap.docs as FirebaseFirestore.QueryDocumentSnapshot[];
+    } catch {
+      // Index missing — fetch without ordering, sort client-side
+      const snap = await q.limit(offset + pageSize + 1).get();
+      const all = (snap.docs as FirebaseFirestore.QueryDocumentSnapshot[])
+        .sort((a, b) => {
+          const at = a.data().archivedAt?.toMillis?.() ?? a.data().createdAt?.toMillis?.() ?? 0;
+          const bt = b.data().archivedAt?.toMillis?.() ?? b.data().createdAt?.toMillis?.() ?? 0;
+          return bt - at;
+        });
+      docs = all.slice(offset);
+    }
+
+    const hasMore = docs.length > pageSize;
+    const page_docs = docs.slice(0, pageSize);
+    return { orders: page_docs.map(serializeDoc), hasMore };
+  } catch (err) {
+    console.error('getArchivedOrders error:', err);
+    return { orders: [], hasMore: false };
+  }
+}
