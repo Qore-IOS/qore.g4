@@ -181,8 +181,9 @@ export default function ToplamaPage() {
     const fetchData = async () => {
       setIsLoading(true);
       try {
-        // 1. Fetch Order First to get depotId
-        const orderSnap = await getDoc(doc(db, 'orders', orderId));
+        // 1. Fetch Order — canlı `orders`'ta yoksa `ordersArchive`'a düş.
+        // Tamamlanan siparişler arşive taşındığından `orders`'ta artık yoktur.
+        const orderSnap = await getOrderDocWithArchiveFallback(orderId);
 
         if (!orderSnap.exists()) {
           toast({ title: 'Hata', description: 'Sipariş bulunamadı.', variant: 'destructive' });
