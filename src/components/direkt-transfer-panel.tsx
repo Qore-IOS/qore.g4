@@ -40,7 +40,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useDepotStockLite, touchStockMetadata, useDepots, useProductCodes, useHospitals, useBorcDepots, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
-import { Loader2, Camera, Truck, Plus, CheckCircle2, History, DatabaseZap, ChevronsUpDown, Check, Trash2, AlertTriangle, Package, FileText, ListChecks, ArrowRight, Minus, MoreHorizontal, X, ChevronDown, ChevronUp, Search, QrCode } from 'lucide-react';
+import { Loader2, Camera, Truck, Plus, CheckCircle2, History, DatabaseZap, ChevronsUpDown, Check, Trash2, AlertTriangle, Package, FileText, ListChecks, ArrowRight, Minus, MoreHorizontal, X, ChevronDown, ChevronUp, Search, QrCode, RefreshCw } from 'lucide-react';
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import useHidScanner from '@/hooks/useHidScanner';
 import { ScanCommitProbe, ScanPerformanceBadge, useScanPerformance } from '@/hooks/useScanPerformance';
@@ -93,6 +93,522 @@ const ManualInlineAdder = dynamic(() => import('@/components/direkt-transfer/Man
   ssr: false,
   loading: () => <div className="h-10 animate-pulse bg-muted rounded-md" />
 });
+
+// ── Cream clay design tokens (matches Siparişler panel) ──────────────────────
+const C = {
+  surface: '#FCFAF5',
+  surface2: '#F5F1E8',
+  surfaceHi: '#FFFFFF',
+  ink1: '#3D382F',
+  ink2: '#908872',
+  ink3: '#BBB2A0',
+  line: 'rgba(90,72,40,0.07)',
+  accent: '#C98A57',
+  accent2: '#E0B776',
+  accentGlow: 'rgba(201,138,87,0.24)',
+  waterSolid: '#6FB585',
+  waterDeep: '#4E9E6B',
+  amber: '#E0A33E',
+  amberSoft: 'rgba(224,163,62,0.16)',
+  danger: '#C0796A',
+  radius: 24,
+  radiusSm: 16,
+  radiusLg: 32,
+  radiusPill: 999,
+  clay: 'inset 0 1px 1px rgba(255,255,255,0.9), inset 0 -3px 7px rgba(178,160,128,0.14), 0 10px 24px -12px rgba(150,128,96,0.34), 0 2px 6px -2px rgba(150,128,96,0.16)',
+  clayPress: 'inset 0 2px 5px rgba(178,160,128,0.32), inset 0 -1px 0 rgba(255,255,255,0.6), 0 2px 6px -4px rgba(150,128,96,0.2)',
+  clayInset: 'inset 0 2px 5px rgba(178,160,128,0.30), inset 0 -1px 0 rgba(255,255,255,0.55)',
+  clayFlat: 'inset 0 1px 1px rgba(255,255,255,0.85), 0 4px 12px -7px rgba(150,128,96,0.28)',
+} as const;
+
+function useWide(bp = 1150) {
+  const [w, setW] = useState(typeof window !== 'undefined' ? window.innerWidth >= bp : true);
+  useEffect(() => {
+    const mq = window.matchMedia(`(min-width: ${bp}px)`);
+    const h = () => setW(mq.matches);
+    h();
+    mq.addEventListener('change', h);
+    return () => mq.removeEventListener('change', h);
+  }, [bp]);
+  return w;
+}
+
+// ── Cream clay helper components ──────────────────────────────────────────────
+
+const DT_READY_STEPS = [
+  { id: 'fmt', label: 'Barkod formatları' },
+  { id: 'stock', label: 'Stok verileri' },
+  { id: 'lot', label: 'Lot / Miad eşleştirme' },
+];
+
+function DTMiniStat({ label, value, tone }: { label: string; value: number; tone?: string }) {
+  return (
+    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '8px 12px', borderRadius: C.radiusSm, background: C.surface2, boxShadow: C.clayInset }}>
+      <span style={{ fontSize: 11, fontWeight: 700, color: C.ink3, letterSpacing: '0.04em', textTransform: 'uppercase' }}>{label}</span>
+      <span style={{ fontSize: 18, fontWeight: 800, color: tone ?? C.ink1, lineHeight: 1 }}>{value}</span>
+    </div>
+  );
+}
+
+function DTReloadBtn({ onReload }: { onReload: () => void }) {
+  return (
+    <button onClick={onReload} aria-label="Yeniden yükle" style={{
+      all: 'unset', cursor: 'pointer', width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
+      display: 'grid', placeItems: 'center', color: C.ink2,
+      background: `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`, boxShadow: C.clayFlat,
+    }}>
+      <RefreshCw size={17} />
+    </button>
+  );
+}
+
+function DTPreparingView({ stage, pct, onReload }: { stage: number; pct: number; onReload: () => void }) {
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <div style={{ position: 'relative', flexShrink: 0 }}>
+          <div style={{
+            width: 52, height: 52, borderRadius: '50%',
+            background: 'radial-gradient(circle at 32% 28%, #F4CE86 0%, #E0A33E 75%)',
+            boxShadow: 'inset 0 3px 5px rgba(255,255,255,0.6), inset 0 -5px 9px rgba(150,100,30,0.35)',
+            animation: 'dtAmberPulse 1.8s ease-in-out infinite',
+            display: 'grid', placeItems: 'center', color: '#fff',
+          }}>
+            <div style={{ display: 'inline-flex', animation: 'dtSpin 1.1s linear infinite' }}><RefreshCw size={20} /></div>
+          </div>
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: C.ink3, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Sistem Durumu</div>
+          <div style={{ fontSize: 16.5, fontWeight: 800, letterSpacing: '-0.01em', color: C.amber, marginTop: 2 }}>Sistem Hazırlanıyor…</div>
+        </div>
+        <DTReloadBtn onReload={onReload} />
+      </div>
+      <div style={{ margin: '16px 0 14px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 700, marginBottom: 7 }}>
+          <span style={{ color: C.ink3, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Veriler</span>
+          <span style={{ color: C.amber }}>%{pct}</span>
+        </div>
+        <div style={{ height: 8, borderRadius: 99, background: C.surface2, boxShadow: C.clayInset, overflow: 'hidden' }}>
+          <div style={{ height: '100%', width: `${pct}%`, borderRadius: 99, background: C.amber, transition: 'width 600ms ease' }} />
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {DT_READY_STEPS.map((s, i) => {
+          const done = stage > i;
+          const loading = stage === i;
+          return (
+            <div key={s.id} style={{
+              display: 'flex', alignItems: 'center', gap: 11, padding: '9px 12px', borderRadius: C.radiusSm,
+              background: done ? 'rgba(111,181,133,0.10)' : loading ? C.amberSoft : C.surface2,
+              boxShadow: done || loading ? 'none' : C.clayInset,
+              transition: 'background 400ms ease',
+            }}>
+              <span style={{
+                width: 24, height: 24, borderRadius: '50%', flexShrink: 0, display: 'grid', placeItems: 'center',
+                background: done ? C.waterSolid : loading ? C.amber : C.surfaceHi,
+                boxShadow: done || loading ? 'none' : C.clayInset,
+                color: done || loading ? '#fff' : C.ink3,
+                transition: 'all 400ms ease',
+              }}>
+                {done ? <Check size={14} />
+                  : loading ? <div style={{ display: 'inline-flex', animation: 'dtSpin 1s linear infinite' }}><RefreshCw size={13} /></div>
+                  : <span style={{ width: 6, height: 6, borderRadius: '50%', background: C.ink3 }} />}
+              </span>
+              <span style={{ flex: 1, fontSize: 13.5, fontWeight: 600, color: done ? C.waterDeep : loading ? '#9A6F1E' : C.ink2 }}>{s.label}</span>
+              {done && <span style={{ fontSize: 11.5, fontWeight: 700, color: C.waterDeep }}>Hazır</span>}
+              {loading && <span style={{ fontSize: 11.5, fontWeight: 700, color: '#9A6F1E' }}>Yükleniyor</span>}
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+function DTScanStatusView({ lastItem, itemCount, totalAdet, pulse, onReload }: {
+  lastItem: { name: string; code: string; qty: number; unit: string } | null;
+  itemCount: number; totalAdet: number; pulse: boolean; onReload: () => void;
+}) {
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <div style={{ position: 'relative', flexShrink: 0 }}>
+          <div style={{
+            width: 46, height: 46, borderRadius: '50%',
+            background: 'radial-gradient(circle at 32% 28%, #A6E3BC 0%, #6FB585 75%)',
+            boxShadow: 'inset 0 3px 5px rgba(255,255,255,0.6), inset 0 -5px 9px rgba(40,110,70,0.35)',
+            display: 'grid', placeItems: 'center', color: '#fff',
+          }}>
+            <QrCode size={22} />
+          </div>
+          <span style={{
+            position: 'absolute', right: -1, bottom: -1, width: 15, height: 15, borderRadius: '50%',
+            background: C.waterSolid, border: `2.5px solid ${C.surface}`,
+            animation: 'dtLivePulse 1.8s ease-in-out infinite',
+          }} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 11, fontWeight: 700, color: C.waterDeep, letterSpacing: '0.06em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: C.waterSolid, flexShrink: 0 }} /> Sistem Hazır
+          </div>
+          <div style={{ fontSize: 16.5, fontWeight: 800, letterSpacing: '-0.01em', color: C.ink1, marginTop: 2 }}>Barkod Okutmaya Hazır</div>
+        </div>
+        <DTReloadBtn onReload={onReload} />
+      </div>
+      {lastItem ? (
+        <div style={{
+          marginTop: 12, padding: 12, borderRadius: C.radiusSm,
+          background: 'rgba(111,181,133,0.10)',
+          boxShadow: pulse ? 'inset 0 0 0 1.5px rgba(111,181,133,0.55)' : 'inset 0 0 0 1px rgba(111,181,133,0.18)',
+          transition: 'box-shadow 500ms ease',
+        }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: C.waterDeep, letterSpacing: '0.07em', textTransform: 'uppercase' }}>Son Okutulan</div>
+          <div style={{ fontSize: 15, fontWeight: 800, color: C.ink1, marginTop: 4, lineHeight: 1.25 }}>{lastItem.name}</div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: C.ink2, fontFamily: 'ui-monospace, monospace', marginTop: 3 }}>{lastItem.code}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 10 }}>
+            <span style={{ flex: 1, fontSize: 12.5, fontWeight: 600, color: C.ink2 }}>Bu üründen okutulan</span>
+            <span key={lastItem.qty} style={{
+              display: 'inline-flex', alignItems: 'baseline', gap: 4,
+              padding: '6px 14px', borderRadius: C.radiusPill,
+              background: 'linear-gradient(180deg, #8FD3A6, #6FB585)',
+              boxShadow: '0 6px 12px -5px rgba(111,181,133,0.7), inset 0 1px 0 rgba(255,255,255,0.4)',
+              color: '#fff', animation: pulse ? 'dtCountPop 480ms ease' : 'none',
+            }}>
+              <span style={{ fontSize: 21, fontWeight: 800, lineHeight: 1 }}>{lastItem.qty}</span>
+              <span style={{ fontSize: 11.5, fontWeight: 700, opacity: 0.92 }}>{lastItem.unit}</span>
+            </span>
+          </div>
+        </div>
+      ) : (
+        <div style={{
+          marginTop: 12, padding: '14px', borderRadius: C.radiusSm,
+          background: C.surface2, boxShadow: C.clayInset,
+          display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, textAlign: 'center',
+        }}>
+          <span style={{ display: 'inline-flex', color: C.waterDeep, animation: 'dtBob 2.4s ease-in-out infinite' }}><QrCode size={26} /></span>
+          <div style={{ fontSize: 13.5, fontWeight: 700, color: C.ink1 }}>İlk barkodu okutun</div>
+          <div style={{ fontSize: 12, fontWeight: 500, color: C.ink2, lineHeight: 1.5 }}>Okutulan ürün ve adedi burada görünecek.</div>
+        </div>
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
+        <DTMiniStat label="Kalem" value={itemCount} />
+        <DTMiniStat label="Toplam Adet" value={totalAdet} tone={C.waterDeep} />
+      </div>
+    </>
+  );
+}
+
+function DTReadinessCard({ stage, ready, pct, lastItem, itemCount, totalAdet, pulse, onReload }: {
+  stage: number; ready: boolean; pct: number;
+  lastItem: { name: string; code: string; qty: number; unit: string } | null;
+  itemCount: number; totalAdet: number; pulse: boolean; onReload: () => void;
+}) {
+  const readyShadow = `${C.clay}, 0 0 0 1.5px rgba(111,181,133,0.55), 0 0 16px -3px rgba(111,181,133,0.25)`;
+  const loadingShadow = `${C.clay}, 0 0 0 1.5px rgba(224,163,62,0.32)`;
+  return (
+    <div style={{
+      padding: 14, borderRadius: C.radius,
+      background: `linear-gradient(180deg, ${C.surface} 0%, ${C.surface2} 100%)`,
+      boxShadow: ready ? readyShadow : loadingShadow,
+      animation: ready ? 'dtReadyGlow 2.6s ease-in-out infinite' : undefined,
+      transition: 'box-shadow 600ms ease',
+    }}>
+      {ready
+        ? <DTScanStatusView lastItem={lastItem} itemCount={itemCount} totalAdet={totalAdet} pulse={pulse} onReload={onReload} />
+        : <DTPreparingView stage={stage} pct={pct} onReload={onReload} />}
+    </div>
+  );
+}
+
+function DTPanel({ title, children, badge }: { title: string; children: React.ReactNode; badge?: React.ReactNode }) {
+  return (
+    <div style={{ padding: '11px 14px', borderRadius: C.radius, background: `linear-gradient(180deg, ${C.surface} 0%, ${C.surface2} 100%)`, boxShadow: C.clay }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 9 }}>
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: C.ink3, letterSpacing: '0.07em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{title}</span>
+        {badge}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function DTFieldLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ fontSize: 10.5, fontWeight: 700, color: C.ink3, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 5 }}>{children}</div>
+  );
+}
+
+function DTAddTile({ icon, label, onClick, disabled, lockReason }: {
+  icon: React.ReactNode; label: string; onClick?: () => void; disabled?: boolean; lockReason?: string;
+}) {
+  const [pressed, setPressed] = useState(false);
+  return (
+    <button
+      onClick={disabled ? undefined : onClick}
+      title={disabled ? lockReason : undefined}
+      onPointerDown={() => !disabled && setPressed(true)}
+      onPointerUp={() => setPressed(false)}
+      onPointerLeave={() => setPressed(false)}
+      style={{
+        all: 'unset', cursor: disabled ? 'not-allowed' : 'pointer', boxSizing: 'border-box', width: '100%',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,
+        padding: '11px 6px', borderRadius: C.radiusSm,
+        background: `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`,
+        boxShadow: pressed ? C.clayPress : C.clayFlat,
+        color: disabled ? C.ink3 : C.ink1, opacity: disabled ? 0.55 : 1,
+        transition: 'transform 200ms ease, box-shadow 200ms ease',
+        transform: pressed ? 'translateY(1px) scale(0.98)' : 'none',
+      }}
+    >
+      <span style={{ color: disabled ? C.ink3 : C.accent, display: 'inline-flex' }}>{icon}</span>
+      <span style={{ fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap' }}>{label}</span>
+    </button>
+  );
+}
+
+function DTStepper({ steps }: { steps: { label: string; done: boolean }[] }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+      {steps.map((s, i) => {
+        const prevDone = i === 0 || steps[i - 1]?.done;
+        const cur = !s.done && prevDone;
+        return (
+          <React.Fragment key={i}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+              <span style={{
+                width: 30, height: 30, borderRadius: '50%', display: 'grid', placeItems: 'center', fontSize: 13, fontWeight: 800,
+                background: s.done ? 'linear-gradient(180deg, #8FD3A6, #6FB585)' : cur ? `linear-gradient(180deg, ${C.accent2}, ${C.accent})` : C.surface2,
+                boxShadow: (s.done || cur) ? '0 5px 11px -4px rgba(150,128,96,0.4)' : C.clayInset,
+                color: (s.done || cur) ? '#fff' : C.ink3, transition: 'all 320ms ease',
+              }}>
+                {s.done ? <Check size={15} /> : i + 1}
+              </span>
+              <span style={{ fontSize: 13.5, fontWeight: 700, color: cur ? C.ink1 : C.ink3, whiteSpace: 'nowrap' }}>{s.label}</span>
+            </div>
+            {i < steps.length - 1 && (
+              <span style={{ width: 38, height: 2.5, borderRadius: 2, background: s.done ? C.waterSolid : C.ink3, opacity: s.done ? 1 : 0.3, transition: 'all 320ms ease' }} />
+            )}
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+}
+
+function DTClayProd() {
+  return (
+    <div style={{
+      width: 46, height: 46, borderRadius: '28%', flexShrink: 0,
+      background: 'radial-gradient(120% 120% at 30% 24%, #FFFFFF 0%, #ECE4D4 82%)',
+      boxShadow: 'inset 0 2px 3px rgba(255,255,255,0.9), inset 0 -4px 7px rgba(178,160,128,0.22), 0 6px 12px -6px rgba(150,128,96,0.3)',
+      display: 'grid', placeItems: 'center', color: C.accent,
+    }}>
+      <Package size={22} />
+    </div>
+  );
+}
+
+function DTTransferBtn({ enabled, onClick, loading }: { enabled: boolean; onClick: () => void; loading?: boolean }) {
+  const [pressed, setPressed] = useState(false);
+  return (
+    <button
+      onClick={enabled && !loading ? onClick : undefined}
+      onPointerDown={() => enabled && !loading && setPressed(true)}
+      onPointerUp={() => setPressed(false)}
+      onPointerLeave={() => setPressed(false)}
+      style={{
+        all: 'unset', cursor: (enabled && !loading) ? 'pointer' : 'not-allowed',
+        display: 'inline-flex', alignItems: 'center', gap: 10, height: 48, padding: '0 24px',
+        borderRadius: C.radiusSm,
+        background: enabled ? `linear-gradient(180deg, ${C.accent2}, ${C.accent})` : C.surface2,
+        boxShadow: enabled ? (pressed ? 'inset 0 3px 7px rgba(120,80,30,0.3)' : `inset 0 1px 0 rgba(255,255,255,0.4), 0 12px 22px -10px ${C.accentGlow}`) : C.clayInset,
+        color: enabled ? '#fff' : C.ink3, fontWeight: 800, fontSize: 15,
+        transition: 'all 240ms ease', transform: pressed ? 'translateY(1px) scale(0.99)' : 'none',
+      }}
+    >
+      {loading
+        ? <div style={{ display: 'inline-flex', animation: 'dtSpin 1s linear infinite' }}><RefreshCw size={19} /></div>
+        : <Truck size={19} />}
+      Transfer Et
+    </button>
+  );
+}
+
+function DTProductRow({ group, wide, available, meta, onQtyChange, onRemove, onRemoveSerial }: {
+  group: { key: string; stokKodu: string; stokAdi: string; lotNumarasi: string; miad: string; adet: number; isGroup: boolean; serials: { id: string; seriNumarasi: string }[] };
+  wide: boolean; available: number; meta: any;
+  onQtyChange: (key: string, val: string) => void;
+  onRemove: () => void;
+  onRemoveSerial: (id: string) => void;
+}) {
+  const isOverStock = group.adet > available && available > 0;
+  const noStock = available === 0;
+  const multiplier = formatUnitMultiplier(meta);
+
+  const depodaPill = (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 7, padding: '7px 13px', borderRadius: C.radiusPill,
+      background: noStock || isOverStock ? 'rgba(192,121,106,0.12)' : C.surface2,
+      boxShadow: noStock || isOverStock ? 'none' : C.clayInset,
+      fontSize: 14, fontWeight: 700,
+      color: noStock || isOverStock ? C.danger : C.ink1,
+    }}>
+      <span style={{ width: 7, height: 7, borderRadius: '50%', background: noStock || isOverStock ? C.danger : C.waterSolid }} />
+      {available > 0 ? available : '?'}
+    </span>
+  );
+
+  const qtyControl = group.isGroup ? (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'center', padding: 6, borderRadius: C.radiusPill, background: C.surface2, boxShadow: C.clayInset }}>
+      <button onClick={() => onQtyChange(group.key, String(Math.max(1, group.adet - 1)))} style={{
+        all: 'unset', cursor: 'pointer', width: 36, height: 36, borderRadius: '50%', flexShrink: 0, display: 'grid', placeItems: 'center',
+        background: `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`, boxShadow: C.clayFlat, color: C.ink2,
+      }}><Minus size={16} /></button>
+      <input
+        type="number"
+        value={group.adet}
+        onChange={e => { const v = parseInt(e.target.value.replace(/\D/g, ''), 10); onQtyChange(group.key, String(isNaN(v) ? 1 : v)); }}
+        style={{ width: 34, textAlign: 'center', border: 'none', background: 'transparent', fontSize: 16, fontWeight: 800, color: C.accent, fontFamily: 'inherit', outline: 'none' }}
+      />
+      <button onClick={() => onQtyChange(group.key, String(group.adet + 1))} style={{
+        all: 'unset', cursor: 'pointer', width: 36, height: 36, borderRadius: '50%', flexShrink: 0, display: 'grid', placeItems: 'center',
+        background: `radial-gradient(120% 120% at 30% 25%, ${C.accent2}, ${C.accent})`,
+        boxShadow: `inset 0 1px 1px rgba(255,255,255,0.4), 0 5px 11px -4px ${C.accentGlow}`,
+        color: '#fff',
+      }}><Plus size={16} /></button>
+    </div>
+  ) : (
+    <span style={{ fontSize: 15, fontWeight: 800, color: C.ink1, display: 'block', textAlign: 'center' }}>
+      {formatQuantityWithUnit(group.adet, meta, { showMultiplier: true })}
+    </span>
+  );
+
+  const deleteBtn = (
+    <button onClick={onRemove} aria-label="Sil" style={{
+      all: 'unset', cursor: 'pointer', width: 38, height: 38, borderRadius: '50%', display: 'grid', placeItems: 'center',
+      color: C.danger, background: C.surface2, boxShadow: C.clayFlat, justifySelf: 'center',
+    }}><Trash2 size={16} /></button>
+  );
+
+  const serialChips = group.serials.length > 0 && (
+    <div style={{ padding: '8px 16px', display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+      {group.serials.slice(0, 50).map(serial => (
+        <span key={serial.id} style={{
+          display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 8,
+          background: C.surface2, border: `1px solid ${C.line}`, fontSize: 10, fontFamily: 'ui-monospace, monospace', color: C.ink2,
+        }}>
+          <span style={{ maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{serial.seriNumarasi}</span>
+          <button onClick={() => onRemoveSerial(serial.id)} style={{ all: 'unset', cursor: 'pointer', color: C.danger, display: 'inline-flex' }}><X size={10} /></button>
+        </span>
+      ))}
+      {group.serials.length > 50 && (
+        <span style={{ fontSize: 10, color: C.ink3, padding: '3px 8px' }}>+{group.serials.length - 50} daha...</span>
+      )}
+    </div>
+  );
+
+  if (wide) {
+    return (
+      <div style={{ animation: 'dtPopIn 280ms ease' }}>
+        <div style={{
+          display: 'grid', gridTemplateColumns: '52px minmax(0,1fr) 140px 92px 164px 44px', gap: 14, alignItems: 'center',
+          padding: '14px 16px', borderRadius: C.radius, background: C.surfaceHi, boxShadow: C.clayFlat,
+        }}>
+          <DTClayProd />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: C.ink1, lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{group.stokAdi}</div>
+            <div style={{ fontSize: 12.5, color: C.ink2, fontFamily: 'ui-monospace, monospace', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {group.stokKodu} · {normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}
+            </div>
+          </div>
+          <div style={{ fontSize: 13, color: C.ink2, fontWeight: 600, minWidth: 0 }}>
+            {group.lotNumarasi && <div style={{ fontFamily: 'ui-monospace, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{group.lotNumarasi}</div>}
+            {group.miad && <div style={{ fontSize: 12, color: C.ink3, marginTop: 2 }}>{group.miad}</div>}
+            {!group.lotNumarasi && !group.miad && <span style={{ color: C.ink3 }}>—</span>}
+          </div>
+          <div style={{ textAlign: 'center' }}>{depodaPill}</div>
+          {qtyControl}
+          {deleteBtn}
+        </div>
+        {isOverStock && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 16px 6px', fontSize: 11, color: C.danger, fontWeight: 700 }}>
+            <AlertTriangle size={12} /> Maksimum: {available} adet (Depoda kalan stok)
+          </div>
+        )}
+        {serialChips}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: '14px 16px', borderRadius: C.radius, background: C.surfaceHi, boxShadow: C.clayFlat, animation: 'dtPopIn 280ms ease' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <DTClayProd />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: C.ink1, lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{group.stokAdi}</div>
+          <div style={{ fontSize: 12.5, color: C.ink2, fontFamily: 'ui-monospace, monospace', marginTop: 3 }}>{group.stokKodu}</div>
+          <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+            {group.lotNumarasi && <span style={{ padding: '3px 8px', borderRadius: 999, background: C.surface2, boxShadow: C.clayInset, fontSize: 11, fontWeight: 600, color: C.ink2, fontFamily: 'ui-monospace, monospace' }}>Lot {group.lotNumarasi}</span>}
+            {group.miad && <span style={{ padding: '3px 8px', borderRadius: 999, background: C.surface2, boxShadow: C.clayInset, fontSize: 11, fontWeight: 600, color: C.ink2 }}>Miad {group.miad}</span>}
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 8px', borderRadius: 999,
+              background: noStock || isOverStock ? 'rgba(192,121,106,0.12)' : C.surface2,
+              boxShadow: noStock || isOverStock ? 'none' : C.clayInset,
+              fontSize: 11, fontWeight: 700, color: noStock || isOverStock ? C.danger : C.ink1,
+            }}>
+              <span style={{ width: 5, height: 5, borderRadius: '50%', background: noStock || isOverStock ? C.danger : C.waterSolid }} /> Depoda {available > 0 ? available : '?'}
+            </span>
+          </div>
+        </div>
+        {qtyControl}
+        {deleteBtn}
+      </div>
+      {isOverStock && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, fontSize: 11, color: C.danger, fontWeight: 700 }}>
+          <AlertTriangle size={12} /> Maksimum: {available} (Depoda kalan)
+        </div>
+      )}
+      {serialChips}
+    </div>
+  );
+}
+
+function DTEmptyState({ ready, onScan, onManual }: { ready: boolean; onScan: () => void; onManual: () => void }) {
+  return (
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 18, padding: 60, textAlign: 'center' }}>
+      <div style={{
+        width: 84, height: 84, borderRadius: '30%', display: 'grid', placeItems: 'center',
+        background: C.surface2, boxShadow: C.clayInset,
+        color: ready ? C.accent : C.ink3,
+        animation: ready ? 'dtBob 2.4s ease-in-out infinite' : 'none',
+      }}>
+        {ready ? <QrCode size={36} /> : <div style={{ display: 'inline-flex', animation: 'dtSpin 1.2s linear infinite', color: C.amber }}><RefreshCw size={32} /></div>}
+      </div>
+      <div>
+        <div style={{ fontSize: 19, fontWeight: 800, color: C.ink1 }}>{ready ? 'Henüz ürün eklenmedi' : 'Sistem hazırlanıyor…'}</div>
+        <div style={{ fontSize: 14.5, color: C.ink2, fontWeight: 500, marginTop: 6, maxWidth: 380, lineHeight: 1.6 }}>
+          {ready ? 'Barkod okutun veya sol panelden bir yöntem seçin.' : 'Barkod formatları ve stok verileri yükleniyor. Hazır olunca tarama açılacak.'}
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', justifyContent: 'center' }}>
+        <button onClick={ready ? onScan : undefined} disabled={!ready} style={{
+          all: 'unset', cursor: ready ? 'pointer' : 'not-allowed', display: 'inline-flex', alignItems: 'center', gap: 9, height: 50, padding: '0 22px',
+          borderRadius: C.radiusSm, opacity: ready ? 1 : 0.5,
+          background: ready ? `linear-gradient(180deg, ${C.accent2}, ${C.accent})` : C.surface2,
+          boxShadow: ready ? `inset 0 1px 0 rgba(255,255,255,0.4), 0 12px 22px -10px ${C.accentGlow}` : C.clayInset,
+          color: ready ? '#fff' : C.ink3, fontWeight: 800, fontSize: 14.5,
+        }}><Camera size={19} /> Seri Tarama Başlat</button>
+        <button onClick={onManual} style={{
+          all: 'unset', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 9, height: 50, padding: '0 22px',
+          borderRadius: C.radiusSm, background: `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`, boxShadow: C.clay,
+          color: C.ink1, fontWeight: 700, fontSize: 14.5,
+        }}><span style={{ color: C.accent, display: 'inline-flex' }}><Plus size={19} /></span> Manuel Ekle</button>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 function DirektTransferSkeleton() {
   return (
@@ -1206,128 +1722,134 @@ export default function DirektTransferPanel() {
 
   // ── More menu state ──
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [showAllStockConfirm, setShowAllStockConfirm] = useState(false);
+
+  const wide = useWide();
+  const pulseActive = scanFeedback?.type === 'success';
+
+  const readinessStage = useMemo(() => {
+    const fmtReady = !formatsLoading && barcodeFormats.length > 0;
+    const stockReady = !productsLoading && products.length > 0;
+    const lotReady = Boolean(selectedDepotId) && !depotStockPending;
+    if (fmtReady && stockReady && lotReady) return 3;
+    if (fmtReady && stockReady) return 2;
+    if (fmtReady) return 1;
+    return 0;
+  }, [formatsLoading, barcodeFormats.length, productsLoading, products.length, selectedDepotId, depotStockPending]);
+
+  const readinessPct = Math.round((readinessStage / 3) * 100);
+
+  const lastItemForCard = useMemo(() => {
+    if (!lastScannedProduct) return null;
+    const meta = productMetaByCode.get(lastScannedProduct.stokKodu);
+    return {
+      name: lastScannedProduct.stokAdi,
+      code: lastScannedProduct.stokKodu,
+      qty: totalCountForProduct,
+      unit: meta?.anaBirim || 'Adet',
+    };
+  }, [lastScannedProduct, totalCountForProduct, productMetaByCode]);
 
   return (
     <>
       <ScanCommitProbe controller={scanPerformanceController} />
-      <div
-        className="cihaz-shell px-3 py-3 sm:px-5 sm:py-4 space-y-3 sm:space-y-4 min-h-screen"
-        role="main"
-        aria-label="Direkt transfer paneli"
-      >
-        {/* ══════════════════════ HEADER ══════════════════════ */}
-        <div className="flex flex-wrap items-center gap-3">
-          <BackButton fallback="/siparisler" aria-label="Geri dön" />
-          <div className="flex-1 min-w-0">
-            <h1 className="sr-only">Direkt Transfer</h1>
-            <p className="text-[11px] sm:text-xs text-[var(--dashboard-muted)] truncate">
-              {depotName ? `${depotName}` : 'Depo seçin'}{' '}
-              {selectedLabName ? `→ ${selectedLabName}` : isBorcMode && selectedCompany ? `→ ${selectedCompany} (Borç)` : ''}
-            </p>
-          </div>
-          {/* Compact workflow indicator keeps the working area close to the header. */}
-          <div className="order-3 flex w-full items-center justify-center gap-0 sm:order-none sm:w-auto sm:px-3">
-            {[
-              { label: 'Bağlam', done: stepperState.hasSource && stepperState.hasTarget, num: 1 },
-              { label: 'Ürün Ekle', done: stepperState.hasItems, num: 2 },
-              { label: 'Transfer', done: false, num: 3 },
-            ].map((step, index) => (
-              <React.Fragment key={step.num}>
-                {index > 0 && (
-                  <div className={cn(
-                    "h-[2px] w-8 sm:w-10 transition-colors",
-                    step.done || (index === 1 && stepperState.hasSource && stepperState.hasTarget)
-                      ? "bg-[var(--dashboard-accent)]"
-                      : "bg-[var(--dashboard-stroke)]"
-                  )} />
-                )}
-                <div className="flex items-center gap-1.5">
-                  <div className={cn(
-                    "flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold transition-all",
-                    step.done
-                      ? "bg-[var(--dashboard-accent)] text-white shadow-[var(--dashboard-raised-soft)]"
-                      : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)]"
-                  )}>
-                    {step.done ? <Check className="h-3.5 w-3.5" /> : step.num}
-                  </div>
-                  <span className="hidden text-[10px] font-medium text-[var(--dashboard-muted)] md:inline">{step.label}</span>
-                </div>
-              </React.Fragment>
-            ))}
-          </div>
+      <style>{`
+        @keyframes dtAmberPulse {
+          0%,100% { box-shadow: 0 0 0 0 rgba(224,163,62,0.45), inset 0 3px 5px rgba(255,255,255,0.6), inset 0 -5px 9px rgba(150,100,30,0.35); }
+          50% { box-shadow: 0 0 0 10px rgba(224,163,62,0), inset 0 3px 5px rgba(255,255,255,0.6), inset 0 -5px 9px rgba(150,100,30,0.35); }
+        }
+        @keyframes dtReadyGlow {
+          0%,100% { box-shadow: inset 0 1px 1px rgba(255,255,255,0.9), inset 0 -3px 7px rgba(178,160,128,0.14), 0 10px 24px -12px rgba(150,128,96,0.34), 0 2px 6px -2px rgba(150,128,96,0.16), 0 0 0 1.5px rgba(111,181,133,0.55), 0 0 16px -3px rgba(111,181,133,0.25); }
+          50% { box-shadow: inset 0 1px 1px rgba(255,255,255,0.9), inset 0 -3px 7px rgba(178,160,128,0.14), 0 10px 24px -12px rgba(150,128,96,0.34), 0 2px 6px -2px rgba(150,128,96,0.16), 0 0 0 1.5px rgba(111,181,133,0.9), 0 0 26px 1px rgba(111,181,133,0.5); }
+        }
+        @keyframes dtLivePulse { 0%,100% { box-shadow: 0 0 0 0 rgba(111,181,133,0.55); } 70% { box-shadow: 0 0 0 7px rgba(111,181,133,0); } }
+        @keyframes dtCountPop { 0% { transform: scale(0.55); opacity: 0; } 55% { transform: scale(1.18); } 100% { transform: scale(1); opacity: 1; } }
+        @keyframes dtBob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+        @keyframes dtSpin { to { transform: rotate(360deg); } }
+        @keyframes dtPopIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+        .dt-shell { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; background: linear-gradient(120deg, #F6F2EA 0%, transparent 55%), linear-gradient(225deg, #E8E1D2 0%, transparent 55%), #EFEAE0; color: #3D382F; min-height: 100vh; padding: 14px 24px 22px; -webkit-font-smoothing: antialiased; }
+        .dt-grid { display: grid; grid-template-columns: 320px minmax(0,1fr); gap: 18px; align-items: start; }
+        @media (max-width: 1149px) { .dt-grid { grid-template-columns: 1fr; } }
+      `}</style>
 
-          {/* Secondary actions */}
-          <div className="ml-auto flex items-center gap-1.5">
-            {(currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik') && (
-              <button
-                onClick={() => router.push('/direkt-transfer/yedek-parca-transfer')}
-                className="cihaz-tool-item hidden sm:flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-emerald-700"
-              >
-                <Package className="h-3.5 w-3.5" />
-                Yedek Parça
+      <div className="dt-shell" style={{ maxWidth: 1680, margin: '0 auto' }}>
+
+        {/* ══ TOP BAR ══ */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
+          <BackButton fallback="/siparisler" />
+
+          <span style={{ fontSize: 14.5, fontWeight: 700, color: C.ink2, whiteSpace: 'nowrap' }}>
+            {depotName || 'Depo seçin'}
+            {selectedLabName ? ` → ${selectedLabName}` : isBorcMode && selectedCompany ? ` → ${selectedCompany} (Borç)` : ''}
+          </span>
+
+          <div style={{ flex: 1 }} />
+
+          <DTStepper steps={[
+            { label: 'Bağlam', done: stepperState.hasSource && stepperState.hasTarget },
+            { label: 'Ürün Ekle', done: stepperState.hasItems },
+            { label: 'Transfer', done: false },
+          ]} />
+
+          <div style={{ flex: 1 }} />
+
+          {(currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik') && (
+            <button onClick={() => router.push('/direkt-transfer/yedek-parca-transfer')} style={{
+              all: 'unset', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8,
+              height: 44, padding: '0 16px', borderRadius: C.radiusSm,
+              background: `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`, boxShadow: C.clay,
+              color: C.waterDeep, fontSize: 14, fontWeight: 700, whiteSpace: 'nowrap',
+            }}>
+              <Package size={18} /> Yedek Parça
+            </button>
+          )}
+
+          <Popover open={moreMenuOpen} onOpenChange={setMoreMenuOpen}>
+            <PopoverTrigger asChild>
+              <button style={{
+                all: 'unset', cursor: 'pointer', width: 44, height: 44, borderRadius: '50%',
+                display: 'grid', placeItems: 'center', color: C.ink2,
+                background: `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`, boxShadow: C.clayFlat,
+              }}>
+                <MoreHorizontal size={20} />
               </button>
-            )}
-            <Popover open={moreMenuOpen} onOpenChange={setMoreMenuOpen}>
-              <PopoverTrigger asChild>
-                <button className="cihaz-tool-item flex items-center justify-center w-9 h-9 sm:w-10 sm:h-10">
-                  <MoreHorizontal className="h-4 w-4 text-[var(--dashboard-muted)]" />
-                </button>
-              </PopoverTrigger>
-              <PopoverContent className="w-56 p-1" align="end">
-                {(currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'lojistik_sorumlusu' || currentUserProfile?.role === 'teknik_lojistik') && (
-                  <button onClick={() => { router.push('/direkt-transfer/yedek-parca-transfer'); setMoreMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)] sm:hidden">
-                    <Package className="h-4 w-4 text-emerald-600" /> Yedek Parça Transfer
-                  </button>
-                )}
-                <button onClick={() => { router.push(`/transfer-gecmis?depotId=${selectedDepotId}`); setMoreMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)]" disabled={!selectedDepotId}>
-                  <History className="h-4 w-4 text-[var(--dashboard-muted)]" /> Transfer Geçmişi
-                </button>
-                <button onClick={() => { router.push('/transfer-sablonlari'); setMoreMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)]">
-                  <FileText className="h-4 w-4 text-[var(--dashboard-muted)]" /> Transfer Şablonları
-                </button>
-              </PopoverContent>
-            </Popover>
-          </div>
+            </PopoverTrigger>
+            <PopoverContent className="w-56 p-1" align="end">
+              <button onClick={() => { router.push(`/transfer-gecmis?depotId=${selectedDepotId}`); setMoreMenuOpen(false); }}
+                className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)]" disabled={!selectedDepotId}>
+                <History className="h-4 w-4 text-[var(--dashboard-muted)]" /> Transfer Geçmişi
+              </button>
+              <button onClick={() => { router.push('/transfer-sablonlari'); setMoreMenuOpen(false); }}
+                className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)]">
+                <FileText className="h-4 w-4 text-[var(--dashboard-muted)]" /> Transfer Şablonları
+              </button>
+            </PopoverContent>
+          </Popover>
         </div>
 
-        {/* ══════════════════════ 2-COL LAYOUT ══════════════════════ */}
-        <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-4 sm:gap-5">
-          {/* ── LEFT COLUMN: Context + Add Methods ── */}
-          <div className="space-y-4">
-            {/* ─── Context Card ─── */}
-            <div className="relative">
-            <LedStripGlow isReady={transferDataReady} corner="bottom-right" />
-            <div className="cihaz-card-strong p-4 sm:p-5 space-y-3">
-              <p className="cihaz-section-label">Kaynak & Hedef</p>
+        {/* ══ TWO-COLUMN GRID ══ */}
+        <div className="dt-grid">
 
-              {/* Source Depot */}
-              <div className="space-y-1">
-                <div className="flex items-center justify-between gap-3">
-                  <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Kaynak Depo</label>
-                  {isTransferDataLoading && (
-                    <div
-                      className="w-28 shrink-0"
-                      role="progressbar"
-                      aria-label="Direkt transfer verileri yükleniyor"
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      aria-valuenow={transferDataProgress}
-                    >
-                      <div className="mb-1 flex items-center justify-between text-[9px] font-medium text-[var(--dashboard-muted)]">
-                        <span>Veriler</span>
-                        <span className="tabular-nums">%{transferDataProgress}</span>
-                      </div>
-                      <div className="h-1 overflow-hidden rounded-full bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
-                        <div
-                          className="h-full rounded-full bg-[var(--dashboard-accent)] transition-[width] duration-300"
-                          style={{ width: `${transferDataProgress}%` }}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
+          {/* LEFT RAIL */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+
+            <DTReadinessCard
+              stage={readinessStage}
+              ready={transferDataReady}
+              pct={readinessPct}
+              lastItem={lastItemForCard}
+              itemCount={stepperState.totalKalem}
+              totalAdet={stepperState.totalAdet}
+              pulse={pulseActive}
+              onReload={() => window.location.reload()}
+            />
+
+            {/* Kaynak & Hedef */}
+            <DTPanel title="Kaynak & Hedef">
+              <DTFieldLabel>Kaynak Depo</DTFieldLabel>
+              <div style={{ marginBottom: 8 }}>
                 <Select value={selectedDepotId} onValueChange={setSelectedDepotId} disabled={prereqsLoading}>
-                  <SelectTrigger className="w-full bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl h-10">
+                  <SelectTrigger className="w-full border-0" style={{ background: C.surface2, boxShadow: C.clayInset, borderRadius: C.radiusSm, height: 44 }}>
                     <SelectValue placeholder="Kaynak depo seçin" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1336,40 +1858,52 @@ export default function DirektTransferPanel() {
                 </Select>
               </div>
 
-              {/* Target */}
-              {!isBorcMode ? (
-                <LabSelector
-                  label="Hedef Laboratuvar"
-                  labs={hospitals.map(l => ({ id: l.id, name: l.name ?? '', kod: l.kod }))}
-                  value={selectedLabId}
-                  onChange={setSelectedLabId}
-                  placeholder="Laboratuvar seçin"
-                  disabled={hospitals.length === 0}
-                />
-              ) : null}
+              {!isBorcMode && (
+                <>
+                  <DTFieldLabel>Hedef Laboratuvar</DTFieldLabel>
+                  <div style={{ marginBottom: 8 }}>
+                    <LabSelector
+                      label=""
+                      labs={hospitals.map(l => ({ id: l.id, name: l.name ?? '', kod: l.kod }))}
+                      value={selectedLabId}
+                      onChange={setSelectedLabId}
+                      placeholder="Laboratuvar seçin"
+                      disabled={hospitals.length === 0}
+                    />
+                  </div>
+                </>
+              )}
 
-              {/* Borç Mode Toggle */}
-              <div className="flex items-center justify-between pt-1">
-                <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Borç Modu</label>
-                <Switch checked={isBorcMode} onCheckedChange={setIsBorcMode} id="borc-mode" />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, alignItems: 'end' }}>
+                <div>
+                  <DTFieldLabel>Barkod Formatı</DTFieldLabel>
+                  <BarcodeFormatSelect
+                    value={selectedFormatId || '__auto__'}
+                    onChange={v => setSelectedFormatId(v)}
+                    disabled={formatsLoading}
+                  />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 44, padding: '0 12px', borderRadius: C.radiusSm, background: C.surface2, boxShadow: C.clayInset }}>
+                  <span style={{ flex: 1, fontSize: 13, fontWeight: 700, color: C.ink1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Borç Modu</span>
+                  <Switch checked={isBorcMode} onCheckedChange={setIsBorcMode} id="borc-mode" />
+                </div>
               </div>
 
-              {/* Borç Fields */}
               {isBorcMode && (
-                <div className="space-y-2 pt-1 border-t border-[var(--dashboard-stroke)]">
-                  <div className="space-y-1">
-                    <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Borç Depo <span className="text-red-500">*</span></label>
+                <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${C.line}`, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div>
+                    <DTFieldLabel>Borç Depo <span style={{ color: C.danger }}>*</span></DTFieldLabel>
                     <Select value={selectedBorcDepotId} onValueChange={setSelectedBorcDepotId}>
-                      <SelectTrigger className="w-full bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl h-10">
+                      <SelectTrigger className="w-full border-0" style={{ background: C.surface2, boxShadow: C.clayInset, borderRadius: C.radiusSm, height: 44 }}>
                         <SelectValue placeholder="Depo seçin" />
                       </SelectTrigger>
                       <SelectContent>{borcDepots.map(d => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}</SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Firma <span className="text-red-500">*</span></label>
+                  <div>
+                    <DTFieldLabel>Firma <span style={{ color: C.danger }}>*</span></DTFieldLabel>
                     <Select value={selectedCompany} onValueChange={setSelectedCompany}>
-                      <SelectTrigger className="w-full bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl h-10">
+                      <SelectTrigger className="w-full border-0" style={{ background: C.surface2, boxShadow: C.clayInset, borderRadius: C.radiusSm, height: 44 }}>
                         <SelectValue placeholder="Firma seçin" />
                       </SelectTrigger>
                       <SelectContent>{borcDepots.find(d => d.id === selectedBorcDepotId)?.companies?.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
@@ -1377,177 +1911,49 @@ export default function DirektTransferPanel() {
                   </div>
                 </div>
               )}
+            </DTPanel>
 
-              {/* Barcode Format */}
-              <div className="pt-1 border-t border-[var(--dashboard-stroke)]">
-                <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1">Barkod Formatı</label>
-                <BarcodeFormatSelect
-                  value={selectedFormatId || '__auto__'}
-                  onChange={v => setSelectedFormatId(v)}
-                  disabled={formatsLoading}
-                />
+            {/* Ürün Ekle */}
+            <DTPanel title="Ürün Ekle" badge={!transferDataReady ? (
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 9px', borderRadius: 999, background: C.amberSoft, color: '#9A6F1E', fontSize: 11, fontWeight: 700 }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: C.amber }} /> Hazırlanıyor
+              </span>
+            ) : undefined}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 8 }}>
+                <DTAddTile icon={<Camera size={19} />} label="Tekli Tara"
+                  onClick={() => { setIsBatchScanning(false); setIsCameraScannerOpen(true); }}
+                  disabled={!transferDataReady || (!isBorcMode && !selectedLabId) || (isBorcMode && !selectedCompany)}
+                  lockReason="Sistem hazırlanıyor" />
+                <DTAddTile icon={<Camera size={19} />} label="Seri Tara"
+                  onClick={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }}
+                  disabled={!transferDataReady || (!isBorcMode && !selectedLabId) || (isBorcMode && !selectedCompany)}
+                  lockReason="Sistem hazırlanıyor" />
+                <DTAddTile icon={<QrCode size={19} />} label="Toplu Oku"
+                  onClick={() => { const next = !isBulkScanMode; setIsBulkScanMode(next); flashScanFeedback('success', next ? 'Toplu barkod modu açık' : 'Normal moda dönüldü.'); }}
+                  disabled={!transferDataReady || (!isBorcMode && !selectedLabId) || (isBorcMode && !selectedCompany)}
+                  lockReason="Sistem hazırlanıyor" />
               </div>
-            </div>
-            </div>
-
-            {/* ─── Add Methods Card ─── */}
-            <div className="cihaz-card p-4 sm:p-5 space-y-3">
-              {/* Last scanned feedback - at top of Ürün Ekle card */}
-              {(lastScannedProduct || scanFeedback) && (
-                <div className={cn(
-                  "p-3 space-y-1 -mt-1 mb-1 rounded-xl transition-all duration-300",
-                  scanFeedback?.type === 'success'
-                    ? "ring-2 ring-green-500/60 bg-green-50/60 dark:bg-green-950/20"
-                    : scanFeedback?.type === 'error'
-                    ? "ring-2 ring-red-500/60 bg-red-50/60 dark:bg-red-950/20"
-                    : "cihaz-pressed"
-                )}>
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Son Okutulan</p>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <ScanPerformanceBadge controller={scanPerformanceController} />
-                      {scanFeedback && (
-                        <span className={cn(
-                          "text-[9px] font-bold uppercase tracking-wide",
-                          scanFeedback.type === 'success' ? "text-green-600" : "text-red-600"
-                        )}>
-                          {scanFeedback.type === 'success' ? '✓ Başarılı' : '✗ Hata'}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  {scanFeedback?.type === 'error' && !lastScannedProduct ? (
-                    <p className="text-sm font-bold text-red-600 truncate">{scanFeedback.message}</p>
-                  ) : (
-                    <>
-                      <p className={cn(
-                        "text-sm font-bold truncate",
-                        scanFeedback?.type === 'error' ? "text-red-600" : "text-[var(--dashboard-text)]"
-                      )}>
-                        {scanFeedback?.type === 'error' ? scanFeedback.message : lastScannedProduct?.stokAdi}
-                      </p>
-                      {lastScannedProduct && scanFeedback?.type !== 'error' && (
-                        <>
-                          <p className="text-[11px] text-[var(--dashboard-muted)]">
-                            {lastScannedProduct.lotNumarasi && `Lot: ${lastScannedProduct.lotNumarasi}`}
-                            {lastScannedProduct.miad && ` · Miad: ${lastScannedProduct.miad}`}
-                            {lastScannedProduct.seriNumarasi && ` · Seri: ${lastScannedProduct.seriNumarasi}`}
-                          </p>
-                          <div className="flex gap-4 pt-1">
-                            <div>
-                              <span className="text-lg font-bold text-[var(--dashboard-accent)]">{lotCount}</span>
-                              <span className="text-[10px] text-[var(--dashboard-muted)] ml-1">Bu Lot</span>
-                            </div>
-                            <div>
-                              <span className="text-lg font-bold text-[var(--dashboard-accent)]">{totalCountForProduct}</span>
-                              <span className="text-[10px] text-[var(--dashboard-muted)] ml-1">Toplam</span>
-                            </div>
-                          </div>
-                        </>
-                      )}
-                    </>
-                  )}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+                <DTAddTile icon={<Plus size={19} />} label="Manuel" onClick={() => setShowManualInline(v => !v)} disabled={!transferDataReady} />
+                <DTAddTile icon={<ListChecks size={19} />} label="Şablon" onClick={() => { setShowTemplateSelector(v => !v); fetchTemplates(); }} disabled={!transferDataReady} />
+                <DTAddTile icon={<DatabaseZap size={17} />} label="Tüm Stok" onClick={() => setShowAllStockConfirm(true)} disabled={!selectedDepotId || !transferDataReady} />
+              </div>
+              {isBulkScanMode && (
+                <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: C.radiusSm, background: `${C.accent}14`, border: `1px solid ${C.accent}40`, fontSize: 12, fontWeight: 600, color: C.accent }}>
+                  Toplu barkod modu aktif — QR barkodu okutun.
                 </div>
               )}
-              <p className="cihaz-section-label">Ürün Ekle</p>
+              {scanFeedback?.type === 'error' && (
+                <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: C.radiusSm, background: 'rgba(192,121,106,0.10)', border: `1px solid rgba(192,121,106,0.3)`, fontSize: 12, fontWeight: 600, color: C.danger }}>
+                  {scanFeedback.message}
+                </div>
+              )}
+            </DTPanel>
 
-              {/* Scan buttons */}
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  onClick={() => { setIsBatchScanning(false); setIsCameraScannerOpen(true); }}
-                  disabled={shipmentLoading || !transferDataReady || (!isBorcMode && !selectedLabId) || (isBorcMode && !selectedCompany)}
-                  className="cihaz-action-tile flex flex-col items-center gap-1.5 py-3 px-2 text-center disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none"
-                >
-                  <Camera className="h-5 w-5 text-[var(--dashboard-accent)]" />
-                  <span className="text-xs font-semibold text-[var(--dashboard-text)]">Tekli Tara</span>
-                </button>
-                <button
-                  onClick={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }}
-                  disabled={shipmentLoading || !transferDataReady || (!isBorcMode && !selectedLabId) || (isBorcMode && !selectedCompany)}
-                  className="cihaz-action-tile flex flex-col items-center gap-1.5 py-3 px-2 text-center disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none"
-                >
-                  <Camera className="h-5 w-5 text-[var(--dashboard-accent)]" />
-                  <span className="text-xs font-semibold text-[var(--dashboard-text)]">Seri Tara</span>
-                </button>
-              </div>
-              <button
-                onClick={() => {
-                  const next = !isBulkScanMode;
-                  setIsBulkScanMode(next);
-                  flashScanFeedback(
-                    next ? 'success' : 'success',
-                    next ? 'Toplu barkod modu açık' : 'Normal barkod okuma moduna dönüldü.'
-                  );
-                }}
-                disabled={shipmentLoading || !transferDataReady || (!isBorcMode && !selectedLabId) || (isBorcMode && !selectedCompany)}
-                className={cn(
-                  "cihaz-tool-item w-full flex items-center justify-center gap-2 py-2.5 text-xs font-semibold disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none",
-                  isBulkScanMode && "bg-[var(--dashboard-accent)] text-white"
-                )}
-              >
-                <QrCode className="h-4 w-4" />
-                Toplu Barkod Oku
-              </button>
-
-              {/* Secondary add methods */}
-              <div className="grid grid-cols-3 gap-2">
-                <button
-                  onClick={() => setShowManualInline(v => !v)}
-                  disabled={!transferDataReady}
-                  className={cn(
-                    "cihaz-tool-item flex flex-col items-center gap-1 py-2.5 px-2 text-center disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none",
-                    showManualInline && "shadow-[var(--dashboard-pressed)] bg-[var(--dashboard-surface-2)]"
-                  )}
-                >
-                  <Plus className="h-4 w-4 text-[var(--dashboard-muted)]" />
-                  <span className="text-[10px] sm:text-xs font-medium text-[var(--dashboard-text)]">Manuel</span>
-                </button>
-                <button
-                  onClick={() => { setShowTemplateSelector(v => !v); fetchTemplates(); }}
-                  disabled={!transferDataReady}
-                  className={cn(
-                    "cihaz-tool-item flex flex-col items-center gap-1 py-2.5 px-2 text-center disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none",
-                    showTemplateSelector && "shadow-[var(--dashboard-pressed)] bg-[var(--dashboard-surface-2)]"
-                  )}
-                >
-                  <ListChecks className="h-4 w-4 text-[var(--dashboard-muted)]" />
-                  <span className="text-[10px] sm:text-xs font-medium text-[var(--dashboard-text)]">Şablon</span>
-                </button>
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <button
-                      disabled={!selectedDepotId || !transferDataReady}
-                      className="cihaz-tool-item flex flex-col items-center gap-1 py-2.5 px-2 text-center disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none"
-                    >
-                      <DatabaseZap className="h-4 w-4 text-[var(--dashboard-muted)]" />
-                      <span className="text-[10px] sm:text-xs font-medium text-[var(--dashboard-text)]">Tüm Stok</span>
-                    </button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Emin misiniz?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        Bu işlem, &quot;{depotName}&quot; deposundaki sevk edilmemiş tüm ürünleri transfer listesine ekleyecektir.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>İptal</AlertDialogCancel>
-                      <AlertDialogAction onClick={handleAddAllStock}>Evet, Tümünü Ekle</AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              </div>
-
-            </div>
-
-            {/* ─── Manual Adder (collapsible drawer) ─── */}
             {showManualInline && (
-              <div className="cihaz-card p-4 sm:p-5 relative">
-                <button
-                  onClick={() => setShowManualInline(false)}
-                  className="absolute top-3 right-3 w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors"
-                >
-                  <X className="h-3.5 w-3.5 text-[var(--dashboard-muted)]" />
+              <div style={{ padding: '14px', borderRadius: C.radius, background: `linear-gradient(180deg, ${C.surface} 0%, ${C.surface2} 100%)`, boxShadow: C.clay, position: 'relative' }}>
+                <button onClick={() => setShowManualInline(false)} style={{ all: 'unset', cursor: 'pointer', position: 'absolute', top: 10, right: 10, width: 28, height: 28, borderRadius: 8, background: C.surface2, display: 'grid', placeItems: 'center', color: C.ink3 }}>
+                  <X size={14} />
                 </button>
                 <ManualInlineAdder
                   visible={showManualInline}
@@ -1556,19 +1962,14 @@ export default function DirektTransferPanel() {
                   stockPool={depotStockData}
                   transferRows={directTransferItems}
                   products={allNonSerialProducts}
-                  onAddLot={({ code, name, lot, miad, qty }) => {
-                    upsertGroupedRow({ stokKodu: code, stokAdi: name, lotNumarasi: lot, miad: miad ?? '' }, qty);
-                  }}
-                  onAddQty={({ code, name, qty }) => {
-                    upsertGroupedRow({ stokKodu: code, stokAdi: name }, qty);
-                  }}
+                  onAddLot={({ code, name, lot, miad, qty }) => upsertGroupedRow({ stokKodu: code, stokAdi: name, lotNumarasi: lot, miad: miad ?? '' }, qty)}
+                  onAddQty={({ code, name, qty }) => upsertGroupedRow({ stokKodu: code, stokAdi: name }, qty)}
                 />
               </div>
             )}
 
-            {/* ─── Template Selector (collapsible drawer) ─── */}
             {showTemplateSelector && (
-              <div className="cihaz-card p-4 sm:p-5">
+              <div style={{ padding: '14px', borderRadius: C.radius, background: `linear-gradient(180deg, ${C.surface} 0%, ${C.surface2} 100%)`, boxShadow: C.clay }}>
                 <TemplateSelector
                   visible={showTemplateSelector}
                   onClose={() => setShowTemplateSelector(false)}
@@ -1576,367 +1977,142 @@ export default function DirektTransferPanel() {
                   templatesLoading={templatesLoading}
                   stockPool={depotStockData}
                   transferRows={directTransferItems}
-                  onAddLot={({ code, name, lot, miad, qty }) => {
-                    upsertGroupedRow({ stokKodu: code, stokAdi: name, lotNumarasi: lot, miad: miad ?? '' }, qty);
-                  }}
-                  onAddQty={({ code, name, qty }) => {
-                    upsertGroupedRow({ stokKodu: code, stokAdi: name }, qty);
-                  }}
+                  onAddLot={({ code, name, lot, miad, qty }) => upsertGroupedRow({ stokKodu: code, stokAdi: name, lotNumarasi: lot, miad: miad ?? '' }, qty)}
+                  onAddQty={({ code, name, qty }) => upsertGroupedRow({ stokKodu: code, stokAdi: name }, qty)}
                 />
               </div>
             )}
           </div>
 
-          {/* ── RIGHT COLUMN: Product List + Validate + Submit ── */}
-          <div className="cihaz-card-strong flex flex-col overflow-hidden">
-            {/* ── List toolbar ── */}
-            <div className="flex items-center gap-2 sm:gap-3 px-4 py-3 sm:px-5 border-b border-[var(--dashboard-stroke)]">
-              <div className="flex-shrink-0">
-                <h2 className="text-sm sm:text-base font-semibold text-[var(--dashboard-text)]">
-                  Transfer Listesi
-                  <span className="ml-1.5 text-[var(--dashboard-muted)]">({stepperState.totalKalem})</span>
-                </h2>
-                <p className="text-[10px] sm:text-xs text-[var(--dashboard-muted)]">
-                  {stepperState.totalAdet} adet ürün transfer edilecek
-                </p>
-              </div>
-              <div className="flex-1" />
-              {directTransferItems.length > 0 && (
-                <button
-                  onClick={() => setDirectTransferItems([])}
-                  className="cihaz-tool-item flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  <span className="hidden sm:inline">Temizle</span>
-                </button>
-              )}
-              {stepperState.totalAdet > 0 && (
-                <div className="flex items-baseline gap-1.5 ml-1">
-                  <span className="text-2xl sm:text-3xl font-extrabold tabular-nums text-[var(--dashboard-text)]">{stepperState.totalAdet}</span>
-                  <span className="text-xs font-medium text-[var(--dashboard-muted)]">adet</span>
+          {/* RIGHT: Transfer Listesi */}
+          <div style={{
+            borderRadius: C.radiusLg, minHeight: 'calc(100vh - 120px)',
+            background: `linear-gradient(180deg, ${C.surface} 0%, ${C.surface2} 100%)`,
+            boxShadow: C.clay,
+            display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '22px 28px', borderBottom: `1px solid ${C.line}` }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+                  <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em', color: C.ink1, whiteSpace: 'nowrap' }}>Transfer Listesi</h1>
+                  <span style={{ fontSize: 18, fontWeight: 800, color: C.accent }}>({stepperState.totalKalem})</span>
                 </div>
+                <div style={{ fontSize: 13.5, color: C.ink2, fontWeight: 600, marginTop: 2 }}>{stepperState.totalAdet} adet ürün transfer edilecek</div>
+              </div>
+              {directTransferItems.length > 0 && (
+                <>
+                  <button onClick={() => setDirectTransferItems([])} style={{
+                    all: 'unset', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8, height: 44, padding: '0 16px',
+                    borderRadius: C.radiusSm, background: `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`, boxShadow: C.clay,
+                    color: C.danger, fontSize: 14, fontWeight: 700,
+                  }}>
+                    <Trash2 size={16} /> Temizle
+                  </button>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
+                    <span style={{ fontSize: 26, fontWeight: 800, color: C.ink1, lineHeight: 1 }}>{stepperState.totalAdet}</span>
+                    <span style={{ fontSize: 13, color: C.ink3, fontWeight: 600 }}>adet</span>
+                  </div>
+                </>
               )}
-              <button
-                onClick={handleCompleteDirectTransfer}
-                disabled={!isTransferReady || shipmentLoading}
-                className={cn(
-                  "flex items-center gap-2 px-4 py-2 sm:px-5 sm:py-2.5 rounded-2xl text-sm font-bold transition-all",
-                  isTransferReady && !shipmentLoading
-                    ? "bg-green-600 text-white shadow-[var(--dashboard-raised)] hover:shadow-[var(--dashboard-raised-soft)] active:shadow-[var(--dashboard-pressed)] hover:-translate-y-0.5 active:translate-y-0"
-                    : "cihaz-pressed text-[var(--dashboard-muted)] cursor-not-allowed"
-                )}
-              >
-                {shipmentLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Truck className="h-4 w-4" />
-                )}
-                <span className="hidden sm:inline">Transfer Et</span>
-              </button>
+              <DTTransferBtn enabled={isTransferReady && !shipmentLoading} onClick={handleCompleteDirectTransfer} loading={shipmentLoading} />
             </div>
 
-            {/* ── Table header (desktop) ── */}
-            {directTransferItems.length > 0 && (
-              <div className="hidden sm:grid grid-cols-[2fr_1fr_1fr_80px_90px_40px] gap-1 px-4 sm:px-5 py-2 text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] border-b border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)]">
-                <span>Ürün</span>
-                <span>Lot / Miad</span>
-                <span>Depoda</span>
-                <span className="text-center">Adet</span>
-                <span className="text-center">Birim</span>
-                <span></span>
-              </div>
-            )}
-
-            {/* ── Table body ── */}
-            <div className="flex-1 overflow-hidden">
-              {directTransferItems.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-[35vh] sm:h-[45vh] text-center px-4">
-                  <div className="w-16 h-16 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] flex items-center justify-center mb-4">
-                    <Search className="h-6 w-6 text-[var(--dashboard-muted)]" />
+            {/* Body */}
+            {directTransferItems.length === 0 ? (
+              <DTEmptyState
+                ready={transferDataReady}
+                onScan={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }}
+                onManual={() => setShowManualInline(true)}
+              />
+            ) : (
+              <>
+                {wide && (
+                  <div style={{ display: 'grid', gridTemplateColumns: '52px minmax(0,1fr) 140px 92px 164px 44px', gap: 14, padding: '14px 24px', borderBottom: `1px solid ${C.line}` }}>
+                    {['', 'Ürün', 'Lot / Miad', 'Depoda', 'Adet', ''].map((h, i) => (
+                      <div key={i} style={{ fontSize: 11, fontWeight: 700, color: C.ink3, letterSpacing: '0.06em', textTransform: 'uppercase', textAlign: (i === 3 || i === 4) ? 'center' : 'left' }}>{h}</div>
+                    ))}
                   </div>
-                  <p className="text-sm font-medium text-[var(--dashboard-text)] mb-1">Henüz ürün eklenmedi</p>
-                  <p className="text-xs text-[var(--dashboard-muted)] mb-4">Barkod okutun veya sol panelden bir yöntem seçin</p>
-                  <div className="flex flex-wrap gap-2 justify-center">
-                    <button
-                      onClick={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }}
-                      disabled={!stepperState.hasSource || !stepperState.hasTarget}
-                      className="cihaz-tool-item flex items-center gap-1.5 px-3 py-2 text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed disabled:transform-none"
-                    >
-                      <Camera className="h-3.5 w-3.5 text-[var(--dashboard-accent)]" />
-                      Seri Tarama Başlat
-                    </button>
-                    <button
-                      onClick={() => setShowManualInline(true)}
-                      className="cihaz-tool-item flex items-center gap-1.5 px-3 py-2 text-xs font-medium"
-                    >
-                      <Plus className="h-3.5 w-3.5 text-[var(--dashboard-accent)]" />
-                      Manuel Ekle
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <VirtualizedList<typeof groupedTransferItems[number]>
-                  items={groupedTransferItems}
-                  height="calc(100vh - 380px)"
-                  estimateSize={72}
-                  overscan={5}
-                  getItemKey={(item: typeof groupedTransferItems[number]) => item.key}
-                  renderItem={(group: typeof groupedTransferItems[number]) => {
+                )}
+                <div style={{ flex: 1, overflowY: 'auto', padding: '12px 18px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {groupedTransferItems.map(group => {
                     const stockKey = group.lotNumarasi ? `${group.stokKodu}__${group.lotNumarasi}` : group.stokKodu;
                     const available = availabilityMap.get(stockKey) ?? 0;
-                    const isOverStock = group.adet > available && available > 0;
-                    const noStock = available === 0;
                     const meta = productMetaByCode.get(group.stokKodu || '');
-                    const multiplier = formatUnitMultiplier(meta);
-
                     return (
-                      <div className={cn(
-                        "border-b border-[var(--dashboard-stroke)] last:border-b-0",
-                        isOverStock && "bg-red-50/50",
-                        noStock && "bg-amber-50/30"
-                      )}>
-                        {/* Desktop row */}
-                        <div className="hidden sm:grid grid-cols-[2fr_1fr_1fr_80px_90px_40px] gap-1 items-center px-4 sm:px-5 py-2.5">
-                          {/* Product */}
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{group.stokAdi}</p>
-                            <p className="text-[11px] text-[var(--dashboard-muted)]">{group.stokKodu}</p>
-                            <p className="text-[10px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</p>
-                          </div>
-                          {/* Lot / Miad chips */}
-                          <div className="flex flex-wrap gap-1">
-                            {group.lotNumarasi && (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-[var(--dashboard-surface-2)] text-[10px] font-medium text-[var(--dashboard-text)]">
-                                {group.lotNumarasi}
-                              </span>
-                            )}
-                            {group.miad && (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-[var(--dashboard-surface-2)] text-[10px] font-medium text-[var(--dashboard-muted)]">
-                                {group.miad}
-                              </span>
-                            )}
-                            {!group.lotNumarasi && !group.miad && (
-                              <span className="text-[10px] text-[var(--dashboard-muted)]">-</span>
-                            )}
-                          </div>
-                          {/* Depot stock */}
-                          <div>
-                            <span className={cn(
-                              "text-xs font-semibold",
-                              noStock ? "text-amber-600" : isOverStock ? "text-red-600" : "text-[var(--dashboard-text)]"
-                            )}>
-                              {available > 0 ? available : '?'}
-                            </span>
-                            <span className="text-[10px] text-[var(--dashboard-muted)] ml-1">{normalizeUnitLabel(meta?.anaBirim)}</span>
-                          </div>
-                          {/* Quantity stepper */}
-                          <div className="flex items-center justify-center">
-                            {group.isGroup ? (
-                              <div className="flex items-center gap-0.5">
-                                <button
-                                  onClick={() => handleGroupAdetChange(group.key, String(Math.max(1, group.adet - 1)))}
-                                  className="w-6 h-6 rounded-md bg-[var(--dashboard-surface-2)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors"
-                                >
-                                  <Minus className="h-3 w-3" />
-                                </button>
-                                <Input
-                                  type="number"
-                                  value={group.adet}
-                                  onChange={(e: ChangeEvent<HTMLInputElement>) => handleGroupAdetChange(group.key, e.target.value)}
-                                  className="w-12 h-7 text-center text-xs font-bold border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)] rounded-lg [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                  min="1"
-                                />
-                                <button
-                                  onClick={() => handleGroupAdetChange(group.key, String(group.adet + 1))}
-                                  className="w-6 h-6 rounded-md bg-[var(--dashboard-surface-2)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors"
-                                >
-                                  <Plus className="h-3 w-3" />
-                                </button>
-                              </div>
-                            ) : (
-                              <span className="text-sm font-bold text-[var(--dashboard-text)]">{formatQuantityWithUnit(group.adet, meta, { showMultiplier: true })}</span>
-                            )}
-                          </div>
-                          {/* Unit */}
-                          <div className="flex justify-center">
-                            <span className="text-[11px] text-[var(--dashboard-muted)]">
-                              {normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}
-                            </span>
-                          </div>
-                          {/* Delete */}
-                          <div className="flex justify-center">
-                            <button
-                              onClick={() => removeTransferItem(group.key, true)}
-                              className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-100 transition-colors"
-                            >
-                              <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                            </button>
-                          </div>
-                        </div>
-                        {/* Mobile row */}
-                        <div className="sm:hidden px-3 py-2.5">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{group.stokAdi}</p>
-                              <p className="text-[11px] text-[var(--dashboard-muted)]">{group.stokKodu}</p>
-                              <p className="text-[10px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</p>
-                              <div className="flex flex-wrap gap-1 mt-1">
-                                {group.lotNumarasi && (
-                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-[var(--dashboard-surface-2)] text-[10px] font-medium">{group.lotNumarasi}</span>
-                                )}
-                                {group.miad && (
-                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-[var(--dashboard-surface-2)] text-[10px] font-medium text-[var(--dashboard-muted)]">{group.miad}</span>
-                                )}
-                                <span className={cn(
-                                  "inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium",
-                                  noStock ? "bg-amber-100 text-amber-700" : isOverStock ? "bg-red-100 text-red-700" : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-text)]"
-                                )}>
-                                  Stok: {available > 0 ? `${available} ${normalizeUnitLabel(meta?.anaBirim)}` : '?'}
-                                </span>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              {group.isGroup ? (
-                                <div className="flex items-center gap-0.5">
-                                  <button onClick={() => handleGroupAdetChange(group.key, String(Math.max(1, group.adet - 1)))} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
-                                    <Minus className="h-3 w-3" />
-                                  </button>
-                                  <Input
-                                    type="number"
-                                    value={group.adet}
-                                    onChange={(e: ChangeEvent<HTMLInputElement>) => handleGroupAdetChange(group.key, e.target.value)}
-                                    className="w-10 h-7 text-center text-xs font-bold border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)] rounded-lg [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                    min="1"
-                                  />
-                                  <button onClick={() => handleGroupAdetChange(group.key, String(group.adet + 1))} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
-                                    <Plus className="h-3 w-3" />
-                                  </button>
-                                </div>
-                              ) : (
-                                <span className="text-sm font-bold mr-1">{formatQuantityWithUnit(group.adet, meta, { showMultiplier: true })}</span>
-                              )}
-                              <span className="text-[10px] text-[var(--dashboard-muted)] mr-1">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</span>
-                              <button onClick={() => removeTransferItem(group.key, true)} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-100 ml-1">
-                                <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                              </button>
-                            </div>
-                          </div>
-                          {/* Inline warning */}
-                          {isOverStock && (
-                            <p className="text-[10px] text-red-600 mt-1 flex items-center gap-1">
-                              <AlertTriangle className="h-3 w-3" /> Maksimum: {available} (Depoda kalan)
-                            </p>
-                          )}
-                        </div>
-                        {/* Desktop inline warning */}
-                        {isOverStock && (
-                          <div className="hidden sm:flex items-center gap-1.5 px-5 pb-2 text-[10px] text-red-600">
-                            <AlertTriangle className="h-3 w-3" /> Maksimum: {available} adet (Depoda kalan stok)
-                          </div>
-                        )}
-                        {/* Serials sub-list with deletable chips */}
-                        {group.serials.length > 0 && (
-                          <div className="px-4 sm:px-5 py-2 bg-[var(--dashboard-surface-2)]/50">
-                            <div className="flex flex-wrap gap-1.5">
-                              {group.serials.slice(0, 50).map(serial => (
-                                <span
-                                  key={serial.id}
-                                  className="group/chip inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--dashboard-surface)] border border-[var(--dashboard-stroke)] text-[10px] font-mono text-[var(--dashboard-muted)] hover:border-red-300 transition-colors"
-                                >
-                                  <span className="truncate max-w-[120px]">{serial.seriNumarasi}</span>
-                                  <button
-                                    onClick={() => removeSerialFromGroup(serial.id)}
-                                    className="w-3.5 h-3.5 rounded-full flex items-center justify-center opacity-40 hover:opacity-100 hover:bg-red-100 hover:text-red-600 transition-all"
-                                    title="Seri numarasını kaldır"
-                                  >
-                                    <X className="w-2.5 h-2.5" />
-                                  </button>
-                                </span>
-                              ))}
-                              {group.serials.length > 50 && (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-[var(--dashboard-surface-2)] text-[10px] text-[var(--dashboard-muted)]">
-                                  +{group.serials.length - 50} daha...
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
+                      <DTProductRow
+                        key={group.key}
+                        group={group}
+                        wide={wide}
+                        available={available}
+                        meta={meta}
+                        onQtyChange={handleGroupAdetChange}
+                        onRemove={() => removeTransferItem(group.key, true)}
+                        onRemoveSerial={removeSerialFromGroup}
+                      />
                     );
-                  }}
-                />
-              )}
-            </div>
-
-            {/* ── Mini summary bar ── */}
-            <div className="border-t border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)] px-4 sm:px-5 py-2.5 flex items-center gap-3 text-xs">
-              <div>
-                <span className="text-[var(--dashboard-muted)]">Kalem</span>
-                <span className="ml-1 font-bold text-[var(--dashboard-text)]">{stepperState.totalKalem}</span>
-              </div>
-              <div>
-                <span className="text-[var(--dashboard-muted)]">Adet</span>
-                <span className="ml-1 font-bold text-[var(--dashboard-text)]">{stepperState.totalAdet}</span>
-              </div>
-            </div>
+                  })}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 18, padding: '16px 28px', borderTop: `1px solid ${C.line}` }}>
+                  <div style={{ fontSize: 14, color: C.ink2, fontWeight: 600 }}>Kalem <strong style={{ color: C.ink1, fontSize: 16 }}>{stepperState.totalKalem}</strong></div>
+                  <div style={{ fontSize: 14, color: C.ink2, fontWeight: 600 }}>Adet <strong style={{ color: C.ink1, fontSize: 16 }}>{stepperState.totalAdet}</strong></div>
+                  {!isBorcMode && !selectedLabId && (
+                    <div style={{ marginLeft: 'auto', fontSize: 13, fontWeight: 700, color: C.amber }}>Transfer için hedef laboratuvar seçin</div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
         </div>
       </div>
 
-      {/* ══════════════════════ MODALS ══════════════════════ */}
+      {/* ══ MODALS ══ */}
 
-      {/* Camera Scanner */}
       <Dialog open={isCameraScannerOpen} onOpenChange={setIsCameraScannerOpen}>
         <DialogContent className="max-w-md p-0">
           <DialogHeader className="p-4">
             <DialogTitle>Kamera ile Tara</DialogTitle>
-            {isBatchScanning && (
-              <DialogDescription className="px-4">Seri tarama açık. Bitince pencereyi kapatın.</DialogDescription>
-            )}
+            {isBatchScanning && <DialogDescription>Seri tarama açık. Bitince pencereyi kapatın.</DialogDescription>}
           </DialogHeader>
           {isCameraScannerOpen && (
-            <Suspense fallback={
-              <div className="flex items-center justify-center p-8">
-                <Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)]" />
-                <p className="ml-2 text-[var(--dashboard-muted)]">Kamera...</p>
-              </div>
-            }>
+            <Suspense fallback={<div className="flex items-center justify-center p-8"><Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)]" /></div>}>
               <CameraScanner onScanSuccess={handleCameraScan} onClose={() => setIsCameraScannerOpen(false)} />
             </Suspense>
           )}
         </DialogContent>
       </Dialog>
 
-      {/* FEFO Violation Dialog */}
       <AlertDialog open={fefoViolations.length > 0} onOpenChange={(open) => !open && setFefoViolations([])}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="text-amber-500" />
-              FEFO Uyarısı
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              Transfer listesinde, depoda daha erken miadlı alternatifi olan ürünler var. Yine de devam etmek istiyor musunuz? Onaylarsanız bu durum kaydedilecektir.
-            </AlertDialogDescription>
+            <AlertDialogTitle className="flex items-center gap-2"><AlertTriangle className="text-amber-500" /> FEFO Uyarısı</AlertDialogTitle>
+            <AlertDialogDescription>Transfer listesinde, depoda daha erken miadlı alternatifi olan ürünler var. Onaylarsanız bu durum kaydedilecektir.</AlertDialogDescription>
           </AlertDialogHeader>
           <ScrollArea className="max-h-60 mt-4 border rounded-md p-2">
             {fefoViolations.map((v, i) => (
               <div key={i} className="text-sm p-3 mb-2 bg-[var(--dashboard-surface-2)] rounded-xl">
                 <p className="font-semibold text-[var(--dashboard-text)]">{v.scannedItem.stokAdi}</p>
-                <p className="text-[var(--dashboard-muted)] text-xs mt-1">
-                  Okutulan: {v.scannedItem.lotNumarasi} (Miad: {v.scannedItem.miad ?? ''})
-                </p>
-                <p className="text-green-600 text-xs">
-                  Önerilen: {v.recommendedItem.lotNumarasi} (Miad: {v.recommendedItem.miad ?? ''})
-                </p>
+                <p className="text-[var(--dashboard-muted)] text-xs mt-1">Okutulan: {v.scannedItem.lotNumarasi} (Miad: {v.scannedItem.miad ?? ''})</p>
+                <p className="text-green-600 text-xs">Önerilen: {v.recommendedItem.lotNumarasi} (Miad: {v.recommendedItem.miad ?? ''})</p>
               </div>
             ))}
           </ScrollArea>
           <AlertDialogFooter>
             <AlertDialogCancel>İptal</AlertDialogCancel>
-            <AlertDialogAction onClick={() => processTransfer(fefoViolations)}>
-              Yine de Transfer Et
-            </AlertDialogAction>
+            <AlertDialogAction onClick={() => processTransfer(fefoViolations)}>Yine de Transfer Et</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={showAllStockConfirm} onOpenChange={setShowAllStockConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Emin misiniz?</AlertDialogTitle>
+            <AlertDialogDescription>Bu işlem, &quot;{depotName}&quot; deposundaki sevk edilmemiş tüm ürünleri transfer listesine ekleyecektir.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>İptal</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { handleAddAllStock(); setShowAllStockConfirm(false); }}>Evet, Tümünü Ekle</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
