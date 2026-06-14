@@ -323,13 +323,13 @@ export default function SiparislerPanel() {
   const tamamlananReqRef = useRef(0);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
 
-  // Tamamlanan filtreleri: metin arama, tarih aralığı, laboratuvar adı.
+  // Tamamlanan filtreleri: metin arama, tarih aralığı, laboratuvar seçimi.
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState(''); // YYYY-MM-DD string (input[type=date])
   const [filterDateTo, setFilterDateTo] = useState('');
-  const [filterKurum, setFilterKurum] = useState('');
-  const [filterKurumInput, setFilterKurumInput] = useState('');
+  const [filterKurum, setFilterKurum] = useState(''); // seçili laboratuvar (recipientHospital tam eşleşme)
+  const [labOptions, setLabOptions] = useState<string[]>([]); // seçici için ayrık lab listesi
   const [filtersOpen, setFiltersOpen] = useState(false);
 
   // Sekme değiştir + URL'i güncelle (geçmişi kirletmeden replace).
@@ -351,12 +351,6 @@ export default function SiparislerPanel() {
     return () => clearTimeout(t);
   }, [searchInput]);
 
-  // Laboratuvar filtre inputunu debounce et.
-  useEffect(() => {
-    const t = setTimeout(() => { setFilterKurum(filterKurumInput.trim()); }, 350);
-    return () => clearTimeout(t);
-  }, [filterKurumInput]);
-
   // Filtre durumu hesapla (badge için).
   const activeFilterCount = [filterDateFrom, filterDateTo, filterKurum].filter(Boolean).length;
 
@@ -364,10 +358,21 @@ export default function SiparislerPanel() {
     setFilterDateFrom('');
     setFilterDateTo('');
     setFilterKurum('');
-    setFilterKurumInput('');
     setSearchInput('');
     setSearchQuery('');
   }, []);
+
+  // Seçili depo için ayrık laboratuvar listesini (sevkiyat geçmişinden) yükle —
+  // laboratuvar seçici bu listeden beslenir.
+  useEffect(() => {
+    if (activeTab !== 'tamamlanan' || !selectedDepotId) { setLabOptions([]); return; }
+    let canceled = false;
+    import('@/actions/stokActions')
+      .then(m => m.getShipmentLabs(selectedDepotId, currentCompanyId, isSuperAdmin ?? false))
+      .then(labs => { if (!canceled) setLabOptions(labs); })
+      .catch(() => { if (!canceled) setLabOptions([]); });
+    return () => { canceled = true; };
+  }, [activeTab, selectedDepotId, currentCompanyId, isSuperAdmin]);
 
   // Lojistik sorumlusu: only perifer orders, no create/depot flow
   const isLojistikSorumlusu = currentUserProfile?.role === 'lojistik_sorumlusu';
@@ -450,10 +455,10 @@ export default function SiparislerPanel() {
     }
   }, [depots, selectedDepotId, isLojistikSorumlusu]);
 
-  // ── Tamamlanan (sipariş geçmişi): server-side cursor sayfalama ──
-  // `reset` true ise baştan, false ise mevcut cursor'dan sonrasını yükler.
-  // Yalnızca görüntülenecek satır kadar (pageSize) veri çekilir; sipariş detayı
-  // (items) listede taşınmaz — karta sadece kalem/adet sayısı gelir.
+  // ── Tamamlanan (sipariş geçmişi): SHIPMENTS tabanlı server-side cursor sayfalama ──
+  // Tam geçmiş `shipments` koleksiyonundan gelir (her tamamlama bir sevkiyat
+  // oluşturur). `reset` true ise baştan, false ise mevcut cursor'dan sonrasını
+  // yükler. Yalnızca pageSize kayıt çekilir; items detayı listede taşınmaz.
   const loadTamamlanan = useCallback(async (reset: boolean) => {
     if (!selectedDepotId) return;
     const reqId = ++tamamlananReqRef.current;
@@ -461,18 +466,18 @@ export default function SiparislerPanel() {
     setTamamlananLoading(true);
     try {
       const m = await import('@/actions/stokActions');
-      const res = await m.getArchivedOrders(
+      const res = await m.getCompletedShipments(
         selectedDepotId, currentCompanyId, isSuperAdmin ?? false,
         20, tamamlananCursorRef.current,
         {
           searchTerm: searchQuery || null,
           dateFrom: filterDateFrom || null,
           dateTo: filterDateTo || null,
-          kurumAdi: filterKurum || null,
+          recipientHospital: filterKurum || null,
         },
       );
       if (reqId !== tamamlananReqRef.current) return; // stale isteği yoksay
-      const mapped = res.orders.map((o: any) => ({
+      const mapped = res.shipments.map((o: any) => ({
         ...o,
         createdAt: o.createdAt instanceof Date ? o.createdAt : o.createdAt ? new Date(o.createdAt) : new Date(),
         transferredAt: o.transferredAt instanceof Date ? o.transferredAt : o.transferredAt ? new Date(o.transferredAt) : null,
@@ -783,26 +788,26 @@ export default function SiparislerPanel() {
                 padding: '14px 16px', borderRadius: C.rsm,
                 background: C.surface, boxShadow: C.clayFlat,
               }}>
-                {/* Laboratuvar adı */}
+                {/* Laboratuvar seçici */}
                 <div>
-                  <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: C.ink3, marginBottom: 5, letterSpacing: '0.05em' }}>LAB</label>
-                  <div style={{
-                    display: 'flex', alignItems: 'center', gap: 6,
-                    padding: '0 10px', height: 38, borderRadius: C.rsm,
-                    background: C.surface2, boxShadow: C.clayInset,
-                  }}>
-                    <input
-                      value={filterKurumInput}
-                      onChange={e => setFilterKurumInput(e.target.value)}
-                      placeholder="Laboratuvar…"
-                      style={{ all: 'unset', flex: 1, fontSize: 13, fontWeight: 600, color: C.ink1 }}
-                    />
-                    {filterKurumInput && (
-                      <button onClick={() => { setFilterKurumInput(''); setFilterKurum(''); }} style={{ all: 'unset', cursor: 'pointer', color: C.ink3, display: 'grid', placeItems: 'center' }}>
-                        <X style={{ width: 12, height: 12 }} />
-                      </button>
-                    )}
-                  </div>
+                  <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: C.ink3, marginBottom: 5, letterSpacing: '0.05em' }}>LABORATUVAR</label>
+                  <select
+                    value={filterKurum}
+                    onChange={e => setFilterKurum(e.target.value)}
+                    style={{
+                      width: '100%', boxSizing: 'border-box',
+                      padding: '0 10px', height: 38, borderRadius: C.rsm,
+                      background: C.surface2, boxShadow: C.clayInset,
+                      border: 'none', outline: 'none', appearance: 'none',
+                      fontSize: 13, fontWeight: 600, color: filterKurum ? C.ink1 : C.ink3,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <option value="">Tüm laboratuvarlar</option>
+                    {labOptions.map(lab => (
+                      <option key={lab} value={lab}>{lab}</option>
+                    ))}
+                  </select>
                 </div>
                 {/* Başlangıç tarihi */}
                 <div>
@@ -875,7 +880,12 @@ export default function SiparislerPanel() {
                   isProcessing={isProcessing}
                   variant={activeTab}
                   onStart={startPickingProcess}
-                  onView={order.isPeripheral ? openPeripheralOrder : (o) => router.push(`/siparisler/${o.id}/toplama`)}
+                  onView={
+                    activeTab === 'tamamlanan'
+                      // Tamamlanan kayıtları sevkiyattır → sevkiyat detayına git.
+                      ? (o) => router.push(`/siparis-gecmis/${o.id}?depotId=${selectedDepotId}`)
+                      : order.isPeripheral ? openPeripheralOrder : (o) => router.push(`/siparisler/${o.id}/toplama`)
+                  }
                   onDelete={handleDeleteOrder}
                 />
               ))}

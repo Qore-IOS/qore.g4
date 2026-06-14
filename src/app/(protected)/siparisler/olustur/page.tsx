@@ -263,16 +263,18 @@ export default function SiparisOlusturPage() {
         const maxValue = rule.max ?? 0;
         const need = maxValue - labStock;
         if (need > 0) {
+          // Ürün katalogda yoksa bile min/max sipariş kalemini ekle — kural
+          // sipariş gerektiriyorsa katalog eşleşmesi koşuluyla satır düşürmeyiz
+          // (katalog şirket kapsamıyla sınırlı olabilir, kural geçerlidir).
           const product = productCodes.find(p => p.stokKodu === stokKodu);
-          if (product) {
-            const depotStock = getDepotStockQty(selectedDepotId, stokKodu);
-            neededItems.push({
-              id: generateId(),
-              stokKodu,
-              stokAdi: `${product.stokAdi} (Depo: ${depotStock})`,
-              adet: need,
-            });
-          }
+          const depotStock = getDepotStockQty(selectedDepotId, stokKodu);
+          const adi = product?.stokAdi ?? (rule as any).stokAdi ?? stokKodu;
+          neededItems.push({
+            id: generateId(),
+            stokKodu,
+            stokAdi: `${adi} (Depo: ${depotStock})`,
+            adet: need,
+          });
         }
       });
 

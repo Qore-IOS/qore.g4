@@ -1262,3 +1262,184 @@ export async function getArchivedOrders(
     return { orders: [], nextCursor: null, hasMore: false };
   }
 }
+
+
+// ─── Tamamlanan sipariş geçmişi: SHIPMENTS tabanlı (tam geçmiş) ───────────────
+// `ordersArchive` yalnızca arşiv özelliği sonrası tamamlananları tutar (seyrek).
+// Her tamamlama bir `shipments` kaydı oluşturur; tam geçmiş buradadır. Eski
+// "Sipariş Geçmişi" paneli de bu koleksiyonu okurdu.
+
+export interface CompletedShipmentFilters {
+  /** JS Date or ISO string — AT OR AFTER (timestamp). */
+  dateFrom?: Date | string | null;
+  /** JS Date or ISO string — AT OR BEFORE (timestamp), gün sonuna tamamlanır. */
+  dateTo?: Date | string | null;
+  /** Laboratuvar (recipientHospital) tam eşleşme — seçici için. */
+  recipientHospital?: string | null;
+  /** recipientHospital / userName üzerinde substring araması. */
+  searchTerm?: string | null;
+}
+
+/** Bir shipment dokümanını hafif kart özetine indirger (items detayı taşınmaz). */
+function summarizeShipmentDoc(d: FirebaseFirestore.QueryDocumentSnapshot): Record<string, any> {
+  const data = d.data();
+  const items = Array.isArray(data.items) ? data.items : [];
+  const kalemCount = items.length;
+  const adetCount = items.reduce(
+    (s: number, i: any) => s + (Number(i?.quantity ?? i?.adet ?? 0) || 0),
+    0,
+  );
+  const ts = data.timestamp;
+  const tsDate = ts && typeof ts.toDate === 'function' ? ts.toDate() : (ts instanceof Date ? ts : null);
+  return serializeFirestoreValue({
+    id: d.id,
+    kurumAdi: data.recipientHospital ?? '',
+    createdBy: data.userName ?? '',
+    transferredBy: data.userName ?? '',
+    createdAt: tsDate,
+    transferredAt: tsDate,
+    status: 'completed',
+    depotId: data.depotId ?? '',
+    orderId: data.orderId ?? '',
+    kalemCount,
+    adetCount,
+    __shipment: true,
+  });
+}
+
+function shipmentMillis(data: Record<string, any>): number {
+  const ts = data?.timestamp;
+  if (ts && typeof ts.toMillis === 'function') return ts.toMillis();
+  if (ts instanceof Date) return ts.getTime();
+  return 0;
+}
+
+/**
+ * Tamamlanan sipariş geçmişi — `shipments` koleksiyonundan, gerçek server-side
+ * cursor sayfalama ile. Tarih aralığı (timestamp) ve laboratuvar (recipientHospital)
+ * filtreleri sunucu tarafında uygulanır; yalnızca `pageSize` kayıt çekilir ve
+ * items detayı istemciye taşınmaz.
+ */
+export async function getCompletedShipments(
+  depotId: string,
+  companyId: string | null | undefined,
+  isSuperAdmin: boolean,
+  pageSize: number = 20,
+  cursor?: { ms: number } | null,
+  filters?: CompletedShipmentFilters | null,
+): Promise<{ shipments: Record<string, any>[]; nextCursor: { ms: number } | null; hasMore: boolean }> {
+  if (!depotId) return { shipments: [], nextCursor: null, hasMore: false };
+  const boundaryMs = cursor && Number.isFinite(cursor.ms) ? cursor.ms : Number.POSITIVE_INFINITY;
+
+  const resolveDate = (v: Date | string | null | undefined): Date | null => {
+    if (!v) return null;
+    const d = v instanceof Date ? v : new Date(v);
+    return isNaN(d.getTime()) ? null : d;
+  };
+  const fromDate = resolveDate(filters?.dateFrom ?? null);
+  const toDate = resolveDate(filters?.dateTo ?? null);
+  if (toDate) toDate.setHours(23, 59, 59, 999);
+  const fromMs = fromDate ? fromDate.getTime() : 0;
+  const toMs = toDate ? toDate.getTime() : Number.POSITIVE_INFINITY;
+
+  const lab = (filters?.recipientHospital ?? '').trim();
+  const term = (filters?.searchTerm ?? '').trim().toLocaleLowerCase('tr');
+
+  const passesDate = (ms: number) =>
+    (fromMs === 0 || ms >= fromMs) && (toMs === Number.POSITIVE_INFINITY || ms <= toMs);
+  const passesSearch = (data: Record<string, any>) => {
+    if (!term) return true;
+    const hay = `${data.recipientHospital ?? ''} ${data.userName ?? ''}`.toLocaleLowerCase('tr');
+    return hay.includes(term);
+  };
+
+  // Herhangi bir filtre (arama/tarih/lab) varsa: yalnızca eşitlik filtreleriyle
+  // (depotId + recipientHospital) sınırlı bir pencere tarayıp tarih/arama/cursor'ı
+  // bellekte uygula. Böylece range+orderBy bileşik indeks gereksinimi oluşmaz.
+  const needsScan = !!(term || fromDate || toDate || lab);
+
+  try {
+    if (needsScan) {
+      let base: FirebaseFirestore.Query = adminDb.collection('shipments').where('depotId', '==', depotId);
+      if (lab) base = base.where('recipientHospital', '==', lab);
+      const SCAN_CAP = 1500;
+      let docs: FirebaseFirestore.QueryDocumentSnapshot[];
+      try {
+        docs = (await base.orderBy('timestamp', 'desc').limit(SCAN_CAP).get()).docs as any;
+      } catch {
+        // Bileşik indeks yoksa: sırasız çek, bellekte sırala.
+        docs = (await base.limit(SCAN_CAP).get()).docs as any;
+      }
+      const all = (docs as FirebaseFirestore.QueryDocumentSnapshot[])
+        .map(d => ({ doc: d, ms: shipmentMillis(d.data()) }))
+        .filter(c => passesDate(c.ms) && passesSearch(c.doc.data()))
+        .sort((a, b) => b.ms - a.ms);
+      const after = all.filter(c => c.ms < boundaryMs);
+      const page = after.slice(0, pageSize);
+      return {
+        shipments: page.map(c => summarizeShipmentDoc(c.doc)),
+        nextCursor: page.length ? { ms: page[page.length - 1].ms } : null,
+        hasMore: after.length > pageSize,
+      };
+    }
+
+    // Filtresiz: gerçek cursor sayfalama (yalnızca depotId + timestamp).
+    const base: FirebaseFirestore.Query = adminDb.collection('shipments').where('depotId', '==', depotId);
+
+    // Cursor sayfalama (indeksli).
+    let pageDocs: FirebaseFirestore.QueryDocumentSnapshot[];
+    try {
+      let q = base.orderBy('timestamp', 'desc');
+      if (Number.isFinite(boundaryMs)) q = q.startAfter(new Date(boundaryMs));
+      pageDocs = (await q.limit(pageSize + 1).get()).docs as any;
+    } catch {
+      // İndeks yoksa: geniş pencere + bellek içi sayfalama.
+      const all = ((await base.limit(2000).get()).docs as FirebaseFirestore.QueryDocumentSnapshot[])
+        .map(d => ({ doc: d, ms: shipmentMillis(d.data()) }))
+        .filter(c => passesDate(c.ms) && c.ms < boundaryMs)
+        .sort((a, b) => b.ms - a.ms);
+      pageDocs = all.slice(0, pageSize + 1).map(c => c.doc);
+    }
+
+    const hasMore = pageDocs.length > pageSize;
+    const page = pageDocs.slice(0, pageSize);
+    const lastMs = page.length ? shipmentMillis(page[page.length - 1].data()) : null;
+    return {
+      shipments: page.map(d => summarizeShipmentDoc(d)),
+      nextCursor: lastMs != null ? { ms: lastMs } : null,
+      hasMore,
+    };
+  } catch (err) {
+    console.error('getCompletedShipments error:', err);
+    return { shipments: [], nextCursor: null, hasMore: false };
+  }
+}
+
+/**
+ * Bir deponun sevkiyat geçmişindeki ayrık laboratuvar (recipientHospital)
+ * adlarını döndürür — Tamamlanan sekmesindeki laboratuvar seçici için.
+ */
+export async function getShipmentLabs(
+  depotId: string,
+  companyId: string | null | undefined,
+  isSuperAdmin: boolean,
+): Promise<string[]> {
+  if (!depotId) return [];
+  try {
+    const snap = await adminDb
+      .collection('shipments')
+      .where('depotId', '==', depotId)
+      .select('recipientHospital')
+      .limit(5000)
+      .get();
+    const set = new Set<string>();
+    snap.forEach(d => {
+      const name = (d.data() as any)?.recipientHospital;
+      if (name && typeof name === 'string') set.add(name);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'tr'));
+  } catch (err) {
+    console.error('getShipmentLabs error:', err);
+    return [];
+  }
+}
