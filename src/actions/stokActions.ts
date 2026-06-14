@@ -1049,79 +1049,163 @@ export async function getBarcodeFormatsAction(
     .map(serializeDoc);
 }
 
+/** Cursor for archived-order pagination — a single time boundary (millis). */
+export type ArchivedOrdersCursor = { ms: number } | null;
+
+/** Best-available completion timestamp (millis) for an order/archive doc. */
+function archivedDocMillis(data: Record<string, any>): number {
+  const pick = (v: any) => (v && typeof v.toMillis === 'function' ? v.toMillis() : (v instanceof Date ? v.getTime() : 0));
+  return pick(data?.archivedAt) || pick(data?.transferredAt) || pick(data?.completedAt) || pick(data?.createdAt) || pick(data?.timestamp) || 0;
+}
+
 /**
- * Returns a page of completed orders from ordersArchive for a specific depot.
- * Uses Admin SDK for speed; results are sorted newest-first and paginated.
+ * Project an order/archive doc to a lightweight LIST summary.
+ *
+ * The heavy `items` array (the order detail) is NOT shipped to the client — the
+ * list only needs counts. Kalem/adet are computed server-side, then `items` is
+ * dropped. The detail screen re-reads the full doc by id when the user opens a
+ * specific order, so detail data is never downloaded until then.
+ */
+function summarizeArchivedDoc(d: FirebaseFirestore.QueryDocumentSnapshot): Record<string, any> {
+  const data = d.data();
+  const items = Array.isArray(data.items) ? data.items : [];
+  const kalemCount = items.length;
+  const adetCount = items.reduce(
+    (s: number, i: any) => s + (Number(i?.adet ?? i?.quantity ?? 0) || 0),
+    0,
+  );
+  const { items: _omitItems, ...rest } = data;
+  return serializeFirestoreValue({ id: d.id, ...rest, kalemCount, adetCount });
+}
+
+/**
+ * Completed-order history for a depot, with TRUE server-side cursor pagination.
+ *
+ * Source of truth = `ordersArchive` (completed orders are moved here, newest
+ * first via `archivedAt`). Pre-archive completed orders that still live in
+ * `orders` (status == 'completed') are unioned in as a bounded supplement, so
+ * the full history shows even before a backfill. Because archived orders are
+ * strictly newer than those leftovers, the archive is paged first (indexed,
+ * only `pageSize` docs fetched) and the leftovers are read only once the
+ * archive is exhausted — keeping reads proportional to what is displayed.
+ *
+ * Returns lightweight summaries (no `items`); the cursor is a single time
+ * boundary so "Daha Fazla Yükle" just passes back `nextCursor`.
  */
 export async function getArchivedOrders(
   depotId: string,
   companyId: string | null | undefined,
   isSuperAdmin: boolean,
-  page: number = 1,
   pageSize: number = 20,
+  cursor?: ArchivedOrdersCursor,
   searchTerm?: string | null,
-): Promise<{ orders: Record<string, any>[]; hasMore: boolean }> {
+): Promise<{ orders: Record<string, any>[]; nextCursor: ArchivedOrdersCursor; hasMore: boolean }> {
+  if (!depotId) return { orders: [], nextCursor: null, hasMore: false };
+  const boundaryMs = cursor && Number.isFinite(cursor.ms) ? cursor.ms : Number.POSITIVE_INFINITY;
+  const isComplete = (data: Record<string, any>) => data?.status !== 'eksik';
+
+  type Cand = { doc: FirebaseFirestore.QueryDocumentSnapshot; ms: number };
+
+  // Leftover completed orders still living in `orders` (pre-archive). Bounded
+  // read: filter status server-side when the composite index exists, else fall
+  // back to a depot-only read + in-memory status filter.
+  const fetchLeftoverCompleted = async (): Promise<Cand[]> => {
+    const base = adminDb.collection('orders').where('depotId', '==', depotId);
+    let docs: FirebaseFirestore.QueryDocumentSnapshot[];
+    try {
+      docs = (await base.where('status', '==', 'completed').limit(1000).get())
+        .docs as FirebaseFirestore.QueryDocumentSnapshot[];
+    } catch {
+      docs = ((await base.limit(1000).get()).docs as FirebaseFirestore.QueryDocumentSnapshot[])
+        .filter(d => d.data().status === 'completed');
+    }
+    return docs.map(d => ({ doc: d, ms: archivedDocMillis(d.data()) }));
+  };
+
   try {
-    const coll = adminDb.collection('ordersArchive');
-    const q: FirebaseFirestore.Query = coll.where('depotId', '==', depotId);
-    const offset = (page - 1) * pageSize;
-
-    // Tamamlanan = arşivlenmiş, eksiksiz teslim edilen siparişler.
-    // "eksik" statülü kayıtları ele.
-    const isComplete = (data: Record<string, any>) => data?.status !== 'eksik';
-    const archivedMillis = (data: Record<string, any>) =>
-      data?.archivedAt?.toMillis?.() ?? data?.transferredAt?.toMillis?.() ?? data?.createdAt?.toMillis?.() ?? 0;
-
+    const archiveColl = adminDb.collection('ordersArchive').where('depotId', '==', depotId);
     const term = (searchTerm ?? '').trim().toLocaleLowerCase('tr');
 
-    // ── Arama: kurumAdi / createdBy üzerinde substring araması ──
-    // Firestore native substring araması yapamadığından, arama varken son
-    // geçmişten geniş bir pencere (Admin SDK, hızlı okuma) çekip sunucu
-    // tarafında filtreleyip sayfalarız. Yalnızca sayfa istemciye taşınır.
+    // Search: substring over kurumAdi / createdBy / transferredBy. Firestore
+    // can't substring-match, so scan a capped window of BOTH sources, filter,
+    // then page by the same time-boundary cursor.
     if (term) {
       const SCAN_CAP = 1000;
-      let scanned: FirebaseFirestore.QueryDocumentSnapshot[];
+      let archiveDocs: FirebaseFirestore.QueryDocumentSnapshot[];
       try {
-        const snap = await q.orderBy('archivedAt', 'desc').limit(SCAN_CAP).get();
-        scanned = snap.docs as FirebaseFirestore.QueryDocumentSnapshot[];
+        archiveDocs = (await archiveColl.orderBy('archivedAt', 'desc').limit(SCAN_CAP).get()).docs as any;
       } catch {
-        const snap = await q.limit(SCAN_CAP).get();
-        scanned = (snap.docs as FirebaseFirestore.QueryDocumentSnapshot[])
-          .sort((a, b) => archivedMillis(b.data()) - archivedMillis(a.data()));
+        archiveDocs = (await archiveColl.limit(SCAN_CAP).get()).docs as any;
       }
-      const matched = scanned.filter(d => {
-        const data = d.data();
-        if (!isComplete(data)) return false;
-        const hay = `${data.kurumAdi ?? ''} ${data.createdBy ?? ''} ${data.transferredBy ?? ''}`.toLocaleLowerCase('tr');
-        return hay.includes(term);
-      });
-      const pageDocs = matched.slice(offset, offset + pageSize);
-      return { orders: pageDocs.map(serializeDoc), hasMore: matched.length > offset + pageSize };
+      const leftover = await fetchLeftoverCompleted();
+      const seen = new Set<string>();
+      const all: Cand[] = [];
+      for (const d of archiveDocs) {
+        if (!seen.has(d.id)) { seen.add(d.id); all.push({ doc: d, ms: archivedDocMillis(d.data()) }); }
+      }
+      for (const c of leftover) {
+        if (!seen.has(c.doc.id)) { seen.add(c.doc.id); all.push(c); }
+      }
+      const matched = all
+        .filter(c => {
+          const data = c.doc.data();
+          if (!isComplete(data)) return false;
+          const hay = `${data.kurumAdi ?? ''} ${data.createdBy ?? ''} ${data.transferredBy ?? ''}`.toLocaleLowerCase('tr');
+          return hay.includes(term);
+        })
+        .sort((a, b) => b.ms - a.ms);
+      const after = matched.filter(c => c.ms < boundaryMs);
+      const page = after.slice(0, pageSize);
+      return {
+        orders: page.map(c => summarizeArchivedDoc(c.doc)),
+        nextCursor: page.length ? { ms: page[page.length - 1].ms } : null,
+        hasMore: after.length > pageSize,
+      };
     }
 
-    // ── Aramasız: tüm depo arşivini çek, filtrele, say ──
-    // isComplete filtresini limit() SONRASI uygulamak yanlış: Firestore'dan
-    // gelen 21 doc'tan kaçı 'eksik' ise o kadar az sonuç döner (bug).
-    // Depo arşivi çok büyük olmaz; Admin SDK ile 2000 doc'a kadar belleğe alıp
-    // filtreyip sayfalamak hem doğru hem hızlıdır.
-    const SCAN_CAP = 2000;
-    let allDocs: FirebaseFirestore.QueryDocumentSnapshot[];
+    // No search: cursor pagination, archive first then leftovers.
+    let archivePage: FirebaseFirestore.QueryDocumentSnapshot[];
     try {
-      const snap = await q.orderBy('archivedAt', 'desc').limit(SCAN_CAP).get();
-      allDocs = snap.docs as FirebaseFirestore.QueryDocumentSnapshot[];
+      let q = archiveColl.orderBy('archivedAt', 'desc');
+      // Admin SDK, Timestamp alanı için JS Date'i kabul edip Timestamp'a çevirir
+      // (web-SDK Timestamp örneğini admin sorgusuna geçirmekten kaçınılır).
+      if (Number.isFinite(boundaryMs)) q = q.startAfter(new Date(boundaryMs));
+      archivePage = (await q.limit(pageSize + 1).get()).docs as any;
     } catch {
-      // Index missing — fetch without ordering, sort in memory
-      const snap = await q.limit(SCAN_CAP).get();
-      allDocs = (snap.docs as FirebaseFirestore.QueryDocumentSnapshot[])
-        .sort((a, b) => archivedMillis(b.data()) - archivedMillis(a.data()));
+      // Composite index missing — read a capped window and page in memory.
+      const all = ((await archiveColl.limit(2000).get()).docs as FirebaseFirestore.QueryDocumentSnapshot[])
+        .map(d => ({ doc: d, ms: archivedDocMillis(d.data()) }))
+        .filter(c => c.ms < boundaryMs)
+        .sort((a, b) => b.ms - a.ms);
+      archivePage = all.slice(0, pageSize + 1).map(c => c.doc);
     }
 
-    const complete = allDocs.filter(d => isComplete(d.data()));
-    const hasMore = complete.length > offset + pageSize;
-    const page_docs = complete.slice(offset, offset + pageSize);
-    return { orders: page_docs.map(serializeDoc), hasMore };
+    const candidates: Cand[] = archivePage
+      .filter(d => isComplete(d.data()))
+      .map(d => ({ doc: d, ms: archivedDocMillis(d.data()) }));
+    const archiveHasMore = archivePage.length > pageSize;
+
+    // Only reach for the (older) leftover orders once the archive page is not
+    // full — i.e. at the tail of the archive — so mid-archive pages stay a
+    // single indexed read of `pageSize` docs.
+    if (!archiveHasMore) {
+      const seen = new Set(candidates.map(c => c.doc.id));
+      const leftover = await fetchLeftoverCompleted();
+      for (const c of leftover) {
+        if (c.ms < boundaryMs && !seen.has(c.doc.id)) { seen.add(c.doc.id); candidates.push(c); }
+      }
+    }
+
+    candidates.sort((a, b) => b.ms - a.ms);
+    const page = candidates.slice(0, pageSize);
+    const hasMore = archiveHasMore || candidates.length > pageSize;
+    return {
+      orders: page.map(c => summarizeArchivedDoc(c.doc)),
+      nextCursor: page.length ? { ms: page[page.length - 1].ms } : null,
+      hasMore,
+    };
   } catch (err) {
     console.error('getArchivedOrders error:', err);
-    return { orders: [], hasMore: false };
+    return { orders: [], nextCursor: null, hasMore: false };
   }
 }

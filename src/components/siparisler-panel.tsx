@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import type { Order } from '@/lib/types';
 import { db } from '@/lib/firebase';
@@ -21,7 +21,7 @@ import { format as formatDate } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import {
   Loader2, Plus, ArrowRight, Trash2, MoreHorizontal,
-  History, ClipboardPlus, Undo, FileSpreadsheet, ShoppingCart,
+  ClipboardPlus, Undo, FileSpreadsheet, ShoppingCart,
   Package, CheckCircle2, Search, X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -161,8 +161,9 @@ function OrderCard({
   onDelete: (id: string) => void;
   variant?: 'acik' | 'kismi' | 'tamamlanan';
 }) {
-  const totalAdet = (order.items ?? []).reduce((s, i) => s + (Number(i.adet) || 0), 0);
-  const totalKalem = (order.items ?? []).length;
+  // Tamamlanan listesinde items taşınmaz; sunucu kalem/adet sayısını hesaplar.
+  const totalAdet = (order as any).adetCount ?? (order.items ?? []).reduce((s, i) => s + (Number(i.adet) || 0), 0);
+  const totalKalem = (order as any).kalemCount ?? (order.items ?? []).length;
   const isPicking = order.status === 'toplaniyor';
   const isPerifer = !order.depotId || order.isPeripheral;
 
@@ -314,9 +315,12 @@ export default function SiparislerPanel() {
     tabFromUrl === 'kismi' || tabFromUrl === 'tamamlanan' ? tabFromUrl : 'acik';
   const [activeTab, setActiveTab] = useState<'acik' | 'kismi' | 'tamamlanan'>(initialTab);
   const [tamamlananOrders, setTamamlananOrders] = useState<Record<string, any>[]>([]);
-  const [tamamlananPage, setTamamlananPage] = useState(1);
   const [tamamlananHasMore, setTamamlananHasMore] = useState(false);
   const [tamamlananLoading, setTamamlananLoading] = useState(false);
+  // Cursor (sonraki sayfa için zaman sınırı) ref'te tutulur: yalnızca görüntülenen
+  // satır kadar veri çekilir, "Daha Fazla Yükle" bu cursor'ı geri gönderir.
+  const tamamlananCursorRef = useRef<{ ms: number } | null>(null);
+  const tamamlananReqRef = useRef(0);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
 
   // Tamamlanan araması: searchInput anlık girdi, searchQuery uygulanan (debounce'lu) terim.
@@ -326,7 +330,6 @@ export default function SiparislerPanel() {
   // Sekme değiştir + URL'i güncelle (geçmişi kirletmeden replace).
   const changeTab = useCallback((tab: 'acik' | 'kismi' | 'tamamlanan') => {
     setActiveTab(tab);
-    if (tab === 'tamamlanan') setTamamlananPage(1);
     const qs = tab === 'acik' ? '/siparisler' : `/siparisler?tab=${tab}`;
     router.replace(qs, { scroll: false });
   }, [router]);
@@ -339,7 +342,7 @@ export default function SiparislerPanel() {
 
   // Arama girdisini debounce ederek uygulanan terime aktar.
   useEffect(() => {
-    const t = setTimeout(() => { setSearchQuery(searchInput.trim()); setTamamlananPage(1); }, 350);
+    const t = setTimeout(() => { setSearchQuery(searchInput.trim()); }, 350);
     return () => clearTimeout(t);
   }, [searchInput]);
 
@@ -424,29 +427,43 @@ export default function SiparislerPanel() {
     }
   }, [depots, selectedDepotId, isLojistikSorumlusu]);
 
-  // ── Tamamlanan orders (ordersArchive) ──
-  useEffect(() => {
-    if (activeTab !== 'tamamlanan' || !selectedDepotId) return;
-    let canceled = false;
+  // ── Tamamlanan (sipariş geçmişi): server-side cursor sayfalama ──
+  // `reset` true ise baştan, false ise mevcut cursor'dan sonrasını yükler.
+  // Yalnızca görüntülenecek satır kadar (pageSize) veri çekilir; sipariş detayı
+  // (items) listede taşınmaz — karta sadece kalem/adet sayısı gelir.
+  const loadTamamlanan = useCallback(async (reset: boolean) => {
+    if (!selectedDepotId) return;
+    const reqId = ++tamamlananReqRef.current;
+    if (reset) tamamlananCursorRef.current = null;
     setTamamlananLoading(true);
-    import('@/actions/stokActions').then(m =>
-      m.getArchivedOrders(selectedDepotId, currentCompanyId, isSuperAdmin ?? false, tamamlananPage, 20, searchQuery || null)
-    ).then(({ orders, hasMore }) => {
-      if (canceled) return;
-      const mapped = orders.map((o: any) => ({
+    try {
+      const m = await import('@/actions/stokActions');
+      const res = await m.getArchivedOrders(
+        selectedDepotId, currentCompanyId, isSuperAdmin ?? false,
+        20, tamamlananCursorRef.current, searchQuery || null,
+      );
+      if (reqId !== tamamlananReqRef.current) return; // stale isteği yoksay
+      const mapped = res.orders.map((o: any) => ({
         ...o,
         createdAt: o.createdAt instanceof Date ? o.createdAt : o.createdAt ? new Date(o.createdAt) : new Date(),
         transferredAt: o.transferredAt instanceof Date ? o.transferredAt : o.transferredAt ? new Date(o.transferredAt) : null,
       }));
-      setTamamlananOrders(tamamlananPage === 1 ? mapped : prev => [...prev, ...mapped]);
-      setTamamlananHasMore(hasMore);
-      setTamamlananLoading(false);
-    }).catch(() => { if (!canceled) setTamamlananLoading(false); });
-    return () => { canceled = true; };
-  }, [activeTab, selectedDepotId, tamamlananPage, currentCompanyId, isSuperAdmin, searchQuery]);
+      tamamlananCursorRef.current = res.nextCursor ?? null;
+      setTamamlananOrders(prev => (reset ? mapped : [...prev, ...mapped]));
+      setTamamlananHasMore(res.hasMore);
+    } catch {
+      /* yut: liste boş kalır */
+    } finally {
+      if (reqId === tamamlananReqRef.current) setTamamlananLoading(false);
+    }
+  }, [selectedDepotId, currentCompanyId, isSuperAdmin, searchQuery]);
 
-  // Reset tamamlanan page when depot changes
-  useEffect(() => { setTamamlananPage(1); setTamamlananOrders([]); }, [selectedDepotId]);
+  // Sekme/depo/arama değişince baştan yükle.
+  useEffect(() => {
+    if (activeTab !== 'tamamlanan' || !selectedDepotId) return;
+    setTamamlananOrders([]);
+    loadTamamlanan(true);
+  }, [activeTab, selectedDepotId, searchQuery, loadTamamlanan]);
 
   // ── Order actions ──
   const startPickingProcess = useCallback(async (order: Order) => {
@@ -569,11 +586,10 @@ export default function SiparislerPanel() {
             <PopoverContent className="w-52 p-1" align="end">
               {[
                 { label: 'Ürün Talep', icon: <ClipboardPlus className="h-4 w-4" />, href: '/urun-talep' },
-                { label: 'Sipariş Geçmişi', icon: <History className="h-4 w-4" />, href: `/siparis-gecmis?depotId=${selectedDepotId}`, disabled: !selectedDepotId },
                 { label: 'Ürün İade', icon: <Undo className="h-4 w-4" />, href: '/urun-iade' },
                 { label: 'Toplu Sipariş', icon: <FileSpreadsheet className="h-4 w-4" />, href: '/merkez-siparis' },
               ].map(item => (
-                <button key={item.href} disabled={item.disabled}
+                <button key={item.href}
                   onClick={() => { router.push(item.href); setMoreMenuOpen(false); }}
                   className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)] disabled:opacity-40 disabled:cursor-not-allowed"
                 >
@@ -733,7 +749,7 @@ export default function SiparislerPanel() {
               ))}
               {activeTab === 'tamamlanan' && tamamlananHasMore && (
                 <button
-                  onClick={() => setTamamlananPage(p => p + 1)}
+                  onClick={() => loadTamamlanan(false)}
                   disabled={tamamlananLoading}
                   style={{
                     all: 'unset', cursor: 'pointer',

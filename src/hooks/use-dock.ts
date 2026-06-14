@@ -288,7 +288,8 @@ const subItemMap: Record<string, DockSubItem[]> = {
       key: "siparis-gecmis",
       label: "Sipariş Geçmişi",
       icon: History,
-      href: "/siparis-gecmis",
+      // Sipariş geçmişi artık Siparişler sayfasındaki "Tamamlanan" sekmesi.
+      href: "/siparisler?tab=tamamlanan",
     },
     {
       key: "direkt-transfer",
