@@ -1050,7 +1050,19 @@ export async function getBarcodeFormatsAction(
 }
 
 /** Cursor for archived-order pagination — a single time boundary (millis). */
+/** Cursor for archived-order pagination — a single time boundary (millis). */
 export type ArchivedOrdersCursor = { ms: number } | null;
+
+/** Filters for getArchivedOrders */
+export interface ArchivedOrdersFilters {
+  searchTerm?: string | null;
+  /** JS Date or ISO string — orders AT OR AFTER this date (archivedAt). */
+  dateFrom?: Date | string | null;
+  /** JS Date or ISO string — orders AT OR BEFORE this date (archivedAt). End of day is assumed. */
+  dateTo?: Date | string | null;
+  /** Substring match on kurumAdi (laboratory name). */
+  kurumAdi?: string | null;
+}
 
 /** Best-available completion timestamp (millis) for an order/archive doc. */
 function archivedDocMillis(data: Record<string, any>): number {
@@ -1089,6 +1101,10 @@ function summarizeArchivedDoc(d: FirebaseFirestore.QueryDocumentSnapshot): Recor
  * only `pageSize` docs fetched) and the leftovers are read only once the
  * archive is exhausted — keeping reads proportional to what is displayed.
  *
+ * Supports date-range filters on archivedAt (applied server-side for the
+ * archive, in-memory for leftovers) and optional lab-name (kurumAdi) substring
+ * filter combined with the text search.
+ *
  * Returns lightweight summaries (no `items`); the cursor is a single time
  * boundary so "Daha Fazla Yükle" just passes back `nextCursor`.
  */
@@ -1098,13 +1114,47 @@ export async function getArchivedOrders(
   isSuperAdmin: boolean,
   pageSize: number = 20,
   cursor?: ArchivedOrdersCursor,
-  searchTerm?: string | null,
+  filters?: ArchivedOrdersFilters | null,
 ): Promise<{ orders: Record<string, any>[]; nextCursor: ArchivedOrdersCursor; hasMore: boolean }> {
   if (!depotId) return { orders: [], nextCursor: null, hasMore: false };
   const boundaryMs = cursor && Number.isFinite(cursor.ms) ? cursor.ms : Number.POSITIVE_INFINITY;
   const isComplete = (data: Record<string, any>) => data?.status !== 'eksik';
 
+  const term = (filters?.searchTerm ?? '').trim().toLocaleLowerCase('tr');
+  const labTerm = (filters?.kurumAdi ?? '').trim().toLocaleLowerCase('tr');
+
+  // Resolve date boundaries (start-of-day from, end-of-day to).
+  const resolveDate = (v: Date | string | null | undefined): Date | null => {
+    if (!v) return null;
+    const d = v instanceof Date ? v : new Date(v);
+    return isNaN(d.getTime()) ? null : d;
+  };
+  const fromDate = resolveDate(filters?.dateFrom ?? null);
+  const toDate = resolveDate(filters?.dateTo ?? null);
+  if (toDate) {
+    // Treat dateTo as inclusive end-of-day in local time.
+    toDate.setHours(23, 59, 59, 999);
+  }
+  const fromMs = fromDate ? fromDate.getTime() : 0;
+  const toMs = toDate ? toDate.getTime() : Number.POSITIVE_INFINITY;
+
   type Cand = { doc: FirebaseFirestore.QueryDocumentSnapshot; ms: number };
+
+  const passesDateFilter = (ms: number) =>
+    (fromMs === 0 || ms >= fromMs) && (toMs === Number.POSITIVE_INFINITY || ms <= toMs);
+
+  const passesTextFilters = (data: Record<string, any>) => {
+    if (!isComplete(data)) return false;
+    if (term) {
+      const hay = `${data.kurumAdi ?? ''} ${data.createdBy ?? ''} ${data.transferredBy ?? ''}`.toLocaleLowerCase('tr');
+      if (!hay.includes(term)) return false;
+    }
+    if (labTerm) {
+      const labHay = (data.kurumAdi ?? '').toLocaleLowerCase('tr');
+      if (!labHay.includes(labTerm)) return false;
+    }
+    return true;
+  };
 
   // Leftover completed orders still living in `orders` (pre-archive). Bounded
   // read: filter status server-side when the composite index exists, else fall
@@ -1119,17 +1169,26 @@ export async function getArchivedOrders(
       docs = ((await base.limit(1000).get()).docs as FirebaseFirestore.QueryDocumentSnapshot[])
         .filter(d => d.data().status === 'completed');
     }
-    return docs.map(d => ({ doc: d, ms: archivedDocMillis(d.data()) }));
+    return docs
+      .map(d => ({ doc: d, ms: archivedDocMillis(d.data()) }))
+      .filter(c => passesDateFilter(c.ms));
   };
 
-  try {
-    const archiveColl = adminDb.collection('ordersArchive').where('depotId', '==', depotId);
-    const term = (searchTerm ?? '').trim().toLocaleLowerCase('tr');
+  const hasFilters = !!(term || labTerm || fromDate || toDate);
 
-    // Search: substring over kurumAdi / createdBy / transferredBy. Firestore
-    // can't substring-match, so scan a capped window of BOTH sources, filter,
-    // then page by the same time-boundary cursor.
-    if (term) {
+  try {
+    let archiveColl: FirebaseFirestore.Query = adminDb.collection('ordersArchive').where('depotId', '==', depotId);
+
+    // Apply Firestore-side date range to the archive query when filters are set.
+    // This keeps the scanned set small before the in-memory text filter runs.
+    if (fromDate) archiveColl = archiveColl.where('archivedAt', '>=', fromDate);
+    if (toDate) archiveColl = archiveColl.where('archivedAt', '<=', toDate);
+
+    // When any filter is active (text, lab, or date), scan a capped window of
+    // BOTH sources, filter in memory, then page by cursor. This is the same
+    // approach as the text-search path — avoids the Firestore offset restriction
+    // while keeping the fetch bounded (SCAN_CAP docs max).
+    if (hasFilters) {
       const SCAN_CAP = 1000;
       let archiveDocs: FirebaseFirestore.QueryDocumentSnapshot[];
       try {
@@ -1147,12 +1206,7 @@ export async function getArchivedOrders(
         if (!seen.has(c.doc.id)) { seen.add(c.doc.id); all.push(c); }
       }
       const matched = all
-        .filter(c => {
-          const data = c.doc.data();
-          if (!isComplete(data)) return false;
-          const hay = `${data.kurumAdi ?? ''} ${data.createdBy ?? ''} ${data.transferredBy ?? ''}`.toLocaleLowerCase('tr');
-          return hay.includes(term);
-        })
+        .filter(c => passesTextFilters(c.doc.data()))
         .sort((a, b) => b.ms - a.ms);
       const after = matched.filter(c => c.ms < boundaryMs);
       const page = after.slice(0, pageSize);
@@ -1163,12 +1217,11 @@ export async function getArchivedOrders(
       };
     }
 
-    // No search: cursor pagination, archive first then leftovers.
+    // No filters: cursor pagination over archive first, then leftovers.
     let archivePage: FirebaseFirestore.QueryDocumentSnapshot[];
     try {
       let q = archiveColl.orderBy('archivedAt', 'desc');
-      // Admin SDK, Timestamp alanı için JS Date'i kabul edip Timestamp'a çevirir
-      // (web-SDK Timestamp örneğini admin sorgusuna geçirmekten kaçınılır).
+      // Admin SDK, Timestamp alani icin JS Date'i kabul eder.
       if (Number.isFinite(boundaryMs)) q = q.startAfter(new Date(boundaryMs));
       archivePage = (await q.limit(pageSize + 1).get()).docs as any;
     } catch {

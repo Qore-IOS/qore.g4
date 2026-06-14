@@ -22,7 +22,7 @@ import { tr } from 'date-fns/locale';
 import {
   Loader2, Plus, ArrowRight, Trash2, MoreHorizontal,
   ClipboardPlus, Undo, FileSpreadsheet, ShoppingCart,
-  Package, CheckCircle2, Search, X,
+  Package, CheckCircle2, Search, X, Filter,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -323,9 +323,14 @@ export default function SiparislerPanel() {
   const tamamlananReqRef = useRef(0);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
 
-  // Tamamlanan araması: searchInput anlık girdi, searchQuery uygulanan (debounce'lu) terim.
+  // Tamamlanan filtreleri: metin arama, tarih aralığı, laboratuvar adı.
   const [searchInput, setSearchInput] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [filterDateFrom, setFilterDateFrom] = useState(''); // YYYY-MM-DD string (input[type=date])
+  const [filterDateTo, setFilterDateTo] = useState('');
+  const [filterKurum, setFilterKurum] = useState('');
+  const [filterKurumInput, setFilterKurumInput] = useState('');
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   // Sekme değiştir + URL'i güncelle (geçmişi kirletmeden replace).
   const changeTab = useCallback((tab: 'acik' | 'kismi' | 'tamamlanan') => {
@@ -340,11 +345,29 @@ export default function SiparislerPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tabFromUrl]);
 
-  // Arama girdisini debounce ederek uygulanan terime aktar.
+  // Metin aramasını debounce ederek uygulanan terime aktar.
   useEffect(() => {
     const t = setTimeout(() => { setSearchQuery(searchInput.trim()); }, 350);
     return () => clearTimeout(t);
   }, [searchInput]);
+
+  // Laboratuvar filtre inputunu debounce et.
+  useEffect(() => {
+    const t = setTimeout(() => { setFilterKurum(filterKurumInput.trim()); }, 350);
+    return () => clearTimeout(t);
+  }, [filterKurumInput]);
+
+  // Filtre durumu hesapla (badge için).
+  const activeFilterCount = [filterDateFrom, filterDateTo, filterKurum].filter(Boolean).length;
+
+  const clearFilters = useCallback(() => {
+    setFilterDateFrom('');
+    setFilterDateTo('');
+    setFilterKurum('');
+    setFilterKurumInput('');
+    setSearchInput('');
+    setSearchQuery('');
+  }, []);
 
   // Lojistik sorumlusu: only perifer orders, no create/depot flow
   const isLojistikSorumlusu = currentUserProfile?.role === 'lojistik_sorumlusu';
@@ -440,7 +463,13 @@ export default function SiparislerPanel() {
       const m = await import('@/actions/stokActions');
       const res = await m.getArchivedOrders(
         selectedDepotId, currentCompanyId, isSuperAdmin ?? false,
-        20, tamamlananCursorRef.current, searchQuery || null,
+        20, tamamlananCursorRef.current,
+        {
+          searchTerm: searchQuery || null,
+          dateFrom: filterDateFrom || null,
+          dateTo: filterDateTo || null,
+          kurumAdi: filterKurum || null,
+        },
       );
       if (reqId !== tamamlananReqRef.current) return; // stale isteği yoksay
       const mapped = res.orders.map((o: any) => ({
@@ -456,14 +485,21 @@ export default function SiparislerPanel() {
     } finally {
       if (reqId === tamamlananReqRef.current) setTamamlananLoading(false);
     }
-  }, [selectedDepotId, currentCompanyId, isSuperAdmin, searchQuery]);
+  }, [selectedDepotId, currentCompanyId, isSuperAdmin, searchQuery, filterDateFrom, filterDateTo, filterKurum]);
 
-  // Sekme/depo/arama değişince baştan yükle.
+  // Depo değişince filtreleri ve listeyi sıfırla.
+  useEffect(() => {
+    clearFilters();
+    setTamamlananOrders([]);
+    tamamlananCursorRef.current = null;
+  }, [selectedDepotId, clearFilters]);
+
+  // Sekme/depo/filtre değişince baştan yükle.
   useEffect(() => {
     if (activeTab !== 'tamamlanan' || !selectedDepotId) return;
     setTamamlananOrders([]);
     loadTamamlanan(true);
-  }, [activeTab, selectedDepotId, searchQuery, loadTamamlanan]);
+  }, [activeTab, selectedDepotId, searchQuery, filterDateFrom, filterDateTo, filterKurum, loadTamamlanan]);
 
   // ── Order actions ──
   const startPickingProcess = useCallback(async (order: Order) => {
@@ -688,35 +724,131 @@ export default function SiparislerPanel() {
           })}
         </div>
 
-        {/* ── Tamamlanan arama ── */}
+        {/* ── Tamamlanan: arama + filtreler ── */}
         {activeTab === 'tamamlanan' && (
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16,
-            padding: '0 14px', height: 50, borderRadius: C.rsm,
-            background: C.surface2, boxShadow: C.clayInset,
-          }}>
-            <Search style={{ width: 17, height: 17, color: C.ink3, flexShrink: 0 }} />
-            <input
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Kuruma veya kişiye göre ara…"
-              style={{
-                all: 'unset', flex: 1, height: '100%',
-                fontSize: 14, fontWeight: 600, color: C.ink1,
-              }}
-            />
-            {searchInput && (
-              <button
-                onClick={() => setSearchInput('')}
-                aria-label="Aramayı temizle"
-                style={{
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
+            {/* Arama + filtre toggle */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '0 14px', height: 50, borderRadius: C.rsm,
+              background: C.surface2, boxShadow: C.clayInset,
+            }}>
+              <Search style={{ width: 17, height: 17, color: C.ink3, flexShrink: 0 }} />
+              <input
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder="Kuruma, kişiye göre ara…"
+                style={{ all: 'unset', flex: 1, height: '100%', fontSize: 14, fontWeight: 600, color: C.ink1 }}
+              />
+              {searchInput && (
+                <button onClick={() => setSearchInput('')} aria-label="Aramayı temizle" style={{
                   all: 'unset', cursor: 'pointer', flexShrink: 0,
                   width: 26, height: 26, borderRadius: '50%', display: 'grid', placeItems: 'center',
                   background: C.surface, boxShadow: C.clayFlat, color: C.ink2,
+                }}>
+                  <X style={{ width: 13, height: 13 }} />
+                </button>
+              )}
+              {/* Filtre toggle butonu */}
+              <button
+                onClick={() => setFiltersOpen(o => !o)}
+                aria-label="Filtreler"
+                style={{
+                  all: 'unset', cursor: 'pointer', flexShrink: 0, position: 'relative',
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  padding: '5px 12px', borderRadius: C.rsm,
+                  background: filtersOpen || activeFilterCount > 0 ? C.accent + '18' : 'transparent',
+                  color: activeFilterCount > 0 ? C.accent : C.ink2,
+                  fontSize: 13, fontWeight: 700,
                 }}
               >
-                <X style={{ width: 13, height: 13 }} />
+                <Filter style={{ width: 14, height: 14 }} />
+                Filtre
+                {activeFilterCount > 0 && (
+                  <span style={{
+                    position: 'absolute', top: -4, right: -4,
+                    width: 16, height: 16, borderRadius: '50%',
+                    background: C.accent, color: '#fff',
+                    fontSize: 10, fontWeight: 800,
+                    display: 'grid', placeItems: 'center',
+                  }}>{activeFilterCount}</span>
+                )}
               </button>
+            </div>
+
+            {/* Genişletilebilir filtre satırı */}
+            {filtersOpen && (
+              <div style={{
+                display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10,
+                padding: '14px 16px', borderRadius: C.rsm,
+                background: C.surface, boxShadow: C.clayFlat,
+              }}>
+                {/* Laboratuvar adı */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: C.ink3, marginBottom: 5, letterSpacing: '0.05em' }}>LAB</label>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '0 10px', height: 38, borderRadius: C.rsm,
+                    background: C.surface2, boxShadow: C.clayInset,
+                  }}>
+                    <input
+                      value={filterKurumInput}
+                      onChange={e => setFilterKurumInput(e.target.value)}
+                      placeholder="Laboratuvar…"
+                      style={{ all: 'unset', flex: 1, fontSize: 13, fontWeight: 600, color: C.ink1 }}
+                    />
+                    {filterKurumInput && (
+                      <button onClick={() => { setFilterKurumInput(''); setFilterKurum(''); }} style={{ all: 'unset', cursor: 'pointer', color: C.ink3, display: 'grid', placeItems: 'center' }}>
+                        <X style={{ width: 12, height: 12 }} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {/* Başlangıç tarihi */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: C.ink3, marginBottom: 5, letterSpacing: '0.05em' }}>BAŞLANGIÇ</label>
+                  <input
+                    type="date"
+                    value={filterDateFrom}
+                    onChange={e => setFilterDateFrom(e.target.value)}
+                    style={{
+                      width: '100%', boxSizing: 'border-box',
+                      padding: '0 10px', height: 38, borderRadius: C.rsm,
+                      background: C.surface2, boxShadow: C.clayInset,
+                      border: 'none', outline: 'none',
+                      fontSize: 13, fontWeight: 600, color: C.ink1,
+                    }}
+                  />
+                </div>
+                {/* Bitiş tarihi */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: C.ink3, marginBottom: 5, letterSpacing: '0.05em' }}>BİTİŞ</label>
+                  <input
+                    type="date"
+                    value={filterDateTo}
+                    onChange={e => setFilterDateTo(e.target.value)}
+                    style={{
+                      width: '100%', boxSizing: 'border-box',
+                      padding: '0 10px', height: 38, borderRadius: C.rsm,
+                      background: C.surface2, boxShadow: C.clayInset,
+                      border: 'none', outline: 'none',
+                      fontSize: 13, fontWeight: 600, color: C.ink1,
+                    }}
+                  />
+                </div>
+                {/* Filtreleri sıfırla */}
+                {activeFilterCount > 0 && (
+                  <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end' }}>
+                    <button onClick={clearFilters} style={{
+                      all: 'unset', cursor: 'pointer',
+                      fontSize: 12, fontWeight: 700, color: C.ink3,
+                      display: 'flex', alignItems: 'center', gap: 4,
+                    }}>
+                      <X style={{ width: 12, height: 12 }} /> Filtreleri Temizle
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
           </div>
         )}
@@ -731,7 +863,7 @@ export default function SiparislerPanel() {
             <EmptyState label={
               activeTab === 'acik' ? 'Açık sipariş yok' :
               activeTab === 'kismi' ? 'Kısmi tamamlanan sipariş yok' :
-              searchQuery ? `"${searchQuery}" için sonuç yok` :
+              (searchQuery || activeFilterCount > 0) ? 'Filtreyle eşleşen sipariş yok' :
               'Tamamlanan sipariş bulunamadı'
             } />
           ) : (
