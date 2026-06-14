@@ -1353,22 +1353,24 @@ export async function getCompletedShipments(
     return hay.includes(term);
   };
 
-  // Herhangi bir filtre (arama/tarih/lab) varsa: yalnızca eşitlik filtreleriyle
-  // (depotId + recipientHospital) sınırlı bir pencere tarayıp tarih/arama/cursor'ı
-  // bellekte uygula. Böylece range+orderBy bileşik indeks gereksinimi oluşmaz.
-  const needsScan = !!(term || fromDate || toDate || lab);
+  // Serbest-metin arama Firestore'da substring desteklemediği için TEK tarama
+  // gerektiren filtredir. Lab (eşitlik) ve tarih (aralık) filtreleri gerçek
+  // cursor sayfalamayla yapılabilir → her sayfada yalnızca pageSize kayıt çekilir
+  // ve "tüm geçmiş" 1500'lük bir cap'e takılmaz.
+  const needsScan = !!term;
 
   try {
     if (needsScan) {
-      let base: FirebaseFirestore.Query = adminDb.collection('shipments').where('depotId', '==', depotId);
-      if (lab) base = base.where('recipientHospital', '==', lab);
+      // Arama: eşitlik filtreleriyle (depotId + lab) sınırlı geniş pencere tara,
+      // tarih/arama/cursor'ı bellekte uygula.
+      let scanBase: FirebaseFirestore.Query = adminDb.collection('shipments').where('depotId', '==', depotId);
+      if (lab) scanBase = scanBase.where('recipientHospital', '==', lab);
       const SCAN_CAP = 1500;
       let docs: FirebaseFirestore.QueryDocumentSnapshot[];
       try {
-        docs = (await base.orderBy('timestamp', 'desc').limit(SCAN_CAP).get()).docs as any;
+        docs = (await scanBase.orderBy('timestamp', 'desc').limit(SCAN_CAP).get()).docs as any;
       } catch {
-        // Bileşik indeks yoksa: sırasız çek, bellekte sırala.
-        docs = (await base.limit(SCAN_CAP).get()).docs as any;
+        docs = (await scanBase.limit(SCAN_CAP).get()).docs as any;
       }
       const all = (docs as FirebaseFirestore.QueryDocumentSnapshot[])
         .map(d => ({ doc: d, ms: shipmentMillis(d.data()) }))
@@ -1383,18 +1385,24 @@ export async function getCompletedShipments(
       };
     }
 
-    // Filtresiz: gerçek cursor sayfalama (yalnızca depotId + timestamp).
-    const base: FirebaseFirestore.Query = adminDb.collection('shipments').where('depotId', '==', depotId);
+    // Filtresiz VEYA yalnızca lab/tarih: gerçek cursor sayfalama.
+    // base = depotId [+ recipientHospital==lab] [+ timestamp aralığı]
+    let base: FirebaseFirestore.Query = adminDb.collection('shipments').where('depotId', '==', depotId);
+    if (lab) base = base.where('recipientHospital', '==', lab);
+    if (fromDate) base = base.where('timestamp', '>=', fromDate);
+    if (toDate) base = base.where('timestamp', '<=', toDate);
 
-    // Cursor sayfalama (indeksli).
     let pageDocs: FirebaseFirestore.QueryDocumentSnapshot[];
     try {
       let q = base.orderBy('timestamp', 'desc');
       if (Number.isFinite(boundaryMs)) q = q.startAfter(new Date(boundaryMs));
       pageDocs = (await q.limit(pageSize + 1).get()).docs as any;
     } catch {
-      // İndeks yoksa: geniş pencere + bellek içi sayfalama.
-      const all = ((await base.limit(2000).get()).docs as FirebaseFirestore.QueryDocumentSnapshot[])
+      // Bileşik indeks yoksa: yalnızca eşitlik filtreleriyle pencere çekip
+      // tarih + cursor'ı bellekte uygula (range+orderBy indeksi gerektirmez).
+      let eqBase: FirebaseFirestore.Query = adminDb.collection('shipments').where('depotId', '==', depotId);
+      if (lab) eqBase = eqBase.where('recipientHospital', '==', lab);
+      const all = ((await eqBase.limit(2000).get()).docs as FirebaseFirestore.QueryDocumentSnapshot[])
         .map(d => ({ doc: d, ms: shipmentMillis(d.data()) }))
         .filter(c => passesDate(c.ms) && c.ms < boundaryMs)
         .sort((a, b) => b.ms - a.ms);
