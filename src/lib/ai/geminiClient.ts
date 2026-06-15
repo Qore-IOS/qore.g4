@@ -26,6 +26,9 @@ interface GenerateOptions {
   temperature?: number;
   maxOutputTokens?: number;
   tools?: GeminiFunctionDeclaration[];
+  // Gemini 2.5+ "düşünme" (thinking) bütçesi. 0 → düşünmeyi kapatır, böylece
+  // tüm çıktı token'ları ve süresi gerçek yanıta gider (kesik/yüzeysel çıktı önlenir).
+  thinkingBudget?: number;
 }
 
 export interface GeminiVisionImage {
@@ -109,12 +112,18 @@ export async function generateWithGemini(options: GenerateOptions): Promise<{ te
   for (const model of models) {
     const remainingMs = overallBudgetMs - (Date.now() - startedAt);
     if (remainingMs <= 1500) { if (lastDebug === 'gemini_no_attempt') lastDebug = 'gemini_timeout_budget_exhausted'; break; }
+    const generationConfig: Record<string, unknown> = {
+      temperature: options.temperature ?? 0.1,
+      maxOutputTokens: options.maxOutputTokens ?? 2048,
+    };
+    // Düşünme bütçesi verildiyse uygula (0 = kapalı). Destekleyen modellerde
+    // (gemini-2.5-flash vb.) çıktı token'larının düşünmeye gitmesini engeller.
+    if (options.thinkingBudget !== undefined) {
+      generationConfig.thinkingConfig = { thinkingBudget: options.thinkingBudget };
+    }
     const body: Record<string, unknown> = {
       contents: toGeminiContents(options.messages),
-      generationConfig: {
-        temperature: options.temperature ?? 0.1,
-        maxOutputTokens: options.maxOutputTokens ?? 2048,
-      },
+      generationConfig,
     };
 
     if (options.systemPrompt) {

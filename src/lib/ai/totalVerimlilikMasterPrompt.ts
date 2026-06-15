@@ -97,6 +97,13 @@ RİSK VE UYUM: risk seviyesi + (gerekiyorsa) eskalasyon notu.
 GÜVEN: yüksek/orta/düşük + tek cümle gerekçe.
 EKSİK BİLGİ / VARSAYIMLAR: varsa madde madde; yoksa "yok".
 
-Yanıtın tamamı Türkçe olmalı. URL yazma; kaynağı doküman/olay adıyla belirt. Yanıtı KISA tut: gereksiz tekrar yapma, toplam ~700 kelimeyi aşma; uzun paragraflar yerine kısa maddeler kullan.`;
+Yanıtın tamamı Türkçe olmalı. URL yazma; kaynağı doküman/olay adıyla belirt.
+
+ÇIKTI KALİTESİ:
+- Her bölümü gerçekten doldur; "veri yetersiz" demeden önce eldeki tüm metrikleri yorumla. Yüzeysel tek cümlelerle geçiştirme.
+- Sayıları kullanarak somut konuş: beklenen test, kümülatif, fark (test ve kutu cinsinden), ambalaj, dönem. Örn. "236 test = ~0,59 kutu fazla tüketim".
+- Her kök neden için neden öyle düşündüğünü ve hangi veriye dayandığını yaz.
+- Aksiyonlar uygulanabilir ve role atanmış olsun.
+- Gereksiz tekrar ve dolgu cümlelerden kaçın; ama analizini EKSİKSİZ bitir — yanıtı asla yarıda bırakma, tüm bölümleri tamamla.`;
 
 export default TOTAL_VERIMLILIK_AI_MASTER_PROMPT;
