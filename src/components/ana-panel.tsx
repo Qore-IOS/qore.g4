@@ -44,7 +44,7 @@ import { Label } from '@/components/ui/label';
 import { VirtualizedList } from '@/components/ui/virtualized-list';
 
 // Icons
-import { Trash2, CheckSquare, PlusCircle, Loader2, Search, History, Camera, ScanLine, Package, MapPin, FileText, X, Undo2, AlertTriangle, QrCode, Download, Sparkles } from 'lucide-react';
+import { Trash2, CheckSquare, PlusCircle, Plus, Minus, Loader2, Search, History, Camera, ScanLine, Package, MapPin, FileText, X, Undo2, AlertTriangle, QrCode, Download, Sparkles } from 'lucide-react';
 
 // Firebase
 import { db } from '@/lib/firebase';
@@ -64,6 +64,11 @@ import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { formatQuantityWithUnit, formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
 import { matchesCompanyScope, normalizeCompanyId, withCompanyScope } from '@/lib/company-scope';
 import BekleyenIrsaliyelerPanel from '@/components/lab/BekleyenIrsaliyelerPanel';
+import {
+  MK_C, MkClayStyles, MkTopStepper, MkSoftBtn, MkReadinessCard, MkAddPanel,
+  MkChipBtn, MkAcceptBtn, MkWarnChip, MkGoodChip, MkEmptyState, MkWaybillCard,
+  type MkLastItem,
+} from '@/components/mal-kabul/clay-kit';
 
 // Child Components
 const ManualInlineAdder = dynamic(() => import('@/components/mal-kabul/ManualInlineAdder'), {
@@ -1947,218 +1952,110 @@ export default function AnaPanel(props: AnaPanelProps) {
   // Prefetch (AppLayout) sayesinde cache doluysa depolar anında gelir;
   // cache boşsa depo dropdown'ı birkaç 100ms sonra dolar — kullanıcı bekleme ekranı görmez.
 
+  // ── Readiness (gerçek veri yüklemesine bağlı 3 adım) ──
+  // 1) Barkod formatları  2) Stok & adres verileri  3) İrsaliye eşleştirme
+  const readinessStage = useMemo(() => {
+    const fmtReady = !barcodeFormatsPending && barcodeFormats.length >= 0;
+    const stockReady = !productsPending && productCodes.length > 0;
+    const irsReady = Boolean(selectedDepotId);
+    if (fmtReady && stockReady && irsReady) return 3;
+    if (fmtReady && stockReady) return 2;
+    if (fmtReady) return 1;
+    return 0;
+  }, [barcodeFormatsPending, barcodeFormats.length, productsPending, productCodes.length, selectedDepotId]);
+  const systemReady = readinessStage >= 3;
+  const readinessPct = Math.round((readinessStage / 3) * 100);
+
+  // Distinct lot count across the scanned list (for the KPI "lot" figure).
+  const distinctLotCount = useMemo(
+    () => new Set(scannedItems.filter(i => i.lotNumarasi).map(i => i.lotNumarasi)).size,
+    [scannedItems]
+  );
+
+  // Last scanned product, mapped to the readiness card shape.
+  const readinessLastItem: MkLastItem = useMemo(() => {
+    if (!lastScannedProduct) return null;
+    const meta = productMetaByCode.get(lastScannedProduct.stokKodu || '');
+    return {
+      stokAdi: lastScannedProduct.stokAdi || '',
+      stokKodu: lastScannedProduct.stokKodu || '',
+      seriNumarasi: lastScannedProduct.seriNumarasi || '',
+      lotNumarasi: lastScannedProduct.lotNumarasi || '',
+      miad: (lastScannedProduct.miad as string) || '',
+      qty: totalCountForProduct,
+      unit: meta?.anaBirim || 'adet',
+    };
+  }, [lastScannedProduct, totalCountForProduct, productMetaByCode]);
+
+  // Top stepper position: Depo → Okut → Kabul.
+  const topStepperActive = stepperState.hasItems ? (stepperState.hasMeta ? 2 : 1) : 0;
+  const pendingIrsaliyeTotal = pendingCeomedIrsaliye.length + pendingFileIrsaliyeCount;
+
   return (
-    <div className="cihaz-shell px-3 py-4 sm:px-5 sm:py-6 space-y-4 sm:space-y-5 min-h-screen">
+    <div className="mk-shell px-3 py-4 sm:px-6 sm:py-5 space-y-4 min-h-screen" style={{ maxWidth: 1720, margin: '0 auto' }}>
+      <MkClayStyles />
       <ScanCommitProbe controller={scanPerformanceController} />
 
-      {/* ── STEP 1: Header – Depo Seçimi ── */}
-      <header className="cihaz-card-strong px-4 py-4 sm:px-6 sm:py-5">
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
-          {/* Stepper indicator */}
-          <div className="flex items-center gap-2 mr-2">
-            <div className={cn(
-              "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors",
-              stepperState.hasDepot
-                ? "bg-[var(--dashboard-accent)] text-white"
-                : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)]"
-            )}>1</div>
-            <div className={cn("w-6 h-0.5 rounded", stepperState.hasItems ? "bg-[var(--dashboard-accent)]" : "bg-[var(--dashboard-surface-2)]")} />
-            <div className={cn(
-              "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors",
-              stepperState.hasItems
-                ? "bg-[var(--dashboard-accent)] text-white"
-                : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)]"
-            )}>2</div>
-            <div className={cn("w-6 h-0.5 rounded", stepperState.hasMeta ? "bg-[var(--dashboard-accent)]" : "bg-[var(--dashboard-surface-2)]")} />
-            <div className={cn(
-              "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors",
-              stepperState.hasMeta
-                ? "bg-[var(--dashboard-accent)] text-white"
-                : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)]"
-            )}>3</div>
-          </div>
-
-          <div className="flex-1 w-full sm:max-w-xs">
-            <Label className="text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Çalışma Deposu</Label>
-            <Select value={selectedDepotId} onValueChange={(v: string) => setSelectedDepotId(v)}>
-              <SelectTrigger className="w-full mt-1 bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl">
-                <SelectValue placeholder="Depo seçin..." />
-              </SelectTrigger>
-              <SelectContent>
-                {sourceDepots.filter(d => !!d.id).map(dep => (
-                  <SelectItem key={dep.id!} value={dep.id!}>{dep.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {isMasterDataLoading && (
-            <div
-              className="w-full sm:w-28 self-center sm:ml-auto"
-              role="progressbar"
-              aria-label="Ürün kodları ve barkod formatları yükleniyor"
-              aria-valuemin={0}
-              aria-valuemax={100}
-              aria-valuenow={masterDataProgress}
-            >
-              <div className="mb-1 flex items-center justify-between text-[9px] font-medium text-[var(--dashboard-muted)]">
-                <span>Veriler</span>
-                <span className="tabular-nums">%{masterDataProgress}</span>
-              </div>
-              <div className="h-1 overflow-hidden rounded-full bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
-                <div
-                  className="h-full rounded-full bg-[var(--dashboard-accent)] transition-[width] duration-300"
-                  style={{ width: `${masterDataProgress}%` }}
-                />
-              </div>
-            </div>
-          )}
-
-          <button
-            onClick={() => router.push(selectedDepotId ? `/mal-kabul/gecmis?depotId=${encodeURIComponent(selectedDepotId)}` : '/mal-kabul/gecmis')}
-            className={cn(
-              "cihaz-tool-item flex items-center gap-2 px-4 py-2.5 text-sm font-medium self-start sm:self-center",
-              !isMasterDataLoading && "sm:ml-auto"
-            )}
-          >
-            <History className="h-4 w-4" />
-            <span>Geçmiş</span>
-          </button>
-          <button
-            onClick={() => setIsPendingCeomedModalOpen(true)}
-            disabled={!selectedDepotId}
-            className="cihaz-tool-item relative flex items-center gap-2 px-4 py-2.5 text-sm font-medium self-start sm:self-center"
-          >
-            <FileText className="h-4 w-4" />
-            <span>Bekleyen İrsaliyeler</span>
-            {(pendingCeomedIrsaliye.length + pendingFileIrsaliyeCount) > 0 && (
-              <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center animate-pulse">
-                {pendingCeomedIrsaliye.length + pendingFileIrsaliyeCount}
-              </span>
-            )}
-          </button>
+      {/* ── TOP CONTEXT BAR: stepper + depo + geçmiş + bekleyen ── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 18, padding: '16px 22px', borderRadius: MK_C.radius, background: `linear-gradient(180deg, ${MK_C.surface} 0%, ${MK_C.surface2} 100%)`, boxShadow: MK_C.clay, flexWrap: 'wrap' }}>
+        <MkTopStepper active={topStepperActive} />
+        <div style={{ width: 1, height: 38, background: MK_C.line }} className="hidden sm:block" />
+        <div style={{ minWidth: 230 }} className="flex-1 sm:flex-none">
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: MK_C.ink3, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 5 }}>Çalışma Deposu</div>
+          <Select value={selectedDepotId} onValueChange={(v: string) => setSelectedDepotId(v)}>
+            <SelectTrigger className="w-full border-0" style={{ background: MK_C.surface2, boxShadow: MK_C.clayInset, borderRadius: MK_C.radiusSm, height: 44 }}>
+              <SelectValue placeholder="Depo seçin..." />
+            </SelectTrigger>
+            <SelectContent>
+              {sourceDepots.filter(d => !!d.id).map(dep => (
+                <SelectItem key={dep.id!} value={dep.id!}>{dep.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-      </header>
+        <div style={{ flex: 1 }} className="hidden sm:block" />
+        <MkSoftBtn icon={<History size={17} />} onClick={() => router.push(selectedDepotId ? `/mal-kabul/gecmis?depotId=${encodeURIComponent(selectedDepotId)}` : '/mal-kabul/gecmis')}>
+          Geçmiş
+        </MkSoftBtn>
+        <MkSoftBtn icon={<FileText size={17} />} onClick={() => setIsPendingCeomedModalOpen(true)} disabled={!selectedDepotId} badge={pendingIrsaliyeTotal}>
+          Bekleyen İrsaliyeler
+        </MkSoftBtn>
+      </div>
 
-      {/* ── Kompakt çalışma satırı: Son Okutulan + Ürün Ekle ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4">
-        <div className="relative">
-        <LedStripGlow isReady={!isMasterDataLoading} corner="top-right" />
-        <div className={cn(
-          "cihaz-card-strong px-4 py-3 sm:px-5 sm:py-4 transition-all duration-300 min-h-[116px]",
-          scanFeedback?.type === 'success' && "ring-2 ring-green-500/60",
-          scanFeedback?.type === 'error' && "ring-2 ring-red-500/60"
-        )}>
-          <div className="grid h-full grid-cols-1 sm:grid-cols-5 gap-3 sm:gap-4">
-            <div className="sm:col-span-3 min-w-0">
-              <div className="flex items-center justify-between gap-2 mb-2">
-                <p className="cihaz-overline text-[10px] sm:text-xs">Son Okutulan Ürün</p>
-                <div className="flex items-center gap-2 shrink-0">
-                  <ScanPerformanceBadge controller={scanPerformanceController} />
-                  {scanFeedback && (
-                    <span className={cn(
-                      "text-[9px] font-bold uppercase tracking-wide",
-                      scanFeedback.type === 'success' ? "text-green-600" : "text-red-600"
-                    )}>
-                      {scanFeedback.type === 'success' ? '✓ Başarılı' : '✗ Hata'}
-                    </span>
-                  )}
-                </div>
-              </div>
-              {scanFeedback?.type === 'error' && !lastScannedProduct ? (
-                <p className="text-sm font-bold text-red-600 truncate">{scanFeedback.message}</p>
-              ) : lastScannedProduct ? (
-                <div className="space-y-1">
-                  <p className={cn(
-                    "text-sm sm:text-base font-semibold truncate",
-                    scanFeedback?.type === 'error' ? "text-red-600" : "text-[var(--dashboard-text)]"
-                  )}>
-                    {scanFeedback?.type === 'error' ? scanFeedback.message : (lastScannedProduct.stokAdi || '')}
-                  </p>
-                  {scanFeedback?.type !== 'error' && (
-                    <>
-                      <p className="text-[10px] sm:text-xs text-[var(--dashboard-muted)] font-mono truncate">{lastScannedProduct.stokKodu}</p>
-                      <div className="flex flex-wrap gap-1.5 mt-1">
-                        {lastScannedProduct.seriNumarasi && <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-800">SN: {lastScannedProduct.seriNumarasi}</span>}
-                        {lastScannedProduct.lotNumarasi && <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-purple-100 text-purple-800">Lot: {lastScannedProduct.lotNumarasi}</span>}
-                        {lastScannedProduct.miad && <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-800">SKT: {lastScannedProduct.miad}</span>}
-                      </div>
-                    </>
-                  )}
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 py-1">
-                  <Package className="h-4 w-4 text-[var(--dashboard-muted)]" />
-                  <p className="text-xs text-[var(--dashboard-muted)]">Barkod okutun</p>
-                </div>
-              )}
-            </div>
-
-            <div className="sm:col-span-2 border-t sm:border-t-0 sm:border-l border-[var(--dashboard-stroke)] pt-3 sm:pt-0 sm:pl-4">
-              <p className="cihaz-overline text-[10px] sm:text-xs mb-2">Okuma Adetleri</p>
-              <div className="grid grid-cols-2 gap-2">
-                <div className="rounded-xl bg-[var(--dashboard-surface-2)] px-3 py-2 shadow-[var(--dashboard-pressed)]">
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-xl sm:text-2xl font-bold text-[var(--dashboard-accent)]">{lotCount}</span>
-                    <span className="text-[10px] sm:text-xs text-[var(--dashboard-muted)]">lot</span>
-                  </div>
-                </div>
-                <div className="rounded-xl bg-[var(--dashboard-surface-2)] px-3 py-2 shadow-[var(--dashboard-pressed)]">
-                  <div className="flex items-baseline gap-1">
-                    <span className="text-xl sm:text-2xl font-semibold text-[var(--dashboard-text)]">{totalCountForProduct}</span>
-                    <span className="text-[10px] sm:text-xs text-[var(--dashboard-muted)]">ürün</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        </div>
-
-        <div className="cihaz-card-strong px-4 py-3 sm:px-5 sm:py-4 min-h-[116px]">
-          <p className="cihaz-overline text-[10px] sm:text-xs mb-2">Ürün Ekle</p>
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-            <button onClick={() => { setIsBatchScanning(false); setIsCameraScannerOpen(true); }} className="cihaz-action-tile flex min-h-14 flex-col items-center justify-center gap-1 px-2 py-2 text-center">
-              <Camera className="h-4 w-4 text-[var(--dashboard-accent)]" />
-              <span className="text-[10px] font-medium text-[var(--dashboard-text)]">Tekli Tara</span>
-            </button>
-            <button onClick={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }} className="cihaz-action-tile flex min-h-14 flex-col items-center justify-center gap-1 px-2 py-2 text-center" style={{ background: 'linear-gradient(135deg, #0d9488 0%, #14b8a6 100%)', color: '#fff', border: 'none' }}>
-              <Camera className="h-4 w-4" />
-              <span className="text-[10px] font-medium">Seri Tarama</span>
-            </button>
-            <button onClick={() => setShowManualInline(v => !v)} className={cn("cihaz-action-tile flex min-h-14 flex-col items-center justify-center gap-1 px-2 py-2 text-center", showManualInline && "cihaz-pressed")}>
-              <PlusCircle className="h-4 w-4 text-[var(--dashboard-accent)]" />
-              <span className="text-[10px] font-medium text-[var(--dashboard-text)]">Manuel Ekle</span>
-            </button>
-            <button onClick={() => setIsOcrModalOpen(true)} className="cihaz-action-tile relative flex min-h-14 flex-col items-center justify-center gap-1 px-2 py-2 text-center">
-              <ScanLine className="h-4 w-4 text-[var(--dashboard-accent)]" />
-              <span className="text-[10px] font-medium text-[var(--dashboard-text)]">İrsaliye Tara</span>
-              {pendingIrsaliyeCount > 0 && <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">{pendingIrsaliyeCount}</span>}
-            </button>
-            <button
-              onClick={handleDepotSerialCheck}
-              disabled={isCheckingDepotSerials || !selectedDepotId}
-              className="cihaz-action-tile col-span-2 sm:col-span-1 flex min-h-14 flex-col items-center justify-center gap-1 px-2 py-2 text-center disabled:opacity-50"
-              title="Listedeki serileri seçili depodaki stokla karşılaştır."
-            >
-              {isCheckingDepotSerials ? <Loader2 className="h-4 w-4 animate-spin text-[var(--dashboard-accent)]" /> : <Search className="h-4 w-4 text-[var(--dashboard-accent)]" />}
-              <span className="text-[10px] font-medium text-[var(--dashboard-text)]">{isCheckingDepotSerials ? 'Sorgulanıyor…' : 'Depoda Kontrol'}</span>
-            </button>
-          </div>
-        </div>
+      {/* ── KPI ROW: readiness + add panel ── */}
+      <div className="mk-grid-kpi">
+        <MkReadinessCard
+          stage={readinessStage}
+          ready={systemReady}
+          pct={readinessPct}
+          lastItem={readinessLastItem}
+          lotCount={distinctLotCount}
+          unitCount={totalScannedQuantity}
+          pulse={scanFeedback?.type === 'success'}
+          feedback={scanFeedback}
+          onReload={() => window.location.reload()}
+        />
+        <MkAddPanel
+          ready={systemReady}
+          onTekli={() => { setIsBatchScanning(false); setIsCameraScannerOpen(true); }}
+          onSeri={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }}
+          onManual={() => setShowManualInline(v => !v)}
+          onIrsaliye={() => setIsOcrModalOpen(true)}
+          onDepoda={handleDepotSerialCheck}
+          manualActive={showManualInline}
+          irsaliyeBadge={pendingIrsaliyeCount}
+          depodaDisabled={isCheckingDepotSerials || !selectedDepotId}
+          depodaLoading={isCheckingDepotSerials}
+        />
       </div>
 
       {/* ── Manuel Giriş Paneli (collapsible drawer) ── */}
       {showManualInline && (
-        <div className="cihaz-card-strong px-4 py-4 sm:px-5 sm:py-5 relative">
+        <div style={{ padding: '16px 20px', borderRadius: MK_C.radius, background: `linear-gradient(180deg, ${MK_C.surface} 0%, ${MK_C.surface2} 100%)`, boxShadow: MK_C.clay, position: 'relative' }}>
           <div className="flex items-center justify-between mb-3">
-            <p className="cihaz-overline text-xs">Manuel Ürün Girişi</p>
-            <button
-              onClick={() => setShowManualInline(false)}
-              className="cihaz-tool-item p-1.5 rounded-lg"
-              title="Manuel Girişi Gizle"
-            >
-              <X className="h-4 w-4 text-[var(--dashboard-muted)]" />
+            <p style={{ fontSize: 11.5, fontWeight: 700, color: MK_C.ink3, letterSpacing: '0.07em', textTransform: 'uppercase' }}>Manuel Ürün Girişi</p>
+            <button onClick={() => setShowManualInline(false)} title="Manuel Girişi Gizle" style={{ all: 'unset', cursor: 'pointer', width: 30, height: 30, borderRadius: 8, background: MK_C.surface2, display: 'grid', placeItems: 'center', color: MK_C.ink3 }}>
+              <X className="h-4 w-4" />
             </button>
           </div>
           <ManualInlineAdder
@@ -2187,10 +2084,10 @@ export default function AnaPanel(props: AnaPanelProps) {
       )}
 
       {/* ── STEP 3: Okutulan Ürünler Tablosu ── */}
-      <div className="cihaz-card-strong flex-1 flex flex-col overflow-hidden min-h-[460px]">
+      <div style={{ borderRadius: MK_C.radiusLg, background: `linear-gradient(180deg, ${MK_C.surface} 0%, ${MK_C.surface2} 100%)`, boxShadow: MK_C.clay, overflow: 'hidden', minHeight: 460, display: 'flex', flexDirection: 'column' }}>
         {/* ── Selection mode sticky bar ── */}
         {isSelectionMode && (
-          <div className="sticky top-0 z-10 flex items-center gap-2 sm:gap-3 px-4 py-2.5 bg-[var(--dashboard-accent)] text-white rounded-t-[18px]">
+          <div className="sticky top-0 z-10 flex items-center gap-2 sm:gap-3 px-4 py-2.5 text-white" style={{ background: `linear-gradient(180deg, ${MK_C.accent2}, ${MK_C.accent})` }}>
             <span className="text-sm font-semibold">{selectedItemsCount} seçildi</span>
             <div className="flex-1" />
             <button
@@ -2229,165 +2126,84 @@ export default function AnaPanel(props: AnaPanelProps) {
         )}
 
         {/* ── Table toolbar ── */}
-        <div className={cn(
-          "flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 px-4 py-3 sm:px-5 border-b border-[var(--dashboard-stroke)]",
-          isSelectionMode && "rounded-t-none"
-        )}>
-          <div className="flex-shrink-0">
-            <h2 className="text-sm sm:text-base font-semibold text-[var(--dashboard-text)]">
-              Okutulan Ürünler
-              <span className="ml-1.5 text-[var(--dashboard-muted)]">({scannedItems.length})</span>
-            </h2>
-            <p className="text-[10px] sm:text-xs text-[var(--dashboard-muted)]">Stoğa eklenecek ürünlerin listesi</p>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 px-4 py-4 sm:px-6" style={{ borderBottom: `1px solid ${MK_C.line}` }}>
+          <div className="flex items-baseline gap-2.5 flex-shrink-0">
+            <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em', color: MK_C.ink1, whiteSpace: 'nowrap' }}>Okutulan Ürünler</h2>
+            <span style={{ fontSize: 18, fontWeight: 800, color: MK_C.accent }}>({scannedItems.length})</span>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.1, padding: '4px 14px', borderRadius: MK_C.radiusSm, background: MK_C.surface2, boxShadow: MK_C.clayInset }} className="ml-2">
+              <span style={{ fontSize: 10, fontWeight: 700, color: MK_C.ink3, letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Toplam Okutulan</span>
+              <span key={totalScannedQuantity} style={{ fontSize: 22, fontWeight: 800, color: MK_C.accent, animation: 'mkCountPop 400ms ease' }}>{totalScannedQuantity}</span>
+            </div>
+            {commitInfo && <span style={{ fontSize: 11, color: MK_C.ink3 }}>Yazılıyor... ({commitInfo.commits} batch)</span>}
           </div>
           <div className="flex-1" />
           {!isSelectionMode && (
-            <div className="flex items-center gap-3 sm:gap-4">
-              <div className="text-right">
-                <p className="text-[10px] sm:text-xs text-[var(--dashboard-muted)]">Toplam Okutulan</p>
-                <p className="text-2xl sm:text-3xl font-bold text-[var(--dashboard-accent)] leading-none">{totalScannedQuantity}</p>
-                {commitInfo && (
-                  <p className="text-[10px] text-[var(--dashboard-muted)] mt-1">Yazılıyor... ({commitInfo.commits} batch)</p>
-                )}
-              </div>
-              <button
-                onClick={handlePreCheckAndDogrulamasizMalKabul}
-                disabled={malKabulIsLoading || isLoading || unprocessedScannedItems === 0 || stepperState.readyCount === 0}
-                className={cn(
-                  "flex items-center gap-2 px-4 sm:px-5 py-2.5 rounded-2xl text-xs sm:text-sm font-semibold transition-all",
-                  "disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none",
-                  stepperState.readyCount > 0
-                    ? "bg-green-600 hover:bg-green-700 active:bg-green-800 text-white shadow-lg shadow-green-600/30 hover:shadow-xl hover:shadow-green-600/40"
-                    : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)]"
-                )}
-                title={stepperState.readyCount === 0 ? 'Önce ürünlere adres ve irsaliye atayın' : undefined}
-              >
-                {(malKabulIsLoading || isLoading) && <Loader2 className="h-4 w-4 animate-spin" />}
-                <Package className="h-4 w-4" />
-                {selectedItemsCount > 0
-                  ? `Seçilenleri Kabul Et (${selectedItemsCount})`
-                  : `Kabul Et ve Stoğa Ekle (${stepperState.readyCount})`
-                }
-              </button>
-            </div>
-          )}
-          {/* Non-selection mode toolbar */}
-          {!isSelectionMode && (
-            <div className="flex flex-wrap gap-1.5 sm:gap-2">
-              <button
+            <div className="flex flex-wrap items-center gap-2">
+              <MkChipBtn
+                icon={<CheckSquare className="h-4 w-4" />}
                 onClick={() => {
                   const anySelected = scannedItems.some(i => !i.isProcessed && i.isSelected);
                   setScannedItems(prev => prev.map(item => (!item.isProcessed ? { ...item, isSelected: !anySelected } : item)));
                 }}
                 disabled={malKabulIsLoading || unprocessedScannedItems === 0}
-                className="cihaz-tool-item flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed"
                 title={unprocessedScannedItems === 0 ? 'Önce ürün ekleyin' : undefined}
               >
-                <CheckSquare className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Seç ({unprocessedScannedItems})</span>
-                <span className="sm:hidden">{unprocessedScannedItems}</span>
-              </button>
-              <button
+                Seç {unprocessedScannedItems > 0 ? `(${unprocessedScannedItems})` : ''}
+              </MkChipBtn>
+              <MkChipBtn
+                icon={<QrCode className="h-4 w-4" />}
                 onClick={() => {
                   const next = !isBulkScanMode;
                   setIsBulkScanMode(next);
-                  flashScanFeedback(
-                    'success',
-                    next ? 'Toplu barkod modu açık' : 'Normal barkod okuma moduna dönüldü.'
-                  );
+                  flashScanFeedback('success', next ? 'Toplu barkod modu açık' : 'Normal barkod okuma moduna dönüldü.');
                 }}
                 disabled={malKabulIsLoading}
-                className={cn(
-                  "cihaz-tool-item flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed",
-                  isBulkScanMode && "bg-[var(--dashboard-accent)] text-white"
-                )}
+                active={isBulkScanMode}
                 title="Sadece toplu barkod okutma modunu aç/kapat"
               >
-                <QrCode className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Toplu Barkod Oku</span>
-                <span className="sm:hidden">Toplu</span>
-              </button>
-              <button
-                onClick={() => setIsBulkBarcodeScanOpen(true)}
-                disabled={malKabulIsLoading}
-                className="cihaz-tool-item flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed"
-                title="AI ile toplu barkod tarama (fotoğraf çek veya yükle)"
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">AI Toplu Tara</span>
-                <span className="sm:hidden">AI</span>
-              </button>
-              <button
-                onClick={clearAllScannedItems}
-                disabled={malKabulIsLoading || scannedItems.length === 0}
-                className="cihaz-tool-item flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 disabled:opacity-40 disabled:cursor-not-allowed"
-                title={scannedItems.length === 0 ? 'Liste boş' : undefined}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Temizle</span>
-              </button>
+                Toplu Barkod Oku
+              </MkChipBtn>
+              <MkChipBtn icon={<Sparkles className="h-4 w-4" style={{ color: MK_C.accent }} />} onClick={() => setIsBulkBarcodeScanOpen(true)} disabled={malKabulIsLoading} title="AI ile toplu barkod tarama">
+                AI Toplu Tara
+              </MkChipBtn>
+              <MkChipBtn icon={<Trash2 className="h-4 w-4" />} onClick={clearAllScannedItems} disabled={malKabulIsLoading || scannedItems.length === 0} danger title={scannedItems.length === 0 ? 'Liste boş' : undefined}>
+                Temizle
+              </MkChipBtn>
+              <MkAcceptBtn
+                count={stepperState.readyCount}
+                onClick={handlePreCheckAndDogrulamasizMalKabul}
+                disabled={isLoading || unprocessedScannedItems === 0}
+                loading={malKabulIsLoading || isLoading}
+                label={selectedItemsCount > 0 ? `Seçilenleri Kabul Et (${selectedItemsCount})` : `Kabul Et ve Stoğa Ekle (${stepperState.readyCount})`}
+              />
             </div>
           )}
         </div>
 
         {/* ── Table header (desktop) ── */}
         {scannedItems.length > 0 && (
-          <div className="hidden sm:grid grid-cols-[40px_2fr_1fr_1fr_1fr_1fr_80px_90px_40px] gap-1 px-4 sm:px-5 py-2 text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] border-b border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)]">
-            <span></span>
-            <span>Ürün</span>
-            <span>Lot</span>
-            <span>Miad</span>
-            <span>Adres</span>
-            <span>İrsaliye</span>
-            <span className="text-right">Adet</span>
-            <span className="text-center">Birim</span>
-            <span></span>
+          <div className="hidden sm:grid grid-cols-[40px_2fr_1fr_1fr_1fr_1fr_80px_90px_40px] gap-1 px-4 sm:px-6 py-3" style={{ borderBottom: `1px solid ${MK_C.line}` }}>
+            {['', 'Ürün', 'Lot', 'Miad', 'Adres', 'İrsaliye', 'Adet', 'Birim', ''].map((h, i) => (
+              <span key={i} style={{ fontSize: 11, fontWeight: 700, color: MK_C.ink3, letterSpacing: '0.06em', textTransform: 'uppercase', textAlign: i === 6 ? 'right' : i === 7 ? 'center' : 'left' }}>{h}</span>
+            ))}
           </div>
         )}
 
         {/* ── Table body ── */}
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden" style={{ padding: scannedItems.length === 0 ? 0 : '12px 14px' }}>
           {scannedItems.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-[35vh] sm:h-[40vh] text-center px-4">
-              <div className="w-16 h-16 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] flex items-center justify-center mb-4">
-                <Search className="h-6 w-6 text-[var(--dashboard-muted)]" />
-              </div>
-              <p className="text-sm font-medium text-[var(--dashboard-text)] mb-1">Okutulmuş ürün bulunmuyor</p>
-              <p className="text-xs text-[var(--dashboard-muted)] mb-4">Başlamak için bir yöntem seçin:</p>
-              <div className="flex flex-wrap gap-2 justify-center">
-                <button
-                  onClick={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }}
-                  className="cihaz-tool-item flex items-center gap-1.5 px-3 py-2 text-xs font-medium"
-                >
-                  <Camera className="h-3.5 w-3.5 text-[var(--dashboard-accent)]" />
-                  Seri Tarama Başlat
-                </button>
-                <button
-                  onClick={() => setIsOcrModalOpen(true)}
-                  className="cihaz-tool-item relative flex items-center gap-1.5 px-3 py-2 text-xs font-medium"
-                >
-                  <ScanLine className="h-3.5 w-3.5 text-[var(--dashboard-accent)]" />
-                  PDF İrsaliye Yükle
-                  {pendingIrsaliyeCount > 0 && (
-                    <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
-                      {pendingIrsaliyeCount}
-                    </span>
-                  )}
-                </button>
-                <button
-                  onClick={() => setIsBulkBarcodeScanOpen(true)}
-                  className="cihaz-tool-item flex items-center gap-1.5 px-3 py-2 text-xs font-medium"
-                >
-                  <Sparkles className="h-3.5 w-3.5 text-[var(--dashboard-accent)]" />
-                  AI Toplu Barkod Tara
-                </button>
-              </div>
-            </div>
+            <MkEmptyState
+              ready={systemReady}
+              onSerial={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }}
+              onIrsaliye={() => setIsOcrModalOpen(true)}
+              onAI={() => setIsBulkBarcodeScanOpen(true)}
+              irsaliyeBadge={pendingIrsaliyeCount}
+            />
           ) : (
             <VirtualizedList<ScanRow>
               items={groupedScannedItems}
-              height="40vh"
-              estimateSize={72}
+              height="44vh"
+              estimateSize={84}
               overscan={10}
               getItemKey={(item: ScanRow) => item.key || item.id}
               className=""
@@ -2397,196 +2213,132 @@ export default function AnaPanel(props: AnaPanelProps) {
                 const meta = productMetaByCode.get(group.stokKodu || '');
                 const verifyLine = getVerifyLineForGroup(group);
                 const multiplier = formatUnitMultiplier(meta);
-                const missingAddress = !group.rafAdresi;
-                const missingIrsaliye = !group.irsaliyeNumarasi;
-                const hasWarnings = missingAddress || missingIrsaliye;
+                const unitLabel = `${normalizeUnitLabel(meta?.anaBirim)}${multiplier ? ` (${multiplier})` : ''}`;
+                const adet = group.adet ?? 0;
+
+                const checkbox = (
+                  <Checkbox checked={group.isSelected} onCheckedChange={() => toggleGroupSelection(group.key)} />
+                );
+                const qtyControl = hasSerials ? (
+                  <span style={{ fontSize: 15, fontWeight: 800, color: MK_C.ink1 }}>{formatQuantityWithUnit(adet, meta, { showMultiplier: true })}</span>
+                ) : (
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: 5, borderRadius: MK_C.radiusPill, background: MK_C.surface2, boxShadow: MK_C.clayInset }}>
+                    <button onClick={() => handleAdetChange(group.key, String(Math.max(1, adet - 1)))} style={{ all: 'unset', cursor: 'pointer', width: 32, height: 32, borderRadius: '50%', display: 'grid', placeItems: 'center', background: `linear-gradient(180deg, ${MK_C.surfaceHi}, ${MK_C.surface2})`, boxShadow: MK_C.clayFlat, color: MK_C.ink2 }}><Minus className="h-3.5 w-3.5" /></button>
+                    <input value={adet} onChange={(e) => { const v = parseInt(e.target.value.replace(/\D/g, ''), 10); handleAdetChange(group.key, String(isNaN(v) ? 1 : v)); }} style={{ width: 40, textAlign: 'center', border: 'none', background: 'transparent', fontSize: 15, fontWeight: 800, color: MK_C.accent, fontFamily: 'inherit', outline: 'none' }} />
+                    <button onClick={() => handleAdetChange(group.key, String(adet + 1))} style={{ all: 'unset', cursor: 'pointer', width: 32, height: 32, borderRadius: '50%', display: 'grid', placeItems: 'center', background: `radial-gradient(120% 120% at 30% 25%, ${MK_C.accent2}, ${MK_C.accent})`, boxShadow: `0 5px 11px -4px ${MK_C.accentGlow}`, color: '#fff' }}><Plus className="h-3.5 w-3.5" /></button>
+                  </div>
+                );
+                const actions = (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                    {(verifyLine || (selectedPendingIrs && hasSerials)) && (
+                      <button onClick={() => markVerifyLineComplete(group)} title="Bu satırdaki tüm seri numaralarını okutulmuş say" style={{ all: 'unset', cursor: 'pointer', width: 32, height: 32, borderRadius: '50%', display: 'grid', placeItems: 'center', color: MK_C.waterDeep, background: MK_C.surface2, boxShadow: MK_C.clayFlat }}>
+                        <CheckSquare className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                    <button onClick={() => deleteGroup(group.key)} aria-label="Sil" style={{ all: 'unset', cursor: 'pointer', width: 32, height: 32, borderRadius: '50%', display: 'grid', placeItems: 'center', color: MK_C.danger, background: MK_C.surface2, boxShadow: MK_C.clayFlat }}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                );
 
                 return (
-                  <div className={cn(
-                    "border-b border-[var(--dashboard-stroke)] transition-colors",
-                    group.isSelected && "bg-[var(--dashboard-accent)]/5"
-                  )}>
-                    {/* Desktop row */}
-                    <div className="hidden sm:grid grid-cols-[40px_2fr_1fr_1fr_1fr_1fr_80px_90px_40px] gap-1 items-center px-4 sm:px-5 py-2.5 cursor-pointer hover:bg-[var(--dashboard-surface-2)]/60">
-                      <div>
-                        <Checkbox
-                          checked={group.isSelected}
-                          onCheckedChange={() => toggleGroupSelection(group.key)}
-                        />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-[var(--dashboard-text)] truncate">{group.stokAdi}</p>
-                        <div className="flex items-center gap-1.5">
-                          <p className="text-[10px] text-[var(--dashboard-muted)] font-mono">{group.stokKodu}</p>
-                          <p className="text-[10px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</p>
-                          {group.bulkQrAssigned && (
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-700">
-                              <Download className="h-2.5 w-2.5" />
-                              Barkod atandı
-                            </span>
-                          )}
+                  <div style={{ paddingBottom: 10, animation: 'mkPopIn 280ms ease' }}>
+                    <div style={{ borderRadius: MK_C.radius, background: MK_C.surfaceHi, boxShadow: group.isSelected ? `${MK_C.clayFlat}, 0 0 0 1.5px ${MK_C.accent}66` : MK_C.clayFlat, overflow: 'hidden' }}>
+                      {/* Desktop row */}
+                      <div className="hidden sm:grid grid-cols-[40px_2fr_1fr_1fr_1fr_1fr_80px_90px_40px] gap-1 items-center" style={{ padding: '13px 18px' }}>
+                        <div>{checkbox}</div>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 14.5, fontWeight: 700, color: MK_C.ink1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{group.stokAdi}</div>
+                          <div className="flex items-center gap-1.5" style={{ marginTop: 2 }}>
+                            <span style={{ fontSize: 11.5, color: MK_C.ink2, fontFamily: 'ui-monospace, monospace' }}>{group.stokKodu}</span>
+                            {group.bulkQrAssigned && (
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 7px', borderRadius: 999, background: 'rgba(111,181,133,0.14)', color: MK_C.waterDeep, fontSize: 10, fontWeight: 700 }}>
+                                <Download className="h-2.5 w-2.5" /> Barkod atandı
+                              </span>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                      <p className="text-xs text-[var(--dashboard-text)] truncate">{group.lotNumarasi || <span className="text-[var(--dashboard-muted)]">-</span>}</p>
-                      <p className="text-xs text-[var(--dashboard-text)] truncate">{group.miad || <span className="text-[var(--dashboard-muted)]">-</span>}</p>
-                      <div>
-                        {group.rafAdresi ? (
-                          <p className="text-xs text-[var(--dashboard-text)] truncate">{group.rafAdresi}</p>
-                        ) : (
-                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700">
-                            <AlertTriangle className="h-2.5 w-2.5" />
-                            Adres yok
-                          </span>
-                        )}
-                      </div>
-                      <div>
-                        {group.irsaliyeNumarasi ? (
-                          <p className="text-xs text-[var(--dashboard-text)] truncate">{group.irsaliyeNumarasi}</p>
-                        ) : (
-                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700">
-                            <AlertTriangle className="h-2.5 w-2.5" />
-                            İrsaliye yok
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-right">
-                        {hasSerials ? (
-                          <span className="text-sm font-bold text-[var(--dashboard-text)]">{formatQuantityWithUnit(group.adet ?? 0, meta, { showMultiplier: true })}</span>
-                        ) : (
-                          <Input
-                            type="number"
-                            value={group.adet}
-                            onChange={(e) => handleAdetChange(group.key, e.target.value)}
-                            className="h-7 w-16 text-center font-bold text-sm bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] rounded-lg ml-auto"
-                            min="1"
-                          />
-                        )}
-                      </div>
-                      <div className="text-center">
-                        <span className="text-[11px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</span>
-                      </div>
-                      <div className="text-center">
-                        <div className="flex items-center justify-center gap-1">
-                          {(verifyLine || (selectedPendingIrs && hasSerials)) && (
-                            <button
-                              onClick={() => markVerifyLineComplete(group)}
-                              className="p-1 rounded-lg hover:bg-emerald-100 transition-colors"
-                              title="Bu satırdaki tüm seri numaralarını okutulmuş say"
-                            >
-                              <CheckSquare className="h-3.5 w-3.5 text-emerald-600" />
-                            </button>
-                          )}
-                          <button
-                            onClick={() => deleteGroup(group.key)}
-                            className="p-1 rounded-lg hover:bg-red-100 transition-colors"
-                          >
-                            <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                          </button>
+                        <div style={{ fontSize: 12.5, color: MK_C.ink2, fontFamily: 'ui-monospace, monospace', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{group.lotNumarasi || '—'}</div>
+                        <div style={{ fontSize: 12.5, color: MK_C.ink2, fontFamily: 'ui-monospace, monospace', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{group.miad || '—'}</div>
+                        <div style={{ textAlign: 'center' }}>
+                          {group.rafAdresi ? <MkGoodChip mono><MapPin className="h-3 w-3" /> {group.rafAdresi}</MkGoodChip> : <MkWarnChip><AlertTriangle className="h-3 w-3" /> Adres yok</MkWarnChip>}
                         </div>
+                        <div style={{ textAlign: 'center' }}>
+                          {group.irsaliyeNumarasi ? <MkGoodChip mono>{group.irsaliyeNumarasi}</MkGoodChip> : <MkWarnChip><AlertTriangle className="h-3 w-3" /> İrsaliye yok</MkWarnChip>}
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'center' }}>{qtyControl}</div>
+                        <div style={{ textAlign: 'center', fontSize: 12, color: MK_C.ink2, fontWeight: 600 }}>{unitLabel}</div>
+                        {actions}
                       </div>
-                    </div>
 
-                    {/* Mobile row (card layout with column structure) */}
-                    <div className="sm:hidden px-3 py-2.5">
-                      <div className="flex items-start gap-2.5">
-                        <Checkbox
-                          checked={group.isSelected}
-                          onCheckedChange={() => toggleGroupSelection(group.key)}
-                          className="mt-1"
-                        />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-[var(--dashboard-text)] truncate">{group.stokAdi}</p>
-                              <div className="flex items-center gap-1.5">
-                                <p className="text-[10px] text-[var(--dashboard-muted)] font-mono">{group.stokKodu}</p>
-                                <p className="text-[10px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</p>
-                                {group.bulkQrAssigned && (
-                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-700">
-                                    <Download className="h-2.5 w-2.5" />
-                                    Barkod atandı
-                                  </span>
-                                )}
+                      {/* Mobile row */}
+                      <div className="sm:hidden" style={{ padding: '13px 15px' }}>
+                        <div className="flex items-start gap-2.5">
+                          <div className="mt-1">{checkbox}</div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <div style={{ fontSize: 14.5, fontWeight: 700, color: MK_C.ink1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{group.stokAdi}</div>
+                                <div style={{ fontSize: 11.5, color: MK_C.ink2, fontFamily: 'ui-monospace, monospace', marginTop: 2 }}>{group.stokKodu} · {unitLabel}</div>
+                              </div>
+                              <div className="flex items-center gap-1.5 flex-shrink-0">
+                                {qtyControl}
+                                {actions}
                               </div>
                             </div>
-                            <div className="flex items-center gap-1.5 flex-shrink-0">
-                              {hasSerials ? (
-                                <span className="text-base font-bold text-[var(--dashboard-accent)]">{formatQuantityWithUnit(group.adet ?? 0, meta, { showMultiplier: true })}</span>
-                              ) : (
-                                <Input
-                                  type="number"
-                                  value={group.adet}
-                                  onChange={(e) => handleAdetChange(group.key, e.target.value)}
-                                  className="h-7 w-14 text-center font-bold text-sm bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] rounded-lg"
-                                  min="1"
-                                />
-                              )}
-                              <span className="text-[10px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</span>
-                              <button onClick={() => deleteGroup(group.key)} className="p-1">
-                                <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                              </button>
+                            <div className="flex flex-wrap gap-1.5" style={{ marginTop: 8 }}>
+                              {group.lotNumarasi && <MkGoodChip mono>Lot {group.lotNumarasi}</MkGoodChip>}
+                              {group.miad && <MkGoodChip mono>SKT {group.miad}</MkGoodChip>}
+                              {group.rafAdresi ? <MkGoodChip mono><MapPin className="h-3 w-3" /> {group.rafAdresi}</MkGoodChip> : <MkWarnChip><AlertTriangle className="h-3 w-3" /> Adres yok</MkWarnChip>}
+                              {group.irsaliyeNumarasi ? <MkGoodChip mono>{group.irsaliyeNumarasi}</MkGoodChip> : <MkWarnChip><AlertTriangle className="h-3 w-3" /> İrsaliye yok</MkWarnChip>}
                             </div>
-                          </div>
-                          {/* Mobile meta row with label+value pairs */}
-                          <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1.5 text-[10px]">
-                            {group.lotNumarasi && (
-                              <span className="text-[var(--dashboard-muted)]">Lot: <strong className="text-[var(--dashboard-text)]">{group.lotNumarasi}</strong></span>
-                            )}
-                            {group.miad && (
-                              <span className="text-[var(--dashboard-muted)]">SKT: <strong className="text-[var(--dashboard-text)]">{group.miad}</strong></span>
-                            )}
-                            {group.rafAdresi ? (
-                              <span className="text-[var(--dashboard-muted)]">Adres: <strong className="text-[var(--dashboard-text)]">{group.rafAdresi}</strong></span>
-                            ) : (
-                              <span className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">
-                                <AlertTriangle className="h-2.5 w-2.5" /> Adres yok
-                              </span>
-                            )}
-                            {group.irsaliyeNumarasi ? (
-                              <span className="text-[var(--dashboard-muted)]">İrs: <strong className="text-[var(--dashboard-text)]">{group.irsaliyeNumarasi}</strong></span>
-                            ) : (
-                              <span className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">
-                                <AlertTriangle className="h-2.5 w-2.5" /> İrsaliye yok
-                              </span>
-                            )}
                           </div>
                         </div>
                       </div>
-                    </div>
 
-                    {/* Serial number expansion */}
-                    {hasSerials && group.items && group.items.length > 0 && (
-                      <div className="px-5 sm:px-10 py-2 bg-[var(--dashboard-surface-2)] border-t border-[var(--dashboard-stroke)]">
-                        {verifyLine && (
-                          <div className="flex items-center justify-between mb-2">
-                            <div className="text-xs text-[var(--dashboard-muted)]">
-                              Okutulan {verifyLine.verifiedSerials.size}
-                              / Beklenen {verifyLine.serials.length}
+                      {/* Serial number expansion */}
+                      {hasSerials && group.items && group.items.length > 0 && (
+                        <div style={{ padding: '10px 18px', background: MK_C.surface2, borderTop: `1px solid ${MK_C.line}` }}>
+                          {verifyLine && (
+                            <div className="flex items-center justify-between mb-2">
+                              <div style={{ fontSize: 12, color: MK_C.ink2 }}>Okutulan {verifyLine.verifiedSerials.size} / Beklenen {verifyLine.serials.length}</div>
+                              <Button size="sm" variant="outline" onClick={() => markVerifyLineComplete(group)}>✓ Tümü Okutuldu</Button>
                             </div>
-                            <Button size="sm" variant="outline" onClick={() => markVerifyLineComplete(group)}>✓ Tümü Okutuldu</Button>
-                          </div>
-                        )}
-                        <div className="text-[10px] font-mono grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-4 gap-y-0.5 text-[var(--dashboard-muted)]">
-                          {group.items.slice(0, 100).map(item => {
-                            const key = `${group.stokKodu}||${group.lotNumarasi || ''}||${group.miad || ''}`;
-                            const vm = ceomedVerifyMap[key];
-                            const verified = !!(vm && item.seriNumarasi && vm.verifiedSerials.has(item.seriNumarasi));
-                            return (
-                              <span key={item.id} className={cn("truncate px-2 py-0.5 rounded border", verified ? "border-emerald-400 text-emerald-700" : "border-red-300 text-red-600")}>{item.seriNumarasi}</span>
-                            );
-                          })}
-                          {group.items.length > 100 && (
-                            <span>+{group.items.length - 100} daha...</span>
                           )}
+                          <div className="text-[10px] font-mono grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-4 gap-y-1">
+                            {group.items.slice(0, 100).map(item => {
+                              const key = `${group.stokKodu}||${group.lotNumarasi || ''}||${group.miad || ''}`;
+                              const vm = ceomedVerifyMap[key];
+                              const verified = !!(vm && item.seriNumarasi && vm.verifiedSerials.has(item.seriNumarasi));
+                              return (
+                                <span key={item.id} className="truncate" style={{ padding: '2px 8px', borderRadius: 8, border: `1px solid ${verified ? 'rgba(111,181,133,0.5)' : 'rgba(192,121,106,0.4)'}`, color: verified ? MK_C.waterDeep : MK_C.danger }}>{item.seriNumarasi}</span>
+                              );
+                            })}
+                            {group.items.length > 100 && <span style={{ color: MK_C.ink3 }}>+{group.items.length - 100} daha...</span>}
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 );
               }}
             />
           )}
         </div>
+
+        {/* ── Footer summary ── */}
+        {scannedItems.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 18, padding: '15px 26px', borderTop: `1px solid ${MK_C.line}` }}>
+            <div style={{ fontSize: 14, color: MK_C.ink2, fontWeight: 600 }}>Kalem <strong style={{ color: MK_C.ink1, fontSize: 16 }}>{groupedScannedItems.length}</strong></div>
+            <div style={{ fontSize: 14, color: MK_C.ink2, fontWeight: 600 }}>Lot <strong style={{ color: MK_C.ink1, fontSize: 16 }}>{distinctLotCount}</strong></div>
+            <div style={{ fontSize: 14, color: MK_C.ink2, fontWeight: 600 }}>Toplam <strong style={{ color: MK_C.ink1, fontSize: 16 }}>{totalScannedQuantity}</strong></div>
+            {scannedItems.some(i => !i.isProcessed && (!i.rafAdresi || !i.irsaliyeNumarasi)) && (
+              <div style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 13, fontWeight: 700, color: '#9A6F1E' }}>
+                <AlertTriangle className="h-3.5 w-3.5" /> Bazı ürünlerde adres / irsaliye eksik
+              </div>
+            )}
+          </div>
+        )}
 
       </div>
 
@@ -2675,72 +2427,79 @@ export default function AnaPanel(props: AnaPanelProps) {
 
       {/* CEOMED ve dosya yönetimi kaynaklı bekleyen irsaliyeler */}
       <Dialog open={isPendingCeomedModalOpen} onOpenChange={setIsPendingCeomedModalOpen}>
-        <DialogContent className="max-w-5xl max-h-[88vh] overflow-hidden flex flex-col">
-          <DialogHeader>
-            <DialogTitle>Bekleyen İrsaliyeler</DialogTitle>
-            <DialogDescription>
-              CEOMED entegrasyonundan ve dosya yönetiminde taranan PDF'lerden gelen kayıtları tek alandan yönetin.
-            </DialogDescription>
+        <DialogContent className="max-w-3xl max-h-[88vh] overflow-hidden flex flex-col p-0" style={{ background: `linear-gradient(180deg, ${MK_C.surface} 0%, ${MK_C.surface2} 100%)`, borderRadius: MK_C.radiusLg, border: 'none' }}>
+          <MkClayStyles />
+          <DialogHeader className="px-6 pt-6 pb-4" style={{ borderBottom: `1px solid ${MK_C.line}` }}>
+            <div className="flex items-start gap-3">
+              <span style={{ width: 44, height: 44, flexShrink: 0, borderRadius: 14, display: 'grid', placeItems: 'center', color: MK_C.accent, background: 'radial-gradient(120% 120% at 30% 24%, #FFFFFF, #ECE4D4 82%)', boxShadow: MK_C.clayFlat }}><FileText className="h-5 w-5" /></span>
+              <div>
+                <DialogTitle style={{ fontSize: 20, fontWeight: 800, color: MK_C.ink1 }}>Bekleyen İrsaliyeler</DialogTitle>
+                <DialogDescription style={{ color: MK_C.ink2, marginTop: 4 }}>
+                  CEOMED entegrasyonundan ve dosya yönetiminde taranan PDF&apos;lerden gelen kayıtları tek alandan yönetin.
+                </DialogDescription>
+              </div>
+            </div>
           </DialogHeader>
-          <div className="flex-1 overflow-y-auto space-y-6 pr-1">
+          <div className="flex-1 overflow-y-auto space-y-6 px-6 py-5">
             <section className="space-y-3">
-              <div className="flex items-center gap-2">
-                <FileText className="h-4 w-4 text-[var(--dashboard-accent)]" />
-                <h3 className="text-sm font-semibold">CEOMED Entegrasyonu</h3>
-                <span className="text-xs text-[var(--dashboard-muted)]">({pendingCeomedIrsaliye.length})</span>
+              <div className="flex items-center gap-2" style={{ marginBottom: 4 }}>
+                <span style={{ color: MK_C.accent, display: 'inline-flex' }}><FileText className="h-4 w-4" /></span>
+                <span style={{ fontSize: 14.5, fontWeight: 800, color: MK_C.ink1 }}>CEOMED Entegrasyonu</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: MK_C.ink3 }}>({pendingCeomedIrsaliye.length})</span>
               </div>
               {!((selectedDepot as any)?.ceomedCariKodu) ? (
-                <div className="rounded-xl border border-dashed border-[var(--dashboard-stroke)] px-4 py-6 text-center text-sm text-[var(--dashboard-muted)]">
+                <div style={{ borderRadius: MK_C.radiusSm, background: MK_C.surface2, boxShadow: MK_C.clayInset, padding: '24px 16px', textAlign: 'center', fontSize: 13.5, color: MK_C.ink2 }}>
                   Seçili depo için CEOMED cari kodu tanımlı değil.
                 </div>
               ) : pendingCeomedIrsaliye.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-[var(--dashboard-stroke)] px-4 py-6 text-center text-sm text-[var(--dashboard-muted)]">Bekleyen CEOMED irsaliyesi bulunamadı.</div>
+                <div style={{ borderRadius: MK_C.radiusSm, background: MK_C.surface2, boxShadow: MK_C.clayInset, padding: '24px 16px', textAlign: 'center', fontSize: 13.5, color: MK_C.ink2 }}>Bekleyen CEOMED irsaliyesi bulunamadı.</div>
               ) : pendingCeomedIrsaliye.map((irs) => {
                 const lines = buildPendingLines(irs);
                 const brands = Array.from(new Set(lines.map(l => l.marka).filter(Boolean)));
+                const totalKalem = lines.length;
                 const isSelected = selectedPendingIrs?.id === irs.id;
                 return (
-                  <Card key={irs.id} className={cn("cursor-pointer", isSelected && "ring-1 ring-[var(--dashboard-accent)]")} onClick={() => setSelectedPendingIrs(irs)}>
-                    <CardHeader className="py-3">
-                      <CardTitle className="text-sm flex items-center justify-between">
-                        <span>{irs.irsaliyeNo}</span>
-                        <span className="text-xs font-normal text-[var(--dashboard-muted)]">{irs.cariKodu}</span>
-                      </CardTitle>
-                      <CardDescription className="text-xs truncate">{brands.length ? `Markalar: ${brands.join(', ')}` : 'Marka bilgisi yok'}</CardDescription>
-                    </CardHeader>
+                  <MkWaybillCard
+                    key={irs.id}
+                    title={irs.irsaliyeNo}
+                    subtitle={`${brands.length ? `Markalar: ${brands.join(', ')}` : 'Marka bilgisi yok'} · ${totalKalem} kalem`}
+                    code={irs.cariKodu}
+                    selected={isSelected}
+                    onClick={() => setSelectedPendingIrs(isSelected ? null : irs)}
+                  >
                     {isSelected && (
-                      <CardContent className="space-y-2 pt-0">
+                      <div className="space-y-2" style={{ borderTop: `1px solid ${MK_C.line}`, paddingTop: 12 }}>
                         {lines.map((g, idx) => (
                           <Accordion key={`${g.stokKodu}-${g.lot}-${idx}`} type="single" collapsible>
                             <AccordionItem value="s">
                               <AccordionTrigger>
-                                <div className="flex w-full justify-between pr-2 text-sm">
+                                <div className="flex w-full justify-between pr-2 text-sm" style={{ color: MK_C.ink1 }}>
                                   <span>{g.stokKodu} - {g.stokAdi} • Lot: {g.lot || '-'} • SKT: {g.miad || '-'}</span>
                                   <span className="font-semibold">Adet: {g.adet}</span>
                                 </div>
                               </AccordionTrigger>
                               <AccordionContent>
                                 <div className="text-xs grid grid-cols-2 md:grid-cols-4 gap-1 font-mono">
-                                  {g.serials.length ? g.serials.map((serial, index) => <span key={`${serial}-${index}`} className="px-2 py-1 rounded border border-red-300 text-red-600">{serial}</span>) : <span>Seri yok</span>}
+                                  {g.serials.length ? g.serials.map((serial, index) => <span key={`${serial}-${index}`} style={{ padding: '4px 8px', borderRadius: 8, border: `1px solid rgba(192,121,106,0.4)`, color: MK_C.danger }}>{serial}</span>) : <span style={{ color: MK_C.ink3 }}>Seri yok</span>}
                                 </div>
                               </AccordionContent>
                             </AccordionItem>
                           </Accordion>
                         ))}
-                        <div className="flex justify-end gap-2">
+                        <div className="flex justify-end gap-2 pt-1">
                           <Button variant="outline" onClick={() => handleStartVerifiedCeomedReceipt(irs)}>Doğrulamalı Stoğa Aktar</Button>
-                          <Button onClick={() => handleApproveCeomedToDepot(irs)} disabled={ceomedApprovingId === irs.id}>
+                          <Button onClick={() => handleApproveCeomedToDepot(irs)} disabled={ceomedApprovingId === irs.id} style={{ background: `linear-gradient(180deg, ${MK_C.accent2}, ${MK_C.accent})`, color: '#fff' }}>
                             {ceomedApprovingId === irs.id ? 'Aktarılıyor...' : 'Stoğa Aktar'}
                           </Button>
                         </div>
-                      </CardContent>
+                      </div>
                     )}
-                  </Card>
+                  </MkWaybillCard>
                 );
               })}
             </section>
 
-            <section className="border-t border-[var(--dashboard-stroke)] pt-5">
+            <section style={{ borderTop: `1px solid ${MK_C.line}`, paddingTop: 20 }}>
               {selectedDepotId && selectedDepot && (
                 <BekleyenIrsaliyelerPanel
                   locationType="depot"

@@ -29,17 +29,15 @@ import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
 
 // UI Components
-import {
-  Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter,
-} from '@/components/ui/card';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { MK_C, MkClayStyles } from '@/components/mal-kabul/clay-kit';
 
 // Icons
-import { Loader2, History, ChevronLeft, ChevronRight, FileSpreadsheet } from 'lucide-react';
+import { Loader2, History, ChevronLeft, ChevronRight, FileSpreadsheet, Eye } from 'lucide-react';
 
 // Hooks & Utils
 import { useToast } from '@/hooks/use-toast';
@@ -261,99 +259,91 @@ export default function MalKabulGecmisPage() {
   };
 
 
+  const cols = 'minmax(0,2.3fr) 130px minmax(0,1.1fr) 150px 70px minmax(0,1fr) 96px';
+
   return (
-    <div className="p-6">
-      <div className="mx-auto max-w-5xl mb-4">
-        <BackButton fallback="/mal-kabul" />
+    <div className="mk-shell" style={{ padding: '20px 28px 40px' }}>
+      <MkClayStyles />
+      <div style={{ maxWidth: 1680, margin: '0 auto' }}>
+        <div className="mb-4"><BackButton fallback="/mal-kabul" /></div>
+
+        <div style={{ borderRadius: MK_C.radiusLg, background: `linear-gradient(180deg, ${MK_C.surface} 0%, ${MK_C.surface2} 100%)`, boxShadow: MK_C.clay, overflow: 'hidden' }}>
+          {/* head */}
+          <div className="flex flex-wrap items-start gap-4" style={{ padding: '24px 28px', borderBottom: `1px solid ${MK_C.line}` }}>
+            <span style={{ width: 46, height: 46, flexShrink: 0, borderRadius: 14, display: 'grid', placeItems: 'center', color: MK_C.accent, background: 'radial-gradient(120% 120% at 30% 24%, #FFFFFF, #ECE4D4 82%)', boxShadow: MK_C.clayFlat }}><History className="h-5 w-5" /></span>
+            <div className="flex-1" style={{ minWidth: 220 }}>
+              <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800, letterSpacing: '-0.02em', color: MK_C.ink1 }}>Mal Kabul İşlem Geçmişi</h1>
+              <p style={{ margin: '5px 0 0', fontSize: 14, color: MK_C.ink2, fontWeight: 500 }}>
+                {depotId ? 'Seçili deponun mal kabul işlemleri listelenir.' : 'Tüm işlemler listelenir.'} Sayfa başına kayıt sayısını seçebilirsiniz.
+              </p>
+              <div style={{ fontSize: 13, color: MK_C.ink3, fontWeight: 600, marginTop: 8 }}>Toplam işlem: {allRows.length} · Sayfa {currentPage} / {totalPages}</div>
+            </div>
+            <Select value={String(pageSize)} onValueChange={(v: string) => { setPageSize(Number(v)); setCurrentPage(1); }}>
+              <SelectTrigger className="border-0" style={{ width: 140, height: 46, background: MK_C.surface2, boxShadow: MK_C.clayInset, borderRadius: MK_C.radiusSm }}><SelectValue placeholder="Sayfa boyutu" /></SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZE_OPTIONS.map(s => <SelectItem key={s} value={String(s)}>{s} / sayfa</SelectItem>)}
+              </SelectContent>
+            </Select>
+            <button onClick={exportCurrentPage} style={{ all: 'unset', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 9, height: 46, padding: '0 18px', borderRadius: MK_C.radiusSm, background: `linear-gradient(180deg, ${MK_C.surfaceHi}, ${MK_C.surface2})`, boxShadow: MK_C.clay, color: MK_C.waterDeep, fontSize: 14, fontWeight: 700 }}>
+              <FileSpreadsheet className="h-[18px] w-[18px]" /> Excel
+            </button>
+          </div>
+
+          {/* column header */}
+          <div className="hidden md:grid" style={{ gridTemplateColumns: cols, gap: 16, padding: '16px 28px', borderBottom: `1px solid ${MK_C.line}` }}>
+            {['İşlem No', 'Depo', 'Kullanıcı', 'İşlem Zamanı', 'Kalem', 'Markalar', ''].map((h, i) => (
+              <div key={i} style={{ fontSize: 11.5, fontWeight: 700, color: MK_C.ink3, letterSpacing: '0.05em', textTransform: 'uppercase', textAlign: i === 4 ? 'center' : 'left' }}>{h}</div>
+            ))}
+          </div>
+
+          {/* rows */}
+          <div style={{ padding: '12px 18px', minHeight: '40vh' }}>
+            {isLoading ? (
+              <div className="flex flex-col items-center justify-center" style={{ padding: '60px 0', color: MK_C.ink2 }}>
+                <Loader2 className="h-6 w-6 animate-spin" />
+                <span className="mt-2 text-sm">Yükleniyor...</span>
+              </div>
+            ) : paginatedRows.length === 0 ? (
+              <div style={{ padding: '60px 0', textAlign: 'center', color: MK_C.ink3, fontWeight: 600 }}>Kayıt bulunamadı.</div>
+            ) : (
+              <div className="flex flex-col" style={{ gap: 9 }}>
+                {paginatedRows.map((r: MalKabulHeader & { id: string }, idx: number) => (
+                  <div key={r.id} data-row-id={r.id} ref={r.id === openId ? focusRef : null}
+                    className="grid items-center"
+                    style={{ gridTemplateColumns: cols, gap: 16, padding: '14px 16px', borderRadius: MK_C.radius, background: MK_C.surfaceHi, boxShadow: r.id === openId ? `${MK_C.clayFlat}, 0 0 0 1.5px ${MK_C.accent}66` : MK_C.clayFlat, animation: `mkPopIn ${240 + Math.min(idx, 8) * 30}ms ease` }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: MK_C.ink1, fontFamily: 'ui-monospace, monospace', lineHeight: 1.4, wordBreak: 'break-all' }}>{r.transactionId || r.id}</div>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: MK_C.ink2 }}>{r.depotName || '-'}</div>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: MK_C.ink1 }}>{r.userName || '-'}</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: MK_C.ink2, fontFamily: 'ui-monospace, monospace' }}>{formatTimestamp(r.timestamp, 'dd.MM.yyyy HH:mm')}</div>
+                    <div style={{ textAlign: 'center' }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 36, height: 30, padding: '0 10px', borderRadius: MK_C.radiusPill, background: MK_C.surface2, boxShadow: MK_C.clayInset, fontSize: 14, fontWeight: 800, color: MK_C.ink1 }}>{r.itemCount ?? 0}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {(r.brands || []).map((b, i) => (
+                        <span key={`${b}-${i}`} style={{ padding: '4px 10px', borderRadius: MK_C.radiusPill, background: `${MK_C.accent}14`, color: MK_C.accent, fontSize: 12, fontWeight: 700 }}>{b}</span>
+                      ))}
+                    </div>
+                    <button onClick={() => openTransaction(r.id)} style={{ all: 'unset', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7, height: 40, padding: '0 16px', justifySelf: 'end', borderRadius: MK_C.radiusSm, background: `linear-gradient(180deg, ${MK_C.surfaceHi}, ${MK_C.surface2})`, boxShadow: MK_C.clay, color: MK_C.accent, fontSize: 13.5, fontWeight: 700 }}>
+                      <Eye className="h-[15px] w-[15px]" /> Detay
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* pagination */}
+          <div className="flex items-center" style={{ padding: '16px 28px', borderTop: `1px solid ${MK_C.line}` }}>
+            <button disabled={currentPage <= 1 || isLoading} onClick={() => setCurrentPage((p: number) => p - 1)} style={{ all: 'unset', cursor: (currentPage <= 1 || isLoading) ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8, height: 44, padding: '0 18px', borderRadius: MK_C.radiusSm, background: (currentPage <= 1) ? MK_C.surface2 : `linear-gradient(180deg, ${MK_C.surfaceHi}, ${MK_C.surface2})`, boxShadow: (currentPage <= 1) ? MK_C.clayInset : MK_C.clay, color: (currentPage <= 1) ? MK_C.ink3 : MK_C.ink1, fontSize: 14, fontWeight: 700, opacity: (currentPage <= 1) ? 0.6 : 1 }}>
+              <ChevronLeft className="h-[15px] w-[15px]" /> Önceki
+            </button>
+            <div className="flex-1" style={{ textAlign: 'center', fontSize: 14, fontWeight: 700, color: MK_C.ink2 }}>Sayfa {currentPage} / {totalPages}</div>
+            <button disabled={currentPage >= totalPages || isLoading} onClick={() => setCurrentPage((p: number) => p + 1)} style={{ all: 'unset', cursor: (currentPage >= totalPages || isLoading) ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8, height: 44, padding: '0 18px', borderRadius: MK_C.radiusSm, background: (currentPage >= totalPages) ? MK_C.surface2 : `linear-gradient(180deg, ${MK_C.surfaceHi}, ${MK_C.surface2})`, boxShadow: (currentPage >= totalPages) ? MK_C.clayInset : MK_C.clay, color: (currentPage >= totalPages) ? MK_C.ink3 : MK_C.ink1, fontSize: 14, fontWeight: 700, opacity: (currentPage >= totalPages) ? 0.6 : 1 }}>
+              Sonraki <ChevronRight className="h-[15px] w-[15px]" />
+            </button>
+          </div>
+        </div>
       </div>
-
-      <Card className="mx-auto max-w-5xl">
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="text-2xl flex items-center gap-2">
-                <History className="h-6 w-6" />
-                Mal Kabul İşlem Geçmişi
-              </CardTitle>
-              <CardDescription>
-                {depotId ? 'Seçili deponun mal kabul işlemleri listelenir.' : 'Tüm işlemler listelenir.'} Sayfa başına kayıt sayısını seçebilir ve sayfalar arasında gezinebilirsiniz.
-              </CardDescription>
-            </div>
-            <div className="flex items-center gap-3">
-              <Select value={String(pageSize)} onValueChange={(v: string) => { setPageSize(Number(v)); setCurrentPage(1); }}>
-                <SelectTrigger className="w-32"><SelectValue placeholder="Sayfa boyutu" /></SelectTrigger>
-                <SelectContent>
-                  {PAGE_SIZE_OPTIONS.map(s => <SelectItem key={s} value={String(s)}>{s} / sayfa</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <Button variant="outline" onClick={exportCurrentPage}>
-                <FileSpreadsheet className="h-4 w-4 mr-2" /> Excel
-              </Button>
-            </div>
-          </div>
-          <div className="pt-2 text-sm text-muted-foreground">
-            Toplam işlem: {allRows.length} &nbsp;•&nbsp; Sayfa {currentPage} / {totalPages}
-          </div>
-        </CardHeader>
-
-        <CardContent className="p-0">
-          <ScrollArea className="h-[60vh] border-t">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>İşlem No</TableHead>
-                  <TableHead>Depo</TableHead>
-                  <TableHead>Kullanıcı</TableHead>
-                  <TableHead>İşlem Zamanı</TableHead>
-                  <TableHead className="text-right">Kalem</TableHead>
-                  <TableHead>Markalar</TableHead>
-                  <TableHead></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {isLoading ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="text-center py-8">
-                      <div className="flex flex-col items-center justify-center">
-                        <Loader2 className="h-6 w-6 animate-spin" />
-                        <span className="mt-2 text-sm text-muted-foreground">Yükleniyor...</span>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ) : paginatedRows.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="text-center py-10">Kayıt bulunamadı.</TableCell>
-                  </TableRow>
-                ) : (
-                  paginatedRows.map((r: MalKabulHeader & { id: string }) => (
-                      <TableRow key={r.id} data-row-id={r.id} ref={r.id === openId ? focusRef : null} className="hover:bg-muted/40" >
-                        <TableCell className="font-medium">{r.transactionId || r.id}</TableCell>
-                        <TableCell>{r.depotName || '-'}</TableCell>
-                        <TableCell>{r.userName || '-'}</TableCell>
-                        <TableCell>{formatTimestamp(r.timestamp, 'dd.MM.yyyy HH:mm')}</TableCell>
-                        <TableCell className="text-right">{r.itemCount ?? 0}</TableCell>
-                        <TableCell className="capitalize text-xs text-muted-foreground">{(r.brands || []).join(', ')}</TableCell>
-                        <TableCell className="text-right">
-                          <Button size="sm" onClick={() => openTransaction(r.id)}>Detay</Button>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                )}
-              </TableBody>
-            </Table>
-          </ScrollArea>
-        </CardContent>
-
-        <CardFooter className="flex items-center justify-between">
-          <Button variant="outline" disabled={currentPage <= 1 || isLoading} onClick={() => setCurrentPage((p: number) => p - 1)}>
-            <ChevronLeft className="h-4 w-4 mr-2" /> Önceki
-          </Button>
-          <span>Sayfa {currentPage} / {totalPages}</span>
-          <Button variant="outline" disabled={currentPage >= totalPages || isLoading} onClick={() => setCurrentPage((p: number) => p + 1)}>
-            Sonraki <ChevronRight className="h-4 w-4 ml-2" />
-          </Button>
-        </CardFooter>
-      </Card>
 
       <Dialog open={!!selectedTx} onOpenChange={(o: boolean) => !o && setSelectedTx(null)}>
         <DialogContent className="max-w-5xl">
