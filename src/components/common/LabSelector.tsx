@@ -42,6 +42,8 @@ type CommonProps = {
   align?: 'start' | 'center' | 'end';
   ariaLabel?: string;
   id?: string;
+  /** Keep the popover interactive when the selector is rendered inside a modal dialog. */
+  popoverModal?: boolean;
 };
 
 type SingleProps = CommonProps & {
@@ -119,6 +121,7 @@ export function LabSelector(props: LabSelectorProps) {
     align = 'start',
     ariaLabel,
     id,
+    popoverModal = false,
   } = props;
 
   const [open, setOpen] = React.useState(false);
@@ -213,7 +216,11 @@ export function LabSelector(props: LabSelectorProps) {
         </label>
       ) : null}
 
-      <Popover open={open} onOpenChange={(o) => !disabled && setOpen(o)}>
+      <Popover
+        open={open}
+        onOpenChange={(o) => !disabled && setOpen(o)}
+        modal={popoverModal}
+      >
         <PopoverTrigger asChild>
           <button
             id={id}
