@@ -1772,7 +1772,10 @@ export default function DirektTransferPanel() {
         @media (max-width: 1149px) { .dt-grid { grid-template-columns: 1fr; } }
       `}</style>
 
-      <div className="dt-shell" style={{ maxWidth: 1680, margin: '0 auto' }}>
+      {/* Full-bleed cream backdrop — paneli çevreleyen gri tema zeminini örter */}
+      <div aria-hidden style={{ position: 'fixed', inset: 0, background: 'linear-gradient(120deg, #F6F2EA 0%, transparent 55%), linear-gradient(225deg, #E8E1D2 0%, transparent 55%), #EFEAE0', zIndex: 0 }} />
+
+      <div className="dt-shell" style={{ maxWidth: 1680, margin: '0 auto', position: 'relative', zIndex: 1 }}>
 
         {/* ══ TOP BAR ══ */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
