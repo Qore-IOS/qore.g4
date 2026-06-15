@@ -87,6 +87,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { getScopedDocs, scopedQuery } from '@/lib/firestore-helpers';
 import { totalVerimlilikLogger } from '@/lib/logger';
 import { cn, exportDataToExcel } from '@/lib/utils';
+import { TOTAL_VERIMLILIK_AI_MASTER_PROMPT } from '@/lib/ai/totalVerimlilikMasterPrompt';
 import { getExchangeRates } from '@/lib/exchange-rates';
 import Link from 'next/link';
 
@@ -3059,43 +3060,51 @@ export default function TotalVerimlilikPanel({
     try {
       setAiAnalyzing(true);
       setAiAnalysisOpen(true);
-      const subset = flatVisibleRows.slice(0, 300).map(r => ({
+      // Satır kanıt paketi — master prompt'un atıfta bulunduğu normalize alanlar
+      // ve panelin güncel sınıflandırması (eksik / fark yok / fazla).
+      const stokDurumOf = (f: number) => (f > 0 ? 'eksik' : f < 0 ? 'fazla' : 'fark yok');
+      const buildEvidence = (r: TableRow) => ({
         lab: r.labName,
+        labKod: r.labKod,
         stok: r.stokAdi,
         stokKodu: r.stokKodu,
+        testAdi: r.testAdi,
+        cihazGrubu: r.cihazGrubu,
+        ambalaj: r.ambalajDegeri,
+        ayBasiSevkiyatKutu: r.ayBasiSevkiyatKutu,
+        ayBasiSevkiyatTest: r.ayBasiSevkiyatTest,
+        sevkiyatlarSonrasiTotalTest: r.sevkiyatlarSonrasiTotalTest,
+        donemSonuToplamTest: r.donemSonuToplamTest,
+        beklenenTest: r.beklenenTestSayisi,
+        kumulatifTotal: r.kumulatifTotal,
+        hakEdis: r.hakEdis,
+        hakEdisVar: Number(r.hakEdis || 0) > 0,
+        arizaliKitTest: r.arizaliKitTest,
         stokDogrulukFark: r.stokDogrulukFark,
-        kitVerimlilikFark: r.kitVerimlilikFark,
+        stokDurum: stokDurumOf(r.stokDogrulukFark),
         kutuKayip: Number(resolveFilterValue(r, 'kutuKayip') || 0),
-        sarfiyatMaliyeti: Number(resolveFilterValue(r, 'sarfiyatMaliyeti') || 0),
-      }));
+        kitVerimlilikFark: r.kitVerimlilikFark,
+      });
+      const donem = { yil: selectedYear, ay: selectedMonth + 1, etiket: `${MONTHS[selectedMonth]?.label || ''} ${selectedYear}`.trim() };
+      const subset = flatVisibleRows.slice(0, 300).map(buildEvidence);
       const targetRow = payload?.rowId ? flatVisibleRows.find(r => r.id === payload.rowId) : null;
       const targetCol = payload?.colId || '';
-      const cellTargetValue = targetRow ? (targetRow as unknown as Record<string, unknown>)[targetCol] : undefined;
-      const cellSummary = targetRow ? {
-        lab: targetRow.labName,
-        stok: targetRow.stokAdi,
-        stokKodu: targetRow.stokKodu,
-        sutun: targetCol,
-        deger: cellTargetValue,
-        stokDogrulukFark: targetRow.stokDogrulukFark,
-        kitVerimlilikFark: targetRow.kitVerimlilikFark,
-        kutuKayip: Number(resolveFilterValue(targetRow, 'kutuKayip') || 0),
-        sarfiyatMaliyeti: Number(resolveFilterValue(targetRow, 'sarfiyatMaliyeti') || 0),
-      } : null;
+      const colLabel = COLS_BY_ID[targetCol]?.label || targetCol;
+      const cellSummary = targetRow ? { ...buildEvidence(targetRow), sutun: targetCol } : null;
       const prompt = mode === 'table'
-        ? `Aşağıdaki total verimlilik verisini analiz et. Smart alertler, auto insights, anomaly detection ve gelecek ay tahmini verimlilik üret. Kısa ve madde madde yaz.\nVeri:${JSON.stringify(subset)}`
+        ? `Mod: TABLO GENELİ. Dönem: ${donem.etiket} (ay ${donem.ay}/12, yıl ${donem.yil}). Aşağıdaki satırların STOK DOĞRULUK ve KİT VERİMLİLİK verisini değerlendir; en kritik fire/anomali satırlarını öne çıkar, ortak kök neden örüntülerini ve aksiyon önceliğini ver. Master prompttaki bölüm formatına uy.\nVeri(JSON):${JSON.stringify(subset)}`
         : mode === 'column'
-          ? `Sadece ${targetCol} sütununu analiz et. Düşük performans, anomali, trend ve aksiyon önerisi ver.\nVeri:${JSON.stringify(subset.map(r => ({ lab: r.lab, stok: r.stok, value: (r as Record<string, unknown>)[targetCol] })))}`
-          : `Tek hücre analizi yap. ${targetCol} sütunundaki bu değeri anomali açısından değerlendir ve kısa, maddeli öneri ver.\nVeri:${JSON.stringify(cellSummary)}`;
-      setAiTargetLabel(mode === 'table' ? 'Tablo Geneli' : mode === 'column' ? `Sütun: ${targetCol}` : `Hücre: ${targetCol}`);
+          ? `Mod: SÜTUN ANALİZİ — "${colLabel}" (${targetCol}). Dönem: ${donem.etiket}. Bu sütunun tüm satırlardaki dağılımını değerlendir: en yüksek fire/anomali satırları, ortak kök neden örüntüleri, trend ve aksiyon önerileri. Master prompttaki bölüm formatına uy.\nVeri(JSON):${JSON.stringify(subset.map(r => ({ lab: r.lab, stok: r.stok, stokKodu: r.stokKodu, stokDurum: r.stokDurum, stokDogrulukFark: r.stokDogrulukFark, kutuKayip: r.kutuKayip, kitVerimlilikFark: r.kitVerimlilikFark, hakEdisVar: r.hakEdisVar })))}`
+          : `Mod: SATIR (HÜCRE) ANALİZİ — "${colLabel}" (${targetCol}). Dönem: ${donem.etiket}. Bu tek satır için master prompttaki kurallara göre fire/anomali neden-aksiyon analizi üret. Master prompttaki bölüm formatına uy.\nSatır kanıt paketi(JSON):${JSON.stringify(cellSummary)}`;
+      setAiTargetLabel(mode === 'table' ? 'Tablo Geneli' : mode === 'column' ? `Sütun: ${colLabel}` : `Hücre: ${colLabel}`);
       const res = await fetch('/api/ai/total-verimlilik-analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          systemPrompt: 'Sen sağlık operasyon verimlilik danışmanısın. Cevabı Türkçe, kısa, maddeli ve aksiyon odaklı ver.',
+          systemPrompt: TOTAL_VERIMLILIK_AI_MASTER_PROMPT,
           prompt,
           temperature: 0.2,
-          maxOutputTokens: 1200,
+          maxOutputTokens: 1600,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -3108,7 +3117,7 @@ export default function TotalVerimlilikPanel({
     } finally {
       setAiAnalyzing(false);
     }
-  }, [flatVisibleRows, resolveFilterValue]);
+  }, [flatVisibleRows, resolveFilterValue, selectedYear, selectedMonth]);
   // Flat ordered row IDs across visible (expanded) groups - used for shift-range selection
   const visibleRowIds = useMemo(() => {
     const ids: string[] = [];
