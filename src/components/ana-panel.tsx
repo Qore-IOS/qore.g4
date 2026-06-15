@@ -41,14 +41,17 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { VirtualizedList } from '@/components/ui/virtualized-list';
 
 // Icons
-import { Trash2, CheckSquare, PlusCircle, Plus, Minus, Loader2, Search, History, Camera, ScanLine, Package, MapPin, FileText, X, Undo2, AlertTriangle, QrCode, Download, Sparkles } from 'lucide-react';
+import { Trash2, CheckSquare, PlusCircle, Plus, Minus, Loader2, Search, History, Camera, ScanLine, Package, MapPin, FileText, X, Undo2, AlertTriangle, QrCode, Download, Sparkles, CheckCircle2, Clock, RefreshCw, Zap } from 'lucide-react';
 
 // Firebase
 import { db } from '@/lib/firebase';
-import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, orderBy, limit } from 'firebase/firestore';
+import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, orderBy, limit, increment, arrayUnion } from 'firebase/firestore';
+import { flushSync } from 'react-dom';
+import { scheduleIdle, cancelIdle, sanitizeFsId, type IdleHandle } from '@/lib/sync/idle-scheduler';
 
 // Utilities
 import { cn, generateId, playFeedback } from '@/lib/utils';
@@ -131,6 +134,15 @@ const DynamicCameraBarcodeScanner = dynamic(
 // =============================================================================
 
 /**
+ * Oto Kabul (arka plan artımlı yazma) için satır senkron durumu.
+ * - `pending`    : kuyrukta, henüz yazılmadı
+ * - `processing` : worker tarafından kilitlendi, Firestore yazımı sürüyor
+ * - `confirmed`  : stoğa yazıldı (sunucu onayı / yerel kalıcı kuyruğa alındı)
+ * - `failed`     : yazılamadı veya geçmişte işlem görmüş seri (atlandı)
+ */
+type SyncStatus = 'pending' | 'processing' | 'confirmed' | 'failed';
+
+/**
  * Extended scanned item with grouping support
  * @description Represents a single scanned item or a group of items with the same lot
  */
@@ -149,6 +161,14 @@ type ScanRow = ScannedItem & {
   items?: ScannedItem[];
   /** Whether item already included in a bulk serial QR assignment */
   bulkQrAssigned?: boolean;
+  /** Oto Kabul: arka plan yazma durumu (sadece oto kabul açıkken set edilir) */
+  syncStatus?: SyncStatus;
+  /** Oto Kabul: başarısızlık nedeni (UI'da gösterilir) */
+  syncError?: string;
+  /** Oto Kabul: geçici hatalarda otomatik yeniden deneme sayacı */
+  syncRetries?: number;
+  /** Oto Kabul: yazılan depoStok belge kimliği (idempotency + izlenebilirlik) */
+  serverDocId?: string;
 };
 
 /**
@@ -280,7 +300,7 @@ const stripUndefined = (val: unknown): unknown => {
  */
 function upsertGroupedRow(
   setScannedItems: React.Dispatch<React.SetStateAction<ScanRow[]>>,
-  base: { stokKodu: string; stokAdi: string; lot?: string; miad?: string; barkod?: string },
+  base: { stokKodu: string; stokAdi: string; lot?: string; miad?: string; barkod?: string; syncStatus?: SyncStatus },
   match: (r: ScanRow) => boolean,
   delta = 1
 ) {
@@ -294,7 +314,7 @@ function upsertGroupedRow(
       copy[idx] = existingItem;
       return copy;
     }
-    
+
     // If no match found, create a new item
     const key = `${base.stokKodu}-${base.lot || ''}-${base.miad || ''}`;
     const row: ScanRow = {
@@ -314,10 +334,18 @@ function upsertGroupedRow(
       isGroup: true,
       key: key,
       bulkQrAssigned: false,
+      ...(base.syncStatus ? { syncStatus: base.syncStatus } : {}),
     };
     return [row, ...prev];
   });
 }
+
+// Oto Kabul: bir satırın arka plan worker'ı tarafından kilitli (yeniden işlenmemesi
+// gereken) olup olmadığını söyler. Kilitli satırlar yeni okutmalarla GRUPLANMAZ;
+// böylece worker yazarken gelen okutmalar yeni bir "pending" gruba düşer ve adet
+// kaybı yaşanmaz.
+const isRowSyncLocked = (r: ScanRow): boolean =>
+  !!r.isProcessed || r.syncStatus === 'processing' || r.syncStatus === 'confirmed' || r.syncStatus === 'failed';
 
 
 const turkishFold = (value: string) =>
@@ -526,6 +554,31 @@ const enqueueSerialHistory = (
   });
 };
 
+// Tek bir depoStok belgesinin gövdesini üretir. Hem manuel "Mal Kabul" akışı hem
+// de Oto Kabul arka plan worker'ı bu fonksiyonu kullanır; böylece iki yolda da
+// belge şeması birebir aynıdır (companyId çağıran tarafça eklenir).
+type DepoStokDocContext = {
+  depotId: string;
+  depotName: string;
+  createdByName: string;
+  createdByUid: string | null;
+};
+const buildDepoStokDocData = (item: ScanRow, serial: string, ctx: DepoStokDocContext) => ({
+  depotId: ctx.depotId,
+  depotName: ctx.depotName,
+  stokKodu: item.stokKodu || '',
+  stokAdi: item.stokAdi || '',
+  lotNumarasi: item.lotNumarasi || '',
+  miad: item.miad ? normalizeMiad(item.miad) : '',
+  seriNumarasi: serial,
+  rafAdresi: item.rafAdresi || '',
+  irsaliyeNumarasi: item.irsaliyeNumarasi || '',
+  eklenmeTarihi: toFsTimestamp(item.timestamp),
+  isShipped: false,
+  createdByName: ctx.createdByName,
+  createdByUid: ctx.createdByUid,
+});
+
 
 // Stable empty reference for the depot serial index so that, while the query is
 // loading (data === undefined), the fallback doesn't allocate a new Map every
@@ -570,6 +623,20 @@ export default function AnaPanel(props: AnaPanelProps) {
   // Ölçülebilir uygulama maliyeti: senkron JS ve React'in acil UI commit süresi.
   const { startScanMeasurement, controller: scanPerformanceController } = useScanPerformance();
   const [, startTransition] = useTransition();
+
+  // ── Oto Kabul (arka plan artımlı stoğa yazma) ───────────────────────────────
+  // Switch açıkken okutulan her ürün, tarama hot-path'ine dokunmadan, tarayıcı
+  // boş anlarında (idle) küçük partiler halinde depoStok'a yazılır ve satır
+  // "Stokta" olarak işaretlenir. Okutma yine tamamen bellek-içi kalır (<10ms);
+  // yalnızca yeni satıra `syncStatus: 'pending'` damgası eklenir.
+  const [otoKabul, setOtoKabul] = useState(false);
+  const otoKabulRef = useRef(false);
+  useEffect(() => { otoKabulRef.current = otoKabul; }, [otoKabul]);
+  const [autoStats, setAutoStats] = useState<{ confirmed: number; failed: number }>({ confirmed: 0, failed: 0 });
+  const [autoTxId, setAutoTxId] = useState<string | null>(null);
+  const autoRunningRef = useRef(false);
+  const autoIdleHandleRef = useRef<IdleHandle | null>(null);
+  const autoTxRef = useRef<{ id: string; ref: ReturnType<typeof doc>; depotId: string } | null>(null);
 
   // A scan must stay on the urgent input path. Grouping and sorting thousands of
   // rows synchronously here used to block the next HID/keyboard event for a few
@@ -906,7 +973,8 @@ export default function AnaPanel(props: AnaPanelProps) {
               id: generateId(), barkod: trimmedData, stokKodu: stokKodu, stokAdi: matchedProduct.stokAdi,
               lotNumarasi: lotNumarasi || '', miad: miadFormatted || '', seriNumarasi: seriNumarasi || '',
               rafAdresi: '', irsaliyeNumarasi: selectedPendingIrs?.irsaliyeNo || '', isSelected: false, timestamp: new Date(), isProcessed: false,
-              adet: 1, isGroup: false, bulkQrAssigned: false
+              adet: 1, isGroup: false, bulkQrAssigned: false,
+              ...(otoKabulRef.current ? { syncStatus: 'pending' as const } : {}),
             };
             newItem.key = `${newItem.stokKodu}-${newItem.lotNumarasi}-${newItem.miad}`;
             // Oturum içi mükerrer takibi: stokKodu -> Set<seriNumarasi> (lot dahil değil)
@@ -946,8 +1014,8 @@ export default function AnaPanel(props: AnaPanelProps) {
           // It's a lot-based or quantity-based item
           startTransition(() => upsertGroupedRow(
             setScannedItems,
-            { stokKodu: stokKodu, stokAdi: matchedProduct.stokAdi, lot: lotNumarasi, miad: miadFormatted, barkod: trimmedData },
-            (r) => !!(r.isGroup && r.stokKodu === stokKodu && r.lotNumarasi === (lotNumarasi || '') && r.miad === (miadFormatted || '')),
+            { stokKodu: stokKodu, stokAdi: matchedProduct.stokAdi, lot: lotNumarasi, miad: miadFormatted, barkod: trimmedData, syncStatus: otoKabulRef.current ? 'pending' : undefined },
+            (r) => !!(r.isGroup && r.stokKodu === stokKodu && r.lotNumarasi === (lotNumarasi || '') && r.miad === (miadFormatted || '') && !isRowSyncLocked(r)),
             1
           ));
           if (source === 'barcode') {
@@ -1574,18 +1642,9 @@ export default function AnaPanel(props: AnaPanelProps) {
             return !isConsumed;
           });
 
-          const createDocData = (serial = '') => ({
+          const createDocData = (serial = '') => buildDepoStokDocData(item, serial, {
             depotId: selectedDepotId,
             depotName,
-            stokKodu: item.stokKodu || '',
-            stokAdi: item.stokAdi || '',
-            lotNumarasi: item.lotNumarasi || '',
-            miad: item.miad ? normalizeMiad(item.miad) : '',
-            seriNumarasi: serial,
-            rafAdresi: item.rafAdresi || '',
-            irsaliyeNumarasi: item.irsaliyeNumarasi || '',
-            eklenmeTarihi: toFsTimestamp(item.timestamp),
-            isShipped: false,
             createdByName: currentUserProfile?.name || currentUser?.email || 'Unknown',
             createdByUid: currentUser?.uid || null,
           });
@@ -1668,6 +1727,244 @@ export default function AnaPanel(props: AnaPanelProps) {
         setCommitInfo(null);
       }
     })();
+  };
+
+  // ── Oto Kabul arka plan worker'ı ────────────────────────────────────────────
+  // Tek bir mikro-partiyi (≤ AUTO_BATCH_SIZE pending satır) idempotent biçimde
+  // stoğa yazar: depoStok + serialHistory + (oturum başına tek) malKabulTransactions
+  // başlığı/satırları. Deterministik belge kimlikleri sayesinde yeniden denemeler
+  // çift kayıt oluşturmaz. Geçmişte işlem görmüş seriler manuel akışla birebir aynı
+  // şekilde elenir.
+  const AUTO_BATCH_SIZE = 20;
+
+  const commitAutoAcceptBatch = async (
+    picked: ScanRow[]
+  ): Promise<{ confirmed: Map<string, string>; failed: Map<string, string> }> => {
+    const confirmed = new Map<string, string>();
+    const failed = new Map<string, string>();
+    const depotName = sourceDepots.find(d => d.id === selectedDepotId)?.name || 'Bilinmeyen Depo';
+    const ctx: DepoStokDocContext = {
+      depotId: selectedDepotId,
+      depotName,
+      createdByName: currentUserProfile?.name || currentUser?.email || 'Unknown',
+      createdByUid: currentUser?.uid || null,
+    };
+
+    // 1) Geçmişte işlem görmüş serileri tespit et (arka planda, okutma dışı).
+    const serialChecks: { serial: string; stokKodu: string }[] = [];
+    picked.forEach(item => {
+      if (!item.isGroup && item.seriNumarasi && item.stokKodu) {
+        serialChecks.push({ serial: item.seriNumarasi, stokKodu: item.stokKodu });
+      } else if (item.isGroup && item.scannedSerials && item.stokKodu) {
+        item.scannedSerials.forEach(s => { if (s) serialChecks.push({ serial: s, stokKodu: item.stokKodu! }); });
+      }
+    });
+    const consumed = new Set<string>();
+    if (serialChecks.length > 0) {
+      await Promise.all(serialChecks.map(async ({ serial, stokKodu }) => {
+        try {
+          const snap = await getDocs(query(collection(db, `serialHistory/${serial}/events`), limit(1)));
+          if (!snap.empty && snap.docs.some(d => d.data().details?.stokKodu === stokKodu)) {
+            consumed.add(`${stokKodu}||${serial}`);
+          }
+        } catch { /* okuma hatasında yazım yine denenir */ }
+      }));
+    }
+
+    // 2) depoStok + serialHistory tek writeBatch (parti küçük; 500 op limiti uzak).
+    const batch = writeBatch(db);
+    const writtenRows: ScanRow[] = [];
+
+    for (const item of picked) {
+      const depotProductSerials = item.stokKodu ? existingDepotSerials.get(serialProductKey(item.stokKodu)) : undefined;
+      if (!item.isGroup && item.seriNumarasi &&
+          (depotProductSerials?.has(item.seriNumarasi) || consumed.has(`${item.stokKodu}||${item.seriNumarasi}`))) {
+        failed.set(item.id, 'Bu seri depoda mevcut veya geçmişte işlem görmüş.');
+        continue;
+      }
+
+      const serialsToProcess = item.isGroup ? (item.scannedSerials || []) : [item.seriNumarasi];
+      const filteredSerials = (serialsToProcess.filter(Boolean) as string[])
+        .filter(s => !consumed.has(`${item.stokKodu}||${s}`));
+
+      if (item.isGroup && filteredSerials.length === 0) {
+        // Lot/adet grubu → tek belge + adet. Deterministik id: satıra bağlı.
+        const ref = doc(db, 'depoStok', `mkrow-${sanitizeFsId(item.id)}`);
+        batch.set(ref, withCompanyScope({ ...buildDepoStokDocData(item, '', ctx), adet: Math.max(1, item.adet ?? 1) }, currentCompanyId));
+        confirmed.set(item.id, ref.id);
+        writtenRows.push(item);
+      } else {
+        if (filteredSerials.length === 0) {
+          failed.set(item.id, 'Seri(ler) geçmişte işlem görmüş.');
+          continue;
+        }
+        let firstId = '';
+        for (const serial of filteredSerials) {
+          // Deterministik id (companyId+depot+stok+seri) → tekrar denemeler tek belge.
+          const ref = doc(db, 'depoStok', `mk-${sanitizeFsId(currentCompanyId || 'nc')}-${sanitizeFsId(selectedDepotId)}-${sanitizeFsId(item.stokKodu || '')}-${sanitizeFsId(serial)}`);
+          batch.set(ref, withCompanyScope({ ...buildDepoStokDocData(item, serial, ctx), adet: 1 }, currentCompanyId));
+          const histRef = doc(collection(db, `serialHistory/${serial}/events`));
+          batch.set(histRef, {
+            type: 'intake',
+            details: { stokKodu: item.stokKodu || '', stokAdi: item.stokAdi || '', depotId: selectedDepotId, depotName, rafAdresi: item.rafAdresi || '', irsaliyeNumarasi: item.irsaliyeNumarasi || '' },
+            timestamp: Timestamp.now(),
+          });
+          if (!firstId) firstId = ref.id;
+        }
+        confirmed.set(item.id, firstId);
+        writtenRows.push(item);
+      }
+    }
+
+    // 3) malKabulTransactions: oturum başına tek başlık (lazy), satırlar artımlı.
+    if (writtenRows.length > 0) {
+      if (autoTxRef.current && autoTxRef.current.depotId !== selectedDepotId) autoTxRef.current = null;
+      const addedCount = writtenRows.reduce((n, r) => n + Math.max(1, r.adet ?? 1), 0);
+      const brands = Array.from(new Set(writtenRows.map(r => getBrandFor(r.stokKodu || '', r.stokAdi || '')).filter(Boolean)));
+
+      if (!autoTxRef.current) {
+        const transactionId = `MK-${generateId()}`;
+        const txRef = doc(db, 'malKabulTransactions', transactionId);
+        const header: MalKabulHeader = {
+          transactionId, depotId: selectedDepotId, depotName,
+          userId: currentUser?.uid || '', userName: currentUserProfile?.name || currentUser?.email || 'Unknown',
+          timestamp: Timestamp.now(), itemCount: addedCount, brands, mode: 'unverified',
+        };
+        batch.set(txRef, withCompanyScope(stripUndefined(header), currentCompanyId));
+        autoTxRef.current = { id: transactionId, ref: txRef, depotId: selectedDepotId };
+      } else {
+        const upd: Record<string, unknown> = { itemCount: increment(addedCount) };
+        if (brands.length) upd.brands = arrayUnion(...brands);
+        batch.update(autoTxRef.current.ref, upd);
+      }
+
+      const txRef = autoTxRef.current.ref;
+      for (const line of buildTransactionLines(writtenRows)) {
+        const lineRef = doc(collection(txRef, 'lines'));
+        batch.set(lineRef, withCompanyScope(stripUndefined({
+          stokKodu: line.stokKodu, stokAdi: line.stokAdi, lotNumarasi: line.lotNumarasi || '', miad: line.miad || '',
+          adet: line.adet ?? 0, serials: Array.isArray(line.serials) ? (line.serials as string[]).filter(Boolean) : [],
+        }), currentCompanyId));
+      }
+    }
+
+    await batch.commit();
+    return { confirmed, failed };
+  };
+
+  // Tek tur drenaj: pending satırları atomik kilitle (flushSync ile snapshot al),
+  // yaz, sonucu işaretle. Dönen değer: daha işlenecek pending kaldıysa true.
+  const drainAutoAcceptOnce = async (): Promise<boolean> => {
+    let picked: ScanRow[] = [];
+    // flushSync: kilit+snapshot'ı senkron uygula → adet kaybı/yarış olmadan
+    // `picked`'i güvenle dışarı al. Tarama duraklamasında (idle) çalıştığı için
+    // okutma gecikmesini etkilemez.
+    flushSync(() => {
+      setScannedItems(prev => {
+        picked = [];
+        let changed = false;
+        const next = prev.map(it => {
+          if (picked.length >= AUTO_BATCH_SIZE) return it;
+          if (it.syncStatus !== 'pending' || !it.stokKodu) return it;
+          const locked: ScanRow = { ...it, syncStatus: 'processing' };
+          picked.push(locked);
+          changed = true;
+          return locked;
+        });
+        return changed ? next : prev;
+      });
+    });
+    if (picked.length === 0) return false;
+
+    try {
+      const { confirmed, failed } = await commitAutoAcceptBatch(picked);
+      setScannedItems(prev => prev.map(it => {
+        if (confirmed.has(it.id)) return { ...it, isProcessed: true, isSelected: false, syncStatus: 'confirmed', serverDocId: confirmed.get(it.id) };
+        if (failed.has(it.id)) return { ...it, syncStatus: 'failed', syncError: failed.get(it.id) };
+        return it;
+      }));
+      if (confirmed.size || failed.size) {
+        setAutoStats(s => ({ confirmed: s.confirmed + confirmed.size, failed: s.failed + failed.size }));
+      }
+      if (autoTxRef.current) setAutoTxId(autoTxRef.current.id);
+      await touchStockMetadata();
+      invalidateDepoStok();
+      return true;
+    } catch (e: any) {
+      const msg = safeStr(e?.message) || 'Stoğa yazılamadı.';
+      const pickedIds = new Set(picked.map(p => p.id));
+      setScannedItems(prev => prev.map(it => {
+        if (!pickedIds.has(it.id)) return it;
+        const retries = (it.syncRetries ?? 0) + 1;
+        // Kalıcı hatada (3 deneme) failed; geçici hatada pending → otomatik retry.
+        if (retries >= 3) return { ...it, syncStatus: 'failed', syncError: msg, syncRetries: retries };
+        return { ...it, syncStatus: 'pending', syncRetries: retries };
+      }));
+      return false;
+    }
+  };
+
+  // drainRef her render'da en güncel closure ile yenilenir; zamanlayıcı efekti
+  // yalnızca bu ref'i çağırır (stale-closure / dep churn yok).
+  const drainAutoAcceptRef = useRef<() => Promise<void>>(async () => {});
+  drainAutoAcceptRef.current = async () => {
+    if (autoRunningRef.current || !otoKabulRef.current) return;
+    autoRunningRef.current = true;
+    try {
+      let more = true;
+      while (more && otoKabulRef.current) {
+        more = await drainAutoAcceptOnce();
+      }
+    } finally {
+      autoRunningRef.current = false;
+    }
+  };
+
+  // Oto kabul açık ve pending satır varken, tarama duraklamasında drenajı planla.
+  // Her okutmada efekt yeniden kurulur ve önceki idle görevi iptal edilir →
+  // hızlı okutma sırasında drenaj ertelenir, okutma bitince devreye girer.
+  useEffect(() => {
+    if (!otoKabul) return;
+    if (!scannedItems.some(i => i.syncStatus === 'pending')) return;
+    const handle = scheduleIdle(() => { void drainAutoAcceptRef.current(); });
+    autoIdleHandleRef.current = handle;
+    return () => { cancelIdle(handle); autoIdleHandleRef.current = null; };
+  }, [otoKabul, scannedItems]);
+
+  const handleToggleOtoKabul = (next: boolean) => {
+    if (next && !selectedDepotId) {
+      toast({ title: 'Depo Seçilmedi', description: 'Oto kabul için önce bir depo seçin.', variant: 'destructive' });
+      return;
+    }
+    setOtoKabul(next);
+    otoKabulRef.current = next;
+    if (next) {
+      setAutoStats({ confirmed: 0, failed: 0 });
+      setAutoTxId(null);
+      autoTxRef.current = null;
+      // Açılmadan önce okutulmuş, henüz işlenmemiş satırları da kuyruğa al.
+      setScannedItems(prev => prev.map(it =>
+        (!it.isProcessed && it.syncStatus !== 'confirmed' && it.syncStatus !== 'processing')
+          ? { ...it, syncStatus: 'pending', syncRetries: 0, syncError: undefined }
+          : it
+      ));
+      toast({ title: 'Oto Kabul Açık', description: 'Okutulan ürünler arka planda otomatik stoğa eklenecek.' });
+    } else {
+      if (autoIdleHandleRef.current != null) { cancelIdle(autoIdleHandleRef.current); autoIdleHandleRef.current = null; }
+      autoTxRef.current = null;
+      // Kuyrukta bekleyen (henüz yazılmamış) satırları normal listeye döndür.
+      setScannedItems(prev => prev.map(it => it.syncStatus === 'pending' ? { ...it, syncStatus: undefined } : it));
+      toast({ title: 'Oto Kabul Kapalı', description: 'Yeni okutmalar elle "Kabul Et" ile kaydedilecek.' });
+    }
+  };
+
+  const retryAutoGroup = (group: ScanRow) => {
+    const ids = new Set((group.items && group.items.length ? group.items : [group]).map(i => i.id));
+    setScannedItems(prev => prev.map(it =>
+      ids.has(it.id) && it.syncStatus === 'failed'
+        ? { ...it, syncStatus: 'pending', syncRetries: 0, syncError: undefined }
+        : it
+    ));
   };
 
   const handlePreCheckAndDogrulamasizMalKabul = async () => {
@@ -2172,6 +2469,36 @@ export default function AnaPanel(props: AnaPanelProps) {
               <MkChipBtn icon={<Trash2 className="h-4 w-4" />} onClick={clearAllScannedItems} disabled={malKabulIsLoading || scannedItems.length === 0} danger title={scannedItems.length === 0 ? 'Liste boş' : undefined}>
                 Temizle
               </MkChipBtn>
+              {/* Oto Kabul: açıkken okutulanlar arka planda anında stoğa eklenir */}
+              <label
+                title={!selectedDepotId ? 'Önce depo seçin' : 'Açıkken okutulan her ürün arka planda otomatik stoğa eklenir'}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 8, cursor: selectedDepotId ? 'pointer' : 'not-allowed',
+                  padding: '6px 12px', borderRadius: MK_C.radiusPill,
+                  background: otoKabul ? 'rgba(111,181,133,0.16)' : MK_C.surface2,
+                  boxShadow: otoKabul ? `0 0 0 1.5px ${MK_C.accent}55` : MK_C.clayInset,
+                  opacity: selectedDepotId ? 1 : 0.55,
+                }}
+              >
+                <Zap className="h-3.5 w-3.5" style={{ color: otoKabul ? MK_C.accent : MK_C.ink3 }} />
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: otoKabul ? MK_C.waterDeep : MK_C.ink2 }}>Oto Kabul</span>
+                <Switch checked={otoKabul} onCheckedChange={handleToggleOtoKabul} disabled={!selectedDepotId} />
+                {otoKabul && (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700 }}>
+                    <span style={{ color: MK_C.waterDeep }}>{autoStats.confirmed} eklendi</span>
+                    {autoStats.failed > 0 && <span style={{ color: MK_C.danger }}>· {autoStats.failed} hata</span>}
+                    {autoTxId && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.preventDefault(); router.push(`/mal-kabul/gecmis?depotId=${encodeURIComponent(selectedDepotId)}&open=${encodeURIComponent(autoTxId)}`); }}
+                        style={{ all: 'unset', cursor: 'pointer', color: MK_C.accent, textDecoration: 'underline' }}
+                      >
+                        Geçmiş
+                      </button>
+                    )}
+                  </span>
+                )}
+              </label>
               <MkAcceptBtn
                 count={stepperState.readyCount}
                 onClick={handlePreCheckAndDogrulamasizMalKabul}
@@ -2219,6 +2546,45 @@ export default function AnaPanel(props: AnaPanelProps) {
                 const unitLabel = `${normalizeUnitLabel(meta?.anaBirim)}${multiplier ? ` (${multiplier})` : ''}`;
                 const adet = group.adet ?? 0;
 
+                // ── Oto Kabul: grup içi senkron durum özeti ──
+                const subRows = (group.items && group.items.length ? group.items : [group]) as ScanRow[];
+                const sConfirmed = subRows.filter(i => i.syncStatus === 'confirmed').length;
+                const sProcessing = subRows.filter(i => i.syncStatus === 'processing').length;
+                const sPending = subRows.filter(i => i.syncStatus === 'pending').length;
+                const sFailed = subRows.filter(i => i.syncStatus === 'failed').length;
+                const syncFailReason = subRows.find(i => i.syncStatus === 'failed')?.syncError;
+                let syncBadge: React.ReactNode = null;
+                if (sFailed > 0) {
+                  syncBadge = (
+                    <button
+                      type="button"
+                      onClick={() => retryAutoGroup(group)}
+                      title={syncFailReason || 'Yeniden dene'}
+                      style={{ all: 'unset', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 7px', borderRadius: 999, background: 'rgba(220,80,80,0.14)', color: MK_C.danger, fontSize: 10, fontWeight: 700 }}
+                    >
+                      <RefreshCw className="h-2.5 w-2.5" /> Hata · Tekrar
+                    </button>
+                  );
+                } else if (sProcessing > 0) {
+                  syncBadge = (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 7px', borderRadius: 999, background: 'rgba(120,150,210,0.16)', color: MK_C.waterDeep, fontSize: 10, fontWeight: 700 }}>
+                      <Loader2 className="h-2.5 w-2.5 animate-spin" /> Ekleniyor
+                    </span>
+                  );
+                } else if (sPending > 0) {
+                  syncBadge = (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 7px', borderRadius: 999, background: MK_C.surface2, color: MK_C.ink3, fontSize: 10, fontWeight: 700 }}>
+                      <Clock className="h-2.5 w-2.5" /> Sırada
+                    </span>
+                  );
+                } else if (sConfirmed > 0) {
+                  syncBadge = (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 7px', borderRadius: 999, background: 'rgba(111,181,133,0.16)', color: MK_C.waterDeep, fontSize: 10, fontWeight: 700 }}>
+                      <CheckCircle2 className="h-2.5 w-2.5" /> Stokta
+                    </span>
+                  );
+                }
+
                 const checkbox = (
                   <Checkbox checked={group.isSelected} onCheckedChange={() => toggleGroupSelection(group.key)} />
                 );
@@ -2259,6 +2625,7 @@ export default function AnaPanel(props: AnaPanelProps) {
                                 <Download className="h-2.5 w-2.5" /> Barkod atandı
                               </span>
                             )}
+                            {syncBadge}
                           </div>
                         </div>
                         <div style={{ fontSize: 12.5, color: MK_C.ink2, fontFamily: 'ui-monospace, monospace', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{group.lotNumarasi || '—'}</div>
@@ -2289,11 +2656,12 @@ export default function AnaPanel(props: AnaPanelProps) {
                                 {actions}
                               </div>
                             </div>
-                            <div className="flex flex-wrap gap-1.5" style={{ marginTop: 8 }}>
+                            <div className="flex flex-wrap gap-1.5 items-center" style={{ marginTop: 8 }}>
                               {group.lotNumarasi && <MkGoodChip mono>Lot {group.lotNumarasi}</MkGoodChip>}
                               {group.miad && <MkGoodChip mono>SKT {group.miad}</MkGoodChip>}
                               {group.rafAdresi ? <MkGoodChip mono><MapPin className="h-3 w-3" /> {group.rafAdresi}</MkGoodChip> : <MkWarnChip><AlertTriangle className="h-3 w-3" /> Adres yok</MkWarnChip>}
                               {group.irsaliyeNumarasi ? <MkGoodChip mono>{group.irsaliyeNumarasi}</MkGoodChip> : <MkWarnChip><AlertTriangle className="h-3 w-3" /> İrsaliye yok</MkWarnChip>}
+                              {syncBadge}
                             </div>
                           </div>
                         </div>
