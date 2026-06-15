@@ -28,7 +28,7 @@ import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
 import BackButton from '@/components/BackButton';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery, getScopedDocs } from '@/lib/firestore-helpers';
 import { resolveDefaultTrackingMode, TrackingMode } from '@/lib/tracking';
 
 
@@ -62,15 +62,15 @@ export default function UrunIadePanel() {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [depotsSnap, hospitalsSnap, productsSnap] = await Promise.all([
+      const [depotsSnap, hospitalsSnap, productDocs] = await Promise.all([
         getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
         getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
-        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+        getScopedDocs('productCodes', currentCompanyId, isSuperAdmin),
       ]);
       const depotList = depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
       setDepots(depotList);
       setHospitals(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
-      setProductCodes(productsSnap.docs.map(p => ({ id: p.id, ...p.data() } as ProductCode)));
+      setProductCodes(productDocs.map(p => ({ id: p.id, ...p.data() } as ProductCode)));
 
       if (depotList.length > 0 && !selectedDepotId && depotList[0].id) {
         setSelectedDepotId(depotList[0].id);
