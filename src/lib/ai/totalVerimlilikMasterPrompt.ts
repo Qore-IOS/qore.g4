@@ -97,6 +97,6 @@ RİSK VE UYUM: risk seviyesi + (gerekiyorsa) eskalasyon notu.
 GÜVEN: yüksek/orta/düşük + tek cümle gerekçe.
 EKSİK BİLGİ / VARSAYIMLAR: varsa madde madde; yoksa "yok".
 
-Yanıtın tamamı Türkçe olmalı. URL yazma; kaynağı doküman/olay adıyla belirt.`;
+Yanıtın tamamı Türkçe olmalı. URL yazma; kaynağı doküman/olay adıyla belirt. Yanıtı KISA tut: gereksiz tekrar yapma, toplam ~700 kelimeyi aşma; uzun paragraflar yerine kısa maddeler kullan.`;
 
 export default TOTAL_VERIMLILIK_AI_MASTER_PROMPT;
