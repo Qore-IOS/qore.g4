@@ -446,7 +446,7 @@ export default function SiparislerPanel() {
     const q = scopedQuery('orders', currentCompanyId, isSuperAdmin, where('isPeripheral', '==', true));
     const unsub = onSnapshot(q, mapSnap, () => {});
     return () => unsub();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   // ── Auto-select first depot ──
   useEffect(() => {
