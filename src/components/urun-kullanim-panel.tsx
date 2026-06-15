@@ -14,7 +14,7 @@ import type { Laboratory, DepoStokItem, ConsumptionRecord, Device, ProductCode, 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Barcode, AlertTriangle, CheckCircle, PackageMinus, TrendingUp, Info, Clock, Camera, Loader2, Wrench, XCircle, ClipboardPlus, ChevronsUpDown, Check, Pencil, Play, Trash2, LogOut, FlaskConical, CalendarDays, X } from 'lucide-react';
+import { Barcode, AlertTriangle, CheckCircle, PackageMinus, TrendingUp, Info, Clock, Camera, Loader2, Wrench, XCircle, ClipboardPlus, ChevronsUpDown, Check, Pencil, Play, Trash2, LogOut, FlaskConical, CalendarDays, X, ListChecks } from 'lucide-react';
 import { playFeedback, sanitizeGS1 } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
@@ -44,6 +44,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { LabSelector } from '@/components/common/LabSelector';
+import { LiquidGlassSurface } from '@/components/ui/liquid-glass';
 import { useLightDashboardData } from './dashboard/useDashboardData';
 import { useBarcodeFormatsQuery, useLabStock, useRecentConsumption, useSubPoints, useInvalidateQueries, useMinMaxRules, useLabPools, useDevices, useUsers, useActiveDutyShifts, useUpcomingDutyShifts } from '@/hooks/useFirebaseQueries';
 import type { DutyShift } from '@/lib/types';
@@ -54,6 +55,37 @@ const DynamicCameraBarcodeScanner = dynamic(() => import('@/components/camera-ba
   ssr: false,
   loading: () => <div className="flex items-center justify-center p-8"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Kamera Yükleniyor...</p></div>,
 });
+
+/**
+ * Frosted cam kartların Apple Liquid Glass varyantı. Eski `.frosted-glass-card`
+ * yüzeyini (background + backdrop-blur) bırakıp yerine, arkadaki sahneyi canlı
+ * kıran <LiquidGlassSurface> kullanır. `.liquid` modifikatörü CSS'te kartın
+ * kendi arka planını/backdrop'unu ve isolation'ını kaldırır (isolation: isolate
+ * bir "backdrop root" oluşturup kırılmayı öldürürdü). Tüm DOM nitelikleri
+ * (role, aria-*, onClick vb.) köke geçirilir.
+ */
+function LiquidGlassCard({
+  className,
+  children,
+  radius = 16,
+  ...rest
+}: React.HTMLAttributes<HTMLDivElement> & { radius?: number }) {
+  return (
+    <div className={cn('frosted-glass-card liquid', className)} {...rest}>
+      <LiquidGlassSurface
+        radius={radius}
+        strength={22}
+        dispersion={0.3}
+        blur={5}
+        bezel={16}
+        zoom={0.1}
+        fallbackBlur={24}
+        shine={false}
+      />
+      {children}
+    </div>
+  );
+}
 
 /**
  * Formats a DutyShift date (Timestamp or Date) to a readable string
@@ -1815,7 +1847,7 @@ export default function UrunKullanimPanel() {
       <div className="relative z-10 min-h-screen flex flex-col">
         {/* Full-width Header - spans entire screen */}
         <div className="w-full p-4 pb-0">
-          <div className="frosted-glass-card">
+          <LiquidGlassCard>
             <div className="px-4 py-2">
               {/* Use flex layout for natural flow */}
               <div className="flex items-center justify-between min-h-[44px]">
@@ -1825,16 +1857,6 @@ export default function UrunKullanimPanel() {
                     <h2 className="text-lg font-bold font-headline text-gradient-primary">{currentUserProfile?.name || 'Kullanıcı'}</h2>
                     <p className="text-xs text-foreground/70">Ürün Kullanım Kaydı</p>
                   </div>
-                  {currentUserProfile?.role === 'teknisyen' && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={logout}
-                      className="text-destructive hover:text-destructive hover:bg-destructive/10 h-6 w-6 p-0"
-                    >
-                      <LogOut className="h-3 w-3" />
-                    </Button>
-                  )}
                 </div>
 
                 {/* Center: Duty info - always centered */}
@@ -1842,8 +1864,45 @@ export default function UrunKullanimPanel() {
                   <DutyInfo selectedLabId={selectedLabId} />
                 </div>
 
-                {/* Right: Lab selector */}
-                <div className="flex items-center gap-3 flex-shrink-0">
+                {/* Right: hızlı eylemler + Lab selector */}
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {/* Ürün Talep paneline git */}
+                  <button
+                    type="button"
+                    onClick={() => router.push('/urun-talep')}
+                    className="inline-flex items-center gap-1.5 h-8 px-3 rounded-xl text-xs font-semibold border border-white/30 bg-white/15 hover:bg-white/30 text-foreground/90 transition-colors backdrop-blur-sm"
+                    title="Ürün Talep Paneli"
+                    aria-label="Ürün talep paneline git"
+                  >
+                    <ClipboardPlus className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span className="hidden sm:inline">Ürün Talep</span>
+                  </button>
+
+                  {/* Seçili laboratuvarın sayım oturumunu başlat */}
+                  <button
+                    type="button"
+                    onClick={() => selectedLabId && router.push(`/laboratuvar/sayim/${selectedLabId}`)}
+                    disabled={!selectedLabId}
+                    className="inline-flex items-center gap-1.5 h-8 px-3 rounded-xl text-xs font-semibold border border-emerald-400/40 bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-700 dark:text-emerald-300 transition-colors backdrop-blur-sm disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Sayım Oturumu Başlat"
+                    aria-label="Seçili laboratuvarın sayım oturumunu başlat"
+                  >
+                    <ListChecks className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span className="hidden sm:inline">Sayım</span>
+                  </button>
+
+                  {/* Oturumdan çıkış */}
+                  <button
+                    type="button"
+                    onClick={logout}
+                    className="inline-flex items-center gap-1.5 h-8 px-3 rounded-xl text-xs font-semibold border border-red-400/40 bg-red-500/15 hover:bg-red-500/30 text-red-700 dark:text-red-300 transition-colors backdrop-blur-sm"
+                    title="Oturumdan Çıkış"
+                    aria-label="Oturumdan çıkış yap"
+                  >
+                    <LogOut className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span className="hidden sm:inline">Çıkış</span>
+                  </button>
+
                   <div className="w-[180px]">
                     <LabSelector
                       labs={assignedLaboratories.map(l => ({ id: l.id, name: l.name, kod: l.kod }))}
@@ -1858,7 +1917,7 @@ export default function UrunKullanimPanel() {
                 </div>
               </div>
             </div>
-          </div>
+          </LiquidGlassCard>
         </div>
 
         {/* Content area - Right 45% aligned */}
@@ -1866,7 +1925,7 @@ export default function UrunKullanimPanel() {
           {/* Left spacer/list deduction panel */}
           <div className="hidden lg:block lg:w-[55%] p-4">
             {selectedLab?.visualDeductionEnabled && (
-              <div className="h-full frosted-glass-card p-4 overflow-hidden flex flex-col">
+              <LiquidGlassCard className="h-full p-4 overflow-hidden flex flex-col">
                 <div className="frosted-header mb-3">
                   <span className="font-semibold text-base">Listeli Düşüm</span>
                 </div>
@@ -1971,7 +2030,7 @@ export default function UrunKullanimPanel() {
                     )}
                   </div>
                 </ScrollArea>
-              </div>
+              </LiquidGlassCard>
             )}
           </div>
 
@@ -1979,9 +2038,9 @@ export default function UrunKullanimPanel() {
           <div className="w-full lg:w-[45%] p-4 flex flex-col gap-3">
 
           {/* Card 2: Son Okutulan Ürün */}
-          <div
+          <LiquidGlassCard
             className={cn(
-              "frosted-glass-card transition-all",
+              "transition-all",
               scanStatus === 'success' && 'ring-2 ring-green-500/50',
               scanStatus === 'error' && 'ring-2 ring-destructive/50'
             )}
@@ -2089,10 +2148,10 @@ export default function UrunKullanimPanel() {
                 <p className="text-foreground/60 dark:text-foreground/50 text-sm text-center py-4">Henüz ürün okutulmadı.</p>
               )}
             </div>
-          </div>
+          </LiquidGlassCard>
 
           {/* Card 3: Son 10 Tüketim */}
-          <div className="frosted-glass-card">
+          <LiquidGlassCard>
             <div className="frosted-header flex items-center gap-2">
               <Clock className="w-4 h-4 text-foreground/70 dark:text-foreground/60"/>
               <span className="font-semibold text-sm">Son 10 Tüketim</span>
@@ -2116,11 +2175,11 @@ export default function UrunKullanimPanel() {
                 )}
               </ScrollArea>
             </div>
-          </div>
+          </LiquidGlassCard>
 
           {/* Card 4: Cihazlar */}
           {selectedLabId && (
-            <div className="frosted-glass-card flex-1" role="region" aria-label="Laboratuvar cihazları">
+            <LiquidGlassCard className="flex-1" role="region" aria-label="Laboratuvar cihazları">
               <div className="frosted-header grid grid-cols-[1fr_auto_1fr] items-center gap-2">
                 <div className="flex items-center gap-2 min-w-0">
                   <Wrench className="w-4 h-4 text-foreground/70 dark:text-foreground/60"/>
@@ -2206,7 +2265,7 @@ export default function UrunKullanimPanel() {
                   </div>
                 )}
               </div>
-            </div>
+            </LiquidGlassCard>
           )}
           </div>
         </div>
