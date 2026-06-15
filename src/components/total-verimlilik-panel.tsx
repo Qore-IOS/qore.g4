@@ -3169,7 +3169,10 @@ export default function TotalVerimlilikPanel({
           systemPrompt: TOTAL_VERIMLILIK_AI_MASTER_PROMPT,
           prompt,
           temperature: 0.2,
-          maxOutputTokens: 1024,
+          // Düşünmeyi kapat (thinkingBudget:0) → token bütçesi + süre gerçek yanıta
+          // gider; böylece çıktı kesilmez/yüzeysel kalmaz ve 504 riski oluşmaz.
+          maxOutputTokens: 2048,
+          thinkingBudget: 0,
         }),
       });
       const data = await res.json().catch(() => ({}));
