@@ -3663,6 +3663,46 @@
   padding: 16px;
 }
 
+/* --- Apple Liquid Glass varyantı ---
+   Kartın kendi frosted yüzeyi (background + backdrop-blur + border) iptal
+   edilir; yerini, arkadaki sahneyi canlı kıran <LiquidGlassSurface> alır.
+   KRİTİK: isolation: isolate kaldırılır — aksi halde kart bir "backdrop
+   root" oluşturup içteki cam yüzeyin sayfayı örneklemesini (gerçek
+   kırılmayı) engeller. Aynı şekilde mix-blend-mode/filter de eklenmemeli. */
+.frosted-glass-card.liquid,
+.dark .frosted-glass-card.liquid {
+  background: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border: none;
+  isolation: auto;
+}
+.frosted-glass-card.liquid {
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.10), 0 3px 10px rgba(0, 0, 0, 0.05);
+}
+.dark .frosted-glass-card.liquid {
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5), 0 3px 10px rgba(0, 0, 0, 0.3);
+}
+.frosted-glass-card.liquid:hover {
+  background: none;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.12), 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+.dark .frosted-glass-card.liquid:hover {
+  background: none;
+  box-shadow: 0 20px 56px rgba(0, 0, 0, 0.55), 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+/* İçerik, mutlak konumlu cam yüzeyin (.lqg-surface) ÜSTÜnde boyansın */
+.frosted-glass-card.liquid > :not(.lqg-surface) {
+  position: relative;
+}
+/* Liquid kartta bölücü çizgiler camla uyumlu, biraz daha belirgin */
+.frosted-glass-card.liquid .frosted-header {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.35);
+}
+.dark .frosted-glass-card.liquid .frosted-header {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
 /* Time-based background panel - now handled via inline styles */
 
 /* Frosted glass button stillerini ayrÄ± tutuyoruz */
