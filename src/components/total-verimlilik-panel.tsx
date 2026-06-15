@@ -1763,44 +1763,6 @@ export default function TotalVerimlilikPanel({
     exportDataToExcel(dataToExport, fileName, 'Veriler', toast);
   }, [rows, selectedPoolId, efficiencyPools, selectedYear, selectedMonth, toast, interLabTransfers, selectedBrand, selectedUrunGrubu, productCodes]);
 
-  // Phase 5 - Excel Şablon İndir
-  const handleDownloadTemplate = useCallback(() => {
-    if (rows.length === 0) return;
-
-    const selectedPool = efficiencyPools.find(p => p.id === selectedPoolId);
-
-    // Şablonda sadece veri girilebilir alanlar olacak (11 ve 12 hariç)
-    // Değerler 0 yerine boş olacak
-    const templateData = rows.map(r => ({
-      'Laboratuvar': r.labName,
-      'Lab Kodu': r.labKod,
-      'Stok Kodu': r.stokKodu,
-      'Ürün Adı': r.stokAdi,
-      'Test Adı': r.testAdi,
-      'Ambalaj Miktarı': r.ambalajDegeri,
-      '7. Başlangıç Stoğu (Kutu)': r.baslangicStokuKutu || '', // 0 yerine boş
-      '8. Ay Başı Cihaz Üstü (Test)': r.ayBasiCihazUstuTest || '',
-      '10. Ay Başı Sevkiyat (Kutu)': r.ayBasiSevkiyatKutu || '',
-      '13. Lojistik Ara Transfer (Kutu)': r.lojistikAraTransfer || '',
-      '15. Kümülatif Total (Test)': r.kumulatifTotal || '',
-      '16. Dönem Sonu Stok (Kutu)': r.donemSonuStokKutu || '',
-      '17. Dönem Sonu Cihaz Üstü (Test)': r.donemSonuCihazUstuTest || '',
-      '19. Hak Ediş (Test)': r.hakEdis || '',
-    }));
-
-    // XLSX worksheet oluştur
-    const ws = XLSX.utils.json_to_sheet(templateData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Şablon');
-
-    // Dosyayı indir
-    const fileName = `Verimlilik_Sablon_${selectedPool?.name || 'Havuz'}_${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}.xlsx`;
-    XLSX.writeFile(wb, fileName);
-
-    toast({ title: 'Şablon İndirildi', description: 'Excel şablonu indirildi. Verileri girdikten sonra yükleyebilirsiniz.' });
-    setShowExcelImportModal(false);
-  }, [rows, selectedPoolId, efficiencyPools, selectedYear, selectedMonth, toast]);
-
   // Phase 5 - Excel Dosyası Yükle ve Verileri Aktar
   const handleExcelImport = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -3000,6 +2962,45 @@ export default function TotalVerimlilikPanel({
 
   const totalVisibleRows = useMemo(() => groupedRows.reduce((s, g) => s + g.rows.length, 0), [groupedRows]);
   const flatVisibleRows = useMemo(() => groupedRows.flatMap(g => g.rows), [groupedRows]);
+
+  // Excel veri giriş şablonu, panelde o anda görünen satırları esas alır.
+  // Böylece marka/ürün grubu, laboratuvar, arama, sütun ve gelişmiş filtreler
+  // şablon indirilirken kaybolmaz.
+  const handleDownloadTemplate = useCallback(() => {
+    if (flatVisibleRows.length === 0) return;
+
+    const selectedPool = efficiencyPools.find(p => p.id === selectedPoolId);
+    const templateData = flatVisibleRows.map(r => ({
+      'Laboratuvar': r.labName,
+      'Lab Kodu': r.labKod,
+      'Stok Kodu': r.stokKodu,
+      'Ürün Adı': r.stokAdi,
+      'Test Adı': r.testAdi,
+      'Ambalaj Miktarı': r.ambalajDegeri,
+      '7. Başlangıç Stoğu (Kutu)': r.baslangicStokuKutu || '',
+      '8. Ay Başı Cihaz Üstü (Test)': r.ayBasiCihazUstuTest || '',
+      '10. Ay Başı Sevkiyat (Kutu)': r.ayBasiSevkiyatKutu || '',
+      '13. Lojistik Ara Transfer (Kutu)': r.lojistikAraTransfer || '',
+      '15. Kümülatif Total (Test)': r.kumulatifTotal || '',
+      '16. Dönem Sonu Stok (Kutu)': r.donemSonuStokKutu || '',
+      '17. Dönem Sonu Cihaz Üstü (Test)': r.donemSonuCihazUstuTest || '',
+      '19. Hak Ediş (Test)': r.hakEdis || '',
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(templateData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Şablon');
+
+    const fileName = `Verimlilik_Sablon_${selectedPool?.name || 'Havuz'}_${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+
+    toast({
+      title: 'Şablon İndirildi',
+      description: `${templateData.length} filtrelenmiş satır içeren Excel şablonu indirildi.`,
+    });
+    setShowExcelImportModal(false);
+  }, [flatVisibleRows, selectedPoolId, efficiencyPools, selectedYear, selectedMonth, toast]);
+
   const footerAgg = useMemo(() => {
     const nums = (colId: string) => flatVisibleRows.map(r => Number(resolveFilterValue(r, colId))).filter(v => Number.isFinite(v));
     const sum = (list: number[]) => list.reduce((s, n) => s + n, 0);
@@ -4334,7 +4335,7 @@ export default function TotalVerimlilikPanel({
                 variant="outline"
                 className="h-20 flex flex-col gap-2"
                 onClick={handleDownloadTemplate}
-                disabled={rows.length === 0}
+                disabled={totalVisibleRows === 0}
               >
                 <Download className="h-6 w-6" />
                 <span>Şablon İndir</span>
