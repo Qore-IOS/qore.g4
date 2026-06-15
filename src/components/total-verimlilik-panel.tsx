@@ -4291,6 +4291,8 @@ export default function TotalVerimlilikPanel({
               onValuesChange={(ids) => setSelectedLabsForSevkiyat(new Set(ids))}
               placeholder="Laboratuvar seçin"
               showChips
+              popoverModal
+              contentClassName="z-[10000]"
             />
           </div>
           <DialogFooter>
