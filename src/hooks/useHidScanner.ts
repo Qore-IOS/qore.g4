@@ -11,6 +11,13 @@ type UseHidScannerOptions = {
   onScan: (payload: { raw: string }) => void;
 };
 
+// Module-level stable default so the keydown effect below doesn't re-subscribe
+// on every render. A fresh `['Enter','Tab']` literal as a default param is a
+// new reference each call → it would invalidate the effect dependency array on
+// every parent re-render (several times per scan), tearing down/re-adding the
+// global listener and, worse, clearing the pending idle-commit timer mid-scan.
+const DEFAULT_TERMINATORS = ['Enter', 'Tab'];
+
 
 
 function toPrintableChar(e: KeyboardEvent): string | null {
@@ -52,7 +59,7 @@ export default function useHidScanner({
   minLength = 10,
   idleMs = 250,
   maxScanMs = 10000,
-  terminators = ['Enter', 'Tab'],
+  terminators = DEFAULT_TERMINATORS,
   allowDuringInputs = true,
   onScan,
 }: UseHidScannerOptions) {
