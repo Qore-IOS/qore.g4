@@ -182,10 +182,19 @@ export default function LojistikSiparisView() {
     () => mergeOrdersById(archivedCompleted, liveCompleted),
     [archivedCompleted, liveCompleted],
   );
-  // TanStack Query — AppLayout prefetch sayesinde anında cache'den gelir, 0ms bekleme
-  const { data: hospitals = [] } = useHospitals();
-  const { data: productCodes = [] } = useProductCodes();
-  const { data: depots = [] } = useDepots();
+  // TanStack Query — AppLayout prefetch sayesinde anında cache'den gelir, 0ms bekleme.
+  // KRİTİK: `data` hata/yükleme sırasında undefined olur. Doğrudan `= []` default'u
+  // her render'da YENİ bir boş dizi referansı üretir; bu diziler aşağıdaki
+  // useEffect/useMemo bağımlılıklarında olduğundan (özellikle rows effect'i),
+  // okuma izni reddedildiğinde (data kalıcı undefined) sonsuz render döngüsü →
+  // React #185 çökmesi tetikleniyordu. useMemo ile boş fallback'i referans olarak
+  // sabitliyoruz: veri yokken bile aynı [] referansı döner, döngü kırılır.
+  const { data: hospitalsData } = useHospitals();
+  const { data: productCodesData } = useProductCodes();
+  const { data: depotsData } = useDepots();
+  const hospitals = useMemo(() => hospitalsData ?? [], [hospitalsData]);
+  const productCodes = useMemo(() => productCodesData ?? [], [productCodesData]);
+  const depots = useMemo(() => depotsData ?? [], [depotsData]);
 
   const [maxByStokKodu, setMaxByStokKodu] = useState<Map<string, { max: number; maxGun?: number }>>(new Map());
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
@@ -329,8 +338,13 @@ export default function LojistikSiparisView() {
   // Load selected order details and stock
   useEffect(() => {
     if (!selectedOrder) {
-      setRows([]);
-      setLabStock([]);
+      // İdempotent sıfırlama: zaten boşken yeni [] atamak (yeni referans) gereksiz
+      // render tetikler. Bu effect her render'da yeniden çalışırsa (kararsız bir
+      // bağımlılık nedeniyle) bu, React #185 sonsuz döngüsüne yol açabilir.
+      // Functional updater + aynı referansı döndürmek React'in render'ı atlamasını
+      // sağlar; giriş anındaki (sipariş seçili değil) çökme kökten engellenir.
+      setRows((prev) => (prev.length ? [] : prev));
+      setLabStock((prev) => (prev.length ? [] : prev));
       setIsLabStockLoading(false);
       return;
     }
