@@ -85,6 +85,7 @@ import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { getScopedDocs, scopedQuery } from '@/lib/firestore-helpers';
+import { withCompanyScope } from '@/lib/company-scope';
 import { totalVerimlilikLogger } from '@/lib/logger';
 import { cn, exportDataToExcel } from '@/lib/utils';
 import { TOTAL_VERIMLILIK_AI_MASTER_PROMPT } from '@/lib/ai/totalVerimlilikMasterPrompt';
@@ -1927,7 +1928,7 @@ export default function TotalVerimlilikPanel({
       const kitVerimlilikSkoru = Math.max(0, Math.min(100, 100 - Math.abs(kitSapmaYuzde)));
       const genelVerimlilik = (stokDogrulukSkoru + kitVerimlilikSkoru) / 2;
 
-      const dataToSave = {
+      const dataToSave = withCompanyScope({
         poolId: selectedPoolId,
         poolName: selectedPool?.name || '',
         month: selectedMonth,
@@ -1948,7 +1949,7 @@ export default function TotalVerimlilikPanel({
         createdByUid: currentUser?.uid || '',
         createdByName: currentUser?.name || currentUser?.email || '',
         updatedAt: Timestamp.now(),
-      };
+      }, currentCompanyId);
 
       await setDoc(doc(db, 'totalEfficiencyRecords', docId), dataToSave, { merge: true });
       toast({ title: 'Kaydedildi', description: `Total verimlilik verileri kaydedildi. Genel Verimlilik: %${genelVerimlilik.toFixed(1)}` });
@@ -1963,7 +1964,7 @@ export default function TotalVerimlilikPanel({
     } finally {
       setIsSaving(false);
     }
-  }, [selectedPoolId, rows, selectedYear, selectedMonth, currentUser, efficiencyPools, toast]);
+  }, [selectedPoolId, rows, selectedYear, selectedMonth, currentUser, currentCompanyId, efficiencyPools, toast]);
 
   // Ara Kayıt (Checkpoint) Kaydetme
   const handleAraKayitSave = useCallback(async () => {
@@ -1974,7 +1975,7 @@ export default function TotalVerimlilikPanel({
       const selectedPool = efficiencyPools.find(p => p.id === selectedPoolId);
       const araKayitDocId = `araKayit-${selectedPoolId}-${selectedYear}-${selectedMonth}`;
 
-      const dataToSave = {
+      const dataToSave = withCompanyScope({
         poolId: selectedPoolId,
         poolName: selectedPool?.name || '',
         month: selectedMonth,
@@ -1986,7 +1987,7 @@ export default function TotalVerimlilikPanel({
         createdByUid: currentUser?.uid || '',
         createdByName: currentUser?.name || currentUser?.email || '',
         updatedAt: Timestamp.now(),
-      };
+      }, currentCompanyId);
 
       await setDoc(doc(db, 'totalEfficiencyRecords', araKayitDocId), dataToSave, { merge: true });
 
@@ -2006,7 +2007,7 @@ export default function TotalVerimlilikPanel({
     } finally {
       setIsSavingAraKayit(false);
     }
-  }, [selectedPoolId, rows, selectedYear, selectedMonth, currentUser, efficiencyPools, interLabTransfers, araKayitInfo, toast]);
+  }, [selectedPoolId, rows, selectedYear, selectedMonth, currentUser, currentCompanyId, efficiencyPools, interLabTransfers, araKayitInfo, toast]);
 
   // Laboratuvar gruplarını hesapla (aynı laboratuvarın satırlarını gruplamak için)
   const labGroups = useMemo(() => {
