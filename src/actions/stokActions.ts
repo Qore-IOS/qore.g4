@@ -74,18 +74,18 @@ async function adminScopedDocs(
   if (isSuperAdmin || normalized === '__legacy__') {
     return (await coll.get()).docs as AdminDocSnap[];
   }
-  const [cs, ls] = await Promise.all([
-    coll.where('companyId', '==', normalized).get(),
-    coll.where('companyId', '==', '__legacy__').get(),
-  ]);
-  const seen = new Set<string>();
-  const out: AdminDocSnap[] = [];
-  for (const snap of [cs, ls]) {
-    for (const d of snap.docs as AdminDocSnap[]) {
-      if (!seen.has(d.id)) { seen.add(d.id); out.push(d); }
-    }
-  }
-  return out;
+  // A `where('companyId', '==', x)` query CANNOT match documents that lack a
+  // companyId field. Pre‑multi‑tenancy master data (barkod formatları, ürün
+  // kodları) is untagged, and dropping it silently breaks barcode parsing for
+  // every panel. So we read the full collection and keep anything visible to
+  // this company via matchesCompanyScope — untagged/legacy records included.
+  // This mirrors the web‑SDK getScopedDocs backward‑compat path. Safe here
+  // because these are small master‑data collections and the Admin SDK read
+  // bypasses security rules.
+  const all = await coll.get();
+  return (all.docs as AdminDocSnap[]).filter(d =>
+    matchesCompanyScope(d.data(), companyId, isSuperAdmin),
+  );
 }
 
 

@@ -1955,7 +1955,7 @@ export default function AnaPanel(props: AnaPanelProps) {
   // ── Readiness (gerçek veri yüklemesine bağlı 3 adım) ──
   // 1) Barkod formatları  2) Stok & adres verileri  3) İrsaliye eşleştirme
   const readinessStage = useMemo(() => {
-    const fmtReady = !barcodeFormatsPending && barcodeFormats.length >= 0;
+    const fmtReady = !barcodeFormatsPending && barcodeFormats.length > 0;
     const stockReady = !productsPending && productCodes.length > 0;
     const irsReady = Boolean(selectedDepotId);
     if (fmtReady && stockReady && irsReady) return 3;
