@@ -637,7 +637,7 @@ export default function UrunKullanimPanel() {
   // Use TanStack Query for lab stock - much more efficient than full depoStok
   // Now also passes lab names to support legacy records without hedefKurumId
   // Wait for labPools to load before querying to ensure pool members are included
-  const { data: labStock = [], isPending: labStockPending } = useLabStock(poolMemberIds, poolMemberNames, {
+  const { data: labStock = [], isLoading: labStockLoading } = useLabStock(poolMemberIds, poolMemberNames, {
     enabled: !labPoolsLoading && poolMemberIds.length > 0
   });
 
@@ -1198,16 +1198,13 @@ export default function UrunKullanimPanel() {
 
   // Readiness: 3 adım — formatlar / ürün+lab listesi / lab stoğu
   // Her adım gerçekten veri yüklenince tamamlanır; hiçbiri sahte true döndürmez.
-  const readinessStage = useMemo(() => {
-    const fmtOk   = !formatsLoading   && barcodeFormats.length > 0;
-    const prodOk  = !isLoading;                       // ürün+lab listesi
-    const stockOk = !labStockPending   && labStock.length >= 0 && poolMemberIds.length > 0;
-    if (fmtOk && prodOk && stockOk) return 3;
-    if (fmtOk && prodOk)            return 2;
-    if (fmtOk)                      return 1;
-    return 0;
-  }, [formatsLoading, barcodeFormats.length, isLoading, labStockPending, labStock.length, poolMemberIds.length]);
-  const systemReady = readinessStage >= 3;
+  // Lab stoğu yalnızca bir laboratuvar seçilince yüklenir; seçili lab yokken
+  // "yükleniyor" değil "lab seçilmeyi bekliyor" durumundadır (takılı görünmez).
+  const labSelected = Boolean(selectedLabId);
+  const stepFmtOk   = !formatsLoading && barcodeFormats.length > 0;
+  const stepProdOk  = !isLoading;
+  const stepStockOk = labSelected && !labPoolsLoading && !labStockLoading;
+  const systemReady = stepFmtOk && stepProdOk && stepStockOk;
 
   const safeName = useCallback(
     (code: string, fallback: string) => productNames[code] || fallback || code,
@@ -2018,6 +2015,11 @@ export default function UrunKullanimPanel() {
                     <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" style={{ animation: 'pulse-warning 2s ease-in-out infinite' }} />
                     SİSTEM HAZIR
                   </span>
+                ) : !labSelected && stepFmtOk && stepProdOk ? (
+                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                    LAB SEÇİN
+                  </span>
                 ) : (
                   <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide bg-foreground/5 text-foreground/50 border border-foreground/10">
                     <Loader2 className="w-2.5 h-2.5 animate-spin shrink-0" />
@@ -2115,31 +2117,42 @@ export default function UrunKullanimPanel() {
               ) : systemReady ? (
                 <p className="text-foreground/60 dark:text-foreground/50 text-sm text-center py-4">Barkod okutmaya hazır.</p>
               ) : (
-                /* Veriler yüklenirken 3-adım göstergesi */
+                /* Veriler yüklenirken 3-adım göstergesi.
+                   state: 'done' | 'loading' | 'waiting' (lab seçilmeyi bekliyor) */
                 <div className="py-2 space-y-2">
-                  {[
-                    { label: 'Barkod formatları', done: !formatsLoading && barcodeFormats.length > 0 },
-                    { label: 'Ürün & laboratuvar listesi', done: !isLoading },
-                    { label: poolMemberIds.length > 1 ? 'Havuz stoğu' : 'Lab stoğu', done: !labStockPending && poolMemberIds.length > 0 },
-                  ].map((step, i) => (
+                  {([
+                    { label: 'Barkod formatları', state: stepFmtOk ? 'done' : 'loading' },
+                    { label: 'Ürün & laboratuvar listesi', state: stepProdOk ? 'done' : 'loading' },
+                    {
+                      label: poolMemberIds.length > 1 ? 'Havuz stoğu' : 'Lab stoğu',
+                      state: !labSelected ? 'waiting' : (stepStockOk ? 'done' : 'loading'),
+                    },
+                  ] as const).map((step, i) => (
                     <div key={i} className="flex items-center gap-2.5">
                       <span className={cn(
                         "w-4 h-4 rounded-full flex items-center justify-center shrink-0 border",
-                        step.done
+                        step.state === 'done'
                           ? "bg-green-500/20 border-green-500/40 text-green-500"
-                          : "bg-foreground/5 border-foreground/15"
+                          : step.state === 'waiting'
+                            ? "bg-amber-500/15 border-amber-500/30 text-amber-500"
+                            : "bg-foreground/5 border-foreground/15"
                       )}>
-                        {step.done
+                        {step.state === 'done'
                           ? <CheckCircle className="w-2.5 h-2.5" />
-                          : <span className="w-1.5 h-1.5 rounded-full bg-foreground/20 animate-pulse" />}
+                          : step.state === 'waiting'
+                            ? <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                            : <Loader2 className="w-2.5 h-2.5 animate-spin text-foreground/40" />}
                       </span>
                       <span className={cn(
                         "text-xs",
-                        step.done ? "text-foreground/70" : "text-foreground/40"
+                        step.state === 'done' ? "text-foreground/70"
+                          : step.state === 'waiting' ? "text-amber-600/80 dark:text-amber-400/80"
+                          : "text-foreground/40"
                       )}>
                         {step.label}
+                        {step.state === 'waiting' && ' — önce laboratuvar seçin'}
                       </span>
-                      {step.done && <CheckCircle className="w-3 h-3 text-green-500 ml-auto shrink-0" />}
+                      {step.state === 'done' && <CheckCircle className="w-3 h-3 text-green-500 ml-auto shrink-0" />}
                     </div>
                   ))}
                 </div>
