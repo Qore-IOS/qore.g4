@@ -87,6 +87,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { getScopedDocs, scopedQuery } from '@/lib/firestore-helpers';
 import { totalVerimlilikLogger } from '@/lib/logger';
 import { cn, exportDataToExcel } from '@/lib/utils';
+import { TOTAL_VERIMLILIK_AI_MASTER_PROMPT } from '@/lib/ai/totalVerimlilikMasterPrompt';
 import { getExchangeRates } from '@/lib/exchange-rates';
 import Link from 'next/link';
 
@@ -376,6 +377,17 @@ const COLS: ColDef[] = [
 
 const COLS_BY_ID: Record<string, ColDef> = COLS.reduce((m, c) => { m[c.id] = c; return m; }, {} as Record<string, ColDef>);
 
+// ─── RENK / DURUM FİLTRESİ ────────────────────────────────────────────────
+// Stok Doğruluk ve Kutu Kayıp sütunları renge (duruma) göre filtrelenebilir.
+// Badge renkleriyle birebir: Eksik=kırmızı, Fark Yok=yeşil, Fazla=sarı.
+const COLOR_FILTER_COL_IDS = new Set(['stokDogrulukFark', 'kutuKayip']);
+const STOK_DURUM_ORDER = ['Eksik', 'Fark Yok', 'Fazla'];
+const STOK_DURUM_COLORS: Record<string, string> = {
+  'Eksik': '#dc2626',     // kırmızı
+  'Fark Yok': '#16a34a',  // yeşil
+  'Fazla': '#ca8a04',     // sarı
+};
+
 // ─── FORMAT PALETTES ──────────────────────────────────────────────────────
 // Palettes ordered by hue (warm → cool) so visual flow is predictable
 const FILL_PALETTE = [
@@ -520,14 +532,42 @@ const DebouncedInput = memo(function DebouncedInput({
   );
 });
 
+// Kenarlıklı (shadcn) görünümü koruyan debounced metin girişi. Gelişmiş filtre
+// değeri her tuşta state'i değiştirmesin diye lokal state + debounce kullanır;
+// böylece yazarken tablo yeniden render'ı tetiklenmez (akıcı INP).
+const DebouncedTextInput = memo(function DebouncedTextInput({
+  value,
+  onChange,
+  debounceMs = 250,
+  className,
+  ...props
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  debounceMs?: number;
+} & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'value'>) {
+  const [localValue, setLocalValue] = useState(value);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => { setLocalValue(value); }, [value]);
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = e.target.value;
+    setLocalValue(v);
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => onChange(v), debounceMs);
+  }, [onChange, debounceMs]);
+  useEffect(() => () => { if (timeoutRef.current) clearTimeout(timeoutRef.current); }, []);
+  return <Input {...props} className={className} value={localValue} onChange={handleChange} />;
+});
+
 // ─── COLUMN FILTER POPOVER (Excel-like value picker) ─────────────────
-function ColFilterPopover({ col, x, y, allValues, activeFilter, sortCol, sortDir, onSort, onClearSort, onHide, onApply, onClose }: {
+function ColFilterPopover({ col, x, y, allValues, activeFilter, sortCol, sortDir, valueColors, onSort, onClearSort, onHide, onApply, onClose }: {
   col: ColDef;
   x: number; y: number;
   allValues: (string | number)[];
   activeFilter: string[] | null;
   sortCol: string | null;
   sortDir: 'asc' | 'desc';
+  valueColors?: Record<string, string>;
   onSort: (dir: 'asc' | 'desc') => void;
   onClearSort: () => void;
   onHide: () => void;
@@ -571,7 +611,7 @@ function ColFilterPopover({ col, x, y, allValues, activeFilter, sortCol, sortDir
         )}
         <div className="h-px bg-zinc-200 dark:bg-zinc-700 my-1" />
         {/* Value list */}
-        <div className="px-2 pb-1 text-[9px] uppercase font-bold text-zinc-400">Değere Göre Filtrele</div>
+        <div className="px-2 pb-1 text-[9px] uppercase font-bold text-zinc-400">{valueColors ? 'Renge / Duruma Göre Filtrele' : 'Değere Göre Filtrele'}</div>
         <div className="px-2">
           <div className="flex items-center gap-1 px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 mb-1">
             <Search className="h-3 w-3 text-zinc-400" />
@@ -589,6 +629,7 @@ function ColFilterPopover({ col, x, y, allValues, activeFilter, sortCol, sortDir
             return (
               <button key={k} onClick={() => toggleVal(v)} className="w-full flex items-center gap-2 px-2 py-1 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded">
                 <div className={`w-3 h-3 rounded-sm border ${checked ? 'bg-blue-600 border-blue-600 text-white flex items-center justify-center text-[7px]' : 'border-zinc-300'}`}>{checked && '✓'}</div>
+                {valueColors?.[k] && <span className="w-2.5 h-2.5 rounded-full flex-shrink-0 border border-black/10" style={{ background: valueColors[k] }} />}
                 <span className={`text-[11.5px] truncate ${typeof v === 'number' ? 'font-mono' : ''}`}>{k === '' ? '(Boş)' : k}</span>
               </button>
             );
@@ -2903,11 +2944,33 @@ export default function TotalVerimlilikPanel({
     formulaCols,
   ]);
 
+  // Stok Doğruluk / Kutu Kayıp için renge (duruma) göre filtre etiketi.
+  // Badge mantığıyla birebir: Eksik (Fark>0) / Fark Yok / Fazla (Fark<0).
+  const getColorStatus = useCallback((row: TableRow, colId: string): string => {
+    if (colId === 'stokDogrulukFark') {
+      const f = row.stokDogrulukFark;
+      return f > 0 ? 'Eksik' : f < 0 ? 'Fazla' : 'Fark Yok';
+    }
+    if (colId === 'kutuKayip') {
+      const kutuFark = Number(resolveFilterValue(row, 'kutuKayip') || 0);
+      if (Math.abs(kutuFark) < 1) return 'Fark Yok';
+      return kutuFark > 0 ? 'Eksik' : 'Fazla';
+    }
+    return '';
+  }, [resolveFilterValue]);
+
+  // Gelişmiş/sütun filtrelerini DEFER et: panel etkileşimleri (buton/seçim/yazma)
+  // acil öncelikte kalır; ağır groupedRows yeniden hesabı + tablo render'ı düşük
+  // öncelikte (kesintiye uğrayabilir) çalışır → her tuş/buslışta takılma olmaz.
+  const deferredAdvFilters = useDeferredValue(advFilters);
+  const deferredAdvMode = useDeferredValue(advMode);
+  const deferredColValFilters = useDeferredValue(colValFilters);
+
   // Group rows by lab (after primary filtering)
   const groupedRows = useMemo(() => {
     // Apply advanced filters on top of existing deferredRows (which already has search+colFilters+sort)
     let result = deferredRows;
-    if (advFilters.length > 0) {
+    if (deferredAdvFilters.length > 0) {
       const metricCache = new Map<string, number[]>();
       const getMetricValues = (colId: string) => {
         if (metricCache.has(colId)) return metricCache.get(colId)!;
@@ -2919,7 +2982,7 @@ export default function TotalVerimlilikPanel({
         return vals;
       };
       result = result.filter(r => {
-        const matches = advFilters.map(f => {
+        const matches = deferredAdvFilters.map(f => {
           const raw = resolveFilterValue(r, f.col);
           if (f.op === 'between') {
             const [a, b] = f.val.split(/[;,]/).map(v => parseFloat(v.trim()));
@@ -2948,14 +3011,17 @@ export default function TotalVerimlilikPanel({
           }
           return evalAdvFilterRaw(raw, f);
         });
-        return advMode === 'AND' ? matches.every(Boolean) : matches.some(Boolean);
+        return deferredAdvMode === 'AND' ? matches.every(Boolean) : matches.some(Boolean);
       });
     }
     // Apply per-column value filters (header dropdown filter)
-    const valEntries = Object.entries(colValFilters).filter(([, v]) => v && v.length > 0);
+    const valEntries = Object.entries(deferredColValFilters).filter(([, v]) => v && v.length > 0);
     if (valEntries.length > 0) {
       result = result.filter(r => valEntries.every(([cid, vals]) => {
-        const v = String(resolveFilterValue(r, cid) ?? '');
+        // Renk/durum filtresi olan sütunlar için badge durumuna göre eşleştir.
+        const v = COLOR_FILTER_COL_IDS.has(cid)
+          ? getColorStatus(r, cid)
+          : String(resolveFilterValue(r, cid) ?? '');
         return (vals as string[]).includes(v);
       }));
     }
@@ -2972,7 +3038,7 @@ export default function TotalVerimlilikPanel({
       g.rows.push(r);
     });
     return groups;
-  }, [deferredRows, advFilters, advMode, colValFilters, resolveFilterValue]);
+  }, [deferredRows, deferredAdvFilters, deferredAdvMode, deferredColValFilters, resolveFilterValue, getColorStatus]);
 
   const totalVisibleRows = useMemo(() => groupedRows.reduce((s, g) => s + g.rows.length, 0), [groupedRows]);
   const flatVisibleRows = useMemo(() => groupedRows.flatMap(g => g.rows), [groupedRows]);
@@ -3059,43 +3125,51 @@ export default function TotalVerimlilikPanel({
     try {
       setAiAnalyzing(true);
       setAiAnalysisOpen(true);
-      const subset = flatVisibleRows.slice(0, 300).map(r => ({
+      // Satır kanıt paketi — master prompt'un atıfta bulunduğu normalize alanlar
+      // ve panelin güncel sınıflandırması (eksik / fark yok / fazla).
+      const stokDurumOf = (f: number) => (f > 0 ? 'eksik' : f < 0 ? 'fazla' : 'fark yok');
+      const buildEvidence = (r: TableRow) => ({
         lab: r.labName,
+        labKod: r.labKod,
         stok: r.stokAdi,
         stokKodu: r.stokKodu,
+        testAdi: r.testAdi,
+        cihazGrubu: r.cihazGrubu,
+        ambalaj: r.ambalajDegeri,
+        ayBasiSevkiyatKutu: r.ayBasiSevkiyatKutu,
+        ayBasiSevkiyatTest: r.ayBasiSevkiyatTest,
+        sevkiyatlarSonrasiTotalTest: r.sevkiyatlarSonrasiTotalTest,
+        donemSonuToplamTest: r.donemSonuToplamTest,
+        beklenenTest: r.beklenenTestSayisi,
+        kumulatifTotal: r.kumulatifTotal,
+        hakEdis: r.hakEdis,
+        hakEdisVar: Number(r.hakEdis || 0) > 0,
+        arizaliKitTest: r.arizaliKitTest,
         stokDogrulukFark: r.stokDogrulukFark,
-        kitVerimlilikFark: r.kitVerimlilikFark,
+        stokDurum: stokDurumOf(r.stokDogrulukFark),
         kutuKayip: Number(resolveFilterValue(r, 'kutuKayip') || 0),
-        sarfiyatMaliyeti: Number(resolveFilterValue(r, 'sarfiyatMaliyeti') || 0),
-      }));
+        kitVerimlilikFark: r.kitVerimlilikFark,
+      });
+      const donem = { yil: selectedYear, ay: selectedMonth + 1, etiket: `${MONTHS[selectedMonth]?.label || ''} ${selectedYear}`.trim() };
+      const subset = flatVisibleRows.slice(0, 300).map(buildEvidence);
       const targetRow = payload?.rowId ? flatVisibleRows.find(r => r.id === payload.rowId) : null;
       const targetCol = payload?.colId || '';
-      const cellTargetValue = targetRow ? (targetRow as unknown as Record<string, unknown>)[targetCol] : undefined;
-      const cellSummary = targetRow ? {
-        lab: targetRow.labName,
-        stok: targetRow.stokAdi,
-        stokKodu: targetRow.stokKodu,
-        sutun: targetCol,
-        deger: cellTargetValue,
-        stokDogrulukFark: targetRow.stokDogrulukFark,
-        kitVerimlilikFark: targetRow.kitVerimlilikFark,
-        kutuKayip: Number(resolveFilterValue(targetRow, 'kutuKayip') || 0),
-        sarfiyatMaliyeti: Number(resolveFilterValue(targetRow, 'sarfiyatMaliyeti') || 0),
-      } : null;
+      const colLabel = COLS_BY_ID[targetCol]?.label || targetCol;
+      const cellSummary = targetRow ? { ...buildEvidence(targetRow), sutun: targetCol } : null;
       const prompt = mode === 'table'
-        ? `Aşağıdaki total verimlilik verisini analiz et. Smart alertler, auto insights, anomaly detection ve gelecek ay tahmini verimlilik üret. Kısa ve madde madde yaz.\nVeri:${JSON.stringify(subset)}`
+        ? `Mod: TABLO GENELİ. Dönem: ${donem.etiket} (ay ${donem.ay}/12, yıl ${donem.yil}). Aşağıdaki satırların STOK DOĞRULUK ve KİT VERİMLİLİK verisini değerlendir; en kritik fire/anomali satırlarını öne çıkar, ortak kök neden örüntülerini ve aksiyon önceliğini ver. Master prompttaki bölüm formatına uy.\nVeri(JSON):${JSON.stringify(subset)}`
         : mode === 'column'
-          ? `Sadece ${targetCol} sütununu analiz et. Düşük performans, anomali, trend ve aksiyon önerisi ver.\nVeri:${JSON.stringify(subset.map(r => ({ lab: r.lab, stok: r.stok, value: (r as Record<string, unknown>)[targetCol] })))}`
-          : `Tek hücre analizi yap. ${targetCol} sütunundaki bu değeri anomali açısından değerlendir ve kısa, maddeli öneri ver.\nVeri:${JSON.stringify(cellSummary)}`;
-      setAiTargetLabel(mode === 'table' ? 'Tablo Geneli' : mode === 'column' ? `Sütun: ${targetCol}` : `Hücre: ${targetCol}`);
+          ? `Mod: SÜTUN ANALİZİ — "${colLabel}" (${targetCol}). Dönem: ${donem.etiket}. Bu sütunun tüm satırlardaki dağılımını değerlendir: en yüksek fire/anomali satırları, ortak kök neden örüntüleri, trend ve aksiyon önerileri. Master prompttaki bölüm formatına uy.\nVeri(JSON):${JSON.stringify(subset.map(r => ({ lab: r.lab, stok: r.stok, stokKodu: r.stokKodu, stokDurum: r.stokDurum, stokDogrulukFark: r.stokDogrulukFark, kutuKayip: r.kutuKayip, kitVerimlilikFark: r.kitVerimlilikFark, hakEdisVar: r.hakEdisVar })))}`
+          : `Mod: SATIR (HÜCRE) ANALİZİ — "${colLabel}" (${targetCol}). Dönem: ${donem.etiket}. Bu tek satır için master prompttaki kurallara göre fire/anomali neden-aksiyon analizi üret. Master prompttaki bölüm formatına uy.\nSatır kanıt paketi(JSON):${JSON.stringify(cellSummary)}`;
+      setAiTargetLabel(mode === 'table' ? 'Tablo Geneli' : mode === 'column' ? `Sütun: ${colLabel}` : `Hücre: ${colLabel}`);
       const res = await fetch('/api/ai/total-verimlilik-analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          systemPrompt: 'Sen sağlık operasyon verimlilik danışmanısın. Cevabı Türkçe, kısa, maddeli ve aksiyon odaklı ver.',
+          systemPrompt: TOTAL_VERIMLILIK_AI_MASTER_PROMPT,
           prompt,
           temperature: 0.2,
-          maxOutputTokens: 1200,
+          maxOutputTokens: 1600,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -3108,7 +3182,7 @@ export default function TotalVerimlilikPanel({
     } finally {
       setAiAnalyzing(false);
     }
-  }, [flatVisibleRows, resolveFilterValue]);
+  }, [flatVisibleRows, resolveFilterValue, selectedYear, selectedMonth]);
   // Flat ordered row IDs across visible (expanded) groups - used for shift-range selection
   const visibleRowIds = useMemo(() => {
     const ids: string[] = [];
@@ -3545,6 +3619,14 @@ export default function TotalVerimlilikPanel({
     if (colFilterOpen?.col.id === col.id) { setColFilterOpen(null); return; }
     const rect = (e.currentTarget as HTMLElement).closest('th')?.getBoundingClientRect();
     if (!rect) return;
+    // Renk/durum filtreli sütunlar (Stok Doğruluk, Kutu Kayıp): ham sayı yerine
+    // mevcut durum etiketlerini (Eksik/Fark Yok/Fazla) sabit sırayla sun.
+    if (COLOR_FILTER_COL_IDS.has(col.id)) {
+      const present = new Set(rows.map(r => getColorStatus(r, col.id)));
+      const statusVals = STOK_DURUM_ORDER.filter(s => present.has(s));
+      setColFilterOpen({ col, x: rect.left, y: rect.bottom + 2, allValues: statusVals });
+      return;
+    }
     // gather unique values across all rows
     const seen = new Set<string>();
     const vals: (string | number)[] = [];
@@ -4126,6 +4208,7 @@ export default function TotalVerimlilikPanel({
           activeFilter={colValFilters[colFilterOpen.col.id] || null}
           sortCol={sortConfig.column}
           sortDir={sortConfig.direction}
+          valueColors={COLOR_FILTER_COL_IDS.has(colFilterOpen.col.id) ? STOK_DURUM_COLORS : undefined}
           onSort={(dir) => { setSort(colFilterOpen.col.id, dir); setColFilterOpen(null); }}
           onClearSort={() => { setSort(null, 'asc'); setColFilterOpen(null); }}
           onHide={() => { toggleHidden(colFilterOpen.col.id); setColFilterOpen(null); }}
@@ -4187,9 +4270,9 @@ export default function TotalVerimlilikPanel({
                       {ADV_OPS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
                     </SelectContent>
                   </Select>
-                  <Input
+                  <DebouncedTextInput
                     value={f.val}
-                    onChange={e => updateAdvFilter(f.id, { val: e.target.value })}
+                    onChange={v => updateAdvFilter(f.id, { val: v })}
                     placeholder={f.op === 'between' ? 'min,max' : f.op === 'topPct' ? '10' : f.op === 'topN' ? '5' : (f.op === 'aboveAvg' || f.op === 'belowAvg') ? '—' : 'değer'}
                     disabled={f.op === 'aboveAvg' || f.op === 'belowAvg'}
                     className="h-8 w-24 text-[11.5px]"
