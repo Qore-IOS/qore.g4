@@ -1992,7 +1992,10 @@ export default function AnaPanel(props: AnaPanelProps) {
   const pendingIrsaliyeTotal = pendingCeomedIrsaliye.length + pendingFileIrsaliyeCount;
 
   return (
-    <div className="mk-shell px-3 py-4 sm:px-6 sm:py-5 space-y-4 min-h-screen" style={{ maxWidth: 1720, margin: '0 auto' }}>
+    <>
+      {/* Full-bleed cream backdrop — paneli çevreleyen gri tema zeminini örter */}
+      <div aria-hidden style={{ position: 'fixed', inset: 0, background: 'linear-gradient(120deg, #F6F2EA 0%, transparent 55%), linear-gradient(225deg, #E8E1D2 0%, transparent 55%), #EFEAE0', zIndex: 0 }} />
+    <div className="mk-shell px-3 py-4 sm:px-6 sm:py-5 space-y-4 min-h-screen" style={{ maxWidth: 1720, margin: '0 auto', position: 'relative', zIndex: 1 }}>
       <MkClayStyles />
       <ScanCommitProbe controller={scanPerformanceController} />
 
@@ -2533,5 +2536,6 @@ export default function AnaPanel(props: AnaPanelProps) {
         />
       )}
     </div>
+    </>
   );
 }
