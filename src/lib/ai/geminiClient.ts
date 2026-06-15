@@ -99,7 +99,16 @@ export async function generateWithGemini(options: GenerateOptions): Promise<{ te
 
   let lastDebug = 'gemini_no_attempt';
 
+  // İstek başına ve toplam zaman bütçesi: model üretimi yavaşlarsa fetch
+  // süresiz beklemesin (aksi halde platform ağ geçidi 504 döndürür). Bütçe
+  // ağ geçidi süresinin (maxDuration 60s) altında tutulur ki temiz 5xx dönsün.
+  const overallBudgetMs = Number(process.env.GEMINI_TOTAL_TIMEOUT_MS) || 50_000;
+  const perAttemptMs = Number(process.env.GEMINI_ATTEMPT_TIMEOUT_MS) || 28_000;
+  const startedAt = Date.now();
+
   for (const model of models) {
+    const remainingMs = overallBudgetMs - (Date.now() - startedAt);
+    if (remainingMs <= 1500) { if (lastDebug === 'gemini_no_attempt') lastDebug = 'gemini_timeout_budget_exhausted'; break; }
     const body: Record<string, unknown> = {
       contents: toGeminiContents(options.messages),
       generationConfig: {
@@ -116,11 +125,24 @@ export async function generateWithGemini(options: GenerateOptions): Promise<{ te
       body.tools = [{ functionDeclarations: options.tools }];
     }
 
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    const controller = new AbortController();
+    const attemptMs = Math.min(perAttemptMs, remainingMs);
+    const timer = setTimeout(() => controller.abort(), attemptMs);
+    let res: Response;
+    try {
+      res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      clearTimeout(timer);
+      const aborted = (err as Error)?.name === 'AbortError';
+      lastDebug = aborted ? `gemini_timeout:${model}:${attemptMs}ms` : `gemini_fetch_error:${model}:${(err as Error)?.message?.slice(0, 120)}`;
+      continue; // sıradaki modeli dene (veya bütçe dolunca döngü kırılır)
+    }
+    clearTimeout(timer);
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');

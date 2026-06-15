@@ -3169,7 +3169,7 @@ export default function TotalVerimlilikPanel({
           systemPrompt: TOTAL_VERIMLILIK_AI_MASTER_PROMPT,
           prompt,
           temperature: 0.2,
-          maxOutputTokens: 1600,
+          maxOutputTokens: 1024,
         }),
       });
       const data = await res.json().catch(() => ({}));
