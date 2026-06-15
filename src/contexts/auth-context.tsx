@@ -160,12 +160,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         } else {
             const userDocRef = doc(db, "users", user.uid);
             // PERF (Faz 1): Doküman okuması ve (cache'li) token claim'lerini PARALEL
-            // çalıştır. Önceden getDoc -> getIdTokenResult(true) seri ve force-refresh
-            // idi; ikisi de setIsLoadingAuth(false)'tan önce await edildiği için her
-            // açılışta iki seri network round-trip ilk boyamayı bloke ediyordu.
-            // Artık cache'li token (force YOK) kullanılıyor; claim eksikse arka planda
-            // zorla yenileniyor. Firestore Security Rules zaten server-side token
-            // claim'lerini kullanır; client companyId yalnızca scoped query'ler içindir.
+            // çalıştır. Cache'li token önce alınır; claim eksikse veya Firestore user
+            // doc'undaki companyId ile uyuşmuyorsa (org taşıması senaryosu) UI açılmadan
+            // önce force-refresh beklenir — aksi hâlde Firestore Security Rules token'daki
+            // stale companyId ile tüm sorguları reddeder ve uygulama çöker.
             const [userDocSnap, tokenResult] = await Promise.all([
               getDoc(userDocRef),
               user.getIdTokenResult().catch(() => null),
@@ -182,27 +180,45 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
               const claimCompanyId = tokenResult?.claims.companyId as string | undefined;
               const claimIsSuperAdmin = tokenResult?.claims.isSuperAdmin as boolean | undefined;
+              const firestoreCompanyId = userData.companyId;
+
+              // Token'daki companyId ile Firestore user doc'undaki companyId karşılaştırılır.
+              // Fark varsa (org taşıması) ya da claim yoksa token yenilemek gerekir;
+              // aksi hâlde Firestore Security Rules tüm sorguları reddeder çünkü
+              // request.auth.token.companyId dokümanlarla eşleşmez.
+              const companyIdMismatch =
+                !!firestoreCompanyId && !!claimCompanyId && claimCompanyId !== firestoreCompanyId;
+              const claimsMissing = !claimCompanyId && !!firestoreCompanyId;
+              const superAdminMismatch = userData.role === 'super_admin' && !claimIsSuperAdmin;
+              const needsTokenRefresh = claimsMissing || companyIdMismatch || superAdminMismatch;
+
+              let effectiveCompanyId = claimCompanyId || firestoreCompanyId || LEGACY_COMPANY_ID;
+              let effectiveIsSuperAdmin = claimIsSuperAdmin ?? userData.role === 'super_admin';
+
+              if (needsTokenRefresh) {
+                // Yanlış/eksik claim ile Firestore sorgularının başlamasını engellemek için
+                // token yenilemesi UI'ı açmadan önce tamamlanır (blocking).
+                try {
+                  const fresh = await user.getIdTokenResult(true);
+                  const freshCompanyId = fresh.claims.companyId as string | undefined;
+                  const freshIsSuperAdmin = fresh.claims.isSuperAdmin as boolean | undefined;
+                  effectiveCompanyId = freshCompanyId || firestoreCompanyId || LEGACY_COMPANY_ID;
+                  if (freshIsSuperAdmin !== undefined) effectiveIsSuperAdmin = freshIsSuperAdmin;
+                } catch {
+                  // Token yenilenemedi (silinmiş/devre dışı hesap, geçersiz credential).
+                  // Kullanıcıyı çıkış yaptırarak login sayfasına yönlendir.
+                  console.error('Token yenilemesi başarısız; kullanıcı çıkış yapıyor.');
+                  await firebaseSignOut(auth);
+                  return;
+                }
+              }
 
               setCurrentUserProfile({...userData, accessibleViews: userPermissions});
-              setIsSuperAdmin(claimIsSuperAdmin ?? userData.role === 'super_admin');
+              setIsSuperAdmin(effectiveIsSuperAdmin);
               setIsAdmin(userData.role === 'super_admin' || userData.role === 'admin' || userData.role === 'admin_developer' || user.uid === ADMIN_USER_UID);
               setIsAdminDeveloper(userData.role === 'super_admin' || userData.role === 'admin_developer' || user.uid === ADMIN_USER_UID);
-              setCurrentCompanyId(claimCompanyId || userData.companyId || LEGACY_COMPANY_ID);
+              setCurrentCompanyId(effectiveCompanyId);
               setPermissions(userPermissions);
-
-              // Claim'ler cache'li token'da yoksa (yeni kullanıcı veya onUserClaimSync
-              // henüz propagate etmediyse) arka planda zorla yenile — ilk boyamayı
-              // BLOKE ETMEDEN — ve geldiğinde companyId/superadmin'i güncelle.
-              if (!claimCompanyId || (userData.role === 'super_admin' && !claimIsSuperAdmin)) {
-                user.getIdTokenResult(true)
-                  .then((fresh) => {
-                    const freshCompanyId = fresh.claims.companyId as string | undefined;
-                    const freshIsSuperAdmin = fresh.claims.isSuperAdmin as boolean | undefined;
-                    if (freshCompanyId) setCurrentCompanyId(freshCompanyId);
-                    if (freshIsSuperAdmin !== undefined) setIsSuperAdmin(freshIsSuperAdmin);
-                  })
-                  .catch(() => { /* sessizce geç; users doc fallback geçerli */ });
-              }
 
               // Force dark mode for 'user' role, otherwise apply user's preference
               if (userData.role === 'user') {
@@ -371,6 +387,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           await logout();
         }
       }
+    }, (err) => {
+      console.error('forceLogout listener error:', err);
     });
 
     return () => {
