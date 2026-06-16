@@ -1,23 +1,9 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import {
-  collection,
-  query,
-  orderBy,
-  where,
-  limit,
-  startAfter,
-  getDocs,
-  getDocsFromServer,
-  getCountFromServer,
-  type QueryDocumentSnapshot,
-  type DocumentData,
-} from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { getScopedDocs } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 import { MK_C, MkClayStyles } from '@/components/mal-kabul/clay-kit';
 import BackButton from '@/components/BackButton';
@@ -46,6 +32,13 @@ type MalKabulRow = {
   brands?: string[];
 };
 
+function tsMillis(ts: any): number {
+  if (!ts) return 0;
+  if (typeof ts.toMillis === 'function') return ts.toMillis();
+  if (typeof ts.seconds === 'number') return ts.seconds * 1000;
+  return 0;
+}
+
 export default function MalKabulGecmisPage() {
   const router = useRouter();
   const { toast } = useToast();
@@ -54,84 +47,58 @@ export default function MalKabulGecmisPage() {
   const [pageSize, setPageSize] = useState<number>(20);
   const [page, setPage] = useState<number>(1);
   const [loading, setLoading] = useState(true);
-  const [rows, setRows] = useState<MalKabulRow[]>([]);
-  const [totalCount, setTotalCount] = useState<number>(0);
+  const [allRows, setAllRows] = useState<MalKabulRow[]>([]);
   const [selectedBrand, setSelectedBrand] = useState<string>('all');
-  const [brands, setBrands] = useState<string[]>([]);
 
-  const cursorStack = useRef<QueryDocumentSnapshot<DocumentData>[]>([]);
-
-  // Load brand list from productCodes (one-time, non-critical)
+  // Fetch ALL records via getScopedDocs which handles three cases:
+  //   1) companyId == normalized  (current records)
+  //   2) companyId == '__legacy__' (legacy-tagged records)
+  //   3) unscoped + matchesCompanyScope (very old records without companyId field)
+  // Using scopedQuery with a single where() clause silently excludes case 2 & 3,
+  // which is why only the most recent (properly-tagged) records were showing.
   useEffect(() => {
     if (!currentCompanyId) return;
-    getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin))
-      .then(snap => {
-        const seen = new Set<string>();
-        snap.docs.forEach(d => {
-          const m = (d.data() as any).marka;
-          if (m && typeof m === 'string') seen.add(m);
-        });
-        setBrands([...seen].sort((a, b) => a.localeCompare(b, 'tr')));
-      })
-      .catch(() => {});
-  }, [currentCompanyId, isSuperAdmin]);
-
-  const fetchCount = useCallback(async (brand: string) => {
-    if (!currentCompanyId) { setTotalCount(0); return; }
-    try {
-      const filters = brand && brand !== 'all' ? [where('brands', 'array-contains', brand)] : [];
-      const q = scopedQuery(COLLECTION_NAME, currentCompanyId, isSuperAdmin, ...filters);
-      const snap = await getCountFromServer(q);
-      setTotalCount(snap.data().count);
-    } catch {
-      setTotalCount(0);
-    }
-  }, [currentCompanyId, isSuperAdmin]);
-
-  const fetchPage = useCallback(async (
-    pageNum: number,
-    brand: string,
-    pgSize: number,
-    cursors: QueryDocumentSnapshot<DocumentData>[],
-  ) => {
-    if (!currentCompanyId) { setRows([]); setLoading(false); return; }
+    let cancelled = false;
     setLoading(true);
-    try {
-      const filters = brand && brand !== 'all' ? [where('brands', 'array-contains', brand)] : [];
-      const cursor = pageNum > 1 ? cursors[pageNum - 2] : undefined;
-      const q = cursor
-        ? scopedQuery(COLLECTION_NAME, currentCompanyId, isSuperAdmin, ...filters, orderBy('timestamp', 'desc'), startAfter(cursor), limit(pgSize))
-        : scopedQuery(COLLECTION_NAME, currentCompanyId, isSuperAdmin, ...filters, orderBy('timestamp', 'desc'), limit(pgSize));
 
-      const snap = await getDocsFromServer(q);
-      const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as MalKabulRow));
+    getScopedDocs(COLLECTION_NAME, currentCompanyId, isSuperAdmin)
+      .then(docs => {
+        if (cancelled) return;
+        const rows = docs
+          .map(d => ({ id: d.id, ...d.data() } as MalKabulRow))
+          .sort((a, b) => tsMillis(b.timestamp) - tsMillis(a.timestamp));
+        setAllRows(rows);
+      })
+      .catch((e: any) => {
+        if (cancelled) return;
+        toast({ title: 'Hata', description: e?.message || 'Kayıtlar yüklenemedi.', variant: 'destructive' });
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
 
-      if (snap.docs.length > 0) {
-        const nc = [...cursors];
-        nc[pageNum - 1] = snap.docs[snap.docs.length - 1];
-        cursorStack.current = nc;
-      }
-      setRows(data);
-    } catch (e: any) {
-      toast({ title: 'Hata', description: e?.message || 'Kayıtlar yüklenemedi.', variant: 'destructive' });
-      setRows([]);
-    } finally {
-      setLoading(false);
-    }
+    return () => { cancelled = true; };
   }, [currentCompanyId, isSuperAdmin, toast]);
 
-  // Reset cursors and refetch count when filter or page size changes
-  useEffect(() => {
-    setPage(1);
-    cursorStack.current = [];
-    void fetchCount(selectedBrand);
-  }, [selectedBrand, pageSize, fetchCount]);
+  // Reset to page 1 when filter or page size changes
+  useEffect(() => { setPage(1); }, [selectedBrand, pageSize]);
 
-  // Fetch page data whenever page or filters change
-  useEffect(() => {
-    void fetchPage(page, selectedBrand, pageSize, cursorStack.current);
-  }, [selectedBrand, page, pageSize, fetchPage]);
+  // Brand list derived from fetched data — no separate Firestore round-trip needed
+  const brands = useMemo(() => {
+    const seen = new Set<string>();
+    allRows.forEach(r => (r.brands || []).forEach(b => seen.add(b)));
+    return [...seen].sort((a, b) => a.localeCompare(b, 'tr'));
+  }, [allRows]);
 
+  const filtered = useMemo(() => {
+    if (!selectedBrand || selectedBrand === 'all') return allRows;
+    return allRows.filter(r => (r.brands || []).includes(selectedBrand));
+  }, [allRows, selectedBrand]);
+
+  const rows = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, page, pageSize]);
+
+  const totalCount = filtered.length;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const cols = 'minmax(0,2.3fr) 130px minmax(0,1.1fr) 150px 70px minmax(0,1fr) 96px';
 
@@ -152,7 +119,9 @@ export default function MalKabulGecmisPage() {
               <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800, letterSpacing: '-0.02em', color: MK_C.ink1 }}>Mal Kabul İşlem Geçmişi</h1>
               <p style={{ margin: '5px 0 0', fontSize: 14, color: MK_C.ink2, fontWeight: 500 }}>Tüm mal kabul işlemleri. Marka ve sayfa boyutuna göre filtreleyin.</p>
               <div style={{ fontSize: 13, color: MK_C.ink3, fontWeight: 600, marginTop: 8 }}>
-                {loading ? 'Yükleniyor…' : `Toplam ${totalCount} işlem · Sayfa ${page} / ${totalPages}`}
+                {loading
+                  ? 'Yükleniyor…'
+                  : `Toplam ${totalCount} işlem · Sayfa ${page} / ${totalPages}`}
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-3">
@@ -193,7 +162,7 @@ export default function MalKabulGecmisPage() {
             {loading ? (
               <div className="flex flex-col items-center justify-center" style={{ padding: '60px 0', color: MK_C.ink2 }}>
                 <Loader2 className="h-6 w-6 animate-spin" />
-                <span className="mt-2 text-sm">Yükleniyor...</span>
+                <span className="mt-2 text-sm font-semibold">Tüm geçmiş yükleniyor…</span>
               </div>
             ) : rows.length === 0 ? (
               <div style={{ padding: '60px 0', textAlign: 'center', color: MK_C.ink3, fontWeight: 600 }}>Kayıt bulunamadı.</div>
@@ -225,17 +194,21 @@ export default function MalKabulGecmisPage() {
           </div>
 
           {/* Pagination */}
-          <div className="flex items-center" style={{ padding: '16px 28px', borderTop: `1px solid ${MK_C.line}` }}>
-            <button disabled={page <= 1 || loading} onClick={() => setPage(p => p - 1)}
-              style={{ all: 'unset', cursor: (page <= 1 || loading) ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8, height: 44, padding: '0 18px', borderRadius: MK_C.radiusSm, background: page <= 1 ? MK_C.surface2 : `linear-gradient(180deg, ${MK_C.surfaceHi}, ${MK_C.surface2})`, boxShadow: page <= 1 ? MK_C.clayInset : MK_C.clay, color: page <= 1 ? MK_C.ink3 : MK_C.ink1, fontSize: 14, fontWeight: 700, opacity: page <= 1 ? 0.6 : 1 }}>
-              <ChevronLeft className="h-[15px] w-[15px]" /> Önceki
-            </button>
-            <div className="flex-1" style={{ textAlign: 'center', fontSize: 14, fontWeight: 700, color: MK_C.ink2 }}>Sayfa {page} / {totalPages}</div>
-            <button disabled={page >= totalPages || loading} onClick={() => setPage(p => p + 1)}
-              style={{ all: 'unset', cursor: (page >= totalPages || loading) ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8, height: 44, padding: '0 18px', borderRadius: MK_C.radiusSm, background: page >= totalPages ? MK_C.surface2 : `linear-gradient(180deg, ${MK_C.surfaceHi}, ${MK_C.surface2})`, boxShadow: page >= totalPages ? MK_C.clayInset : MK_C.clay, color: page >= totalPages ? MK_C.ink3 : MK_C.ink1, fontSize: 14, fontWeight: 700, opacity: page >= totalPages ? 0.6 : 1 }}>
-              Sonraki <ChevronRight className="h-[15px] w-[15px]" />
-            </button>
-          </div>
+          {!loading && totalCount > 0 && (
+            <div className="flex items-center" style={{ padding: '16px 28px', borderTop: `1px solid ${MK_C.line}` }}>
+              <button disabled={page <= 1} onClick={() => setPage(p => p - 1)}
+                style={{ all: 'unset', cursor: page <= 1 ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8, height: 44, padding: '0 18px', borderRadius: MK_C.radiusSm, background: page <= 1 ? MK_C.surface2 : `linear-gradient(180deg, ${MK_C.surfaceHi}, ${MK_C.surface2})`, boxShadow: page <= 1 ? MK_C.clayInset : MK_C.clay, color: page <= 1 ? MK_C.ink3 : MK_C.ink1, fontSize: 14, fontWeight: 700, opacity: page <= 1 ? 0.6 : 1 }}>
+                <ChevronLeft className="h-[15px] w-[15px]" /> Önceki
+              </button>
+              <div className="flex-1" style={{ textAlign: 'center', fontSize: 14, fontWeight: 700, color: MK_C.ink2 }}>
+                Sayfa {page} / {totalPages} &nbsp;·&nbsp; {totalCount} kayıt
+              </div>
+              <button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}
+                style={{ all: 'unset', cursor: page >= totalPages ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8, height: 44, padding: '0 18px', borderRadius: MK_C.radiusSm, background: page >= totalPages ? MK_C.surface2 : `linear-gradient(180deg, ${MK_C.surfaceHi}, ${MK_C.surface2})`, boxShadow: page >= totalPages ? MK_C.clayInset : MK_C.clay, color: page >= totalPages ? MK_C.ink3 : MK_C.ink1, fontSize: 14, fontWeight: 700, opacity: page >= totalPages ? 0.6 : 1 }}>
+                Sonraki <ChevronRight className="h-[15px] w-[15px]" />
+              </button>
+            </div>
+          )}
 
         </div>
       </div>
