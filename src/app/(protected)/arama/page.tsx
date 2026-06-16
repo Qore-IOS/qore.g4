@@ -492,7 +492,9 @@ export default function AramaPanel() {
   const typeLabel = searchType === 'serial' ? 'Seri No Araması' : searchType === 'lot' ? 'Lot Araması' : 'Ürün Araması';
 
   return (
-    <div className="mk-shell" style={{ minHeight: '100vh' }}>
+    <>
+      <div aria-hidden style={{ position: 'fixed', inset: 0, background: 'linear-gradient(120deg, #F6F2EA 0%, transparent 55%), linear-gradient(225deg, #E8E1D2 0%, transparent 55%), #EFEAE0', zIndex: 0 }} />
+      <div className="mk-shell" style={{ minHeight: '100vh', position: 'relative', zIndex: 1 }}>
       <MkClayStyles />
       <SearchBar value={draft} onChange={setDraft} onSubmit={handleSearch} onClear={clearAll} busy={isSearching} />
 
@@ -533,5 +535,6 @@ export default function AramaPanel() {
         </div>
       </div>
     </div>
+    </>
   );
 }
