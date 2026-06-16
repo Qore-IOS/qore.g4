@@ -972,6 +972,38 @@ export default function FaultDetailPage() {
       const now = new Date();
       let restoredDepotEntry: YedekParcaDepoStokItem | null = null;
 
+      if (removedHn) {
+        const duplicateRemovedHucreSnap = await getDocs(query(
+          collection(db, 'yedekParcaDepoStok'),
+          where('stokKodu', '==', item.stokKodu),
+          where('hucreNumarasi', '==', removedHn)
+        ));
+
+        if (duplicateRemovedHucreSnap.empty) {
+          const removedHucreDepotRef = doc(collection(db, 'yedekParcaDepoStok'));
+          batch.set(removedHucreDepotRef, withCompanyScope({
+            productCodeId: (item as any).productCodeId || '',
+            stokKodu: item.stokKodu,
+            stokAdi: item.stokAdi,
+            anaBirim: (item as any).anaBirim || 'Adet',
+            serialNumber: '',
+            hucreNumarasi: removedHn,
+            address: '',
+            quantity: 1,
+            partCondition: 'cihazdan_cikan',
+            partConditionNote: `Cihazdan çıkan hücre: ${fault.model || fault.deviceId || ''}`.trim(),
+            sourceType: 'device_removed',
+            sourceDeviceId: fault.deviceId,
+            sourceDeviceName: fault.model || '',
+            sourceFormId: fault.id,
+            sourceFormType: 'ariza_yonetimi',
+            createdAt: Timestamp.fromDate(now),
+            createdByUid: currentUser.uid,
+            createdByName: currentUserProfile?.name || '',
+          }, currentCompanyId));
+        }
+      }
+
       if (hucreStockSourceTab === 'depot') {
         const depotEntry = depotStockItems.find((stock) => stock.id === item.id);
         if (!depotEntry) throw new Error('Seçilen depo hücre stoğu bulunamadı.');
@@ -1224,45 +1256,43 @@ export default function FaultDetailPage() {
         });
       }
 
-      // If removed part has serial number, create personal stock entry for removed part.
+      // Cihazdan çıkan parça teknisyenin şahsi stoğuna değil yedek parça deposuna iade edilir.
       // Guardrails:
-      // 1) Do not re-add when removed serial equals installed serial.
-      // 2) Do not create duplicate active stock for same owner + stokKodu + serial.
+      // 1) Takılan seri ile çıkan seri aynıysa tekrar stok oluşturma.
+      // 2) Aynı stok kodu + seri için depoda zaten kayıt varsa mükerrer iade oluşturma.
       const removedSerial = removedPartSerialNumber.trim();
       const removedStokKoduValue = removedPartStokKodu.trim() || resolvedStokKodu;
-      const isReusableStockStatus = (status: unknown) => {
-        const normalized = String(status || '').trim().toLowerCase();
-        return normalized === 'in_stock' || normalized === 'pending_approval';
-      };
 
       if (removedSerial && removedSerial !== (resolvedSerialNumber || '').trim()) {
         const duplicateSnap = await getDocs(query(
-          collection(db, 'personalStock'),
-          where('ownerUid', '==', currentUser.uid),
+          collection(db, 'yedekParcaDepoStok'),
+          where('stokKodu', '==', removedStokKoduValue),
           where('serialNumber', '==', removedSerial)
         ));
-        const hasActiveDuplicate = duplicateSnap.docs.some((docSnap) => {
-          const data = docSnap.data();
-          return data.stokKodu === removedStokKoduValue && isReusableStockStatus(data.status);
-        });
 
-        if (!hasActiveDuplicate) {
-          const removedStockRef = doc(collection(db, 'personalStock'));
-          batch.set(removedStockRef, {
-            ownerUid: currentUser.uid,
-            ownerName: currentUserProfile?.name || '',
-            productCodeId: null,
+        if (duplicateSnap.empty) {
+          const removedStockRef = doc(collection(db, 'yedekParcaDepoStok'));
+          batch.set(removedStockRef, withCompanyScope({
+            productCodeId: selectedStockItem?.productCodeId || selectedPoolStockItem?.productCodeId || selectedDepotStockItem?.productCodeId || '',
             stokKodu: removedStokKoduValue,
             stokAdi: removedPartStokAdi.trim() || resolvedStokAdi,
+            anaBirim: (selectedStockItem as any)?.anaBirim || (selectedPoolStockItem as any)?.anaBirim || selectedDepotStockItem?.anaBirim || 'Adet',
             serialNumber: removedSerial,
             imageUrl: removedImgUrl || null,
-            source: 'device',
+            address: '',
+            quantity: 1,
+            partCondition: 'cihazdan_cikan',
+            partConditionNote: `Cihazdan çıkan parça: ${fault.model || fault.deviceId || ''}`.trim(),
+            sourceType: 'device_removed',
             sourceDeviceId: fault.deviceId,
             sourceDeviceName: fault.model || '',
-            status: 'in_stock',
+            sourceFormId: fault.id,
+            sourceFormType: 'ariza_yonetimi',
             createdAt: Timestamp.fromDate(now),
+            createdByUid: currentUser.uid,
+            createdByName: currentUserProfile?.name || '',
             replacedPartId: selectedStockItem?.id || selectedPoolStockItem?.id || null,
-          });
+          }, currentCompanyId));
         }
       }
 
