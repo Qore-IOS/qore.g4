@@ -5476,13 +5476,50 @@ body:has(.fault-clay-page) .page-shell {
     linear-gradient(135deg, #251b36 0%, #171529 50%, #14243d 100%);
 }
 
-/* Krem/clay tasarımlı paneller (Mal Kabul, Direkt Transfer, Siparişler, Arama).
-   Bu paneller kendi krem arka planlarını kendi shell'lerinde (.mk-shell /
-   .dt-shell / .sp-shell) çiziyor. page-shell'in yan boşluğunu (md:px-3) ve
-   genişlik sınırını kaldırarak panel ile arka plan arasında köşeli bir ara
-   katman kalmasını engelliyoruz. (Tailwind utility'lerini geçmek için !important;
-   katmansız kuralın katmansız Tailwind utility'lerini geçmesi yeterli.) */
-body:has(.mk-shell, .dt-shell, .sp-shell) .page-shell {
+/* ──────────────────────────────────────────────────────────────────────────
+   KREM / CLAY TASARIM — GLOBAL ZEMİN SÖZLEŞMESİ
+   ----------------------------------------------------------------------------
+   Tüm paneller sırayla clay tasarıma geçiyor. Yeni bir panel clay'e geçtiğinde
+   bu dosyayı DÜZENLEMEYE GEREK YOK — panelin kök sarmalayıcısına `clay-shell`
+   sınıfını eklemek (ya da clay-kit'teki <ClayShell> bileşenini kullanmak)
+   yeterli. Aşağıdaki kurallar `.clay-shell` üzerinden çalışır.
+
+   `.mk-shell / .dt-shell / .sp-shell` halihazırda yayında olan paneller için
+   geriye dönük uyumluluk amacıyla listede tutuluyor; bu paneller yeniden
+   yazıldıkça tek başına `clay-shell` sözleşmesine geçecek.
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* Kök clay sarmalayıcısı — krem zemin + içerik katmanı (z-index: 1). */
+.clay-shell {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  color: #3D382F;
+  background:
+    linear-gradient(120deg, #F6F2EA 0%, transparent 55%),
+    linear-gradient(225deg, #E8E1D2 0%, transparent 55%),
+    #EFEAE0;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Viewport'u baştan başa saran sabit krem backdrop — gri tema zeminini örter.
+   <ClayShell> bunu otomatik render eder. */
+.clay-shell-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(120deg, #F6F2EA 0%, transparent 55%),
+    linear-gradient(225deg, #E8E1D2 0%, transparent 55%),
+    #EFEAE0;
+}
+
+/* page-shell'in yan boşluğunu (md:px-3) ve genişlik sınırını kaldırarak panel
+   ile arka plan arasında köşeli bir ara katman kalmasını engelliyoruz.
+   (Tailwind utility'lerini geçmek için !important.) */
+body:has(.clay-shell, .mk-shell, .dt-shell, .sp-shell) .page-shell {
   max-width: none !important;
   padding-inline: 0 !important;
 }
@@ -5492,15 +5529,15 @@ body:has(.mk-shell, .dt-shell, .sp-shell) .page-shell {
    !important ile tanımlı; katmanlı !important katmansızı geçtiği için bu
    override da aynı katmanda ve daha yüksek özgüllükle yazılmalı. */
 @layer components {
-  body:has(.mk-shell, .dt-shell, .sp-shell),
-  body:has(.mk-shell, .dt-shell, .sp-shell) main,
-  body:has(.mk-shell, .dt-shell, .sp-shell) .page-shell,
-  html:not(.dark) body.qore-standard-shell-bg:has(.mk-shell, .dt-shell, .sp-shell),
-  html:not(.dark) body.qore-standard-shell-bg:has(.mk-shell, .dt-shell, .sp-shell) main,
-  html:not(.dark) body.qore-standard-shell-bg:has(.mk-shell, .dt-shell, .sp-shell) .page-shell,
-  html:not(.dark) body.qore-global-window-chrome:has(.mk-shell, .dt-shell, .sp-shell),
-  html:not(.dark) body.qore-global-window-chrome:has(.mk-shell, .dt-shell, .sp-shell) main,
-  html:not(.dark) body.qore-global-window-chrome:has(.mk-shell, .dt-shell, .sp-shell) .page-shell {
+  body:has(.clay-shell, .mk-shell, .dt-shell, .sp-shell),
+  body:has(.clay-shell, .mk-shell, .dt-shell, .sp-shell) main,
+  body:has(.clay-shell, .mk-shell, .dt-shell, .sp-shell) .page-shell,
+  html:not(.dark) body.qore-standard-shell-bg:has(.clay-shell, .mk-shell, .dt-shell, .sp-shell),
+  html:not(.dark) body.qore-standard-shell-bg:has(.clay-shell, .mk-shell, .dt-shell, .sp-shell) main,
+  html:not(.dark) body.qore-standard-shell-bg:has(.clay-shell, .mk-shell, .dt-shell, .sp-shell) .page-shell,
+  html:not(.dark) body.qore-global-window-chrome:has(.clay-shell, .mk-shell, .dt-shell, .sp-shell),
+  html:not(.dark) body.qore-global-window-chrome:has(.clay-shell, .mk-shell, .dt-shell, .sp-shell) main,
+  html:not(.dark) body.qore-global-window-chrome:has(.clay-shell, .mk-shell, .dt-shell, .sp-shell) .page-shell {
     background: #EFEAE0 !important;
   }
 }
