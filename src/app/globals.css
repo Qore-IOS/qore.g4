@@ -5516,6 +5516,35 @@ body:has(.fault-clay-page) .page-shell {
     linear-gradient(135deg, #251b36 0%, #171529 50%, #14243d 100%);
 }
 
+/* Krem/clay tasarımlı paneller (Mal Kabul, Direkt Transfer, Siparişler, Arama).
+   Bu paneller kendi krem arka planlarını kendi shell'lerinde (.mk-shell /
+   .dt-shell / .sp-shell) çiziyor. page-shell'in yan boşluğunu (md:px-3) ve
+   genişlik sınırını kaldırarak panel ile arka plan arasında köşeli bir ara
+   katman kalmasını engelliyoruz. (Tailwind utility'lerini geçmek için !important;
+   katmansız kuralın katmansız Tailwind utility'lerini geçmesi yeterli.) */
+body:has(.mk-shell, .dt-shell, .sp-shell) .page-shell {
+  max-width: none !important;
+  padding-inline: 0 !important;
+}
+
+/* Gövde/main/page-shell krem zemini. qore-standard-shell-bg /
+   qore-global-window-chrome gri (#eeece9) kuralları @layer components içinde
+   !important ile tanımlı; katmanlı !important katmansızı geçtiği için bu
+   override da aynı katmanda ve daha yüksek özgüllükle yazılmalı. */
+@layer components {
+  body:has(.mk-shell, .dt-shell, .sp-shell),
+  body:has(.mk-shell, .dt-shell, .sp-shell) main,
+  body:has(.mk-shell, .dt-shell, .sp-shell) .page-shell,
+  html:not(.dark) body.qore-standard-shell-bg:has(.mk-shell, .dt-shell, .sp-shell),
+  html:not(.dark) body.qore-standard-shell-bg:has(.mk-shell, .dt-shell, .sp-shell) main,
+  html:not(.dark) body.qore-standard-shell-bg:has(.mk-shell, .dt-shell, .sp-shell) .page-shell,
+  html:not(.dark) body.qore-global-window-chrome:has(.mk-shell, .dt-shell, .sp-shell),
+  html:not(.dark) body.qore-global-window-chrome:has(.mk-shell, .dt-shell, .sp-shell) main,
+  html:not(.dark) body.qore-global-window-chrome:has(.mk-shell, .dt-shell, .sp-shell) .page-shell {
+    background: #EFEAE0 !important;
+  }
+}
+
 /* Fault detail claymorphic redesign */
 .fault-clay-page {
   min-height: 100dvh;
