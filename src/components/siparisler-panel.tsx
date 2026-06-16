@@ -593,7 +593,7 @@ export default function SiparislerPanel() {
           baştan başa sarar, arkadaki gri tema zemini görünmez. */}
       <div aria-hidden style={{ position: 'fixed', inset: 0, background: C.surface2, zIndex: 0 }} />
 
-      <div style={{
+      <div className="sp-shell" style={{
         position: 'relative', zIndex: 1,
         maxWidth: 860, margin: '0 auto',
         padding: '28px 20px 90px',
