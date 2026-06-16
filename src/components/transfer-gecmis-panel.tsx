@@ -145,7 +145,9 @@ export default function TransferGecmisPanel() {
   const cols = '150px minmax(0,2fr) minmax(0,1.2fr) minmax(0,1fr) 80px 96px';
 
   return (
-    <div className="mk-shell" style={{ padding: '20px 28px 40px' }}>
+    <>
+      <div aria-hidden style={{ position: 'fixed', inset: 0, background: 'linear-gradient(120deg, #F6F2EA 0%, transparent 55%), linear-gradient(225deg, #E8E1D2 0%, transparent 55%), #EFEAE0', zIndex: 0 }} />
+      <div className="mk-shell" style={{ padding: '20px 28px 40px', position: 'relative', zIndex: 1 }}>
       <MkClayStyles />
       <div style={{ maxWidth: 1680, margin: '0 auto' }}>
         <div className="mb-4"><BackButton fallback="/direkt-transfer" /></div>
@@ -262,5 +264,6 @@ export default function TransferGecmisPanel() {
         </div>
       </div>
     </div>
+    </>
   );
 }
