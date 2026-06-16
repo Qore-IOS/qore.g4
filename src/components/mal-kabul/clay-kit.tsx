@@ -63,6 +63,37 @@ export function MkClayStyles() {
   );
 }
 
+// ── Canonical clay shell ─────────────────────────────────────────────────────
+/**
+ * Kök sarmalayıcı for clay (krem) tasarımlı paneller.
+ *
+ * Gelecekte clay'e geçecek HER panel içeriğini bununla sarmalamalı (veya
+ * doğrudan `clay-shell` sınıfını kök div'ine eklemeli). Bu sayede:
+ *  - viewport baştan başa krem ile sarılır (gri tema zemini görünmez),
+ *  - page-shell'in yan boşluğu/genişlik sınırı kaldırılır (köşeli ara katman
+ *    oluşmaz),
+ *  - clay keyframe'leri (mkSpin, mkPopIn, …) otomatik enjekte edilir.
+ *
+ * Zemin/çerçeve davranışı globals.css'teki `.clay-shell` sözleşmesiyle gelir;
+ * yeni panel eklerken globals.css'i düzenlemeye gerek yoktur.
+ */
+export function ClayShell({ children, className, style }: {
+  children: React.ReactNode; className?: string; style?: React.CSSProperties;
+}) {
+  return (
+    <>
+      <MkClayStyles />
+      <div aria-hidden className="clay-shell-backdrop" />
+      <div className={['clay-shell', className].filter(Boolean).join(' ')} style={style}>
+        {children}
+      </div>
+    </>
+  );
+}
+
+/** Kök clay sarmalayıcı sınıf adı — manuel kullanım için (örn. className birleştirme). */
+export const CLAY_SHELL_CLASS = 'clay-shell';
+
 const C = MK_C;
 
 // ── Top stepper (Depo → Okut → Kabul) ────────────────────────────────────────
