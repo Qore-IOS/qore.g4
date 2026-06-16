@@ -2061,23 +2061,29 @@ export default function IslemFormuPage() {
             const removedStokKodu = partChange.removedPartStokKodu || partChange.stokKodu;
 
             if (removedSerial && removedSerial !== installedSerial) {
-              const removedStockRef = doc(collection(db, 'personalStock'));
+              const removedStockRef = doc(collection(db, 'yedekParcaDepoStok'));
               removedStockRefId = removedStockRef.id;
-              batch.set(removedStockRef, {
-                ownerUid: currentUserProfile?.uid || '',
-                ownerName: currentUserProfile?.name || '',
-                productCodeId: partChange.personalStockId ? partChange.action : null,
+              batch.set(removedStockRef, withCompanyScope({
+                productCodeId: partChange.productCodeId || '',
                 stokKodu: removedStokKodu,
                 stokAdi: partChange.removedPartStokAdi || partChange.stokAdi,
+                anaBirim: partChange.anaBirim || 'Adet',
                 serialNumber: removedSerial,
                 imageUrl: partChange.removedPartImageUrl || null,
-                source: 'device',
+                address: '',
+                quantity: 1,
+                partCondition: 'cihazdan_cikan',
+                partConditionNote: `Cihazdan çıkan parça: ${currentDevice.cihazAdi || currentDevice.model || currentDeviceId || ''}`.trim(),
+                sourceType: 'device_removed',
                 sourceDeviceId: currentDeviceId,
                 sourceDeviceName: currentDevice.cihazAdi || currentDevice.model || '',
-                status: 'in_stock',
+                sourceFormId: formRef.id,
+                sourceFormType: 'teknik_servis',
                 createdAt: Timestamp.fromDate(now),
-                replacedPartId: partChange.personalStockId || null,
-              });
+                createdByUid: currentUserProfile?.uid || '',
+                createdByName: currentUserProfile?.name || '',
+                replacedPartId: partChange.personalStockId || partChange.poolStockId || null,
+              }, currentCompanyId));
             }
 
             if (partChange.personalStockId && !processedPersonalStockIdsGlobal.has(partChange.personalStockId)) {
