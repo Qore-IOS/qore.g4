@@ -153,6 +153,7 @@ service cloud.firestore {
     match /transferTemplates/{id}             { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /vehicles/{id}                      { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /testDefinitions/{id}               { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /testAutoSumDefinitions/{id}        { allow read: if inCompany(); allow write: if writingInCompany(); }
     // Product-code definitions are shared catalogs across every company.
     match /def_brands/{id}                    { allow read, write: if isSignedIn(); }
     match /def_labGroups/{id}                 { allow read, write: if isSignedIn(); }
