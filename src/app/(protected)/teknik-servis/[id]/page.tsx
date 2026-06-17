@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import BackButton from '@/components/BackButton';
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
-import { AlertTriangle, CheckCircle, Loader2, Wrench, FilePenLine, FlaskConical, Building2, ChevronDown, ChevronUp, History, CalendarClock, RotateCcw, FileEdit, FilePlus, ClipboardList, Download, Upload } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Loader2, Wrench, FilePenLine, FlaskConical, Building2, ChevronDown, ChevronUp, History, CalendarClock, RotateCcw, FileEdit, FilePlus, ClipboardList, Download, Upload, Calculator } from 'lucide-react';
 import {
   collection,
   onSnapshot,
@@ -1219,6 +1219,12 @@ export default function TeknikServisDetayPage() {
                   >
                     <FilePenLine className="h-4 w-4" /> Yeni Servis İşlemi Oluştur
                   </button>
+                  <button
+                    onClick={() => navigateToAction('/kumulatif-hesaplama')}
+                    className="cihaz-tool-item px-4 py-2.5 text-sm font-medium flex items-center justify-center gap-2"
+                  >
+                    <Calculator className="h-4 w-4" /> Kümülatif Hesapla
+                  </button>
                 </>
               ) : (
                 <>
@@ -1234,6 +1240,12 @@ export default function TeknikServisDetayPage() {
                     className="cihaz-tool-item px-4 py-2.5 text-sm font-medium flex items-center justify-center gap-2"
                   >
                     <FilePenLine className="h-4 w-4" /> Teknik Servis İşlem Formu Aç
+                  </button>
+                  <button
+                    onClick={() => navigateToAction('/kumulatif-hesaplama')}
+                    className="cihaz-tool-item px-4 py-2.5 text-sm font-medium flex items-center justify-center gap-2"
+                  >
+                    <Calculator className="h-4 w-4" /> Kümülatif Hesapla
                   </button>
                   <button
                     onClick={() => setIsModalOpen(false)}
