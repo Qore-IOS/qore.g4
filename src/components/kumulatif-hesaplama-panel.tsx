@@ -77,6 +77,7 @@ export default function KumulatifHesaplamaPanel() {
   const [isParsing, setIsParsing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<Array<CalculationProductRow & CumulativeRow & { matchedTests: string[] }>>([]);
+  const [unmatchedTests, setUnmatchedTests] = useState<CumulativeRow[]>([]);
   const [brandFilter, setBrandFilter] = useState(ALL_FILTER_VALUE);
   const [productGroupFilter, setProductGroupFilter] = useState(ALL_FILTER_VALUE);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -129,6 +130,7 @@ export default function KumulatifHesaplamaPanel() {
   }, [currentCompanyId, isSuperAdmin]);
 
   const hasComputed = rows.length > 0;
+  const availableUnmatchedProducts = useMemo(() => rows.filter((row) => row.matchedTests.length === 0), [rows]);
   const canParse = files.length > 0 && !!hospitalId && filteredProducts.length > 0 && !isParsing && !isLoadingScope;
 
   function cancelCombine() {
@@ -141,6 +143,7 @@ export default function KumulatifHesaplamaPanel() {
     if (!accepted.length) return;
     setFiles((prev) => [...prev, ...accepted]);
     setRows([]);
+    setUnmatchedTests([]);
     setError(null);
     cancelCombine();
   }, []);
@@ -150,6 +153,7 @@ export default function KumulatifHesaplamaPanel() {
       const next = prev.filter((_, i) => i !== index);
       if (next.length === 0) {
         setRows([]);
+        setUnmatchedTests([]);
         cancelCombine();
       }
       return next;
@@ -164,6 +168,7 @@ export default function KumulatifHesaplamaPanel() {
     setError(null);
     setIsParsing(true);
     setRows([]);
+    setUnmatchedTests([]);
     cancelCombine();
     try {
       const pdfs = files.filter(isPdf);
@@ -174,21 +179,32 @@ export default function KumulatifHesaplamaPanel() {
       ]);
       const merged = [...pdfRows, ...txtRows];
       const aggregated = aggregateCumulative(merged);
-      const byTest = new Map(aggregated.map((row) => [normalizeTestName(row.test), row]));
+      const byTest = new Map<string, CumulativeRow[]>();
+      aggregated.forEach((row) => {
+        const key = normalizeTestName(row.test);
+        byTest.set(key, [...(byTest.get(key) ?? []), row]);
+      });
+      const usedTestKeys = new Set<string>();
       const matched = filteredProducts.map((product) => {
-        const match = byTest.get(normalizeTestName(product.testAdi));
+        const productTestKey = normalizeTestName(product.testAdi);
+        const matches = byTest.get(productTestKey) ?? [];
+        if (matches.length > 0) usedTestKeys.add(productTestKey);
+        const totals = matches.reduce((acc, match) => ({
+          routine: acc.routine + (match.routine || 0),
+          rerun: acc.rerun + (match.rerun || 0),
+          calib: acc.calib + (match.calib || 0),
+          control: acc.control + (match.control || 0),
+          total: acc.total + (match.total || 0),
+        }), { routine: 0, rerun: 0, calib: 0, control: 0, total: 0 });
         return {
           ...product,
           test: product.testAdi || product.stokKodu,
-          routine: match?.routine || 0,
-          rerun: match?.rerun || 0,
-          calib: match?.calib || 0,
-          control: match?.control || 0,
-          total: match?.total || 0,
-          matchedTests: match ? [match.test] : [],
+          ...totals,
+          matchedTests: matches.map((match) => match.test),
         };
       });
       setRows(matched);
+      setUnmatchedTests(aggregated.filter((row) => !usedTestKeys.has(normalizeTestName(row.test))));
       if (aggregated.length === 0) {
         setError('Geçerli veri satırı çıkarılamadı. Dosya içeriğini ve biçimini kontrol edin.');
       } else {
@@ -259,6 +275,26 @@ export default function KumulatifHesaplamaPanel() {
     cancelCombine();
   }
 
+  function assignUnmatchedTest(testName: string, stokKodu: string) {
+    const source = unmatchedTests.find((item) => item.test === testName);
+    if (!source || !stokKodu) return;
+
+    setRows((prev) => prev.map((row) => row.stokKodu === stokKodu
+      ? {
+          ...row,
+          test: row.testAdi || row.stokKodu,
+          routine: source.routine,
+          rerun: source.rerun,
+          calib: source.calib,
+          control: source.control,
+          total: source.total,
+          matchedTests: [...row.matchedTests, source.test],
+        }
+      : row
+    ));
+    setUnmatchedTests((prev) => prev.filter((item) => item.test !== testName));
+  }
+
   function handleExport() {
     if (!rows.length) return;
     const data = rows.map((r) => ({
@@ -304,7 +340,7 @@ export default function KumulatifHesaplamaPanel() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="col-span-1 md:col-span-2">
               <label className="text-sm font-medium">Laboratuvar</label>
-              <Select value={hospitalId} onValueChange={setHospitalId} disabled={loadingHospitals}>
+              <Select value={hospitalId} onValueChange={(v) => { setHospitalId(v); setRows([]); setUnmatchedTests([]); }} disabled={loadingHospitals}>
                 <SelectTrigger className="mt-1">
                   <SelectValue placeholder={loadingHospitals ? 'Yükleniyor...' : 'Seçiniz'} />
                 </SelectTrigger>
@@ -317,7 +353,7 @@ export default function KumulatifHesaplamaPanel() {
             </div>
             <div>
               <label className="text-sm font-medium">Ay</label>
-              <Select value={String(month)} onValueChange={(v) => setMonth(Number(v))}>
+              <Select value={String(month)} onValueChange={(v) => { setMonth(Number(v)); setRows([]); setUnmatchedTests([]); }}>
                 <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {MONTHS.map((m) => (
@@ -328,7 +364,7 @@ export default function KumulatifHesaplamaPanel() {
             </div>
             <div>
               <label className="text-sm font-medium">Yıl</label>
-              <Select value={String(year)} onValueChange={(v) => setYear(Number(v))}>
+              <Select value={String(year)} onValueChange={(v) => { setYear(Number(v)); setRows([]); setUnmatchedTests([]); }}>
                 <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {YEARS.map((y) => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}
@@ -340,7 +376,7 @@ export default function KumulatifHesaplamaPanel() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 rounded-xl border bg-muted/20 p-4">
             <div>
               <label className="text-sm font-medium">Marka Filtresi</label>
-              <Select value={brandFilter} onValueChange={(v) => { setBrandFilter(v); setRows([]); }}>
+              <Select value={brandFilter} onValueChange={(v) => { setBrandFilter(v); setRows([]); setUnmatchedTests([]); }}>
                 <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value={ALL_FILTER_VALUE}>Tüm Markalar</SelectItem>
@@ -350,7 +386,7 @@ export default function KumulatifHesaplamaPanel() {
             </div>
             <div>
               <label className="text-sm font-medium">Ürün Grubu Filtresi</label>
-              <Select value={productGroupFilter} onValueChange={(v) => { setProductGroupFilter(v); setRows([]); }}>
+              <Select value={productGroupFilter} onValueChange={(v) => { setProductGroupFilter(v); setRows([]); setUnmatchedTests([]); }}>
                 <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value={ALL_FILTER_VALUE}>Tüm Ürün Grupları</SelectItem>
@@ -437,6 +473,37 @@ export default function KumulatifHesaplamaPanel() {
             <Alert variant="destructive">
               <AlertTitle>Hata</AlertTitle>
               <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+
+          {unmatchedTests.length > 0 && (
+            <Alert>
+              <AlertTitle>Eşleşmeyen testler bulundu</AlertTitle>
+              <AlertDescription className="space-y-3 pt-2">
+                <p>PDF/TXT içinden gelen ama seçili lab ürün listesinde otomatik eşleşmeyen testleri, boşta kalan ürünlerden birine aktarabilirsiniz.</p>
+                <div className="space-y-2">
+                  {unmatchedTests.map((item) => (
+                    <div key={item.test} className="grid grid-cols-1 md:grid-cols-[1fr_1.3fr] gap-2 items-center rounded-md border bg-background/60 p-2">
+                      <div className="text-sm">
+                        <div className="font-medium">{item.test}</div>
+                        <div className="text-xs text-muted-foreground">Routine {item.routine} • Rerun {item.rerun} • Calib {item.calib} • Control {item.control} • Total {item.total}</div>
+                      </div>
+                      <Select onValueChange={(stokKodu) => assignUnmatchedTest(item.test, stokKodu)} disabled={availableUnmatchedProducts.length === 0}>
+                        <SelectTrigger>
+                          <SelectValue placeholder={availableUnmatchedProducts.length ? 'Boşta kalan ürün/test seçin' : 'Boşta kalan ürün yok'} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availableUnmatchedProducts.map((product) => (
+                            <SelectItem key={product.stokKodu} value={product.stokKodu}>
+                              {product.stokKodu} • {product.stokAdi} • {product.testAdi || 'Test adı yok'}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ))}
+                </div>
+              </AlertDescription>
             </Alert>
           )}
 
