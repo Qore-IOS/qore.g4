@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { Download, Loader2, Table2 } from 'lucide-react';
-import { orderBy } from 'firebase/firestore';
+import { Download, Loader2, Table2, Trash2 } from 'lucide-react';
+import { deleteDoc, doc, orderBy } from 'firebase/firestore';
 import BackButton from '@/components/BackButton';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useAuth } from '@/contexts/auth-context';
+import { db } from '@/lib/firebase';
 import { getScopedDocs } from '@/lib/firestore-helpers';
 import { exportDataToExcel } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
@@ -94,6 +95,19 @@ export default function QoreHesaplamaGecmisPanel({ kind }: { kind: HistoryKind }
 
   const selected = useMemo(() => records.find((record) => record.id === selectedId) || records[0] || null, [records, selectedId]);
 
+
+  async function deleteRecord(record: HistoryRecord) {
+    if (!window.confirm(`${record.scopeLabel || record.hospitalName || record.hospitalId || 'Seçili'} ${record.period || ''} geçmiş kaydı silinsin mi?`)) return;
+    try {
+      await deleteDoc(doc(db, cfg.collection, record.id));
+      setRecords((prev) => prev.filter((item) => item.id !== record.id));
+      setSelectedId((prev) => (prev === record.id ? null : prev));
+      toast({ title: 'Geçmiş kaydı silindi' });
+    } catch (e: any) {
+      toast({ title: 'Silme başarısız', description: e?.message || 'Geçmiş kaydı silinemedi.', variant: 'destructive' });
+    }
+  }
+
   function exportRecord(record: HistoryRecord) {
     const data = (record.items || []).map((item) => ({
       'Stok Kodu': item.productId,
@@ -126,7 +140,7 @@ export default function QoreHesaplamaGecmisPanel({ kind }: { kind: HistoryKind }
               <ScrollArea className="h-[55vh] rounded-md border">
                 <Table>
                   <TableHeader className="sticky top-0 bg-background z-10">
-                    <TableRow><TableHead>Lab/Havuz</TableHead><TableHead>Dönem</TableHead><TableHead>Satır</TableHead><TableHead>Kayıt</TableHead></TableRow>
+                    <TableRow><TableHead>Lab/Havuz</TableHead><TableHead>Dönem</TableHead><TableHead>Satır</TableHead><TableHead>Kayıt</TableHead><TableHead className="w-12" /></TableRow>
                   </TableHeader>
                   <TableBody>
                     {records.map((record) => (
@@ -135,6 +149,17 @@ export default function QoreHesaplamaGecmisPanel({ kind }: { kind: HistoryKind }
                         <TableCell>{record.period || `${record.month ?? '-'}-${record.year ?? '-'}`}</TableCell>
                         <TableCell>{record.rowCount ?? record.items?.length ?? 0}</TableCell>
                         <TableCell>{formatDate(record.createdAt)}</TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-red-600"
+                            onClick={(event) => { event.stopPropagation(); void deleteRecord(record); }}
+                            title="Geçmiş kaydını sil"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -148,7 +173,10 @@ export default function QoreHesaplamaGecmisPanel({ kind }: { kind: HistoryKind }
                       <CardTitle className="text-base">Detay — {selected.scopeLabel || selected.hospitalName || selected.hospitalId}</CardTitle>
                       <CardDescription>{selected.period} • {formatDate(selected.createdAt)}</CardDescription>
                     </div>
-                    <Button variant="outline" onClick={() => exportRecord(selected)}><Download className="mr-2 h-4 w-4" /> Excel</Button>
+                    <div className="flex gap-2">
+                      <Button variant="outline" onClick={() => exportRecord(selected)}><Download className="mr-2 h-4 w-4" /> Excel</Button>
+                      <Button variant="outline" className="text-red-600" onClick={() => void deleteRecord(selected)}><Trash2 className="mr-2 h-4 w-4" /> Sil</Button>
+                    </div>
                   </CardHeader>
                   <CardContent>
                     <ScrollArea className="h-[48vh] rounded-md border">
