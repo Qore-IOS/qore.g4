@@ -281,6 +281,8 @@ export default function DeviceLabPoolModal({ open, onOpenChange, hospitals, devi
             }
             disabled={labsWithDevices.length === 0}
             showChips
+            popoverModal
+            contentClassName="z-[10000]"
           />
         </div>
       </div>
