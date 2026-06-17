@@ -5,6 +5,7 @@ import { Download, Loader2, Table2, Trash2 } from 'lucide-react';
 import { deleteDoc, doc, orderBy } from 'firebase/firestore';
 import BackButton from '@/components/BackButton';
 import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -27,6 +28,7 @@ type HistoryItem = {
   calib?: number;
   control?: number;
   total?: number;
+  efficiency?: number | null;
   value?: number;
 };
 
@@ -59,6 +61,24 @@ const config = {
   },
 } as const;
 
+
+function calculateEfficiency(item: HistoryItem): number | null {
+  const total = item.total || 0;
+  return total ? ((item.routine || 0) / total) * 100 : null;
+}
+
+function getEfficiencyValue(item: HistoryItem): number | null {
+  return typeof item.efficiency === 'number' ? item.efficiency : calculateEfficiency(item);
+}
+
+function toSheetName(record: HistoryRecord, index: number): string {
+  const base = `${record.scopeLabel || record.hospitalName || record.hospitalId || 'Lab'}_${index + 1}`
+    .replace(/[\/?*\[\]:]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return (base || `Lab_${index + 1}`).substring(0, 31);
+}
+
 function formatDate(value: any): string {
   const date = value?.toDate ? value.toDate() : value instanceof Date ? value : null;
   return date ? date.toLocaleString('tr-TR') : '-';
@@ -72,6 +92,7 @@ export default function QoreHesaplamaGecmisPanel({ kind }: { kind: HistoryKind }
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [periodExport, setPeriodExport] = useState<string>('');
 
   useEffect(() => {
     let alive = true;
@@ -94,6 +115,12 @@ export default function QoreHesaplamaGecmisPanel({ kind }: { kind: HistoryKind }
   }, [cfg.collection, currentCompanyId, isSuperAdmin]);
 
   const selected = useMemo(() => records.find((record) => record.id === selectedId) || records[0] || null, [records, selectedId]);
+  const periodOptions = useMemo(() => Array.from(new Set(records.map((record) => record.period || `${record.month ?? '-'}-${record.year ?? '-'}`).filter(Boolean))).sort().reverse(), [records]);
+
+  useEffect(() => {
+    if (kind !== 'kumulatif') return;
+    setPeriodExport((prev) => (prev && periodOptions.includes(prev) ? prev : periodOptions[0] || ''));
+  }, [kind, periodOptions]);
 
 
   async function deleteRecord(record: HistoryRecord) {
@@ -115,12 +142,38 @@ export default function QoreHesaplamaGecmisPanel({ kind }: { kind: HistoryKind }
       'Test Adı': item.testName || '',
       'Eşleşen Dosya Testi': (item.matchedTests || []).join(', '),
       ...(kind === 'kumulatif'
-        ? { Routine: item.routine || 0, Rerun: item.rerun || 0, Calib: item.calib || 0, Control: item.control || 0, Total: item.total || 0 }
+        ? { Routine: item.routine || 0, Rerun: item.rerun || 0, Calib: item.calib || 0, Control: item.control || 0, Total: item.total || 0, 'Verimlilik (%)': getEfficiencyValue(item) ?? '' }
         : { 'Toplam Kullanılabilir': item.value || 0 }),
     }));
     exportDataToExcel(data, `${cfg.sheet}_${record.hospitalName || record.hospitalId || 'Lab'}_${record.period || ''}`, cfg.sheet, toast);
   }
 
+
+
+  function exportPeriodRecords(period: string) {
+    if (kind !== 'kumulatif' || !period) return;
+    const periodRecords = records.filter((record) => (record.period || `${record.month ?? '-'}-${record.year ?? '-'}`) === period);
+    if (!periodRecords.length) {
+      toast({ title: 'Veri yok', description: `${period} dönemine ait kümülatif geçmiş kaydı bulunamadı.` });
+      return;
+    }
+    const sheets = periodRecords.reduce<Record<string, any[]>>((acc, record, index) => {
+      acc[toSheetName(record, index)] = (record.items || []).map((item) => ({
+        'Stok Kodu': item.productId,
+        'Stok Adı': item.productName || '',
+        'Test Adı': item.testName || '',
+        'Eşleşen Dosya Testi': (item.matchedTests || []).join(', '),
+        Routine: item.routine || 0,
+        Rerun: item.rerun || 0,
+        Calib: item.calib || 0,
+        Control: item.control || 0,
+        Total: item.total || 0,
+        'Verimlilik (%)': getEfficiencyValue(item) ?? '',
+      }));
+      return acc;
+    }, {});
+    exportDataToExcel(sheets, `Kumulatif_Donemsel_${period}`, toast);
+  }
   return (
     <div className="p-4 md:p-6 space-y-6">
       <BackButton fallback={cfg.fallback} />
@@ -131,6 +184,22 @@ export default function QoreHesaplamaGecmisPanel({ kind }: { kind: HistoryKind }
         </CardHeader>
         <CardContent className="space-y-4">
           {error && <Alert variant="destructive"><AlertTitle>Hata</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
+          {kind === 'kumulatif' && records.length > 0 && (
+            <div className="flex flex-col sm:flex-row gap-2 rounded-lg border bg-muted/20 p-3 sm:items-end">
+              <div className="min-w-[220px]">
+                <label className="text-sm font-medium">Dönemsel toplu Excel</label>
+                <Select value={periodExport} onValueChange={setPeriodExport}>
+                  <SelectTrigger className="mt-1"><SelectValue placeholder="Dönem seçin" /></SelectTrigger>
+                  <SelectContent>
+                    {periodOptions.map((period) => <SelectItem key={period} value={period}>{period}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button variant="outline" onClick={() => exportPeriodRecords(periodExport)} disabled={!periodExport}>
+                <Download className="mr-2 h-4 w-4" /> Seçili Dönemi Toplu Excel Al
+              </Button>
+            </div>
+          )}
           {isLoading ? (
             <div className="flex items-center gap-2 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Yükleniyor…</div>
           ) : records.length === 0 ? (
@@ -184,7 +253,7 @@ export default function QoreHesaplamaGecmisPanel({ kind }: { kind: HistoryKind }
                         <TableHeader className="sticky top-0 bg-background z-10">
                           <TableRow>
                             <TableHead>Stok Kodu</TableHead><TableHead>Stok Adı</TableHead><TableHead>Test Adı</TableHead><TableHead>Eşleşen</TableHead>
-                            {kind === 'kumulatif' ? <><TableHead className="text-right">Routine</TableHead><TableHead className="text-right">Rerun</TableHead><TableHead className="text-right">Calib</TableHead><TableHead className="text-right">Control</TableHead><TableHead className="text-right">Total</TableHead></> : <TableHead className="text-right">Toplam Kullanılabilir</TableHead>}
+                            {kind === 'kumulatif' ? <><TableHead className="text-right">Routine</TableHead><TableHead className="text-right">Rerun</TableHead><TableHead className="text-right">Calib</TableHead><TableHead className="text-right">Control</TableHead><TableHead className="text-right">Total</TableHead><TableHead className="text-right">Verimlilik (%)</TableHead></> : <TableHead className="text-right">Toplam Kullanılabilir</TableHead>}
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -194,7 +263,7 @@ export default function QoreHesaplamaGecmisPanel({ kind }: { kind: HistoryKind }
                               <TableCell>{item.productName}</TableCell>
                               <TableCell>{item.testName}</TableCell>
                               <TableCell className="text-muted-foreground">{(item.matchedTests || []).join(', ') || '-'}</TableCell>
-                              {kind === 'kumulatif' ? <><TableCell className="text-right">{item.routine || 0}</TableCell><TableCell className="text-right">{item.rerun || 0}</TableCell><TableCell className="text-right">{item.calib || 0}</TableCell><TableCell className="text-right">{item.control || 0}</TableCell><TableCell className="text-right font-semibold">{item.total || 0}</TableCell></> : <TableCell className="text-right font-semibold">{item.value || 0}</TableCell>}
+                              {kind === 'kumulatif' ? <><TableCell className="text-right">{item.routine || 0}</TableCell><TableCell className="text-right">{item.rerun || 0}</TableCell><TableCell className="text-right">{item.calib || 0}</TableCell><TableCell className="text-right">{item.control || 0}</TableCell><TableCell className="text-right font-semibold">{item.total || 0}</TableCell><TableCell className="text-right">{getEfficiencyValue(item)?.toFixed(2) ?? ''}</TableCell></> : <TableCell className="text-right font-semibold">{item.value || 0}</TableCell>}
                             </TableRow>
                           ))}
                         </TableBody>

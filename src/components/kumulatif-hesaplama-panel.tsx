@@ -68,6 +68,7 @@ const YEARS = Array.from({ length: 6 }, (_, i) => CURRENT_YEAR - i);
 
 const isPdf = (f: File) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
 const isTxt = (f: File) => f.type.startsWith('text/') || /\.(txt|csv)$/i.test(f.name);
+const calculateEfficiency = (routine?: number, total?: number) => total ? ((routine || 0) / total) * 100 : null;
 
 export default function KumulatifHesaplamaPanel() {
   const { toast } = useToast();
@@ -331,6 +332,7 @@ export default function KumulatifHesaplamaPanel() {
           calib: r.calib || 0,
           control: r.control || 0,
           total: r.total || 0,
+          efficiency: calculateEfficiency(r.routine, r.total),
         })),
         createdAt: serverTimestamp(),
         createdByUid: currentUser?.uid || null,
@@ -356,6 +358,7 @@ export default function KumulatifHesaplamaPanel() {
       Calib: r.calib,
       Control: r.control,
       Total: r.total,
+      'Verimlilik (%)': calculateEfficiency(r.routine, r.total) ?? '',
     }));
     const fname = `Kumulatif_${hospitalName || 'Lab'}_${String(month + 1).padStart(2, '0')}-${year}`;
     exportDataToExcel(data, fname, 'Kumulatif', toast);
@@ -589,6 +592,7 @@ export default function KumulatifHesaplamaPanel() {
                         <TableHead className="text-right">Calib</TableHead>
                         <TableHead className="text-right">Control</TableHead>
                         <TableHead className="text-right">Total</TableHead>
+                        <TableHead className="text-right">Verimlilik (%)</TableHead>
                         <TableHead className="w-28" />
                       </TableRow>
                     </TableHeader>
@@ -628,6 +632,7 @@ export default function KumulatifHesaplamaPanel() {
                             <TableCell className="text-right">{r.calib}</TableCell>
                             <TableCell className="text-right">{r.control}</TableCell>
                             <TableCell className="text-right font-semibold">{r.total}</TableCell>
+                            <TableCell className="text-right">{calculateEfficiency(r.routine, r.total)?.toFixed(2) ?? ''}</TableCell>
                             <TableCell className="text-right">
                               {isAnchor && (
                                 <div className="flex items-center justify-end gap-1">
