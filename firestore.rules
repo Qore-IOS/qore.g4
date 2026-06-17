@@ -168,6 +168,7 @@ service cloud.firestore {
     match /purchasingTaskDefinitions/{id}     { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /expensePeriods/{id}                { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /cihazUstuGecmisi/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /kumulatifHesaplamaGecmisi/{id}     { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /actionFormHistoryLogs/{id}         { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /actionFormPartReassignLogs/{id}    { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /postClosurePartChangeLogs/{id}     { allow read: if inCompany(); allow write: if writingInCompany(); }

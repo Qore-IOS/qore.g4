@@ -31,6 +31,8 @@ import {
   CheckCircle,
   Download,
   FileText,
+  History,
+  Save,
   Loader2,
   Network,
   Plus,
@@ -39,9 +41,10 @@ import {
   X,
   XCircle,
 } from 'lucide-react';
-import { getDocs, orderBy } from 'firebase/firestore';
+import { addDoc, collection, getDocs, orderBy, serverTimestamp } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
+import { db } from '@/lib/firebase';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import type { Hospital } from '@/lib/types';
 import { exportDataToExcel } from '@/lib/utils';
@@ -68,7 +71,7 @@ const isTxt = (f: File) => f.type.startsWith('text/') || /\.(txt|csv)$/i.test(f.
 
 export default function KumulatifHesaplamaPanel() {
   const { toast } = useToast();
-  const { currentCompanyId, isSuperAdmin } = useAuth();
+  const { currentCompanyId, currentUser, currentUserProfile, isSuperAdmin } = useAuth();
 
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [loadingHospitals, setLoadingHospitals] = useState(true);
@@ -80,6 +83,7 @@ export default function KumulatifHesaplamaPanel() {
   const [isDragActive, setIsDragActive] = useState(false);
   const [isParsing, setIsParsing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isSavingHistory, setIsSavingHistory] = useState(false);
   const [rows, setRows] = useState<Array<CalculationProductRow & CumulativeRow & { matchedTests: string[] }>>([]);
   const [unmatchedTests, setUnmatchedTests] = useState<CumulativeRow[]>([]);
   const [brandFilter, setBrandFilter] = useState(ALL_FILTER_VALUE);
@@ -98,7 +102,7 @@ export default function KumulatifHesaplamaPanel() {
 
   const { definitions: autoSumDefinitions } = useTestAutoSumDefinitions();
 
-  const { rows: scopedProducts, brandOptions, productGroupOptions, isLoadingScope, scopeError, scopeLabel } = useQoreCalculationProducts({
+  const { rows: scopedProducts, brandOptions, productGroupOptions, isLoadingScope, scopeError, scopeLabel, scopedLabIds } = useQoreCalculationProducts({
     hospitalId,
     hospitals,
     currentCompanyId,
@@ -301,6 +305,45 @@ export default function KumulatifHesaplamaPanel() {
     setUnmatchedTests((prev) => prev.filter((item) => item.test !== testName));
   }
 
+
+  async function handleSaveHistory() {
+    if (!rows.length) return;
+    setIsSavingHistory(true);
+    try {
+      const period = `${String(month + 1).padStart(2, '0')}-${year}`;
+      await addDoc(collection(db, 'kumulatifHesaplamaGecmisi'), {
+        companyId: currentCompanyId || '__legacy__',
+        hospitalId,
+        hospitalName,
+        scopedLabIds,
+        scopeLabel: scopeLabel || hospitalName,
+        month: month + 1,
+        year,
+        period,
+        rowCount: rows.length,
+        items: rows.map((r) => ({
+          productId: r.stokKodu,
+          productName: r.stokAdi,
+          testName: r.testAdi,
+          matchedTests: r.matchedTests,
+          routine: r.routine || 0,
+          rerun: r.rerun || 0,
+          calib: r.calib || 0,
+          control: r.control || 0,
+          total: r.total || 0,
+        })),
+        createdAt: serverTimestamp(),
+        createdByUid: currentUser?.uid || null,
+        createdByName: currentUserProfile?.name || currentUser?.email || null,
+      });
+      toast({ title: 'Kaydedildi', description: `${period} dönemi kümülatif hesaplama geçmişe kaydedildi.` });
+    } catch (e: any) {
+      toast({ title: 'Kayıt başarısız', description: e?.message || 'Geçmiş kaydı oluşturulamadı.', variant: 'destructive' });
+    } finally {
+      setIsSavingHistory(false);
+    }
+  }
+
   function handleExport() {
     if (!rows.length) return;
     const data = rows.map((r) => ({
@@ -455,6 +498,9 @@ export default function KumulatifHesaplamaPanel() {
             <Button asChild variant="outline">
               <Link href="/oto-toplam-tanimlari"><Network className="mr-2 h-4 w-4" /> Oto Toplam Tanımları</Link>
             </Button>
+            <Button asChild variant="outline">
+              <Link href="/kumulatif-hesaplama/gecmis"><History className="mr-2 h-4 w-4" /> Geçmiş</Link>
+            </Button>
             <Button onClick={handleParse} disabled={!canParse}>
               {isParsing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Calculator className="mr-2 h-4 w-4" />}
               {files.length > 0 ? `${files.length} Dosyayı Ayrıştır` : 'Ayrıştır'}
@@ -463,6 +509,9 @@ export default function KumulatifHesaplamaPanel() {
               <>
                 <Button variant="outline" onClick={removeZeroRows} disabled={!hasZeroRows || combineMode}>
                   <Trash2 className="mr-2 h-4 w-4" /> 0 Olanları Kaldır
+                </Button>
+                <Button variant="outline" onClick={handleSaveHistory} disabled={combineMode || isSavingHistory}>
+                  {isSavingHistory ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />} Kaydet
                 </Button>
                 <Button variant="outline" onClick={handleExport} disabled={combineMode}>
                   <Download className="mr-2 h-4 w-4" /> Excel'e Aktar
