@@ -32,6 +32,7 @@ import {
   Download,
   FileText,
   Loader2,
+  Network,
   Plus,
   Trash2,
   UploadCloud,
@@ -45,12 +46,15 @@ import { scopedQuery } from '@/lib/firestore-helpers';
 import type { Hospital } from '@/lib/types';
 import { exportDataToExcel } from '@/lib/utils';
 import { cn } from '@/lib/utils';
+import Link from 'next/link';
 import BackButton from '@/components/BackButton';
 import { parseCumulativePdfFiles, type CumulativeRow } from '@/lib/qore-hesaplama/parse-cumulative';
 import { parseCumulativeTxtFiles } from '@/lib/qore-hesaplama/parse-cumulative-txt';
 import { aggregateCumulative } from '@/lib/qore-hesaplama/aggregate';
+import { applyCumulativeAutoSum } from '@/lib/qore-hesaplama/auto-sum-definitions';
 import { normalizeTestName } from '@/lib/qore-hesaplama/test-name-matcher';
 import { ALL_FILTER_VALUE, type CalculationProductRow, useQoreCalculationProducts } from '@/hooks/useQoreCalculationProducts';
+import { useTestAutoSumDefinitions } from '@/hooks/useTestAutoSumDefinitions';
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => ({
   value: i,
@@ -91,6 +95,8 @@ export default function KumulatifHesaplamaPanel() {
     () => hospitals.find((h) => h.id === hospitalId)?.name || '',
     [hospitals, hospitalId]
   );
+
+  const { definitions: autoSumDefinitions } = useTestAutoSumDefinitions();
 
   const { rows: scopedProducts, brandOptions, productGroupOptions, isLoadingScope, scopeError, scopeLabel } = useQoreCalculationProducts({
     hospitalId,
@@ -178,7 +184,7 @@ export default function KumulatifHesaplamaPanel() {
         parseCumulativeTxtFiles(txts),
       ]);
       const merged = [...pdfRows, ...txtRows];
-      const aggregated = aggregateCumulative(merged);
+      const aggregated = applyCumulativeAutoSum(aggregateCumulative(merged), autoSumDefinitions);
       const byTest = new Map<string, CumulativeRow[]>();
       aggregated.forEach((row) => {
         const key = normalizeTestName(row.test);
@@ -446,6 +452,9 @@ export default function KumulatifHesaplamaPanel() {
           )}
 
           <div className="flex flex-wrap gap-3">
+            <Button asChild variant="outline">
+              <Link href="/oto-toplam-tanimlari"><Network className="mr-2 h-4 w-4" /> Oto Toplam Tanımları</Link>
+            </Button>
             <Button onClick={handleParse} disabled={!canParse}>
               {isParsing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Calculator className="mr-2 h-4 w-4" />}
               {files.length > 0 ? `${files.length} Dosyayı Ayrıştır` : 'Ayrıştır'}
