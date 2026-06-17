@@ -1,0 +1,4413 @@
+GENEL BİLGİ
+Aşağıdaki çıktı, yüklenen talimata göre “özet” değil, Roche cobas dokümanlarından çıkarılmış AI-ready teknik bilgi tabanı formatındadır. Kaynak kapsamı özellikle cobas® 8000 Complete User Documentation v5.9, cobas® 8000 Operator/Safety Guide v5.4 ve cobas® pro User Guide v4.2 dokümanlarına dayanmaktadır. Kullanıcının istediği yapı; modüller, yazılım, mekanik, elektronik, kalibrasyon, bakım, hata/troubleshooting, sensör, fluidik, güvenlik ve sistem etkileşimlerini içeren teknik veri tabanı olarak tanımlanmıştır.
+DEVICE TECHNICAL KNOWLEDGE BASE
+
+1. DEVICE OVERVIEW
+
+•	Device family: Roche cobas® 8000 modular analyzer series; ayrıca yüklenen güncel cobas® pro integrated solutions dokümanından karşılaştırmalı modül bilgileri çıkarılmıştır.
+•	System purpose: Klinik kimya, ISE ve immünoloji testlerinin yüksek hacimli, modüler, otomatik in-vitro diagnostik analiz platformunda yürütülmesi.
+•	Core architecture: cobas 8000 sistemi iki ana bileşenden oluşur: analitik modüller, kontrol ünitesi ve core bileşenleri içeren instrument; ayrıca instrument ile host/LIS arasında gerçek zamanlı veri koordinasyonu yapan cobas 8000 data manager.
+•	Detected cobas 8000 modules: Core unit, control unit, data manager, ISE module, c 701, c 702, c 502, e 801, e 602.
+•	Detected cobas pro analytical units: SSU/SB, ISE v1, ISE neo, c 503, c 703, e 801.
+Fluidic architecture
+•	Sample/reagent aspiration and dispensing via syringes, probes, sippers, nozzles and tubing.
+•	ISE pathway: ISE Internal Standard, ISE Diluent, ISE Reference Electrolyte, dilution vessel, electrode block, pinch valve, sipper syringe, drain port.
+•	cobas c pathway: reagent probes, reaction cells, incubation bath, cell wash solutions CellCln1/CellCln2, NaOHD/SMS/ECO-D.
+•	cobas e pathway: ProCell, CleanCell, PreClean, sipper flow paths, AssayCup/AssayTip handling, microbeads mixing, detection unit.
+Mechanical architecture
+•	Rack transport, reagent loading, sample pipetting, reagent pipetting, reaction disk movement, reagent disk movement, mixer motion, sipper nozzle movement, magazine gripper/lifter/feeders, cap opener, pre-wash gripper, reagent loader.
+•	Maintenance mode can switch off selected motors so probes and mechanical parts can be moved manually without powering off the instrument.
+Electronic architecture
+•	Control unit PC, data manager PC/server, barcode/RFID readers, sensor circuits, interlock switches, photometer system, ECL detection electronics, liquid level/clot detection signal systems.
+•	Operators are explicitly not responsible for PCB-level electrical troubleshooting unless instructed by Roche Service.
+Software control structure
+•	Instrument UI controls maintenance, alarms, reagent registration, calibration/QC workflows, sample processing, module masking, data alarms, reruns, backup, parameter read/write and software-controlled maintenance.
+•	Maintenance actions can be grouped into maintenance types and automated via maintenance pipes.
+
+2. MODULES AND SUBSYSTEMS
+
+Core Unit / Sample Supply / Rack Transport
+•	Purpose: Rack input/output, STAT/routine rack routing, sample tracking, sample buffer and transport line coordination.
+•	Connected systems: Barcode readers, rack sensors, host/LIS via data manager, analytical modules.
+•	Sensors used: Barcode reader, rack presence/position sensors, transport line sensors.
+•	Motors/actuators used: Rack transport motors, loading/unloading mechanisms.
+•	Fluidic connections: None directly except sample containers delivered to pipetting positions.
+•	Common failures: Rack jam, barcode read failure, rack priority/transport error, sample database mismatch.
+•	Maintenance requirements: Rack/rack tray cleaning, barcode reader surface cleaning; cobas pro maintenance list includes cleaning racks, rack trays and 2D barcode reader surface.
+Control Unit
+•	Purpose: User interface, instrument control, maintenance execution, alarm display, parameter management.
+•	Connected systems: Analytical modules, data manager, storage media, printer/reporting.
+•	Software functions: Logon, startup, shutdown, maintenance pipes, alarm monitoring, calibration/QC ordering, sample processing.
+•	Electronic boards: PC hardware; PCB replacement/troubleshooting reserved for Roche Service.
+•	Common failures: Software freeze, incorrect parameters, download issues, backup/storage media issues.
+•	Maintenance: Data backup, database backup, parameter read/write, program update.
+cobas 8000 Data Manager
+•	Purpose: Real-time data coordination between instrument and host/LIS.
+•	Connected systems: Instrument, host/LIS, QC/calibration/result workflows.
+•	Common failures: LIS communication issues, parameter download errors, result forwarding problems.
+•	Security dependencies: Access control, validated software updates, authorized external devices.
+ISE Module / ISE v1 / ISE neo
+•	Purpose: Na⁺, K⁺, Cl⁻ measurement by ion-selective electrode technology.
+•	Connected systems: Sample pipetter, dilution vessel, electrode block, reference electrode, reagent bottles/drawer, degasser, drain port.
+•	Sensors used: Liquid short sensor, pressure sensor for clot detection, electrode signal system, liquid level detection.
+•	Motors/actuators: Sample pipetter, syringes, sipper syringe, pinch valve.
+•	Fluidic connections: ISE Internal Standard, ISE Diluent, ISE Reference Electrolyte, sample syringe, dilution vessel, electrode block, drain.
+•	Common failures: Air in sipper syringe, low ISE internal standard, low chloride, ISE.E / ISE.N data alarms, IStd.E calibration alarm.
+•	Calibration dependencies: ISE Low, ISE High, ISE S3 according to package insert; electrode condition and reference electrolyte stability.
+•	Maintenance: Daily/weekly/monthly/every 2 months/quarterly/6-month/as-required maintenance for ISE module in cobas 8000; cobas pro includes cleaning sample probe, sonic wash station, reagent drawer/compartment, checking vacuum pump, ISE system wash.
+c 701 / c 702 / c 502 Clinical Chemistry Modules
+•	Purpose: Photometric clinical chemistry tests using reaction cells, reagent probes, mixers, incubation bath and photometer.
+•	Connected systems: Reagent disks/cassettes, reaction disk/cells, reagent probes, sample pipetter, photometer, incubation bath, wash station.
+•	Sensors used: Photometer output, cell blank monitoring, liquid detection/clot detection, temperature/incubation monitoring.
+•	Motors/actuators: Reaction disk motor, reagent disk motor, reagent/sample pipetter motors, ultrasonic mixers.
+•	Fluidic connections: Deionized water, NaOHD, CellCln1, CellCln2, ECO-D, rinse/wash flow, incubation bath water.
+•	Common failures: Cell blank deviation, photometer lamp failure, dirty reaction cells/probes, air in syringes, incubation bath issues.
+•	Calibration dependencies: Photometric test calibration, reagent lot/pack status, cell blank quality, lamp stability.
+•	Maintenance: Photometer check, cell blank measurement, incubation water exchange, wash reaction parts, cell detergent prime, incubator bath cleaning, change reaction cell, change photometer lamp.
+e 801 / e 602 Immunology Modules
+•	Purpose: Electrochemiluminescence immunoassay processing using reagent pipetters, sample pipetter, sipper stations, ProCell/CleanCell, PreClean and consumable handling.
+•	Connected systems: Reagent manager/loader, RFID readers, AssayCup/AssayTip magazines, sipper station, detection unit, pre-wash station.
+•	Sensors used: Reagent short sensors, liquid level detection, clot detection, RFID readers, reagent loader sensors.
+•	Motors/actuators: Reagent loader, reagent pipetters, sample pipetter, cap opener, bead mixer, magazine gripper/lifter/feeder, sipper gripper, pre-wash gripper.
+•	Fluidic connections: ProCell, CleanCell, PreClean, sipper nozzles, PC/CC cups, aspiration pipes, rinse station.
+•	Common failures: Reagent loader failure, reagent cassette handling failure, reagent short sensor alarm, sipper LLD failure, sample pipetting/clot detection failure.
+•	Maintenance: Daily, every 2 weeks, quarterly/as-required depending on module; e 801 includes CleanCell/PreClean aspiration pipe cleaning, cooling filter cleaning, ProCell/ECL sipper flow path cleaning.
+
+3. SOFTWARE SYSTEMS
+
+Instrument UI / Overview Menu
+•	Purpose: Module state monitoring, alarms, reagent status, masking, maintenance execution.
+•	Affected hardware: All analytical modules.
+•	Related errors: System alarms, data alarms, reagent masking, module stop alarms.
+•	Dependencies: User logon, correct module status, standby/operation modes.
+Data Manager / LIS Communication
+•	Purpose: Coordinates data in real time between instrument and host/LIS.
+•	Affected hardware: Control unit, data manager PC/server, host network.
+•	Related errors: Download procedure errors, incorrect parameters, result transfer problems.
+•	Dependencies: Host connection, network security, parameter versioning.
+Maintenance Pipe System
+•	Purpose: Automates groups of maintenance actions; supports Power Up Pipe and Start Up Pipe functions.
+•	Affected hardware: All modules, depending on selected maintenance pipe.
+•	Related errors: Overdue maintenance, failed maintenance action, module not in required mode.
+•	Dependencies: Standby/masked mode, maintenance type intervals, correct consumables.
+Calibration Review / Calibration Status
+•	Purpose: Shows calibrator status and last calibration test details.
+•	Status codes: P = processing, F = failed, S = successful. Calibration may be invalid if canceled due to sample clot or insufficient sample.
+•	Affected hardware: ISE, cobas c modules, cobas e modules.
+•	Related errors: Calibration alarms including IStd.E, Dup.E, Diff.E.
+•	Dependencies: Calibrator lot, reagent pack lot/sequence, reagent status, pipetting success.
+Alarm and Rerun Logic
+•	Purpose: Detects data alarms, system alarms and conditions generating automatic reruns.
+•	Affected hardware: Sample/reagent pipetting, photometer, ISE electrodes, ECL detection.
+•	Related errors: H/L alarms, linearity, repeat limit, sensitivity limit, substrate depletion, ISE.E, ISE.N, ReagEx.
+•	Dependencies: Application settings, rerun settings, repeat limits, QC/calibration status.
+
+4. MECHANICAL SYSTEMS
+
+Sample Pipetter / Sample Probe
+•	Function: Aspirates/dispenses patient samples, calibrators and QC material.
+•	Movement type: Vertical/horizontal robotic pipetting.
+•	Connected systems: Sample syringe, pressure sensor, LLD, clot detection.
+•	Common failures: Probe clogging, clot detection alarm, LLD low voltage, misalignment.
+•	Maintenance: Probe cleaning/replacement; cobas pro lists sample probe replacement for ISE, c 503, c 703.
+•	Calibration impact: Pipetting errors affect calibration, QC and sample results.
+Reagent Pipetters / Reagent Probes
+•	Function: Transfer reagents to reaction cells or assay vessels.
+•	Movement type: Robotic aspiration/dispense.
+•	Connected systems: Reagent syringes, reagent disk/pack, rinse station.
+•	Common failures: Carryover, clogging, insufficient wash, reagent short alarms.
+•	Maintenance: Wash Reaction Parts, reagent probe cleaning, reagent pipetting checks.
+Reaction Disk / Reaction Cells
+•	Function: Holds reaction cells for photometric measurements.
+•	Movement type: Rotary indexing.
+•	Connected systems: Reagent probes, sample probe, mixers, photometer, incubation bath.
+•	Common failures: Dirty cells, damaged cells, abnormal blank, disk motor issue.
+•	Maintenance: Cell Blank Measurement; Change Reaction Cell switches off reaction disk motor so cells can be exchanged without powering off.
+Photometer / Lamp Assembly
+•	Function: Measures absorbance in reaction cells.
+•	Movement type: Optical/electronic measurement, lamp replacement mode.
+•	Common failures: Lamp deterioration, abnormal photometer output, cell blank shifts.
+•	Maintenance: Photometer Check measures cell blank value of reaction cell no. 1; Cell Blank Measurement flags reaction cells differing by >0.1 absorbance units from reaction cell no. 1.
+Sipper Systems
+•	Function: Aspirate diluted ISE sample/internal standard or ECL liquids into measurement path.
+•	Connected systems: Syringes, electrode block or ECL detection, liquid level detection.
+•	Common failures: Air, clogging, LLD failure, low signal.
+•	Maintenance: Sipper check; e modules check ECL sipper nozzle movement and LLD function.
+Reagent Loader / Reagent Handling
+•	Function: Loads and handles reagent packs/cassettes.
+•	Movement type: Loader transport and handling motion.
+•	Connected systems: RFID readers, reagent manager, sensors.
+•	Common failures: Loading failure, RFID reading error, reagent pack handling error.
+•	Maintenance/diagnostics: Reagent Loader Check verifies loader movement, sensors and RFID readers; Reagent Handling Check checks all components used for reagent cassette handling.
+
+5. ELECTRONIC SYSTEMS
+
+Control Unit PC
+•	Purpose: Main user control and interface.
+•	Connected components: Instrument modules, storage media, data manager.
+•	Diagnostic methods: System alarms, software status, reports, database backup.
+•	Failure symptoms: Frozen UI, parameter download failure, incorrect system settings.
+Data Manager PC
+•	Purpose: Host/LIS data coordination and workflow/result management.
+•	Connected components: Instrument, host, network.
+•	Failure symptoms: Data transfer delay, missing results, parameter sync issues.
+Photometer Electronics
+•	Purpose: Absorbance measurement.
+•	Connected components: Photometer lamp, reaction cells, optical path.
+•	Diagnostics: Photometer Check, Cell Blank Measurement.
+•	Failure symptoms: Abnormal blank, unstable photometric QC, high/low results.
+RFID / Barcode Readers
+•	Purpose: Identify samples, racks, reagent packs.
+•	Diagnostics: Reagent Loader Check, barcode read verification.
+•	Failure symptoms: Reagent registration stopped, pack not recognized, sample ID mismatch.
+Interlock Circuits
+•	Purpose: Prevent operator contact with moving parts.
+•	Connected components: ISE main cover, c 503 main/reagent manager/rear cover, c 703 main/rear cover, e 801 main cover.
+•	Failure symptoms: Cover alarm, operation not starting if interlock cover cannot lock.
+•	Safety behavior: During operation, interlocked covers cannot be opened; if opened in Standby, power is removed from that analytical unit while reagent cooling remains powered.
+
+6. SENSORS AND DETECTION SYSTEMS
+
+Pressure Sensor / Clot Detection
+•	Sensor type: Pressure-based flow sensor.
+•	Purpose: Detect sample clot in sample pipetter flow path.
+•	Trigger conditions: Abnormal aspiration/dispense pressure.
+•	Failure symptoms: Clot alarms, insufficient sample, calibration/sample interruption.
+•	Related components: Sample syringe, sample probe, tubing.
+•	Cleaning/replacement: Clean or replace sample probe; inspect tubing and syringe.
+Liquid Level Detection / LLD
+•	Sensor type: Liquid level detection signal system.
+•	Purpose: Detect liquid surface during pipetting/sipper operation.
+•	Trigger conditions: Low voltage or failure to detect level.
+•	Failure symptoms: Liquid level sensor alarm; sample probe mechanism may remain in vertical upper position.
+•	Affected modules: ISE, c 503/cobas c, e modules.
+•	Corrective actions: Check probe cleanliness, liquid presence, wiring/sensor status, alarm remedy.
+Liquid Short Sensor
+•	Sensor type: Reagent presence/shortage sensor.
+•	Purpose: Detect ISE Reference Electrolyte, ISE Diluent and ISE Internal Standard after degasser.
+•	Trigger conditions: Reagent low/short, air in line, degasser/tubing problem.
+•	Failure symptoms: ISE reagent alarms, unstable ISE results.
+•	Maintenance: Reagent prime, inspect reagent bottles/tubing.
+Photometer Detection
+•	Sensor type: Optical absorbance detection.
+•	Purpose: Measure cell blank and reaction absorbance.
+•	Trigger conditions: Lamp/output abnormality, dirty cell, optical drift.
+•	Related alarms: Cell blank abnormality, photometric data alarms.
+•	Maintenance: Photometer Check, Cell Blank Measurement, lamp replacement.
+RFID Readers
+•	Sensor type: Radio-frequency identification.
+•	Purpose: Identify reagent packs/cassettes.
+•	Trigger conditions: Pack handling, loading, registration.
+•	Failure symptoms: RFID reading error, reagent registration stopped.
+•	Diagnostics: Reagent Loader Check.
+Cover Interlock Sensors
+•	Sensor type: Safety switch/interlock.
+•	Purpose: Detect and lock covers during operation.
+•	Trigger conditions: Cover open, unable to lock cover.
+•	Failure symptoms: Operation blocked, safety alarm.
+•	Safety impact: Prevents injury from fast-moving mechanisms.
+
+7. CALIBRATION PROCEDURES
+
+ISE Calibration
+•	Purpose: Calibrate Na⁺/K⁺/Cl⁻ electrode response.
+•	Required consumables: ISE Standard Low, ISE Standard High, ISE S3 as applicable; ISE Internal Standard, Diluent, Reference Electrolyte.
+•	Required conditions: Valid electrodes, no air in sipper line, sufficient reagents, clean dilution vessel.
+•	Process: Request recommended calibration/QC, load calibrators, measure calibrators, review status.
+•	Failure conditions: IStd.E, ISE.E, ISE.N, insufficient sample, clot, unstable electrode response.
+•	Affected systems: Electrode block, reference electrode, sipper syringe, dilution vessel.
+Photometric Test Calibration
+•	Purpose: Generate valid calibration curve/K-factor for cobas c tests.
+•	Required consumables: Calibrators, reagent cassette/pack, QC material.
+•	Required conditions: Clean reaction cells, stable photometer lamp, valid reagent lot/pack.
+•	Failure conditions: Dup.E, Diff.E, linearity/calibrator duplicate limits, poor photometer output.
+•	Affected systems: Sample/reagent pipetting, reaction cells, photometer, reagent disk.
+Immunology Calibration
+•	Purpose: Establish assay response for e 801/e 602 tests.
+•	Required consumables: Assay-specific calibrators, reagent packs, ProCell/CleanCell, AssayTip/AssayCup.
+•	Required conditions: Valid reagent pack registration, clean sipper paths, sufficient consumables.
+•	Failure conditions: Reagent pack handling errors, sipper LLD errors, calibration alarm.
+•	Affected systems: Reagent manager, sample/reagent pipetters, sipper station, detection unit.
+
+8. MAINTENANCE PROCEDURES
+
+Daily / Pre-routine
+•	Objective: Prepare instrument for routine operation.
+•	Tasks: Logon, check system alarms, check photometer report, check water splashes, check syringes/tubing, perform software-controlled maintenance, clear sample database, load/unload reagents, download parameters, perform recommended calibration/QC, measure samples.
+•	Affected systems: All modules.
+•	Failure symptoms: Startup delay, alarms, calibration/QC failure.
+Software-controlled Maintenance
+•	Objective: Automated maintenance executed by instrument.
+•	Examples: Photometer Check, Cell Blank Measurement, Incubation Water Exchange, Air Purge, Wash Reaction Parts, Reagent Prime, Cell Detergent Prime.
+•	Expected results: Stable optical/fluidic performance and reduced carryover/air.
+•	Failure symptoms: Maintenance incomplete, module unavailable, reagent/solution insufficient.
+Manual Cleaning
+•	Objective: Allow operator to clean probes/mechanical parts safely.
+•	Mechanism: Motors of selected c 701/c 702/c 502/e 801/e 602 modules are switched off; e 801 sipper turntables move down and rotate 180° clockwise.
+•	Post-condition: For c 701/c 702, reagent registration is required after manual cleaning.
+c 701/c 702/c 502 Maintenance
+•	Daily/weekly/monthly/quarterly/6-month/as-required: Documented separately for c 701/c 702 and c 502.
+•	Key tasks: Reaction cell wash, incubation bath cleaning, photometer lamp replacement, aspiration filter cleaning, reaction cell replacement.
+ISE Maintenance
+•	Intervals: Daily, weekly, monthly, every 2 months, quarterly, every 6 months and as required for cobas 8000 ISE.
+•	Key tasks: Probe cleaning, electrode replacement, reagent prime, ISE system wash, vacuum pump check on ISE neo.
+e 801/e 602 Maintenance
+•	Intervals: Daily, every 2 weeks, quarterly/as-required depending on module.
+•	Key tasks: Clean aspiration pipes, consumables drawer, cooling filter, sipper flow paths, ProCell/CleanCell/PreClean paths.
+
+9. ERROR CODES AND TROUBLESHOOTING
+
+Liquid Level Sensor Alarm
+Description
+Liquid level sensor voltage is too low; the system generates a liquid level sensor alarm and the sample probe mechanism may remain in vertical upper position.
+Trigger Conditions
+•	Low LLD voltage.
+•	Probe contamination.
+•	Poor liquid contact.
+•	Wiring/sensor defect.
+•	Insufficient sample/reagent.
+Possible Causes
+1.	Dirty or wet probe surface.
+2.	Air/liquid path issue.
+3.	Insufficient liquid volume.
+4.	Sensor circuit degradation.
+5.	Cable/connector issue.
+Affected Modules
+ISE, c 503/cobas c modules, sample pipetting systems.
+Diagnostic Procedure
+1.	Check displayed system alarm and affected pipetter.
+2.	Inspect sample/reagent level.
+3.	Clean probe.
+4.	Check for foam, bubbles, clots.
+5.	Repeat check/maintenance.
+6.	Escalate to Roche Service if persistent.
+Recommended Corrective Actions
+1.	Clean probe and remove contamination.
+2.	Re-run liquid level check.
+3.	Replace probe if damaged.
+4.	Inspect tubing/syringe.
+5.	Service sensor electronics if unresolved.
+Severity
+High.
+Safety Impact
+Possible probe movement and biohazard exposure; follow PPE and maintenance mode rules.
+
+ISE.E / ISE.N Data Alarm
+Description
+ISE module test data alarm; indicates abnormal ISE measurement validity.
+Trigger Conditions
+•	Electrode instability.
+•	Reagent shortage/air.
+•	Reference electrolyte issue.
+•	Internal standard abnormality.
+Possible Causes
+1.	Air in sipper syringe/path.
+2.	Dirty dilution vessel/electrode.
+3.	Expired/degraded electrode.
+4.	Reagent problem.
+5.	Pinch valve/sipper issue.
+Affected Modules
+ISE module / ISE v1 / ISE neo.
+Diagnostic Procedure
+1.	Check ISE reagents and liquid short sensors.
+2.	Inspect sipper syringe/path for air.
+3.	Perform reagent prime.
+4.	Run ISE calibration and QC.
+5.	Review electrode status.
+Recommended Corrective Actions
+1.	Prime ISE reagents.
+2.	Clean dilution vessel/probe.
+3.	Replace affected electrode/reference electrode.
+4.	Repeat calibration/QC.
+5.	Contact Roche Service if persistent.
+Severity
+High.
+Safety Impact
+Incorrect electrolyte results if not resolved.
+
+IStd.E Calibration Alarm
+Description
+ISE Internal Standard-related calibration alarm.
+Trigger Conditions
+•	Internal standard signal abnormal.
+•	ISE IS reagent path issue.
+•	Electrode/reference instability.
+Possible Causes
+1.	Low/expired ISE Internal Standard.
+2.	Air after degasser.
+3.	Sipper or syringe malfunction.
+4.	Electrode degradation.
+Affected Modules
+ISE module.
+Diagnostic Procedure
+1.	Check IS bottle, tubing and liquid short sensor.
+2.	Perform ISE Reagent Prime.
+3.	Inspect for bubbles.
+4.	Repeat ISE calibration.
+5.	Check electrode status.
+Recommended Corrective Actions
+1.	Replace/refill reagent.
+2.	Prime path.
+3.	Clean/replace tubing/probe/electrode as applicable.
+Severity
+High.
+
+Cell Blank Abnormality
+Description
+Reaction cell blank deviation; if a reaction cell differs by more than 0.1 absorbance units from reaction cell no. 1, it is listed in the cell blank measurement report.
+Trigger Conditions
+•	Dirty/scratched reaction cell.
+•	Photometer instability.
+•	Water contamination.
+•	Incubation bath contamination.
+Possible Causes
+1.	Dirty reaction cell.
+2.	Cell aging/damage.
+3.	Wash failure.
+4.	Lamp/photometer issue.
+Affected Modules
+c 701, c 702, c 502.
+Diagnostic Procedure
+1.	Run Cell Blank Measurement.
+2.	Identify listed cells.
+3.	Perform Wash Reaction Parts.
+4.	Replace reaction cells if persistent.
+5.	Run Photometer Check.
+Corrective Actions
+1.	Clean cells.
+2.	Replace reaction cells.
+3.	Clean incubation bath.
+4.	Replace photometer lamp if required.
+Severity
+Medium to High.
+
+Reagent Loader / RFID Reading Error
+Description
+Reagent loader or RFID reader fails to process reagent pack/cassette.
+Trigger Conditions
+•	Reagent pack loading.
+•	Reagent registration.
+•	Reagent loader movement.
+Possible Causes
+1.	Pack incorrectly loaded.
+2.	RFID read failure.
+3.	Loader obstruction.
+4.	Sensor failure.
+5.	Reagent pack deformation.
+Affected Modules
+e 801; cobas pro e 801 reagent manager.
+Diagnostic Procedure
+1.	Check reagent loader status indicators.
+2.	Remove/reload reagent pack.
+3.	Perform Reagent Loader Check.
+4.	Perform Reagent Handling Check if required.
+5.	Review alarm description and remedy.
+Corrective Actions
+1.	Correct pack loading.
+2.	Clean/check loader path.
+3.	Use new pack if damaged.
+4.	Contact Roche Service for RFID/sensor failure.
+Severity
+Medium to High.
+
+General Instrument Problem
+Description
+Problem may be electrical/electronic, mechanical, operator-related, facility-related or computer-related.
+Trigger Conditions
+•	Alarms during operation.
+•	Abnormal QC/calibration/sample results.
+•	Environmental or utility instability.
+Possible Causes
+1.	Application/reagent/sample/calibrator/QC issue.
+2.	Mechanical misalignment.
+3.	Electronic or sensor fault.
+4.	Heat/humidity/power/water/drain issue.
+5.	Incorrect parameters or operator input.
+Diagnostic Procedure
+1.	Observe and record alarms.
+2.	Isolate problem area according to alarms.
+3.	Check application/reagent/sample/QC/calibrator.
+4.	Check maintenance status and mechanical alignment.
+5.	Check facility utilities.
+6.	Escalate electrical/PCB issues to Roche Service.
+Severity
+Variable.
+
+10. REPLACEMENT PARTS AND COMPONENTS
+
+•	Sample probes: Aspirate/dispense samples; replace after clogging, damage, persistent pipetting/LLD/clot errors; calibration/QC verification required after replacement.
+•	Reagent probes: Dispense reagents; replace if bent, clogged, contaminated, or carryover persists; affected tests require QC/calibration verification.
+•	ISE electrodes Na/K/Cl: Measure ion potentials; replace if expired, unstable or calibration repeatedly fails.
+•	ISE reference electrode: Provides reference potential; replace if reference instability or repeated ISE calibration failure.
+•	Reaction cells: Photometric reaction vessels; replace if dirty/scratched or cell blank abnormal.
+•	Photometer lamp: Optical light source; replace when output unstable or lamp maintenance required.
+•	ProCell/CleanCell cups: e-module fluid cups; replace during e 801/e 602 maintenance when worn/contaminated.
+•	AssayTip/AssayCup magazines: e-module consumables; replace/load as needed.
+•	Aspiration filters/tubing: Replace/clean when blockage, pressure instability or reagent flow failure occurs.
+•	Cooling unit filter: e 801 maintenance item; clean/replace if cooling airflow restricted.
+
+11. FLUIDIC SYSTEMS
+
+ISE Fluidics
+•	Flow logic: IS/DIL/REF from reagent bottles through syringes/degasser/nozzles into dilution vessel/electrode block; sipper syringe aspirates diluted sample or IS, then reference electrolyte through reference electrode.
+•	Key components: IS syringe, DIL syringe, sample syringe, sipper syringe, dilution vessel, electrode block, pinch valve, degasser, liquid short sensor.
+•	Contamination risks: Dirty dilution vessel, electrode carryover, reagent degradation.
+•	Blockage symptoms: ISE.E/ISE.N, low IS, unstable calibration, air in sipper.
+•	Maintenance: Reagent prime, system wash, probe/dilution vessel cleaning, electrode replacement.
+Clinical Chemistry Fluidics
+•	Flow logic: Sample/reagent pipetted into reaction cells; ultrasonic mixing; incubation; photometric measurement; cell washing with CellCln/NaOHD/ECO-D.
+•	Key components: Sample/reagent probes, syringes, reaction cells, mixers, incubation bath, wash nozzles.
+•	Blockage symptoms: Poor precision, high/low results, cell blank abnormalities, pipetting alarms.
+•	Maintenance: Air Purge, Wash Reaction Parts, Cell Detergent Prime, Incubator Bath Cleaning.
+Immunology Fluidics
+•	Flow logic: Sample/reagent/particles handled in AssayCup; PreClean/ProCell/CleanCell support pre-wash and ECL detection; sipper moves liquids to detection path.
+•	Key components: PreClean aspiration tubes/nozzles, ProCell/CleanCell syringes, sipper nozzles, PC/CC cups, reagent probes.
+•	Blockage symptoms: Reagent short sensor alarms, sipper check failure, low signal, QC drift.
+•	Maintenance: Reagent Prime, sipper flow path cleaning, aspiration pipe cleaning.
+
+12. SAFETY SYSTEMS AND WARNINGS
+
+•	Operator qualification: Operators must not perform operation/maintenance without Roche-certified training; service not described must be left to Roche Service.
+•	PPE: Eye protection, fluid-resistant lab coat, approved gloves and face shield when splash risk exists.
+•	Biohazard: System mechanisms and waste may be infectious; decontamination required before reuse/recycling/disposal.
+•	Mechanical safety: Interlocked covers prevent access to fast-moving parts.
+•	Electrical/electronic safety: Operators must not remove PCBs unless instructed by Roche Service.
+•	Software/data security: Unauthorized access and malware can cause data loss or render the system unusable; only authorized devices/software should be used, storage media secured, and backups performed regularly.
+•	Reagent/chemical exposure: Direct contact with reagents/wash solutions may cause irritation, inflammation or burns; PPE and IFU precautions required.
+
+13. SYSTEM INTERACTION MAP
+
+•	Sample probe → pressure sensor → clot detection → sample/calibration validity.
+•	LLD sensor → sample/reagent pipetter movement → aspiration success → alarm generation.
+•	ISE liquid short sensor → IS/DIL/REF availability → electrode measurement stability.
+•	Degasser → ISE reagent gas removal → EMF stability → ISE calibration/QC.
+•	Photometer lamp → cell blank measurement → photometric assay reliability.
+•	Reaction cell cleanliness → absorbance baseline → cell blank report → QC/sample accuracy.
+•	Maintenance pipe → module maintenance actions → startup readiness.
+•	Reagent RFID reader → reagent registration → reagent availability → calibration/test execution.
+•	Interlock cover sensor → module power/motion enable → operator safety.
+•	Data manager → host/LIS → result/order exchange → workflow continuity.
+•	Calibration Review → reagent lot/pack status → valid calibration assignment.
+•	Reagent prime → tubing air removal → pipetting/sipper stability.
+•	Air purge → syringes/probes → pressure stability and pipetting precision.
+
+14. COMMON FAILURE PATTERNS
+
+Pressure / Clot / Aspiration Instability
+•	Symptoms: Clot alarms, insufficient sample, failed calibration, poor precision.
+•	Likely causes: Probe clogging, bubbles, syringe leak, tubing restriction.
+•	Affected systems: Sample pipetter, ISE, c modules, e modules.
+•	Preventive actions: Probe cleaning, Air Purge, tubing/syringe inspection.
+Calibration Drift
+•	Symptoms: Calibration failure, QC drift, high/low results.
+•	Likely causes: Reagent degradation, dirty cells/probes, electrode aging, lamp drift.
+•	Affected systems: ISE, photometric, immunology.
+•	Preventive actions: Scheduled calibration/QC, reagent control, cell blank/photometer checks.
+Contamination / Carryover
+•	Symptoms: Unexpected high/low results, QC failure, poor reproducibility.
+•	Likely causes: Dirty probes, insufficient wash solution, reaction cell contamination.
+•	Affected systems: c modules, ISE dilution vessel, e sipper paths.
+•	Preventive actions: Wash Reaction Parts, Cell Detergent Prime, probe/sipper cleaning.
+Sensor Degradation
+•	Symptoms: LLD low voltage, reagent short alarms, RFID failures, interlock alarms.
+•	Likely causes: Dirty sensor surfaces, cable/connector issues, electronic degradation.
+•	Affected systems: Pipetting, reagent loading, cover safety, ISE reagent monitoring.
+•	Preventive actions: Cleaning, diagnostic checks, Roche Service escalation.
+Fluidic Blockage / Air in Lines
+•	Symptoms: Reagent short, unstable ISE, poor precision, sipper alarms.
+•	Likely causes: Air after degasser, clogged tubing/nozzle, empty reagent, filter blockage.
+•	Affected systems: ISE, e module sipper/pre-wash, c module wash paths.
+•	Preventive actions: Reagent Prime, Air Purge, aspiration filter cleaning, tubing inspection.
+Mechanical Alignment / Loader Failure
+•	Symptoms: Reagent handling failure, probe movement alarm, rack/pack loading error.
+•	Likely causes: Misalignment, obstruction, worn gripper/loader, interlock misuse.
+•	Affected systems: Reagent loader, sample/reagent pipetters, magazine gripper/lifter.
+•	Preventive actions: Maintenance checks, manual cleaning mode, do not force moving parts.
+Thermal / Incubation Instability
+•	Symptoms: QC drift, photometric result deviation, reagent instability.
+•	Likely causes: Incubation bath issue, cooling filter obstruction, facility heat/humidity.
+•	Affected systems: c modules, e reagent cooling, facility utilities.
+•	Preventive actions: Incubation Water Exchange, incubator bath cleaning, cooling filter cleaning, facility checks.
+
+ARIZA BİLGİ ALANI
+Aşağıdaki rapor, yüklediğiniz markdown talimatındaki “complete technical failure database” yapısına göre hazırlandı. Talimat dosyası; tüm arıza, alarm, uyarı, anormal durum, bakım kaynaklı problem, kalibrasyon hatası, sensör/fluidik/mekanik/elektronik/yazılım arızalarının servis mühendisi formatında çıkarılmasını istiyor.
+Kaynak olarak özellikle cobas® 8000 Complete User Documentation v5.9 ve cobas® pro User Guide v4.2 içindeki troubleshooting, data alarms, calibration alarms, bakım ve güvenlik bölümleri kullanıldı. cobas pro dokümanı troubleshooting bölümünü; genel troubleshooting, system/data alarm ayrımı, alarm sonrası AU restart, reagent pack loading ve liquid level sensor alarm başlıkları altında veriyor.
+COMPLETE TECHNICAL FAILURE ANALYSIS REPORT
+
+1. FAILURE OVERVIEW
+
+Mechanical
+En kritik mekanik arıza alanları şunlardır: sample/reagent pipetter hareketleri, reagent loader, reagent pack handling, rack transport, reaction cell/disk hareketi, mixer hareketi, sipper nozzle hareketi ve kapak/interlock ilişkili hareket kilitleri. Reagent pack handling için sistem reagent loader reset, loading port boşluğu ve belirli reagent pack pozisyonlarının boş olması gibi mekanik ön koşullar ister; kontrol sırasında mekanik komponentler resetlenir ve status indicator flashing durumu alarm remedy ile takip edilir.
+Electronic / Electrical
+Elektronik tarafta ADC abnormal, liquid level sensor düşük voltajı, RFID/barcode okuyucu sorunları, control unit PC donması, communication/data manager problemleri, güç kesintisi ve safety shutdown riskleri öne çıkar. cobas pro kılavuzu, kullanıcı arayüzü donduğunda power button ile zorla restart yapmanın control unit PC’ye zarar verebileceğini, bunun yerine güvenli shutdown prosedürü uygulanması gerektiğini belirtir.
+Fluidic
+Fluidik sistemde en sık tekrar eden kök nedenler: hava kabarcığı, syringe kaçağı, tubing kink/occlusion, ISE Reference Electrolyte aspiration tubing’in yanlış yerleşimi, kristalleşme, kirlenmiş ISE flow path, kontamine drain port, wash/reagent short, system reagent deterioration ve air bubble kaynaklı reproducibility bozulmasıdır. ISE erratic result prosedüründe hava kabarcığı, reagent hacmi, leak, electrode yerleşimi, reference electrode ve tubing occlusion ayrı ayrı kontrol edilir.
+Calibration
+Kalibrasyon alarm grubu ISE, c module ve e module kalibrasyon kalite kriterlerinin karşılanmadığını gösterir. cobas 8000 v5.9 listesinde Cal.E, Cond.E, Diff.E, Dup.E, IStd.E, MAX, MIN, Mono.E, Prep.E, Rsp1.E, Rsp2.E, S1A.E, SD.E, Sens.E, Sig.E, Slop.E, Std.E ve Sys.E gibi kalibrasyon alarmları modüllere göre ayrılır.
+Software
+Yazılım kaynaklı problem alanları: data alarm handling, system alarm seviyesi, module masking/unmasking, calibration trace, result upload/host iletişimi, frozen UI ve bakım pipe yönetimidir. cobas pro alarm mantığına göre yellow alarm operasyonun devam edebileceği caution durumunu; red alarm ise S.Stop, Stop veya E.Stop nedeniyle operasyonun devam edemeyeceğini ifade eder.
+Sensor
+Kritik sensör sistemleri: liquid level sensor, pressure/clot detection, reagent short sensor, temperature sensors, photometer/optical detection, barcode/RFID readers, interlock sensors ve EMF/electrode signal detection. Liquid level sensor alarmında sensör voltajı çok düşüktür; sistem alarm üretir ve sample probe mechanism vertical upper position’da kalabilir.
+Maintenance-related
+Bakım kaynaklı riskler; periyodik bakımın ihmal edilmesi, carryover, fibrin/dust, uygunsuz sample container, kontamine ISE flow path, reagent/wash deterioration ve special wash rule eksikliği olarak görülür. cobas pro troubleshooting bölümünde QC drift, erroneous operation, poor reproducibility, high/low results ve all analytical units etkilenmesi bu bakım/operasyon kök nedenleriyle ilişkilendirilir.
+
+2. COMPLETE FAILURE LIST
+
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Stop Alarm / AU-specific Stop Alarm
+
+Failure Category
+Software / Mechanical / Reagent System / Safety
+
+Severity Level
+Critical
+
+Technical Description
+Stop alarm, ilgili analytical unit’in veya tüm sistemin operasyonu durdurduğu ciddi sistem alarmıdır. Ölçüm altındaki numune için sonuç verisi toplanmaz ve ölçüm tekrar edilmelidir. AU-specific stop alarm oluştuğunda ilgili AU Standby moduna geçebilir; sistemin geri kalanı çalışmaya devam edebilir.
+
+Trigger Conditions
+•	Sistem reagent boşluğu.
+•	Her iki waste container’ın dolması.
+•	AU düzeyinde çalışma güvenliğini veya ölçüm geçerliliğini bozan durum.
+•	AU restart’ın Start button ile yapılamadığı izole stop koşulu.
+
+Observable Symptoms
+•	Red alarm.
+•	İlgili AU operasyon dışı.
+•	Numune sonucu oluşmaz.
+•	Sistem geri kalanı operasyonu sürdürebilir.
+•	AU masking/unmasking gerekebilir.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	System reagent empty	Reagent System
+High	Waste container full	Fluidic/Waste
+Medium	AU-specific sensor or process fault	Sensor/Software
+Medium	Module safety condition	Safety
+Low	Controller/module communication fault	Electronic/Communication
+Affected Modules / Systems
+ISE, c 503/c 703, e 801, cobas 8000 analytical modules, waste system, reagent system, system alarm manager.
+
+Engineering Interpretation
+Stop alarm mantığı, prosesin güvenilir sonuç üretmesini engelleyen koşullarda AU’yu izole eder. Bu, tüm sistemin durmasını önlemek için modüler seviyede fail-safe davranıştır. Sistem reagent veya waste kaynaklı stoplar fluidik çevrimin tamamlanamaması anlamına gelir; bu durumda aspirasyon/dispense veya waste evacuation zinciri güvenli değildir.
+
+Diagnostic Procedure
+1.	Alarms dialog içindeki stop alarm description ve remedy okunur; beklenen: alarm nedeni açıkça listelenmelidir; anormal: alarm tekrar eder veya remedy sonrası kapanmaz.
+2.	İlgili AU’nun Standby/masked durumunu kontrol et; beklenen: AU izole, diğer sistem çalışır.
+3.	System reagent seviyelerini kontrol et; beklenen: yeterli hacim; anormal: empty/short.
+4.	Waste container durumunu kontrol et; beklenen: boşaltılabilir kapasite; anormal: full.
+5.	AU masking/unmasking ile restart prosedürü uygula; beklenen: AU tekrar operation’a döner.
+6.	Alarm tekrarlarsa Roche Service’e veri/log ile eskale et.
+
+Corrective Actions
+Immediate Actions
+•	Ölçümdeki numuneyi geçersiz kabul et ve tekrar çalış.
+•	Alarm remedy’yi uygula.
+•	Reagent veya waste nedenini gider.
+Recommended Repairs
+•	System reagent şişelerini değiştir/doldur.
+•	Waste container’ları boşalt.
+•	AU’yu mask/unmask ederek operasyon zincirine yeniden dahil et.
+Advanced Service Actions
+•	AU controller, sensor loop, interlock ve fluidic state transition logları incelenir.
+Replacement Recommendations
+•	Tekrarlayan durumda ilgili reagent level sensor, waste sensor, tubing veya AU control hardware değerlendirilir.
+
+Preventive Maintenance Recommendations
+•	System reagent ve waste kapasite seviyeleri pre-routine sırasında kontrol edilmeli.
+•	AU bazlı stop geçmişi bakım raporlarında izlenmeli.
+•	Reagent/waste consumable değişimleri pik saat öncesi yapılmalı.
+
+Related Components
+System reagent bottles, waste containers, AU controller, reagent level sensors, waste level sensors, module alarm software, masking logic.
+
+Calibration Impact
+Stop sırasında çalışılan numune geçersizdir. Reagent değişimi veya fluidic müdahale sonrası ilgili testlerde QC ve gerekirse kalibrasyon kontrolü yapılmalıdır.
+
+Safety Risks
+Biohazardous waste overflow, reagent exposure, interrupted moving mechanisms.
+
+Downtime Impact
+İlgili AU stop; tüm sistem konfigürasyona göre degraded throughput veya analyzer stop yaşayabilir.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+E.Stop / Emergency Stop
+
+Failure Category
+Safety / Electrical / Mechanical
+
+Severity Level
+Critical
+
+Technical Description
+E.Stop, hardware failure veya safety device talebiyle tetiklenen emergency stop alarmıdır. Normal operasyona dönmek için tam shutdown veya en azından reset gerekir.
+
+Trigger Conditions
+•	Safety device emergency stop request.
+•	Donanım arızası.
+•	Hareketli mekanizma veya güvenlik zinciri için kritik risk.
+
+Observable Symptoms
+•	Red alarm.
+•	Sistem veya modül hareketleri durur.
+•	Reset/shutdown gerektirir.
+•	Operasyon devam edemez.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Safety interlock/emergency circuit triggered	Safety
+Medium	Hardware actuator fault	Mechanical
+Medium	Motor/drive abnormal state	Electrical
+Medium	Cover/safety device fault	Sensor
+Low	Controller I/O board failure	Electronic
+Affected Modules / Systems
+All analytical units, safety interlock chain, motors, covers, control unit, emergency stop circuit.
+
+Engineering Interpretation
+E.Stop, normal alarm seviyesinin üzerindeki fail-safe durumdur. Sistem hareket komutlarını keser ve operator müdahalesi veya servis reseti olmadan motion enable zincirini geri açmaz. Bu tasarım, hızlı hareket eden pipetter/loader/robotik parçaların operatörle temasını engellemek için kullanılır.
+
+Diagnostic Procedure
+1.	E.Stop alarm description kaydedilir; beklenen: tetikleyen safety/hardware alan görünür.
+2.	Kapak/interlock durumları kontrol edilir; beklenen: tüm kapaklar kapalı ve kilitli.
+3.	Motor/loader/probe pozisyonu gözlenir; beklenen: çarpışma veya sıkışma yok.
+4.	Sistem reset/shutdown prosedürü uygulanır; anormal: alarm tekrar ederse donanım arızası düşünülür.
+5.	Alarm trace ve system details report alınarak Roche Service’e iletilir.
+
+Corrective Actions
+Immediate Actions
+•	Sistemi kullanmayı durdur.
+•	Numune/result durumunu geçersiz/tekrar gerektirir olarak değerlendir.
+•	Kullanıcı güvenliğini sağla.
+Recommended Repairs
+•	Interlock kapakları ve fiziksel engelleri kontrol et.
+•	Reset/shutdown sonrası başlangıç kontrolü yap.
+Advanced Service Actions
+•	Safety I/O, motor drive, emergency circuit, actuator home sensors kontrol edilir.
+Replacement Recommendations
+•	Interlock switch, actuator drive, motor, safety PCB veya kablo harness.
+
+Preventive Maintenance Recommendations
+•	Kapak/interlock mekanizmaları temiz ve hizalı tutulmalı.
+•	Hareketli alanlarda yabancı cisim bırakılmamalı.
+•	Safety alarm tekrarları trendlenmeli.
+
+Related Components
+Emergency stop circuit, interlock switches, covers, motor drivers, robot arms, reagent loader, probes.
+
+Calibration Impact
+E.Stop sonrası yarım kalan ölçümler geçersizdir. Modül resetinden sonra QC ve gerekiyorsa calibration verification yapılmalıdır.
+
+Safety Risks
+Motion injury, electrical hazard, biohazard exposure.
+
+Downtime Impact
+Tam sistem duruşu veya ciddi AU duruşu; yüksek downtime.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Liquid Level Sensor Alarm / Sample Pipetter LLD Low Voltage
+
+Failure Category
+Sensor / Electronic / Robotic Movement / Fluidic
+
+Severity Level
+High
+
+Technical Description
+Liquid level sensor voltage çok düşüktür. Sistem liquid level sensor alarmı oluşturur ve sample probe mechanism vertical upper position’da kalır. Alarm ISE Sample Pipetter, c 503 Sample Pipetter S1/S2 gibi pipetter seviyesinde gösterilebilir.
+
+Trigger Conditions
+•	Liquid level detection voltage below expected range.
+•	Sample/reagent yüzeyi algılanamıyor.
+•	Probe üzerinde kontaminasyon, köpük, hava, uygunsuz kap veya düşük hacim.
+•	LLD sinyal hattında elektriksel bozulma.
+
+Observable Symptoms
+•	Probe vertical upper position’da kalır.
+•	Sample aspiration başlamaz veya yarıda kalır.
+•	Sistem alarmı oluşur.
+•	Numune çalışması kesilir.
+•	Tekrarlayan durumda modül throughput düşer.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Probe kirlenmesi veya ıslak/kontamine yüzey	Sensor/Fluidic
+High	Numune seviyesi düşük, köpük veya kabarcık	Fluidic
+Medium	Sample container uygunsuzluğu	Mechanical/Consumable
+Medium	LLD signal cable/connector problemi	Electronic
+Low	LLD board veya ADC input arızası	Electronic
+Affected Modules / Systems
+ISE sample pipetter, c 503 sample pipetter S1/S2, c 703 sample probes, e 801 sample pipetter, LLD sensor circuit, sample probe, sample container.
+
+Engineering Interpretation
+LLD, probe ile sıvı yüzeyi arasında elektriksel/kapasitif sinyal değişimini izler. Voltaj beklenen eşiğin altına düştüğünde yazılım, probe’un sıvıyı güvenilir şekilde algılamadığını kabul eder. Bu durumda probe’un sıvı içine fazla dalarak carryover veya mekanik çarpışma üretmesini engellemek için hareket zinciri durdurulur.
+
+Diagnostic Procedure
+1.	Alarm text ve etkilenen pipetter adını kaydet; beklenen: spesifik pipetter belirtilir.
+2.	Probe’u görsel kontrol et; beklenen: temiz, düz, kuru; anormal: tuz, protein, damlacık, eğilme.
+3.	Sample container ve hacmi kontrol et; beklenen: önerilen kap ve yeterli hacim; anormal: foam, bubble, düşük hacim.
+4.	Probe cleaning uygula; beklenen: alarm reset sonrası tekrarlamaz.
+5.	Tekrar LLD/pipetter movement test yap; anormal: probe tekrar upper position’da kalır.
+6.	Connector/kablo/sensor circuit servis kontrolüne alınır.
+
+Corrective Actions
+Immediate Actions
+•	Etkilenen numuneyi tekrar çalışmak üzere ayır.
+•	Probe yüzeyini temizle.
+•	Köpüklü/uygunsuz numuneyi düzelt veya yeni kap kullan.
+Recommended Repairs
+•	Sample probe temizliği veya değişimi.
+•	Container/rack uyumluluğunu düzelt.
+•	LLD check veya module check çalıştır.
+Advanced Service Actions
+•	LLD analog signal, ADC input, grounding, probe cable continuity kontrol edilir.
+Replacement Recommendations
+•	Sample probe, LLD cable, sensor board, related connector.
+
+Preventive Maintenance Recommendations
+•	Sample probe temizliği günlük/as-required yapılmalı.
+•	Köpüklü numune yüklenmemeli.
+•	Uygun sample container kullanılmalı.
+•	Probe yüzeyinde tuz/protein buildup izlenmeli.
+
+Related Components
+Sample probe, LLD circuit, ADC input, sample syringe, tubing, rack/sample container, probe arm motor, connector harness.
+
+Calibration Impact
+Numune ve kalibratör aspirasyonu etkilenirse calibration/QC geçersiz olabilir. Probe değişimi veya LLD onarımı sonrası QC ve gerekirse kalibrasyon tekrar edilmelidir.
+
+Safety Risks
+Biohazard splash, probe movement hazard, carryover risk.
+
+Downtime Impact
+Tek pipetter veya AU bazlı çalışma kesintisi; tekrarlayan durumda yüksek throughput kaybı.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Samp.C / Sample Clot
+
+Failure Category
+Pressure / Fluidic / Sensor
+
+Severity Level
+High
+
+Technical Description
+Sample clot data alarmı, numune aspirasyonu sırasında akış/pressure davranışının pıhtı veya tıkanıklıkla uyumlu olduğunu gösterir. cobas 8000 data alarm listesinde Samp.C tüm ana modüllerde yer alır.
+
+Trigger Conditions
+•	Aspirasyon basıncı beklenen profil dışında.
+•	Fibrin/pıhtı sample probe veya tubing girişini engeller.
+•	Numune homojen değil veya uygun şekilde hazırlanmadı.
+
+Observable Symptoms
+•	Numune sonucu data alarm ile gelir veya ölçüm iptal olur.
+•	Pipetting delay/abnormal aspiration.
+•	Tek numune veya ardışık numunelerde tekrarlama.
+•	Probe clogging ihtimali.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Fibrin/pıhtı içeren numune	Sample/Fluidic
+High	Probe tip kısmi tıkanıklığı	Fluidic
+Medium	Sample container dip/false bottom problemi	Mechanical
+Medium	Pressure sensor drift veya contamination	Sensor
+Low	Syringe seal leakage	Mechanical/Fluidic
+Affected Modules / Systems
+Sample probe, sample syringe, pressure sensor, tubing, ISE/c/e analytical units, sample container.
+
+Engineering Interpretation
+Sistem aspirasyon sırasında pressure-time curve izler. Pıhtı veya fibrin, probe ucunda hidrolik direnci artırır; basınç eğrisi normal aspirasyon imzasından sapar. Yazılım bu sapmayı clot olarak işaretler. Eğer probe içinde artık fibrin kalırsa bir sonraki numunelerde carryover veya false short/clot alarmı tetiklenebilir.
+
+Diagnostic Procedure
+1.	Alarmın tek numunede mi seri numunelerde mi oluştuğunu kontrol et.
+2.	Numune görsel olarak fibrin/köpük/pıhtı açısından incelenir.
+3.	Probe ucunda tıkanıklık veya kirlenme aranır.
+4.	Probe cleaning ve gerekiyorsa de-clogging uygulanır.
+5.	Aynı numune yeni kapta tekrar çalışılır.
+6.	Seri tekrarda pressure sensor/syringe/tubing kontrol edilir.
+
+Corrective Actions
+Immediate Actions
+•	Etkilenen sonucu geçersiz/tekrar olarak değerlendir.
+•	Numuneyi santrifüj/yeniden hazırlama prosedürüne göre düzelt.
+•	Probe temizliği yap.
+Recommended Repairs
+•	Sample probe değişimi.
+•	Syringe seal ve tubing kontrolü.
+•	Pressure check.
+Advanced Service Actions
+•	Pressure sensor signal calibration/diagnostic.
+•	Pipetter drive ve syringe plunger hareket analizi.
+Replacement Recommendations
+•	Sample probe, sample tubing, syringe seal, pressure sensor.
+
+Preventive Maintenance Recommendations
+•	Fibrinli numuneler yüklenmemeli.
+•	Probe cleaning periyodu aksatılmamalı.
+•	Uygun container ve yeterli hacim kullanılmalı.
+
+Related Components
+Sample probe, pressure sensor, sample syringe, tubing, rack/sample cup, pipetter motor.
+
+Calibration Impact
+Kalibratör/QC aspirasyonunda oluşursa ilgili kalibrasyon/QC geçersiz kabul edilmelidir.
+
+Safety Risks
+Biohazard exposure, carryover risk.
+
+Downtime Impact
+Tek numune tekrarından modül bazlı duruşa kadar değişir; seri clot durumunda yüksek.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Samp.S / Sample Short
+
+Failure Category
+Fluidic / Sensor / Sample Handling
+
+Severity Level
+High
+
+Technical Description
+Sample short, aspirasyon için yeterli numune hacmi olmadığını veya sistemin yeterli numuneyi algılayamadığını gösterir. cobas 8000 data alarm listesinde Samp.S tüm ana modüller için verilmiştir.
+
+Trigger Conditions
+•	Numune hacmi yetersiz.
+•	Foam/bubble nedeniyle gerçek sıvı seviyesi yanlış algılanır.
+•	Yanlış sample container veya yanlış rack/tube parametresi.
+•	LLD veya pressure davranışı aspiration short ile uyumlu.
+
+Observable Symptoms
+•	Numune sonucu alarm alır.
+•	Test çalışmaz veya eksik çalışır.
+•	Rerun gerekebilir.
+•	Aynı tüpte birden fazla testte short görülebilir.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Yetersiz numune hacmi	Sample
+High	Foam/air bubble	Fluidic
+Medium	Yanlış container/tube type	Mechanical/Configuration
+Medium	Probe/LLD kirlenmesi	Sensor
+Low	Syringe aspiration volume hatası	Mechanical
+Affected Modules / Systems
+Sample probe, LLD, sample syringe, sample container, order/test volume calculation.
+
+Engineering Interpretation
+Sistem, sipariş edilen test hacmi ve dead volume gereksinimini sample level detection ile eşleştirir. Hacim veya algılama yetersiz ise aspiration volume garanti edilemez; yanlış hacim pipetlenmesi tüm analitik ölçümü invalid hale getirebilir.
+
+Diagnostic Procedure
+1.	Numune hacmini ve test sayısını kontrol et.
+2.	Container tipinin sistem tanımıyla uyumunu kontrol et.
+3.	Foam/bubble varlığını kontrol et.
+4.	Probe/LLD yüzeyini temizle.
+5.	Numuneyi yeni kapta yeterli hacimle tekrar yükle.
+6.	Alarm tekrarlarsa syringe/probe aspiration check yap.
+
+Corrective Actions
+Immediate Actions
+•	Numune hacmini tamamla veya yeni numune iste.
+•	Köpük/bubble gider.
+•	Testi tekrar çalış.
+Recommended Repairs
+•	Probe temizliği.
+•	Container ayarlarının düzeltilmesi.
+•	LLD kontrolü.
+Advanced Service Actions
+•	Syringe volume accuracy, plunger leakage ve pipetter calibration değerlendirilir.
+Replacement Recommendations
+•	Sample probe, syringe seal, LLD cable/sensor.
+
+Preventive Maintenance Recommendations
+•	Minimum volume kontrolleri pre-analitikte uygulanmalı.
+•	Foam oluşturan numuneler bekletilmeli veya yeniden hazırlanmalı.
+•	Tube/cup tanımları doğrulanmalı.
+
+Related Components
+Sample cup/tube, sample probe, LLD, sample syringe, pipetter motor.
+
+Calibration Impact
+Kalibratör veya QC short ise calibration/QC geçersiz olur; tekrar gerekir.
+
+Safety Risks
+None identified beyond biohazard handling.
+
+Downtime Impact
+Numune bazlı tekrar; seri ise throughput düşer.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+ISE.E / ISE Voltage Level Error
+
+Failure Category
+Sensor / Electronic / Fluidic / Calibration
+
+Severity Level
+High
+
+Technical Description
+ISE.E, ISE voltage level error’dır. ISE electrode sinyal seviyesinin beklenen aralık dışında olduğunu gösterir. cobas 8000 test data alarm listesinde ISE.E yalnız ISE modülü için tanımlıdır.
+
+Trigger Conditions
+•	ISE electrode EMF seviyesi anormal.
+•	Internal Standard/Reference/Diluent akışı bozulmuş.
+•	Electrode veya reference electrode yerleşimi/teması bozuk.
+•	Salt bridge, leak, hava kabarcığı veya kontaminasyon.
+
+Observable Symptoms
+•	ISE sonuçlarında alarm.
+•	Na/K/Cl erratic result.
+•	QC/calibration irregularity.
+•	Tek ISE unit veya tüm ISE sonuçlarında sapma.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	ISE reagent flow path air bubble	Fluidic
+High	Reference electrode instability	Sensor
+High	Measuring electrode contamination/degradation	Sensor
+Medium	Loose signal cable veya salt bridge	Electronic/Fluidic
+Medium	Syringe seal leak	Fluidic/Mechanical
+Low	ISE amplifier/PCB failure	Electronic
+Affected Modules / Systems
+ISE module, Na/K/Cl electrodes, reference electrode, ISE Internal Standard, ISE Diluent, ISE Reference Electrolyte, sipper syringe, signal cable.
+
+Engineering Interpretation
+ISE ölçümü, elektrot EMF değerinin stabil ve kalibrasyon eğrisiyle uyumlu olmasına dayanır. Reagent flow path’te hava veya kristalleşme oluştuğunda elektrot membranı ile referans potansiyeli arasındaki iyonik temas bozulur. Bu durumda voltage level, beklenen elektrokimyasal davranıştan sapar ve ISE.E tetiklenir.
+
+Diagnostic Procedure
+1.	ISE reagent volume ve aspiration tubing’in bottle bottom’a temasını kontrol et.
+2.	ISE Reference Electrolyte, Diluent ve Internal Standard tubing’lerinde hava kabarcığı ara.
+3.	Utility > Maintenance > reagent prime, ISE module, All, 20 cycles uygula.
+4.	Leak kontrolü yap: tubing, connector, syringe seals.
+5.	Measuring electrodes ve reference electrode yerleşimini kontrol et.
+6.	Signal cable loose/salt bridge kontrolü yap.
+7.	Calibration ve QC çalış; düzelmezse data alarm remedy ve Roche Service.
+
+Corrective Actions
+Immediate Actions
+•	ISE sonuçlarını doğrulama/QC olmadan raporlama.
+•	Reagent prime yap.
+•	Hava ve leak varlığını gider.
+Recommended Repairs
+•	Electrode ve reference electrode temizliği/yeniden yerleşimi.
+•	Sipper syringe seal değişimi.
+•	Tubing kink/occlusion düzeltme.
+Advanced Service Actions
+•	EMF signal stability, electrode channel cable, amplifier PCB kontrolü.
+Replacement Recommendations
+•	Reference electrode, Na/K/Cl electrode, sipper syringe seal, tubing, signal cable.
+
+Preventive Maintenance Recommendations
+•	Reagentler oda sıcaklığına gelmeden kullanılmamalı.
+•	ISE flow path wash düzenli yapılmalı.
+•	Salt buildup ıslak gazlı bezle temizlenmeli.
+•	ISE Check trendleri izlenmeli.
+
+Related Components
+ISE electrodes, reference electrode, signal cable, sipper syringe, ISE reagents, tubing, degasser, pinch valve.
+
+Calibration Impact
+ISE kalibrasyonu geçersiz olabilir; problem giderildikten sonra calibration + QC zorunludur.
+
+Safety Risks
+Yanlış elektrolit sonucu klinik risk oluşturur; reagent/biohazard exposure riski vardır.
+
+Downtime Impact
+ISE modül stop/degraded operation; Na/K/Cl testleri etkilenir.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+ISE.N / ISE Noise Error
+
+Failure Category
+Sensor / Electronic / Fluidic
+
+Severity Level
+High
+
+Technical Description
+ISE.N, ISE noise error’dır. Elektrot sinyalinde kabul edilemeyen gürültü/instabilite olduğunu gösterir. cobas 8000 data alarm listesinde ISE.N ISE modülü için tanımlıdır.
+
+Trigger Conditions
+•	EMF sinyalinde gürültü.
+•	Loose signal cable.
+•	Salt bridge veya leakage.
+•	Air bubble/köpük/kristalleşme.
+•	Reference electrode noise.
+
+Observable Symptoms
+•	Tekrarlayan erratic ISE result.
+•	QC drift veya poor reproducibility.
+•	Calibration alarm eşlik edebilir.
+•	ISE Check’te EMF step farkları büyür.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Loose signal cable / salt bridge	Electronic/Fluidic
+High	Air bubbles in ISE flow path	Fluidic
+High	Reference electrode degradation	Sensor
+Medium	Tubing kink/occlusion	Fluidic
+Low	Electrical noise/PCB instability	Electronic
+Affected Modules / Systems
+ISE electrode block, reference electrode, signal cable, sipper tubing, ISE reagent path.
+
+Engineering Interpretation
+ISE noise, elektrokimyasal sinyalin ölçüm penceresi içinde stabil kalmaması durumudur. Tuz köprüsü, kaçak veya gevşek kablo, yüksek empedanslı elektrot sinyalini bozarak dalgalı EMF üretir. Akış hattındaki bubble da elektrot yüzeyinde geçici iyonik temas kaybına neden olur.
+
+Diagnostic Procedure
+1.	Tek unit mi tüm ISE mi etkilendiğini belirle.
+2.	Signal cable bağlantısını ve salt bridge varlığını kontrol et.
+3.	Reference electrode compartment leak kontrolü yap.
+4.	ISE reagent tubing bubble kontrolü yap.
+5.	Reagent prime uygula.
+6.	ISE Check 30 cycles çalış; 10. ölçümden sonraki measurement-to-measurement fark ±0.2 mV sınırını aşmamalıdır.
+7.	Calibration/QC çalış.
+
+Corrective Actions
+Immediate Actions
+•	ISE sonuçlarını QC ile doğrula.
+•	Reagent prime yap.
+•	Tuz birikimini temizle.
+Recommended Repairs
+•	Reference electrode değişimi.
+•	Tubing kink/occlusion giderme.
+•	Signal cable bağlantısını düzeltme.
+Advanced Service Actions
+•	EMF amplifier noise, grounding, PCB channel kontrolü.
+Replacement Recommendations
+•	Reference electrode, signal cable, electrode, tubing, syringe seal.
+
+Preventive Maintenance Recommendations
+•	Electrode compartment kuru/temiz tutulmalı.
+•	Salt buildup düzenli temizlenmeli.
+•	ISE reagents doğru sıcaklıkta kullanılmalı.
+•	ISE Check periyodik izlenmeli.
+
+Related Components
+Na/K/Cl electrodes, reference electrode, signal cable, ISE sipper syringe, tubing.
+
+Calibration Impact
+Kalibrasyon geçersiz veya unstable olabilir; calibration + QC tekrar gerekir.
+
+Safety Risks
+Yanlış elektrolit sonucu riski.
+
+Downtime Impact
+ISE testlerinde operasyon kesintisi veya tekrar ihtiyacı.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+IStd.E / IS Concentration Abnormal
+
+Failure Category
+Calibration / Fluidic / Sensor
+
+Severity Level
+High
+
+Technical Description
+IStd.E, ISE Internal Standard concentration abnormal alarmıdır. Kalibrasyon data alarm listesinde ISE modülü için tanımlıdır.
+
+Trigger Conditions
+•	Internal Standard sinyali beklenen aralıkta değil.
+•	IS reagent akışı bozuk.
+•	IS tubing’de hava/kristalleşme.
+•	Electrode/reference response bozuk.
+
+Observable Symptoms
+•	ISE calibration failure.
+•	ISE QC drift.
+•	Na/K/Cl sonuçlarında sapma.
+•	Reagent prime sonrası geçici düzelme olabilir.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	ISE Internal Standard reagent low/degraded	Reagent System
+High	IS tubing air bubble	Fluidic
+Medium	Sipper syringe seal leak	Fluidic
+Medium	Electrode/reference instability	Sensor
+Low	IS measurement electronics fault	Electronic
+Affected Modules / Systems
+ISE Internal Standard bottle/path, ISE electrodes, reference electrode, sipper syringe, IS measurement algorithm.
+
+Engineering Interpretation
+ISE internal standard, her ölçüm döngüsünde elektrot tepkisini normalize eder. IS konsantrasyonu veya akış karakteri değişirse elektrot slope/offset hesaplaması bozulur. Sistem bunu calibration quality criterion failure olarak işaretler.
+
+Diagnostic Procedure
+1.	IS reagent volume/expiry kontrol edilir.
+2.	IS aspiration tubing bubble/kink kontrol edilir.
+3.	Reagent prime All 20 cycles uygulanır.
+4.	Sipper syringe air/seal kontrol edilir.
+5.	Electrode placement ve reference electrode kontrol edilir.
+6.	ISE calibration + QC tekrar edilir.
+
+Corrective Actions
+Immediate Actions
+•	ISE test raporlamasını durdur veya QC ile kısıtla.
+•	IS reagent ve tubing’i kontrol et.
+•	Prime yap.
+Recommended Repairs
+•	IS bottle değişimi.
+•	Sipper seal değişimi.
+•	Reference/electrode yenileme.
+Advanced Service Actions
+•	IS measurement channel electronics ve EMF stability analizi.
+Replacement Recommendations
+•	IS reagent bottle, tubing, sipper syringe seal, electrode/reference electrode.
+
+Preventive Maintenance Recommendations
+•	ISE reagents expiry/onboard stability izlenmeli.
+•	Bottle aspiration tubing doğru yerleştirilmeli.
+•	ISE reagent flow path wash uygulanmalı.
+
+Related Components
+ISE Internal Standard, IS tubing, sipper syringe, electrode block, reference electrode.
+
+Calibration Impact
+Doğrudan kalibrasyonu geçersiz kılar; problem giderilmeden ISE calibration kabul edilmemelidir.
+
+Safety Risks
+Yanlış elektrolit sonucu klinik risk.
+
+Downtime Impact
+ISE modülü kısmi/tam devre dışı kalabilir.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Cuvet / ABS Cell Blank Abnormal
+
+Failure Category
+Optical / Maintenance / Fluidic
+
+Severity Level
+High
+
+Technical Description
+Cuvet, ABS Cell blank abnormal alarmıdır. cobas 8000 data alarm listesinde c 701, c 702 ve c 502 modülleri için tanımlıdır.
+
+Trigger Conditions
+•	Reaction cell blank absorbance abnormal.
+•	Kirli/scratched cuvette/reaction cell.
+•	Wash failure.
+•	Photometer optical path veya lamp drift.
+•	Incubation bath contamination.
+
+Observable Symptoms
+•	Fotometrik testlerde alarm.
+•	QC drift, poor reproducibility.
+•	Aynı reaction cell’de tekrar eden problem.
+•	Cell Blank Measurement raporunda sapma.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Dirty/scratched reaction cell	Optical/Maintenance
+High	Wash nozzle veya detergent performans sorunu	Fluidic
+Medium	Incubation bath contamination	Maintenance/Thermal
+Medium	Photometer lamp aging	Optical/Electrical
+Low	Photometer detector electronics fault	Electronic
+Affected Modules / Systems
+c 701/c 702/c 502, reaction cells, photometer, wash unit, incubation bath, CellCln/NaOHD/EcoTergent.
+
+Engineering Interpretation
+Cell blank ölçümü, reaction cell’in optik baseline’ını temsil eder. Hücre yüzeyinde protein/partikül/kazınma oluşursa absorbans offset’i yükselir. Sistem, bu offset’i photometric result hesaplamasında güvenilir kabul edemez ve cell blank abnormal alarmı üretir.
+
+Diagnostic Procedure
+1.	Cell Blank Measurement raporunu incele.
+2.	Aynı cell numarası tekrar ediyor mu kontrol et.
+3.	Wash Reaction Parts / Cell Detergent Prime uygula.
+4.	Reaction cell fiziksel durumunu kontrol et.
+5.	Photometer Check çalıştır.
+6.	Lamp veya detector drift şüphesinde servis kontrolü yap.
+
+Corrective Actions
+Immediate Actions
+•	Etkilenen sonuçları tekrar çalış.
+•	Cell wash maintenance uygula.
+Recommended Repairs
+•	Reaction cell değiştir.
+•	Incubation bath cleaning yap.
+•	Wash nozzle ve detergent flow kontrol et.
+Advanced Service Actions
+•	Photometer lamp intensity, detector output, optical alignment kontrol edilir.
+Replacement Recommendations
+•	Reaction cells, photometer lamp, wash tubing/nozzles.
+
+Preventive Maintenance Recommendations
+•	Cell blank ve photometer check trendleri günlük/pre-routine izlenmeli.
+•	Reaction cell replacement interval takip edilmeli.
+•	Detergent ve incubation bath maintenance aksatılmamalı.
+
+Related Components
+Reaction cells, photometer lamp, detector, wash nozzles, incubation bath, detergents.
+
+Calibration Impact
+Fotometrik kalibrasyon ve QC etkilenir; cell/lamp müdahalesi sonrası QC ve gerekirse calibration yapılmalıdır.
+
+Safety Risks
+Reagent exposure, biohazard residue.
+
+Downtime Impact
+c module testlerinde degraded operation; ciddi durumda modül duruşu.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+ADC.E / ADC Abnormal
+
+Failure Category
+Electronic / Sensor
+
+Severity Level
+High
+
+Technical Description
+ADC.E, analog-to-digital conversion abnormal durumudur. cobas 8000 data alarm listesinde tüm ana modüller için geçerlidir.
+
+Trigger Conditions
+•	Analog sensör sinyali dijital ölçüm aralığı dışında.
+•	ADC input saturation/noise.
+•	Sensor cable/grounding problemi.
+•	Ölçüm kanalında elektronik kararsızlık.
+
+Observable Symptoms
+•	Birden fazla testte elektronik kaynaklı data alarm.
+•	Sensor değerlerinde anormal dalgalanma.
+•	Modül bazlı tekrarlayan ölçüm hatası.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Sensor signal out of range	Sensor
+Medium	Cable/connector instability	Electronic
+Medium	Grounding/noise issue	Electrical
+Low	ADC board failure	Electronic
+Affected Modules / Systems
+ISE, c modules, e modules, analog sensor inputs, detector channels, ADC circuitry.
+
+Engineering Interpretation
+ADC zinciri; photometer, electrode, temperature veya liquid detection gibi analog sinyalleri dijital değerlere çevirir. Sinyal saturasyon, kesinti veya noise içerirse yazılım, ölçüm verisini güvenilir saymaz.
+
+Diagnostic Procedure
+1.	ADC.E’nin tek test/modül mü yoksa genel mi olduğunu belirle.
+2.	Eşlik eden sensor/data alarms incelenir.
+3.	Kablo/connector ve sıvı sızıntısı kontrol edilir.
+4.	Modül reset/maintenance sonrası tekrar ölçüm yapılır.
+5.	Tekrarlarsa Roche Service elektronik diagnostik gereklidir.
+
+Corrective Actions
+Immediate Actions
+•	Etkilenen sonuçları geçersiz/tekrar olarak değerlendir.
+•	Alarm remedy takip et.
+Recommended Repairs
+•	Connector reseat/inspection.
+•	Sensor path cleanup/dry.
+Advanced Service Actions
+•	ADC board, analog front-end, grounding ve shielding kontrolü.
+Replacement Recommendations
+•	Sensor cable, detector/sensor module, ADC PCB.
+
+Preventive Maintenance Recommendations
+•	Sıvı kaçağı erken giderilmeli.
+•	Elektronik alanlar kuru tutulmalı.
+•	Preventive inspection sırasında connector gevşekliği kontrol edilmeli.
+
+Related Components
+ADC board, analog sensors, cables, connectors, photometer/electrode/temperature channels.
+
+Calibration Impact
+Etkilenen ölçüm sistemi kalibrasyonu güvenilmezdir; elektronik hata giderilmeden calibration yapılmamalıdır.
+
+Safety Risks
+Electrical hazard if leakage present.
+
+Downtime Impact
+Modül veya tüm test grubu etkilenebilir.
+
+Detection Confidence
+Medium-High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Reag.S / Reagent Short
+
+Failure Category
+Reagent System / Fluidic / Sensor
+
+Severity Level
+High
+
+Technical Description
+Reag.S, reagent short alarmıdır. cobas 8000 data alarm listesinde ISE, c 701, c 702, e 801 ve e 602 için verilmiştir.
+
+Trigger Conditions
+•	Reagent volume yetersiz.
+•	Reagent aspiration başarısız.
+•	Reagent probe LLD/short detection hatası.
+•	Reagent pack/bottle boş veya yanlış yerleşmiş.
+
+Observable Symptoms
+•	Test çalışmaz veya alarm alır.
+•	Reagent status düşük/empty görünür.
+•	Reagent prime gerekebilir.
+•	Bir test veya tüm reagent path etkilenebilir.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Reagent volume insufficient	Reagent System
+High	Bottle/pack not seated correctly	Mechanical/Reagent
+Medium	Reagent probe contamination/clog	Fluidic
+Medium	Reagent LLD/short sensor issue	Sensor
+Low	Syringe/pump aspiration failure	Mechanical
+Affected Modules / Systems
+Reagent packs, reagent bottles, reagent probes, reagent syringes, LLD/short sensors, reagent manager.
+
+Engineering Interpretation
+Reagent short, ya gerçek hacim eksikliğini ya da sistemin reagent aspirasyonunu güvenilir şekilde doğrulayamadığını gösterir. Bu durumda dispense edilen hacim test stoichiometry’sini bozar ve sonuç hesaplaması invalid olur.
+
+Diagnostic Procedure
+1.	Reagent status ve pack/bottle seviyelerini kontrol et.
+2.	Pack/bottle yerleşimini doğrula.
+3.	Probe ve aspiration tubing’i kontrol et.
+4.	Reagent prime uygula.
+5.	Aynı alarm tekrarlarsa reagent probe/syringe/sensor diagnostik yap.
+6.	Reagent lot/expiry/onboard stability kontrol edilir.
+
+Corrective Actions
+Immediate Actions
+•	Reagent değiştir/doldur.
+•	Testi tekrar çalış.
+•	Etkilenen sonucu raporlama.
+Recommended Repairs
+•	Probe cleaning.
+•	Reagent pack yeniden yükleme.
+•	Prime.
+Advanced Service Actions
+•	Reagent syringe volume, LLD signal, reagent manager sensor kontrolü.
+Replacement Recommendations
+•	Reagent probe, syringe seal, reagent pack/bottle, LLD sensor/cable.
+
+Preventive Maintenance Recommendations
+•	Reagent inventory pre-routine kontrol edilmeli.
+•	Reagent onboarding ve expiry takip edilmeli.
+•	Probe cleaning yapılmalı.
+
+Related Components
+Reagent probe, reagent syringe, reagent pack, reagent bottle, reagent loader, LLD/short sensor.
+
+Calibration Impact
+Reagent short sonrası ilgili reagent pack için QC/kalibrasyon kontrolü gerekir.
+
+Safety Risks
+Reagent exposure.
+
+Downtime Impact
+Test bazlı veya module bazlı operasyon kesintisi.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+ReagEx / Reagent Expired Date
+
+Failure Category
+Reagent System / Software / Calibration
+
+Severity Level
+Medium-High
+
+Technical Description
+ReagEx, reagent expired date alarmıdır. cobas 8000 data alarm listesinde c modules, e 801 ve e 602 için tanımlıdır.
+
+Trigger Conditions
+•	Reagent expiry date geçmiş.
+•	Onboard stability veya reagent age limiti aşılmış.
+•	Software reagent tracking expired flag üretir.
+
+Observable Symptoms
+•	Test sonucuna data alarm eklenir.
+•	QC drift olabilir.
+•	Calibration geçerliliği bozulabilir.
+•	Reagent pack değiştirme gerekir.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Reagent expiration date exceeded	Reagent System
+High	Onboard stability exceeded	Software/Reagent
+Medium	Yanlış reagent storage	Maintenance
+Low	Tarih/sistem zamanı hatası	Software
+Affected Modules / Systems
+c modules, e 801/e 602, reagent manager, reagent tracking software, calibration/QC systems.
+
+Engineering Interpretation
+Reagent expiry, kimyasal/immünolojik performansın validasyon aralığı dışına çıktığını gösterir. Software, reagent barcode/RFID ve onboard stability bilgisiyle bu alarmı üretir. Expired reagent kullanımı bias veya sensitivity kaybına yol açabilir.
+
+Diagnostic Procedure
+1.	Reagent expiry ve onboard stability kontrol et.
+2.	Reagent storage koşullarını değerlendir.
+3.	Yeni reagent pack/bottle yükle.
+4.	Calibration/QC gereksinimini kontrol et.
+5.	Sonuçları QC ile doğrula.
+
+Corrective Actions
+Immediate Actions
+•	Expired reagent ile sonuç raporlamayı durdur.
+•	Reagent değiştir.
+Recommended Repairs
+•	Yeni reagent ile calibration/QC.
+•	Reagent inventory yönetimini düzelt.
+Advanced Service Actions
+•	Reagent tracking/RFID tarih verisi tutarsızsa service log kontrolü.
+Replacement Recommendations
+•	Reagent pack/bottle.
+
+Preventive Maintenance Recommendations
+•	Expiry ve onboard stability uyarıları günlük izlenmeli.
+•	Stok rotasyonu FIFO yapılmalı.
+•	Reagentler Method Sheet koşullarında saklanmalı.
+
+Related Components
+Reagent pack, RFID/barcode, reagent manager, calibration data, QC material.
+
+Calibration Impact
+Reagent değişimi sonrası test-specific calibration/QC gerekebilir.
+
+Safety Risks
+None identified beyond reagent handling.
+
+Downtime Impact
+Test bazlı duruş veya QC/calibration tekrar süresi.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Reag.F / Reagent Film or Foam Detection
+
+Failure Category
+Reagent System / Sensor / Fluidic
+
+Severity Level
+Medium-High
+
+Technical Description
+Reag.F, reagent film veya foam detection alarmıdır. cobas 8000 data alarm listesinde e 801/e 602 modülleri için bulunur.
+
+Trigger Conditions
+•	Reagent yüzeyinde foam/film.
+•	Reagent aspiration yüzey algılaması bozuk.
+•	Reagent pack içinde köpürme veya kontaminasyon.
+
+Observable Symptoms
+•	Reagent aspiration gecikmesi/hatası.
+•	e module reagent result alarmı.
+•	Reagent pack tekrarlı sorun verir.
+•	QC drift veya result instability olabilir.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Reagent foam	Reagent/Fluidic
+High	Reagent film/contamination	Reagent
+Medium	Pack handling/shaking	Maintenance
+Medium	Reagent probe/LLD contamination	Sensor
+Low	LLD electronics fault	Electronic
+Affected Modules / Systems
+e 801/e 602 reagent packs, reagent probe, LLD, reagent manager.
+
+Engineering Interpretation
+Foam/film, gerçek sıvı yüzeyini maskeleyerek LLD sinyalini ve aspirasyon hacmini bozar. Özellikle immunoassay reagentlerinde hatalı hacim, reaction kinetics ve ECL signal üretimini etkiler.
+
+Diagnostic Procedure
+1.	Reagent pack alarmını doğrula.
+2.	Pack yüzeyi/foam varlığını kontrol et.
+3.	Pack’i Method Sheet koşullarına göre değiştir veya beklet.
+4.	Reagent probe temizliğini kontrol et.
+5.	QC ile doğrulama yap.
+
+Corrective Actions
+Immediate Actions
+•	Etkilenen reagent pack’i kullanma.
+•	Yeni pack yükle.
+Recommended Repairs
+•	Reagent probe cleaning.
+•	Pack handling prosedürünü düzelt.
+Advanced Service Actions
+•	LLD signal diagnostik.
+Replacement Recommendations
+•	Reagent pack, reagent probe, LLD component.
+
+Preventive Maintenance Recommendations
+•	Reagent pack gereksiz çalkalanmamalı.
+•	Soğuk zincir/saklama şartları korunmalı.
+•	Probe cleaning aksatılmamalı.
+
+Related Components
+Reagent pack, reagent probe, LLD, reagent manager.
+
+Calibration Impact
+Reagent pack değişiminde QC ve gerekiyorsa calibration gerekir.
+
+Safety Risks
+Reagent exposure.
+
+Downtime Impact
+Test/reagent pack bazlı throughput düşüşü.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Reag.H / Reagent Hovering
+
+Failure Category
+Reagent System / Robotic Movement / Sensor
+
+Severity Level
+Medium-High
+
+Technical Description
+Reag.H, reagent hovering alarmıdır ve e 801/e 602 modüllerinde listelenmiştir.
+
+Trigger Conditions
+•	Reagent aspiration/handling pozisyonu beklenen mekanik ve sıvı seviyesine uymuyor.
+•	Reagent pack geometrisi, foam veya pack positioning problemi.
+•	Probe/loader hareket hizası anormal.
+
+Observable Symptoms
+•	Reagent aspiration kesilir.
+•	Reagent pack handling alarmı eşlik edebilir.
+•	Reagent loader/status indicator uyarısı olabilir.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Pack positioning issue	Mechanical
+Medium	Foam/film affecting level detection	Fluidic/Sensor
+Medium	Reagent probe alignment issue	Robotic Movement
+Low	Position sensor/LLD failure	Sensor
+Affected Modules / Systems
+e 801/e 602 reagent manager, reagent probe, reagent pack, loader, LLD.
+
+Engineering Interpretation
+Hovering, probe veya reagent handling mekanizmasının beklenen fiziksel referansla uyumsuz olduğunu gösterir. Mekanik hizalama veya sıvı yüzeyi algılama hatası, reagent transfer hacmini belirsiz hale getirir.
+
+Diagnostic Procedure
+1.	Reagent pack yerleşimini kontrol et.
+2.	Loader ve pack handling hareketini gözle.
+3.	Foam/film varlığını kontrol et.
+4.	Reagent Handling Check çalıştır.
+5.	Alarm tekrar ederse probe alignment/position sensor servis kontrolü yap.
+
+Corrective Actions
+Immediate Actions
+•	Pack’i çıkarıp yeniden yükle.
+•	Alarm remedy uygula.
+Recommended Repairs
+•	Reagent pack değiştir.
+•	Reagent probe ve loader path temizliği.
+Advanced Service Actions
+•	Loader motor/encoder, position sensor ve probe alignment kontrolü.
+Replacement Recommendations
+•	Reagent pack, loader component, probe, position sensor.
+
+Preventive Maintenance Recommendations
+•	Reagent loading port temizliği.
+•	Pack deformasyon kontrolü.
+•	Reagent loader checks periyodik uygulanmalı.
+
+Related Components
+Reagent pack, reagent loader, reagent probe, position sensors, LLD.
+
+Calibration Impact
+Etkilenen reagent pack ile yapılan calibration/QC geçersiz olabilir.
+
+Safety Risks
+Motion hazard if loader area manipulated improperly.
+
+Downtime Impact
+e module reagent/test bazlı kesinti.
+
+Detection Confidence
+Medium-High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Reag.T / Reagent Disk Temperature
+
+Failure Category
+Thermal / Reagent System / Sensor
+
+Severity Level
+High
+
+Technical Description
+Reag.T, reagent disk temperature alarmıdır. cobas 8000 data alarm listesinde e 801/e 602 için verilmiştir.
+
+Trigger Conditions
+•	Reagent storage/disk temperature out of range.
+•	Cooling fan/filter obstruction.
+•	Room temperature out of range.
+•	Temperature sensor veya refrigeration fault.
+
+Observable Symptoms
+•	Reagent temperature alarm.
+•	QC drift, reagent stability loss.
+•	e module reagent area uyarısı.
+•	Fan/filter problemi görülebilir.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Cooling airflow obstruction/filter dirty	Thermal/Maintenance
+High	Room temperature out of range	Environment
+Medium	Fan failure	Mechanical/Electrical
+Medium	Temperature sensor fault	Sensor
+Low	Refrigeration unit failure	Thermal/Electrical
+Affected Modules / Systems
+e 801/e 602 reagent storage, cooling unit, fans, filters, temperature sensors.
+
+Engineering Interpretation
+Reagent stabilitesi sıcaklık kontrollü saklama gerektirir. Reagent disk sıcaklığı aralık dışına çıktığında onboard stability ve assay response değişebilir. Sistem sıcaklık sensörüyle bu drift riskini algılar.
+
+Diagnostic Procedure
+1.	Alarm description içindeki sıcaklık/reagent area kontrol edilir.
+2.	Room temperature 18–32 °C aralığında mı kontrol edilir; WB.T remedy’de bu aralık açıkça verilmiştir.
+3.	Fanlar ve rear obstruction kontrol edilir.
+4.	Cooling filter temizliği yapılır.
+5.	Reagent QC/calibration değerlendirilir.
+6.	Alarm tekrarlarsa temperature sensor/refrigeration service.
+
+Corrective Actions
+Immediate Actions
+•	Etkilenen reagentleri QC ile doğrula.
+•	Fan/filter obstruction gider.
+Recommended Repairs
+•	Cooling filter cleaning.
+•	Room HVAC düzeltme.
+•	Reagent pack değişimi.
+Advanced Service Actions
+•	Temperature sensor calibration, fan voltage, refrigeration diagnostic.
+Replacement Recommendations
+•	Cooling fan, filter, temperature sensor, refrigeration component.
+
+Preventive Maintenance Recommendations
+•	Cooling filter temizliği planlı yapılmalı.
+•	Oda sıcaklığı izlenmeli.
+•	Rear ventilation açık tutulmalı.
+
+Related Components
+Cooling fan, filter, reagent disk, temperature sensor, reagent packs.
+
+Calibration Impact
+Sıcaklık sapması reagent response’u etkiler; QC ve calibration verification gerekir.
+
+Safety Risks
+Refrigerant/electrical risk service seviyesinde.
+
+Downtime Impact
+e module reagent stabilitesi nedeniyle yüksek operasyon riski.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+WB.T / Washing Buffer Temperature
+
+Failure Category
+Thermal / Reagent System
+
+Severity Level
+Medium-High
+
+Technical Description
+WB.T, washing buffer temperature alarmıdır. PreClean temperature out of range durumudur. Sistem startup’tan 30 dakika sonra initial check yapar ve sonra sıcaklığı sürekli kontrol eder.
+
+Trigger Conditions
+•	PreClean temperature out of range.
+•	Heat radiation normal değil.
+•	Room temperature out of range.
+
+Observable Symptoms
+•	WB.T alarm.
+•	e module wash/preclean related instability.
+•	QC drift veya assay signal instability.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Fan obstruction/failure	Thermal/Mechanical
+High	Room temperature 18–32 °C dışında	Environment
+Medium	Temperature sensor fault	Sensor
+Medium	PreClean cooling/heating circuit failure	Thermal
+Low	Controller monitoring fault	Electronic
+Affected Modules / Systems
+e 801/e 602, PreClean/washing buffer system, rear fans, temperature sensor.
+
+Engineering Interpretation
+Wash buffer sıcaklığı, immunoassay pre-wash ve bound/free separation performansını etkiler. Sıcaklık aralık dışına çıkarsa reagent kinetics ve wash efficiency değişir; bu nedenle sistem sürekli thermal monitoring yapar.
+
+Diagnostic Procedure
+1.	Rear fanların çalıştığını ve unobstructed olduğunu kontrol et.
+2.	Room temperature 18–32 °C aralığında mı kontrol et.
+3.	Alarm reset sonrası tekrarı izle.
+4.	Tekrar ederse Roche Service’e eskale et.
+
+Corrective Actions
+Immediate Actions
+•	Fan obstruction gider.
+•	Oda sıcaklığını uygun aralığa getir.
+Recommended Repairs
+•	Filter/fan cleaning.
+•	PreClean bottle/line inspection.
+Advanced Service Actions
+•	Temperature sensor ve thermal control circuit diagnostik.
+Replacement Recommendations
+•	Fan, temperature sensor, thermal control component.
+
+Preventive Maintenance Recommendations
+•	HVAC ve rear ventilation izlenmeli.
+•	Cooling filter temizlenmeli.
+•	PreClean/wash reagents saklama koşulları korunmalı.
+
+Related Components
+PreClean, washing buffer path, fans, filters, temperature sensor.
+
+Calibration Impact
+e module QC/calibration etkilenebilir; thermal alarm sonrası QC önerilir.
+
+Safety Risks
+Overheating/electrical service risk.
+
+Downtime Impact
+e module assay reliability düşer; tekrarda operasyon durabilir.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Inc.T / Incubator Temperature
+
+Failure Category
+Thermal / Sensor / Optical
+
+Severity Level
+High
+
+Technical Description
+Inc.T, incubator temperature data alarmıdır. cobas 8000 data alarm listesinde e 801/e 602 için listelenmiştir; cobas pro data alarm listesinde de sıcaklık ilişkili alarm grubunda yer alır.
+
+Trigger Conditions
+•	Incubation temperature out of range.
+•	Thermal control failure.
+•	Fan/heater/cooling fault.
+•	Temperature sensor instability.
+
+Observable Symptoms
+•	QC drift.
+•	Reaction kinetics sapması.
+•	Test sonuçlarında high/low bias.
+•	Thermal alarm.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Incubator thermal control instability	Thermal
+Medium	Temperature sensor drift	Sensor
+Medium	Fan/heater failure	Electrical/Mechanical
+Medium	Room temperature instability	Environment
+Low	Control PCB failure	Electronic
+Affected Modules / Systems
+Incubator, temperature sensors, thermal controller, e modules and/or photometric incubation system depending configuration.
+
+Engineering Interpretation
+İnkübasyon sıcaklığı reaction kinetics’in temel parametresidir. Enzimatik, fotometrik veya immunolojik reaksiyon eğrisi sıcaklıkla değişir; sıcaklık kontrol dışına çıkarsa kalibrasyon eğrisiyle numune reaksiyonu aynı koşullarda gerçekleşmez.
+
+Diagnostic Procedure
+1.	Inc.T alarmı hangi module/testte oluştu belirle.
+2.	Ambient temperature ve ventilation kontrol et.
+3.	Incubator maintenance/cleaning status kontrol et.
+4.	QC drift veya high/low pattern analiz et.
+5.	Alarm tekrarlarsa temperature sensor/thermal controller service.
+
+Corrective Actions
+Immediate Actions
+•	Etkilenen sonuçları QC ile doğrula.
+•	Thermal condition düzelene kadar testleri sınırlı kullan.
+Recommended Repairs
+•	Ventilation/filter cleaning.
+•	Incubator bath/area cleaning.
+Advanced Service Actions
+•	Temperature sensor calibration, heater/fan control diagnostik.
+Replacement Recommendations
+•	Temperature sensor, fan, heater, thermal controller.
+
+Preventive Maintenance Recommendations
+•	Oda sıcaklığı stabil tutulmalı.
+•	Incubation maintenance zamanında yapılmalı.
+•	Filter/fan temizliği yapılmalı.
+
+Related Components
+Incubator, temperature sensor, fan/heater, thermal control PCB, reaction vessels.
+
+Calibration Impact
+Kalibrasyon ve QC sıcaklık sapması sonrası tekrarlanmalıdır.
+
+Safety Risks
+Overheating/electrical risk.
+
+Downtime Impact
+Assay reliability yüksek risk; AU stop veya degraded operation.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+MIXLOW / Mixing Current Low
+
+Failure Category
+Mechanical / Robotic Movement / Electronic
+
+Severity Level
+Medium-High
+
+Technical Description
+MIXLOW, mixing current low alarmıdır. cobas 8000 data alarm listesinde c 701/c 702/c 502 modülleri için listelenir.
+
+Trigger Conditions
+•	Mixer motor/current feedback beklenen seviyenin altında.
+•	Ultrasonic/mixing performansı zayıf.
+•	Mixer mekanik temas veya enerji aktarımı yetersiz.
+
+Observable Symptoms
+•	Reaksiyon karışımı homojenleşmez.
+•	QC precision bozulur.
+•	Fotometrik reaction curve sapar.
+•	Tekrarlayan test alarmı.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Mixer contamination/wear	Mechanical
+Medium	Mixer drive current abnormal	Electronic
+Medium	Reaction cell/mixer alignment issue	Mechanical
+Low	Control PCB failure	Electronic
+Affected Modules / Systems
+c modules, mixers, reaction cells, mixer motor/driver, reaction disk timing.
+
+Engineering Interpretation
+Karıştırma akımı düşükse karıştırma enerjisi reagent-sample karışımına yeterince aktarılmıyor olabilir. Homojen olmayan reaksiyon, absorbans eğrisinde noise, slope error veya precision kaybı yaratır.
+
+Diagnostic Procedure
+1.	MIXLOW hangi test/modül/cell ile ilişkili analiz edilir.
+2.	Mixer contamination veya mechanical obstruction kontrol edilir.
+3.	Maintenance cleaning yapılır.
+4.	Reaction Monitor/QC precision değerlendirilir.
+5.	Mixer current/drive service diagnostik gerekir.
+
+Corrective Actions
+Immediate Actions
+•	Etkilenen sonuçları tekrar çalış.
+•	Module cleaning/maintenance uygula.
+Recommended Repairs
+•	Mixer cleaning veya adjustment.
+•	Reaction cell area cleaning.
+Advanced Service Actions
+•	Mixer motor current, driver PCB, alignment kontrolü.
+Replacement Recommendations
+•	Mixer assembly, motor driver, related cable.
+
+Preventive Maintenance Recommendations
+•	Mixer ve reaction area cleaning.
+•	Reaction curve trend izleme.
+•	QC precision trend monitoring.
+
+Related Components
+Mixer, reaction cells, reaction disk, motor driver, control PCB.
+
+Calibration Impact
+Homojenizasyon bozulduysa calibration/QC güvenilir değildir; QC tekrar gerekir.
+
+Safety Risks
+Motion hazard during maintenance.
+
+Downtime Impact
+c module testlerinde intermittent instability.
+
+Detection Confidence
+Medium-High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+MIXSTP / Stop Mixing
+
+Failure Category
+Mechanical / Robotic Movement
+
+Severity Level
+High
+
+Technical Description
+MIXSTP, mixing stop alarmıdır. cobas 8000 data alarm listesinde c modules için listelenir.
+
+Trigger Conditions
+•	Mixer hareketi durur veya kontrol edilemez.
+•	Motor/actuator obstruction.
+•	Driver veya sensor feedback failure.
+
+Observable Symptoms
+•	Test sonucu alarm alır.
+•	Reaction mixing yok.
+•	QC/reaction curve ciddi bozulur.
+•	Modül stop’a ilerleyebilir.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Mixer mechanical blockage	Mechanical
+Medium	Mixer motor failure	Mechanical/Electrical
+Medium	Position/current feedback failure	Sensor/Electronic
+Low	Control PCB failure	Electronic
+Affected Modules / Systems
+c 701/c 702/c 502 mixers, reaction disk, motor driver, sensor feedback.
+
+Engineering Interpretation
+Mixing işlemi sample ve reagent temasını uniform hale getirir. Mixer stop olursa reaksiyon kinetiği lokal konsantrasyon bölgelerine bağlı hale gelir; ölçüm invalid olur. Sistem bunu process integrity failure olarak işaretler.
+
+Diagnostic Procedure
+1.	Alarm test/modül ilişkisini belirle.
+2.	Mixer çevresinde fiziksel engel/kir kontrol et.
+3.	Maintenance/manual inspection modunda hareket serbestliği kontrol edilir.
+4.	Mixer motor/driver feedback test edilir.
+5.	QC/reaction monitor ile doğrulama yapılır.
+
+Corrective Actions
+Immediate Actions
+•	Etkilenen sonuçları tekrar çalış.
+•	Modül operasyonunu durdur/mask et.
+Recommended Repairs
+•	Mixer temizliği, obstruction removal.
+•	Motor/assembly inspection.
+Advanced Service Actions
+•	Motor driver, encoder/current feedback, control board diagnostik.
+Replacement Recommendations
+•	Mixer motor/assembly, driver PCB, cable harness.
+
+Preventive Maintenance Recommendations
+•	Reaction/mixer area temizliği.
+•	Yabancı cisim ve crystallization kontrolü.
+•	Scheduled maintenance.
+
+Related Components
+Mixer, motor, driver, reaction disk, reaction cells, control PCB.
+
+Calibration Impact
+Etkilenen testlerde QC/calibration verification gerekir.
+
+Safety Risks
+Moving parts hazard.
+
+Downtime Impact
+Yüksek; c module testleri durabilir.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Lin / Linearity Abnormal
+
+Failure Category
+Calibration / Optical / Software
+
+Severity Level
+High
+
+Technical Description
+Lin, linearity abnormal alarmıdır. cobas 8000 data alarm listesinde c modules için tanımlıdır.
+
+Trigger Conditions
+•	Reaction curve linearity criterion bozulur.
+•	Absorbance değişimi beklenen modelle uyumlu değil.
+•	Substrate depletion, interference, mixing veya photometer problemi.
+
+Observable Symptoms
+•	Test sonucunda >Lin alarmı.
+•	Reaction Monitor eğrisi abnormal.
+•	High/low bias veya repeat limit alarmı eşlik edebilir.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Sample interference/high concentration	Calibration/Analytical
+Medium	Reagent deterioration	Reagent System
+Medium	Mixing/pipetting instability	Mechanical/Fluidic
+Medium	Dirty cell/photometer drift	Optical
+Low	Application parameter issue	Software
+Affected Modules / Systems
+c 701/c 702/c 502, reaction cells, photometer, reagent/sample pipetting, application parameters.
+
+Engineering Interpretation
+Fotometrik ölçümlerde absorbans değişim profili belirli matematiksel reaksiyon modeline uymalıdır. Linearity abnormal, ölçümün kalibrasyon modeliyle karşılaştırılamayacak şekilde sapmasıdır. Genellikle sample concentration, interference veya reaction condition bozukluğuna işaret eder.
+
+Diagnostic Procedure
+1.	Reaction Monitor raporunu incele.
+2.	Aynı testte QC ve kalibrasyon durumunu kontrol et.
+3.	Sample interference/serum index alarmı var mı kontrol et.
+4.	Reagent expiry/onboard stability kontrol et.
+5.	Cell blank/photometer check yap.
+6.	Special wash/application parameter versiyonunu doğrula.
+
+Corrective Actions
+Immediate Actions
+•	Sonucu tekrar veya dilution/rerun ile doğrula.
+•	QC kontrol et.
+Recommended Repairs
+•	Reagent değiştir.
+•	Wash/cell cleaning.
+•	Application parameters güncelle.
+Advanced Service Actions
+•	Photometer linearity, pipetting volume, mixer performance test.
+Replacement Recommendations
+•	Reagent, reaction cell, photometer lamp, probe/syringe components.
+
+Preventive Maintenance Recommendations
+•	QC drift ve reaction monitor trendi izlenmeli.
+•	Reagent stabilitesi korunmalı.
+•	Cell blank/photometer checks aksatılmamalı.
+
+Related Components
+Photometer, reaction cell, reagent probe, sample probe, mixer, calibration curve, application parameters.
+
+Calibration Impact
+Kalibrasyon model geçerliliği sorgulanır; QC ve gerekiyorsa calibration tekrar gerekir.
+
+Safety Risks
+Yanlış sonuç riski.
+
+Downtime Impact
+Test bazlı operasyon kısıtı.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Kin / Kinetic Unstable / Prozone Error 2
+
+Failure Category
+Calibration / Optical / Reagent System
+
+Severity Level
+High
+
+Technical Description
+Kin, kinetic unstable veya Prozone error 2 olarak listelenmiştir. c modules için data alarm listesinde yer alır.
+
+Trigger Conditions
+•	Reaction kinetics expected profile dışında.
+•	Prozone/hook-like high concentration effect.
+•	Mixing, reagent, temperature veya interference problemi.
+
+Observable Symptoms
+•	Reaction curve unstable.
+•	High-dose sample şüphesi.
+•	Rerun/dilution gerekebilir.
+•	QC veya calibration normal olabilir, sadece belirli numunelerde görülebilir.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	High analyte concentration/prozone	Analytical
+Medium	Sample interference	Sample
+Medium	Reagent deterioration	Reagent
+Medium	Mixing/temperature instability	Mechanical/Thermal
+Low	Application parameter issue	Software
+Affected Modules / Systems
+c modules, photometer, reaction cells, assay application, sample/reagent pipetting.
+
+Engineering Interpretation
+Kinetik assaylerde absorbans zaman eğrisi belirli hız/şekil limitleri içinde kalmalıdır. Prozone veya reaktif aşırı yüklenmesi, eğriyi beklenen monoton/lineer değişimden uzaklaştırır. Sistem bu davranışı data alarm ile işaretler.
+
+Diagnostic Procedure
+1.	Reaction curve incelenir.
+2.	Numune high concentration/interference açısından değerlendirilir.
+3.	Dilution/rerun stratejisi uygulanır.
+4.	QC/reagent status kontrol edilir.
+5.	Repeated pattern varsa mixing/temperature/photometer kontrol edilir.
+
+Corrective Actions
+Immediate Actions
+•	Rerun veya dilution ile doğrula.
+•	Alarm attached result’ı dikkatli değerlendir.
+Recommended Repairs
+•	Reagent/QC kontrol.
+•	Reaction parts wash.
+Advanced Service Actions
+•	Application parameters, photometer timing, mixer performance kontrolü.
+Replacement Recommendations
+•	Reagent, mixer, photometer lamp, reaction cells.
+
+Preventive Maintenance Recommendations
+•	High-dose samples için reflex dilution rules.
+•	Reagent stability ve QC monitoring.
+•	Reaction monitor trend review.
+
+Related Components
+Reaction cell, photometer, mixer, reagent, sample probe, application parameters.
+
+Calibration Impact
+Tek numune etkileniyorsa kalibrasyon geçerli olabilir; çoklu örüntüde calibration/QC tekrar gerekir.
+
+Safety Risks
+Yanlış klinik yorum riski.
+
+Downtime Impact
+Test bazlı tekrar; sistem duruşu genelde yok.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Over.E / Overflow
+
+Failure Category
+Software / Calibration / Optical / Sensor
+
+Severity Level
+Medium-High
+
+Technical Description
+Over.E, overflow alarmıdır. cobas 8000 data alarm listesinde ISE, c modules ve e modules genelinde bulunur.
+
+Trigger Conditions
+•	Ölçüm sinyali veya hesaplanan değer sınır üstünde.
+•	Detector/algorithm measuring range aşımı.
+•	High concentration sample veya signal saturation.
+
+Observable Symptoms
+•	Sonuç alarm ile raporlanır.
+•	Rerun/dilution gerekir.
+•	Tek test veya çoklu testte görülebilir.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Analyte concentration measuring range over	Analytical
+Medium	Dilution/rerun rule missing	Software
+Medium	Detector signal saturation	Sensor/Optical
+Low	Calibration curve invalid	Calibration
+Affected Modules / Systems
+ISE, c modules, e modules, detector systems, application calculation, rerun logic.
+
+Engineering Interpretation
+Overflow, sistemin güvenilir numeric result üretim aralığının aşıldığını gösterir. Bu durumda ham signal veya hesaplanan konsantrasyon kalibrasyon fonksiyonunun valid range’i dışındadır.
+
+Diagnostic Procedure
+1.	Test measuring range ve result flag kontrol edilir.
+2.	Otomatik rerun/dilution oluştu mu kontrol edilir.
+3.	Numune dilution ile tekrar edilir.
+4.	QC/calibration status incelenir.
+5.	Detector/photometer/ECL signal saturation pattern araştırılır.
+
+Corrective Actions
+Immediate Actions
+•	Dilution/rerun yap.
+•	Alarm attached result’ı raporlama kurallarına göre değerlendir.
+Recommended Repairs
+•	Application/rerun settings kontrol.
+•	Calibration/QC doğrula.
+Advanced Service Actions
+•	Detector linearity ve application parameters kontrol edilir.
+Replacement Recommendations
+•	Genelde component değişimi gerekmez; pattern varsa detector/optical chain değerlendirilir.
+
+Preventive Maintenance Recommendations
+•	Rerun/dilution rules doğru yapılandırılmalı.
+•	High sample workload testleri için auto rerun aktif olmalı.
+
+Related Components
+Detector, calculation algorithm, calibration curve, rerun settings.
+
+Calibration Impact
+Kalibrasyon valid range dışı kullanım; QC normalse kalibrasyon değil numune aralığı sorunudur.
+
+Safety Risks
+Yanlış raporlama riski.
+
+Downtime Impact
+Numune bazlı tekrar.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Rept / <Rept / Repeat Limit Over
+
+Failure Category
+Software / Analytical / Calibration
+
+Severity Level
+Medium
+
+Technical Description
+Repeat limit over, üst veya alt repeat limitin aşıldığını gösterir. cobas 8000 data alarm listesinde tüm ana modüllerde yer alır.
+
+Trigger Conditions
+•	Sonuç configured repeat limit dışında.
+•	Auto rerun trigger koşulu.
+•	High/low concentration veya analytical interference.
+
+Observable Symptoms
+•	Otomatik rerun tetiklenebilir.
+•	Sonuç alarm ile işaretlenir.
+•	Repeat result beklenir.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Result outside configured repeat range	Software/Analytical
+Medium	Sample high/low concentration	Sample
+Medium	Calibration/QC drift	Calibration
+Low	Application setting error	Software
+Affected Modules / Systems
+ISE, c modules, e modules, result calculation, rerun logic, host upload.
+
+Engineering Interpretation
+Repeat limit, analitik güvenilirlik veya laboratuvar protokolü için belirlenmiş karar sınırıdır. Sonuç bu sınırı aşarsa sistem tekrar ölçüm isteyebilir. Bu, cihaz arızasından çok result governance mekanizmasıdır; ancak sıklaşması calibration drift veya reagent sorunu gösterebilir.
+
+Diagnostic Procedure
+1.	Result, repeat limit ve rerun status kontrol edilir.
+2.	QC/calibration durumu incelenir.
+3.	Repeat result ile ilk result karşılaştırılır.
+4.	Aynı testte trend varsa reagent/calibration değerlendirilir.
+5.	Application settings doğrulanır.
+
+Corrective Actions
+Immediate Actions
+•	Repeat/rerun sonucunu bekle.
+•	Alarm attached result’ı raporlama kurallarına göre yorumla.
+Recommended Repairs
+•	QC/calibration kontrol.
+•	Repeat limits/application settings doğrulama.
+Advanced Service Actions
+•	Data alarm handling ve LIS upload kuralları kontrol edilir.
+Replacement Recommendations
+•	Genelde yok; reagent/calibrator gerekebilir.
+
+Preventive Maintenance Recommendations
+•	Application limits periyodik doğrulanmalı.
+•	QC trend izlenmeli.
+
+Related Components
+Result calculation software, calibration curve, application settings, host/LIS.
+
+Calibration Impact
+Sık tekrar eden repeat alarms calibration/QC review gerektirir.
+
+Safety Risks
+Yanlış sonuç yorumlama riski.
+
+Downtime Impact
+Reduced throughput due to reruns.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+OBS.RR / OBS.RM / On-board Stability Limit Over
+
+Failure Category
+Reagent System / Software / Calibration
+
+Severity Level
+Medium-High
+
+Technical Description
+OBS.RR reagent rotor onboard stability limit over; OBS.RM reagent manager onboard stability limit over durumudur. cobas 8000 data alarm listesinde OBS.RR c/e modules için, OBS.RM c 702 reagent manager için listelenmiştir.
+
+Trigger Conditions
+•	Reagent onboard stability süresi aşılır.
+•	Reagent manager/rotor üzerinde pack valid süre dışında kalır.
+
+Observable Symptoms
+•	Data alarm.
+•	QC drift veya calibration validity şüphesi.
+•	Reagent replacement önerilir.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Onboard stability exceeded	Reagent/Software
+Medium	Reagent stock rotation poor	Maintenance
+Medium	Temperature exposure	Thermal
+Low	System date/time issue	Software
+Affected Modules / Systems
+Reagent rotor, reagent manager, reagent packs, reagent tracking software.
+
+Engineering Interpretation
+Onboard stability, reagentin cihaz üzerinde performans validasyon aralığını temsil eder. Süre aşımı reagent response ve calibration relation’ı bozabilir. Yazılım bu süreleri izleyerek result alarmı üretir.
+
+Diagnostic Procedure
+1.	Reagent status report kontrol edilir.
+2.	Pack onboard stability süresi incelenir.
+3.	Reagent pack değiştir.
+4.	QC/calibration çalış.
+5.	System date/time tutarlılığı kontrol edilir.
+
+Corrective Actions
+Immediate Actions
+•	Aşılmış reagent pack’i değiştir.
+•	Etkilenen sonuçları QC ile değerlendir.
+Recommended Repairs
+•	Inventory rotation.
+•	Reagent loading workflow düzeltme.
+Advanced Service Actions
+•	Reagent tracking/database issue araştırılır.
+Replacement Recommendations
+•	Reagent pack.
+
+Preventive Maintenance Recommendations
+•	Onboard stability uyarıları takip edilmeli.
+•	Düşük hacimli testlerde reagent tüketimi planlanmalı.
+
+Related Components
+Reagent pack, reagent rotor/manager, RFID/barcode, tracking software.
+
+Calibration Impact
+Yeni pack sonrası QC ve test-specific calibration gerekebilir.
+
+Safety Risks
+None identified.
+
+Downtime Impact
+Test bazlı kısa duruş.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Cal.E / Calibration Result Abnormal
+
+Failure Category
+Calibration / Software
+
+Severity Level
+High
+
+Technical Description
+Cal.E, calibration result abnormal veya CALIB error olarak tanımlanır. Kalibrasyon kalite kriterlerinden birinin karşılanmadığını gösterir. Calibration data alarms, Calibration Trace dialog ve calibration monitor report üzerinde gösterilir.
+
+Trigger Conditions
+•	Calibration quality criterion failure.
+•	Calibrator measurement invalid.
+•	Reagent/calibrator/sample handling issue.
+•	Module-specific calibration algorithm failure.
+
+Observable Symptoms
+•	Calibration status failed.
+•	Test masked veya calibration invalid olabilir.
+•	QC çalışılamaz/başarısız olabilir.
+•	Resultlerde Cal.E/Cal.I görülebilir.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Calibrator deterioration/handling error	Calibration
+High	Reagent issue	Reagent
+Medium	Pipetting/clot/short	Fluidic
+Medium	Photometer/ECL/electrode instability	Sensor
+Low	Application parameter mismatch	Software
+Affected Modules / Systems
+ISE, c 701/c 702/c 502, e 801/e 602, calibration trace, calibrator racks, reagent packs.
+
+Engineering Interpretation
+Kalibrasyon, cihazın sinyal-konsantrasyon ilişkisini günceller. Kalibrasyon sırasında duplicate, sensitivity, slope, standard veya system criteria sağlanmazsa sistem calibration curve’ü güvenilir kabul etmez. Bu durumda ilgili test result calculation valid değildir.
+
+Diagnostic Procedure
+1.	Calibration Trace ve Calibration Monitor report incelenir.
+2.	Hangi spesifik alarmın oluştuğu belirlenir.
+3.	Calibrator lot/expiry/reconstitution/position kontrol edilir.
+4.	Reagent pack status, expiry, onboard stability kontrol edilir.
+5.	Pipetting alarms, clot/short, LLD incelenir.
+6.	İlgili modül maintenance ve QC çalışılır.
+7.	Calibration tekrarlanır.
+
+Corrective Actions
+Immediate Actions
+•	Failed calibration kullanılan testleri raporlama.
+•	Yeni calibrator/reagent ile tekrar kalibrasyon.
+Recommended Repairs
+•	Probe cleaning, reagent replacement, calibrator preparation correction.
+•	QC after calibration.
+Advanced Service Actions
+•	Module-specific detector/electrode/photometer diagnostics.
+Replacement Recommendations
+•	Calibrator, reagent pack, probe, electrode, reaction cell, detector component.
+
+Preventive Maintenance Recommendations
+•	Calibrator storage/handling strict uygulanmalı.
+•	Calibration intervals takip edilmeli.
+•	Maintenance before calibration yapılmalı.
+
+Related Components
+Calibrators, reagent packs, sample/reagent probes, photometer/ECL/ISE electrodes, calibration software.
+
+Calibration Impact
+Doğrudan kalibrasyonu invalid kılar; başarılı calibration ve QC olmadan test çalıştırılmamalıdır.
+
+Safety Risks
+Yanlış sonuç riski.
+
+Downtime Impact
+Test veya modül bazlı operasyon durabilir.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Dup.E / Duplicate Error
+
+Failure Category
+Calibration / Precision / Fluidic
+
+Severity Level
+High
+
+Technical Description
+Dup.E, duplicate calibration ölçümleri arasındaki farkın kabul limitini aşmasıdır. cobas 8000 calibration alarm listesinde c modules ve e modules için yer alır.
+
+Trigger Conditions
+•	Duplicate calibrator measurements inconsistent.
+•	Pipetting instability.
+•	Calibrator heterogeneity/evaporation.
+•	Reagent instability.
+
+Observable Symptoms
+•	Calibration failed/not updated.
+•	QC precision poor olabilir.
+•	Aynı calibrator çiftinde sapma.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Calibrator evaporation/deterioration	Calibration
+High	Pipetting precision issue	Fluidic/Mechanical
+Medium	Reagent instability	Reagent
+Medium	Reaction cell/photometer inconsistency	Optical
+Low	Calculation/software parameter issue	Software
+Affected Modules / Systems
+c/e modules, calibrator material, sample probe, reagent probe, detector, calibration algorithm.
+
+Engineering Interpretation
+Duplicate error, aynı kalibratörün tekrar ölçümlerinin cihaz precision limitini aşmasıdır. Bu genellikle mekanik pipetting CV bozulması, bubble/leak, calibrator heterogeneity veya detector instability kaynaklıdır.
+
+Diagnostic Procedure
+1.	Calibration monitor report’ta duplicate pair incelenir.
+2.	Calibrator preparation ve evaporation kontrol edilir.
+3.	Sample/reagent probe ve syringe air/leak kontrol edilir.
+4.	QC precision trend incelenir.
+5.	Reagent pack değiştirilerek calibration denenir.
+6.	Detector/photometer/ECL check yapılır.
+
+Corrective Actions
+Immediate Actions
+•	Kalibrasyonu tekrar et.
+•	Yeni calibrator kullan.
+Recommended Repairs
+•	Probe cleaning.
+•	Air purge/syringe inspection.
+•	Reagent replacement.
+Advanced Service Actions
+•	Pipetting precision test, detector stability check.
+Replacement Recommendations
+•	Probe, syringe seal, calibrator, reagent, reaction cells.
+
+Preventive Maintenance Recommendations
+•	Calibrator açıkta bekletilmemeli.
+•	Syringe/probe bakımları yapılmalı.
+•	Calibration öncesi QC/material readiness kontrol edilmeli.
+
+Related Components
+Calibrator, sample probe, reagent probe, syringe, detector, reaction cells.
+
+Calibration Impact
+Kalibrasyon güncellenmez; test invalid olabilir.
+
+Safety Risks
+Yanlış sonuç riski.
+
+Downtime Impact
+Test bazlı duruş.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Diff.E / Minimum Acceptable Difference
+
+Failure Category
+Calibration / Analytical
+
+Severity Level
+High
+
+Technical Description
+Diff.E, minimum acceptable difference alarmıdır ve e 801/e 602 calibration alarm listesinde yer alır.
+
+Trigger Conditions
+•	Calibrator seviyeleri arasındaki sinyal farkı minimum gereksinimi karşılamaz.
+•	Reagent sensitivity düşmüş.
+•	Calibrator/reagent bozulmuş.
+•	ECL detection veya wash/sipper performansı bozuk.
+
+Observable Symptoms
+•	e module calibration failed.
+•	Low signal separation.
+•	QC sensitivity drift.
+•	Aynı reagent pack’te tekrar.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Reagent deterioration	Reagent
+High	Calibrator issue	Calibration
+Medium	ECL sipper/detection contamination	Fluidic/Sensor
+Medium	Wash inefficiency	Fluidic
+Low	Detector electronics fault	Electronic
+Affected Modules / Systems
+e 801/e 602, calibrators, reagent pack, ECL detection, ProCell/CleanCell, sipper flow path.
+
+Engineering Interpretation
+İmmünolojik kalibrasyonda düşük ve yüksek calibrator seviyeleri arasında yeterli signal separation oluşmalıdır. Separation azsa curve adaptation güvenilir değildir. Bu durum reagent binding kapasitesi, label signal, wash efficiency veya ECL readout zincirinde zayıflama olduğunu gösterir.
+
+Diagnostic Procedure
+1.	Calibration monitor report’ta Diff.E doğrulanır.
+2.	Calibrator lot/handling kontrol edilir.
+3.	Reagent expiry/onboard stability kontrol edilir.
+4.	ProCell/CleanCell/PreClean seviyeleri ve flow path kontrol edilir.
+5.	Sipper flow path cleaning yapılır.
+6.	Yeni reagent/calibrator ile tekrar calibration.
+
+Corrective Actions
+Immediate Actions
+•	Failed calibration kabul edilmez.
+•	Yeni calibrator/reagent ile tekrar.
+Recommended Repairs
+•	e 801 sipper flow path cleaning.
+•	System reagent replacement.
+Advanced Service Actions
+•	ECL detector, sipper pump, wash efficiency diagnostics.
+Replacement Recommendations
+•	Reagent pack, calibrator, ProCell/CleanCell, sipper tubing/nozzle.
+
+Preventive Maintenance Recommendations
+•	e module aspiration pipes/sipper paths düzenli temizlenmeli.
+•	System reagents stabilitesi takip edilmeli.
+
+Related Components
+ECL detector, measuring cell, sipper nozzle, ProCell, CleanCell, PreClean, reagent pack.
+
+Calibration Impact
+Doğrudan calibration invalid.
+
+Safety Risks
+Reagent/biohazard exposure.
+
+Downtime Impact
+e module test bazlı duruş.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+S1A.E / S1ABS Abnormal
+
+Failure Category
+Calibration / Optical
+
+Severity Level
+High
+
+Technical Description
+S1A.E, S1 absorbance abnormal alarmıdır. cobas 8000 calibration alarm listesinde c 701/c 702/c 502 için bulunur.
+
+Trigger Conditions
+•	Calibration S1 absorbance beklenen aralık dışında.
+•	Reagent blank/zero response abnormal.
+•	Dirty reaction cell, reagent contamination, photometer issue.
+
+Observable Symptoms
+•	Photometric calibration failure.
+•	Blank/low calibrator abnormal.
+•	QC bias.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Reagent blank abnormal/contamination	Reagent
+High	Reaction cell dirty	Optical
+Medium	Photometer lamp/output drift	Optical/Electrical
+Medium	Calibrator issue	Calibration
+Low	Application parameter issue	Software
+Affected Modules / Systems
+c modules, photometer, reaction cells, reagent blank, calibration algorithm.
+
+Engineering Interpretation
+S1 genellikle düşük/blank kalibrasyon noktasıdır. Bu absorbans değeri bozulduğunda curve offset yanlış kurulur. Dirty cell veya reagent contamination S1’i kaydırarak tüm calibration curve’ü biaslı hale getirir.
+
+Diagnostic Procedure
+1.	Calibration report’ta S1 absorbance incelenir.
+2.	Reagent blank ve reagent status kontrol edilir.
+3.	Cell blank measurement çalıştırılır.
+4.	Photometer check yapılır.
+5.	Calibrator/reagent yenilenerek tekrar edilir.
+
+Corrective Actions
+Immediate Actions
+•	Kalibrasyonu kabul etme.
+•	Reagent ve calibrator kontrol et.
+Recommended Repairs
+•	Reaction cell cleaning/replacement.
+•	Photometer check/lamp değerlendirme.
+Advanced Service Actions
+•	Optical path ve detector diagnostics.
+Replacement Recommendations
+•	Reagent, calibrator, reaction cell, lamp.
+
+Preventive Maintenance Recommendations
+•	Cell blank trend izleme.
+•	Reagent contamination önleme.
+•	Photometer maintenance.
+
+Related Components
+Reaction cell, photometer, reagent pack, calibrator, lamp.
+
+Calibration Impact
+Photometric calibration invalid; tekrar gerekir.
+
+Safety Risks
+Yanlış sonuç riski.
+
+Downtime Impact
+Test bazlı duruş.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+SD.E / SD Limit Error
+
+Failure Category
+Calibration / Precision
+
+Severity Level
+High
+
+Technical Description
+SD.E, standard deviation limit error alarmıdır. cobas 8000 calibration alarm listesinde c 701/c 702/c 502 için yer alır.
+
+Trigger Conditions
+•	Calibration replicate variability SD limitini aşar.
+•	Pipetting instability.
+•	Bubble/leak.
+•	Dirty reaction cell veya detector instability.
+
+Observable Symptoms
+•	Calibration failed/not updated.
+•	Poor reproducibility.
+•	QC CV artışı.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Pipetting precision instability	Fluidic/Mechanical
+High	Air bubbles/leak in syringe	Fluidic
+Medium	Dirty cells/photometer instability	Optical
+Medium	Calibrator degradation	Calibration
+Low	Calculation parameter issue	Software
+Affected Modules / Systems
+c modules, sample/reagent probes, syringes, reaction cells, photometer, calibrator.
+
+Engineering Interpretation
+SD.E, kalibrasyon tekrarlarının istatistiksel dağılmasının kabul edilemez olduğunu gösterir. Bu alarm genellikle cihaz precision zincirinde mekanik/fluidik kararsızlık olduğunu gösterir.
+
+Diagnostic Procedure
+1.	Calibration replicate SD incelenir.
+2.	Syringe bubble/leak kontrol edilir.
+3.	Probe cleaning yapılır.
+4.	Cell blank ve photometer check yapılır.
+5.	Yeni calibrator/reagent ile tekrar calibration yapılır.
+
+Corrective Actions
+Immediate Actions
+•	Calibration tekrar edilir.
+•	Etkilenen test raporlaması durdurulur.
+Recommended Repairs
+•	Air purge.
+•	Probe/syringe maintenance.
+•	Reaction cell cleaning.
+Advanced Service Actions
+•	Pipetting precision ve photometer stability diagnostik.
+Replacement Recommendations
+•	Syringe seal, probe, reaction cell, calibrator.
+
+Preventive Maintenance Recommendations
+•	Syringe air/leak günlük kontrol.
+•	Probe cleaning.
+•	Calibration öncesi bakım.
+
+Related Components
+Sample/reagent syringes, probes, reaction cells, photometer.
+
+Calibration Impact
+Calibration invalid; QC sonrası tekrar gerekir.
+
+Safety Risks
+Yanlış sonuç riski.
+
+Downtime Impact
+Test bazlı veya module bazlı gecikme.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Sens.E / Sensitivity Error
+
+Failure Category
+Calibration / Reagent System / Optical
+
+Severity Level
+High
+
+Technical Description
+Sens.E, sensitivity error alarmıdır. cobas 8000 calibration alarm listesinde c modules için yer alır.
+
+Trigger Conditions
+•	Calibration sensitivity limit karşılanmaz.
+•	Reagent response düşük/yüksek.
+•	Calibrator concentration/handling problem.
+•	Photometer/reaction condition bozuk.
+
+Observable Symptoms
+•	Calibration failed.
+•	QC bias.
+•	Low/high result pattern.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Reagent deterioration	Reagent
+High	Calibrator issue	Calibration
+Medium	Photometer/reaction cell issue	Optical
+Medium	Pipetting error	Fluidic
+Low	Application setting issue	Software
+Affected Modules / Systems
+c modules, reagents, calibrators, photometer, probes/syringes.
+
+Engineering Interpretation
+Sensitivity, sinyal değişiminin concentration değişimine yanıtıdır. Reagent aktivitesi azaldığında veya calibrator hatalı olduğunda curve slope kabul sınırından çıkar. Bu, tüm test sonuçlarını sistematik bias’a açık hale getirir.
+
+Diagnostic Procedure
+1.	Sens.E calibration monitor report incelenir.
+2.	Reagent expiry/onboard stability kontrol edilir.
+3.	Calibrator preparation/storage kontrol edilir.
+4.	Photometer/cell blank check yapılır.
+5.	Pipetting/air purge kontrol edilir.
+6.	Yeni reagent/calibrator ile tekrar edilir.
+
+Corrective Actions
+Immediate Actions
+•	Calibration accepted sayılmaz.
+•	Reagent/calibrator yenile.
+Recommended Repairs
+•	Probe cleaning/air purge.
+•	Reaction parts wash.
+Advanced Service Actions
+•	Photometer sensitivity ve pipetting accuracy test.
+Replacement Recommendations
+•	Reagent, calibrator, probe, reaction cell, lamp.
+
+Preventive Maintenance Recommendations
+•	Reagent storage/onboard stability izleme.
+•	Calibrator handling standardizasyonu.
+•	Calibration/QC trend review.
+
+Related Components
+Reagent, calibrator, photometer, probes, reaction cells.
+
+Calibration Impact
+Doğrudan calibration invalid.
+
+Safety Risks
+Yanlış sonuç riski.
+
+Downtime Impact
+Test bazlı duruş.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Slop.E / Slope Abnormal
+
+Failure Category
+Calibration / Sensor / Fluidic
+
+Severity Level
+High
+
+Technical Description
+Slop.E, slope abnormal alarmıdır ve ISE calibration alarm listesinde bulunur.
+
+Trigger Conditions
+•	ISE electrode slope kabul aralığı dışında.
+•	Electrode aged/contaminated.
+•	Calibrator/reagent problem.
+•	Reference electrolyte flow bozuk.
+
+Observable Symptoms
+•	ISE calibration failure.
+•	Na/K/Cl QC drift.
+•	ISE.E/ISE.N eşlik edebilir.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Electrode degradation	Sensor
+High	ISE calibrator/reagent problem	Calibration/Reagent
+Medium	Reference electrode instability	Sensor
+Medium	Flow path contamination	Fluidic
+Low	EMF electronics issue	Electronic
+Affected Modules / Systems
+ISE module, Na/K/Cl electrodes, reference electrode, ISE calibrators, ISE reagents.
+
+Engineering Interpretation
+ISE slope, elektrotun konsantrasyon değişimine EMF yanıtıdır. Membran yaşlanması, kirlenme veya referans potansiyel kararsızlığı slope’u bozar. Bu durumda kalibrasyon eğrisi elektrolit sonuçlarını doğru hesaplayamaz.
+
+Diagnostic Procedure
+1.	Hangi electrode/test slope alarmı verdiğini belirle.
+2.	ISE calibrator ve reagentleri kontrol et.
+3.	Reagent prime/flow path wash yap.
+4.	Electrode/reference placement kontrol et.
+5.	ISE Check 30 cycles çalış.
+6.	Electrode değiştir ve calibration/QC tekrar et.
+
+Corrective Actions
+Immediate Actions
+•	ISE sonuç raporlamasını durdur/QC ile kısıtla.
+•	Prime ve calibration tekrarı.
+Recommended Repairs
+•	Electrode/reference electrode replacement.
+•	Flow path cleaning.
+Advanced Service Actions
+•	EMF amplifier ve electrode cable kontrolü.
+Replacement Recommendations
+•	Affected electrode, reference electrode, calibrator/reagent, tubing.
+
+Preventive Maintenance Recommendations
+•	Electrode replacement interval takip edilmeli.
+•	ISE system wash düzenli.
+•	Calibrator/reagent storage uygun.
+
+Related Components
+Na/K/Cl electrodes, reference electrode, ISE reagents, calibrators, EMF signal cable.
+
+Calibration Impact
+ISE calibration invalid; successful calibration + QC gerekir.
+
+Safety Risks
+Yanlış elektrolit sonucu riski.
+
+Downtime Impact
+ISE modül operasyon kaybı.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Rsp1.E / Rsp2.E / Response ISE Abnormal
+
+Failure Category
+Calibration / Sensor / Fluidic
+
+Severity Level
+High
+
+Technical Description
+Rsp1.E ve Rsp2.E, ISE response abnormal calibration alarms olarak listelenmiştir.
+
+Trigger Conditions
+•	ISE electrode response timing veya magnitude abnormal.
+•	Flow path reagent/sample delivery bozuk.
+•	Electrode/reference instability.
+
+Observable Symptoms
+•	ISE calibration failure.
+•	Erratic ISE results.
+•	QC irregularity.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Electrode contamination/degradation	Sensor
+High	Air bubble/reagent flow issue	Fluidic
+Medium	Reference electrode problem	Sensor
+Medium	Calibrator issue	Calibration
+Low	Signal cable/PCB issue	Electronic
+Affected Modules / Systems
+ISE module, electrodes, reference electrode, sipper syringe, ISE reagent flow path.
+
+Engineering Interpretation
+ISE response alarmı, elektrot sinyalinin kalibrasyon ölçüm penceresinde beklenen tepkiyi vermediğini gösterir. Akıştaki hava veya elektrot yüzey kontaminasyonu, sinyalin oturma süresini ve final EMF değerini bozar.
+
+Diagnostic Procedure
+1.	Rsp1/Rsp2 hangi test/electrode ile ilişkili belirle.
+2.	Reagent volume ve tubing bubble kontrol et.
+3.	Reagent prime All 20 cycles yap.
+4.	Electrode/reference placement kontrol et.
+5.	ISE Check ve calibration/QC tekrar et.
+6.	Devam ederse electrode/reference değiştir.
+
+Corrective Actions
+Immediate Actions
+•	ISE testleri QC doğrulaması olmadan raporlanmaz.
+•	Prime ve calibration tekrarı.
+Recommended Repairs
+•	Electrode/reference cleaning/replacement.
+•	Tubing occlusion giderme.
+Advanced Service Actions
+•	Signal cable, EMF channel diagnostik.
+Replacement Recommendations
+•	Electrode, reference electrode, sipper seal, tubing.
+
+Preventive Maintenance Recommendations
+•	ISE maintenance schedules.
+•	Reagent temperature stabilization.
+•	Salt buildup cleaning.
+
+Related Components
+ISE electrodes, reference electrode, ISE reagents, sipper syringe, signal cable.
+
+Calibration Impact
+Calibration invalid.
+
+Safety Risks
+Yanlış elektrolit sonucu.
+
+Downtime Impact
+ISE modül etkilenir.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Std.E / Standard Error
+
+Failure Category
+Calibration
+
+Severity Level
+High
+
+Technical Description
+Std.E, standard error calibration alarmıdır. ISE ve c modules için listelenmiştir.
+
+Trigger Conditions
+•	Standard/calibrator measurement expected range dışında.
+•	Calibrator preparation/concentration hatası.
+•	Reagent veya detector/electrode response problemi.
+
+Observable Symptoms
+•	Calibration failed.
+•	Calibration trace abnormal.
+•	QC bias.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Calibrator wrong/deteriorated	Calibration
+High	Reagent issue	Reagent
+Medium	Pipetting instability	Fluidic
+Medium	Detector/electrode issue	Sensor
+Low	Application parameter mismatch	Software
+Affected Modules / Systems
+ISE, c modules, calibrators, reagents, probes, detector/electrodes.
+
+Engineering Interpretation
+Standard error, referans materyalin beklenen sinyal/konsantrasyon ilişkisini üretmediğini gösterir. Bu durumda sistem calibration curve’ü matematiksel olarak kurabilir olsa bile traceability güvenilir değildir.
+
+Diagnostic Procedure
+1.	Calibrator ID/lot/expiry/position kontrol edilir.
+2.	Reagent status kontrol edilir.
+3.	Probe/syringe air/leak kontrol edilir.
+4.	Module-specific detector/electrode kontrol edilir.
+5.	Yeni standard/calibrator ile calibration tekrarı.
+
+Corrective Actions
+Immediate Actions
+•	Yeni calibrator hazırla.
+•	Calibration tekrar et.
+Recommended Repairs
+•	Reagent değişimi.
+•	Pipetting maintenance.
+Advanced Service Actions
+•	Detector/electrode diagnostics.
+Replacement Recommendations
+•	Calibrator, reagent, probe, electrode/reaction cell.
+
+Preventive Maintenance Recommendations
+•	Calibrator handling SOP.
+•	Calibration material expiry tracking.
+•	Maintenance before calibration.
+
+Related Components
+Calibrators/standards, reagent, sample probe, reagent probe, electrodes/photometer.
+
+Calibration Impact
+Calibration invalid.
+
+Safety Risks
+Yanlış sonuç riski.
+
+Downtime Impact
+Test bazlı/modül bazlı duruş.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Sys.E / System Errors During Calibration
+
+Failure Category
+Calibration / Software / Electronic
+
+Severity Level
+High
+
+Technical Description
+Sys.E, e 801/e 602 calibration data alarm listesinde system errors olarak tanımlanır.
+
+Trigger Conditions
+•	Calibration sırasında system-level interruption.
+•	e module process sequence failure.
+•	Sipper/reagent/sample/consumable handling veya detection system fault.
+
+Observable Symptoms
+•	e module calibration failed.
+•	Calibration trace’te wildcard asterisk görülebilir; spesifik alarm için calibration monitor report gerekir.
+•	Test masked/invalid olabilir.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	e module process interruption	Software/Mechanical
+Medium	Consumable/reagent handling fault	Reagent System
+Medium	Sipper/detection failure	Fluidic/Sensor
+Low	Control electronics fault	Electronic
+Affected Modules / Systems
+e 801/e 602, reagent manager, sample/reagent pipetters, ECL detector, sipper paths, calibration software.
+
+Engineering Interpretation
+Sys.E, calibration kalite kriterinden ziyade kalibrasyon prosesinin sistemsel olarak tamamlanamadığını veya güvenilir olmadığını ifade eder. e module çok adımlı cup/tip/reagent/sipper/ECL zinciri kullandığı için tek bir step failure tüm kalibrasyonu invalid kılar.
+
+Diagnostic Procedure
+1.	Calibration monitor report alınır.
+2.	Eşlik eden system alarm/data alarm kontrol edilir.
+3.	Reagent/consumable levels kontrol edilir.
+4.	Sipper and reagent handling checks yapılır.
+5.	QC/calibration tekrar edilir.
+6.	Tekrar ederse Roche Service’e log/report ile eskale edilir.
+
+Corrective Actions
+Immediate Actions
+•	Calibration geçersiz kabul edilir.
+•	Etkilenen testler raporlanmaz.
+Recommended Repairs
+•	Reagent/consumable değişimi.
+•	e module cleaning/prime.
+Advanced Service Actions
+•	ECL detector, sipper pump, reagent handling, control log diagnostics.
+Replacement Recommendations
+•	Reagent pack, tips/cups, sipper tubing/nozzle, detector service parts.
+
+Preventive Maintenance Recommendations
+•	e 801 aspiration pipes, consumable drawer, sipper flow paths düzenli temizlenmeli.
+•	Calibration öncesi consumables ve system reagents doğrulanmalı.
+
+Related Components
+ECL detector, reagent pack, cups/tips, sipper, ProCell/CleanCell, pre-wash.
+
+Calibration Impact
+Calibration invalid.
+
+Safety Risks
+Reagent/biohazard exposure.
+
+Downtime Impact
+e module test bazlı veya AU bazlı duruş.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Poor Reproducibility / Data Problem Without Alarm
+
+Failure Category
+Fluidic / Maintenance / Mechanical
+
+Severity Level
+High
+
+Technical Description
+Alarm olmadan poor reproducibility; tekrarlı ölçümlerde precision bozulmasıdır. cobas pro troubleshooting bölümünde all analytical units etkilenirse air bubbles in sample/reagent syringe, syringe leakage ve e 801 system reagents/wash deterioration nedenleri listelenmiştir.
+
+Trigger Conditions
+•	Syringe içinde hava.
+•	Syringe leak.
+•	Reagent/wash solution deterioration.
+•	Periodic maintenance ihmali.
+
+Observable Symptoms
+•	QC CV artışı.
+•	Aynı numunede tekrar sonuçları tutarsız.
+•	Alarm olmadan high/low scatter.
+•	Birden fazla AU etkilenebilir.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Air bubbles in sample/reagent syringe	Fluidic
+High	Syringe leakage	Fluidic/Mechanical
+Medium	System reagent/wash deterioration	Reagent
+Medium	Neglected maintenance	Maintenance
+Low	Environmental temperature variation	Thermal
+Affected Modules / Systems
+All analytical units, sample syringes, reagent syringes, e 801 system reagents, wash solutions.
+
+Engineering Interpretation
+Precision kaybı genellikle hacimsel transferin tekrarlanabilir olmamasından kaynaklanır. Syringe içindeki mikrobubble compressible volume oluşturur; plunger hareketi aynı olsa bile dispense edilen sıvı hacmi değişir. Leak ise aspirasyon/dispense hacmini düşürür. e 801’de wash/system reagent deterioration ECL background ve binding wash efficiency’yi etkiler.
+
+Diagnostic Procedure
+1.	QC trend ve CV analiz edilir.
+2.	Etki alanı: tek test, her test, tüm AU olarak ayrılır.
+3.	Sample/reagent syringes bubble/leak açısından kontrol edilir.
+4.	Maintenance and inspection yapılır.
+5.	e 801’de system reagent/wash şişeleri yenilenir.
+6.	QC tekrar edilir.
+
+Corrective Actions
+Immediate Actions
+•	QC out-of-control ise sonuç raporlamayı durdur.
+•	Maintenance/inspection yap.
+Recommended Repairs
+•	Air purge.
+•	Syringe seal/tubing kontrol.
+•	System reagent/wash solution replacement.
+Advanced Service Actions
+•	Pipetting precision, syringe drive ve pressure stability diagnostics.
+Replacement Recommendations
+•	Syringe seal, tubing, reagent/wash bottles, probe.
+
+Preventive Maintenance Recommendations
+•	Syringe bubble/leak günlük gözlenmeli.
+•	Reagent/wash solution storage/onboard stability takip edilmeli.
+•	QC trend erken uyarı olarak kullanılmalı.
+
+Related Components
+Sample syringe, reagent syringe, tubing, probes, system reagents, wash solutions.
+
+Calibration Impact
+Poor reproducibility varken calibration reliable değildir; problem sonrası QC ve gerekirse calibration tekrarı gerekir.
+
+Safety Risks
+Yanlış sonuç riski.
+
+Downtime Impact
+Tüm AU’larda test güvenilirliği düşebilir; yüksek operasyonel risk.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Drift of QC Results / QC Drift Without Alarm
+
+Failure Category
+Calibration / Maintenance / Fluidic / Reagent System
+
+Severity Level
+High
+
+Technical Description
+QC drift alarm olmadan oluşabilen performans bozulmasıdır. Kılavuz neden olarak QC material evaporation/deterioration, reagent deterioration without calibration, ISE calibrator evaporation/deterioration ve contaminated ISE flow path belirtir.
+
+Trigger Conditions
+•	QC material açıkta uzun süre bekler.
+•	Reagent calibration interval aşılır.
+•	ISE calibrator deteriorates/evaporates.
+•	ISE flow path contamination.
+
+Observable Symptoms
+•	QC trend yavaş kayar.
+•	Alarm olmayabilir.
+•	Aynı testte bias oluşur.
+•	ISE testlerinde paralel drift görülebilir.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	QC material evaporation/deterioration	Calibration/QC
+High	Reagent deterioration without calibration	Reagent
+Medium	ISE calibrator deterioration	Calibration
+Medium	Contaminated ISE flow path	Fluidic
+Low	Environmental drift	Thermal
+Affected Modules / Systems
+QC system, reagent packs, ISE flow path, calibrators, calibration intervals.
+
+Engineering Interpretation
+QC drift, ölçüm zincirinin alarm eşiğini aşmadan sistematik bias üretmesidir. Bu nedenle alarm yokluğu cihazın sağlıklı olduğu anlamına gelmez. Reagent/calibrator material aging veya ISE flow path contamination, calibration curve’e göre gerçek response’u yavaş değiştirir.
+
+Diagnostic Procedure
+1.	QC Levey-Jennings trendini değerlendir.
+2.	QC material açıkta kalma süresi ve storage kontrol edilir.
+3.	Reagent calibration interval kontrol edilir.
+4.	ISE için flow path wash uygulanır.
+5.	Recalibration yapılır.
+6.	QC tekrar edilir.
+
+Corrective Actions
+Immediate Actions
+•	QC out-of-control testleri raporlamayı durdur.
+•	Yeni QC/calibrator hazırla.
+Recommended Repairs
+•	Recalibrate reagent packs.
+•	ISE flow path wash/prime.
+Advanced Service Actions
+•	Persisting drift için pipetting/detection chain diagnostics.
+Replacement Recommendations
+•	QC material, calibrator, reagent pack, ISE tubing/electrode if persistent.
+
+Preventive Maintenance Recommendations
+•	QC material sample containers içinde uzun süre bırakılmamalı.
+•	Reagent calibration intervals uygulanmalı.
+•	ISE flow path cleaning düzenli yapılmalı.
+
+Related Components
+QC material, reagents, calibrators, ISE flow path, probes, calibration software.
+
+Calibration Impact
+Recalibration gerekir; QC kabul edilmeden sonuç raporlanmamalı.
+
+Safety Risks
+Yanlış klinik sonuç riski.
+
+Downtime Impact
+Test bazlı operasyon duruşu.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Erroneous Operation / Carryover / Wrong Container / Maintenance Neglect
+
+Failure Category
+Maintenance / Sample Handling / Software
+
+Severity Level
+Medium-High
+
+Technical Description
+Erroneous operation; periyodik bakımın ihmal edilmesi, carryover, numunede fibrin veya reagent içinde dust, önerilmeyen sample container kullanımı gibi alarm olmadan result problemlerine yol açabilen operator/process kaynaklı arıza sınıfıdır.
+
+Trigger Conditions
+•	Scheduled maintenance yapılmamış.
+•	Carryover önleyici special wash eksik/yanlış.
+•	Fibrinli numune veya partiküllü reagent.
+•	Recommended olmayan sample container.
+
+Observable Symptoms
+•	High/low test results.
+•	Poor reproducibility.
+•	Tek test veya çok test etkilenebilir.
+•	Alarm olmayabilir.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Periodic maintenance neglected	Maintenance
+High	Carryover	Fluidic
+Medium	Fibrin/dust contamination	Sample/Reagent
+Medium	Wrong sample container	Consumable
+Low	Application/special wash setting missing	Software
+Affected Modules / Systems
+Sample probes, reagent probes, wash stations, special wash rules, sample containers.
+
+Engineering Interpretation
+Bu sınıf arızalar, sistemin otomatik sensör eşiğini tetiklemeden ölçüm koşullarını bozar. Carryover, önceki numune/reagent kalıntısının bir sonraki reaksiyona taşınmasıdır. Uygunsuz kap veya fibrin ise aspirasyon hacmini ve sıvı seviyesi algılamasını bozabilir.
+
+Diagnostic Procedure
+1.	Problem pattern: tek test/çok test/tüm AU ayrılır.
+2.	Maintenance due/status kontrol edilir.
+3.	Special wash rules güncel mi kontrol edilir.
+4.	Numune kapları ve numune kalitesi kontrol edilir.
+5.	Probes/wash stations temizlenir.
+6.	QC/repeat test ile doğrulanır.
+
+Corrective Actions
+Immediate Actions
+•	Etkilenen sonuçları doğrula/tekrar et.
+•	Maintenance actions uygula.
+Recommended Repairs
+•	Probe/wash cleaning.
+•	Correct sample container kullanımı.
+•	Special wash parameters güncelle.
+Advanced Service Actions
+•	Carryover study, pipetting/wash efficiency validation.
+Replacement Recommendations
+•	Probe, wash nozzle/tubing, sample containers.
+
+Preventive Maintenance Recommendations
+•	Scheduled maintenance uyarıları aksatılmamalı.
+•	Special wash updates takip edilmeli.
+•	Numune kabul kriterleri uygulanmalı.
+
+Related Components
+Probes, wash stations, sample containers, special wash software, tubing.
+
+Calibration Impact
+Carryover veya bakım eksikliği calibration/QC bias yaratır; QC/recalibration gerekebilir.
+
+Safety Risks
+Biohazard/carryover contamination.
+
+Downtime Impact
+Intermittent instability; tanısı zor ve tekrarlayan iş yükü yaratır.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Problems with Every Test / ISE Reference Flow Path / Electrode Failure
+
+Failure Category
+Fluidic / Sensor / Calibration
+
+Severity Level
+High
+
+Technical Description
+Her testte problem görülmesi; calibrator/QC/reagent handling, ISE reference solution flow path air bubble/crystallization, reference electrode veya tek ISE electrode arızası, polluted waste line gibi kök nedenlerle ilişkilendirilir.
+
+Trigger Conditions
+•	ISE reference solution flow path bubble/crystallization.
+•	Reference electrode failure.
+•	One ISE electrode failure.
+•	Waste line contamination.
+•	Calibrator/reagent handling error.
+
+Observable Symptoms
+•	Tüm ISE testleri veya her ölçüm etkilenir.
+•	QC/calibration başarısız.
+•	Erratic results.
+•	Waste/drain kaynaklı flow disturbance.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	ISE reference path air/crystallization	Fluidic
+High	Reference electrode failure	Sensor
+Medium	Individual ISE electrode failure	Sensor
+Medium	Polluted waste line/drain port	Fluidic
+Medium	Calibrator/reagent improper handling	Calibration/Reagent
+Affected Modules / Systems
+ISE module, reference solution flow path, reference electrode, Na/K/Cl electrodes, drain port, waste line.
+
+Engineering Interpretation
+ISE reference path, tüm elektrot ölçümlerinin ortak referans potansiyelini sağlar. Bu yol bozulduğunda tüm ISE testleri etkilenir. Tek bir electrode bozuksa yalnız ilgili iyon testi etkilenir. Waste line/drain contamination ise akış sonrası basınç/geri akış etkisiyle measurement stability’yi bozabilir.
+
+Diagnostic Procedure
+1.	Problem tüm ISE testlerinde mi tek testte mi belirle.
+2.	Yeni calibrator/QC material hazırla.
+3.	Reagent pack/bottles yenile.
+4.	ISE reference solution flow path crystallization kontrol et.
+5.	ISE reagent flow paths prime yap.
+6.	Drain port temizle.
+7.	Etkilenen electrode/reference electrode değiştir.
+8.	Application parameters doğrula.
+
+Corrective Actions
+Immediate Actions
+•	ISE sonuçlarını raporlamayı durdur/QC doğrula.
+•	Prime ve drain cleaning yap.
+Recommended Repairs
+•	Reagent bottles değişimi.
+•	Electrode/reference electrode replacement.
+Advanced Service Actions
+•	Reference path pressure/flow, EMF stability diagnostics.
+Replacement Recommendations
+•	Reference electrode, individual electrode, tubing, drain components.
+
+Preventive Maintenance Recommendations
+•	ISE flow path wash.
+•	Crystallization inspection.
+•	Drain port cleaning.
+•	Electrode replacement interval.
+
+Related Components
+Reference electrode, ISE electrodes, reference solution tubing, drain port, waste line, reagent bottles.
+
+Calibration Impact
+ISE calibration invalid; başarılı calibration + QC şart.
+
+Safety Risks
+Biohazard waste exposure; yanlış elektrolit sonucu.
+
+Downtime Impact
+ISE test panel duruşu.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Reagent Loader / Reagent Pack Handling Problem – e 801
+
+Failure Category
+Mechanical / Robotic Movement / Reagent System / Sensor
+
+Severity Level
+High
+
+Technical Description
+e 801 reagent loader veya reagent pack handling problemi, pack loading/unloading, temporary check pack movement, RFID/position/status indicator logic ve mechanical reset adımlarını etkiler. Kılavuzda reagent handling check için pozisyon 1, 10, 20, 30, 40’ın boş olması ve sistemin Standby/masked AU Standby modunda olması gerektiği belirtilir.
+
+Trigger Conditions
+•	Reagent pack loading failure.
+•	Loader status indicator flashing.
+•	Pack position occupied.
+•	Loader mechanical component reset failure.
+•	Pack deformasyonu veya incorrect loading.
+
+Observable Symptoms
+•	Reagent Loader button flashing.
+•	Pack geri dönmez veya yüklenmez.
+•	Status indicators flashing.
+•	Reagent registration stopped.
+•	e 801 reagent testleri çalışamaz.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Reagent pack misload/deformation	Mechanical/Reagent
+High	Loader path obstruction	Mechanical
+Medium	Position sensor/RFID issue	Sensor
+Medium	Loader motor/actuator issue	Robotic Movement
+Low	Loader control PCB fault	Electronic
+Affected Modules / Systems
+e 801 reagent loader, reagent manager, loading ports, RFID readers, position sensors, reagent packs.
+
+Engineering Interpretation
+e 801 reagent loading, mekanik transport, pack identification ve reagent database registration’ın senkron çalışmasına dayanır. Pack fiziksel olarak doğru pozisyona gelmezse RFID/position confirmation alınamaz; software reagent registration’ı durdurur veya loading port’u maskeler.
+
+Diagnostic Procedure
+1.	Reagents > Overview üzerinden pozisyon 1, 10, 20, 30, 40 boş mu kontrol et.
+2.	Loading port ve reagent loader içinde pack yok mu kontrol et.
+3.	Gerekli pack’leri unload et.
+4.	Up to 5 new reagent packs ile Maintenance > Checks > 22 Reagent Handling Check çalıştır.
+5.	Sistem mechanical reset’i yaklaşık 50 saniyede tamamlamalıdır.
+6.	Loader button ve status indicators izlenir.
+7.	Flashing devam ederse alarm description/remedy uygulanır.
+
+Corrective Actions
+Immediate Actions
+•	Loader’a zorla müdahale etme.
+•	Pack’i çıkar, kapakları kapat ve Method Sheet’e göre sakla.
+•	Alarm remedy takip et.
+Recommended Repairs
+•	Loader path temizliği.
+•	Pack deformasyon kontrolü.
+•	Reagent Handling Check.
+Advanced Service Actions
+•	Loader motor, position sensor, RFID reader, actuator timing diagnostics.
+Replacement Recommendations
+•	Reagent pack, loader sensor, RFID reader, loader motor/actuator.
+
+Preventive Maintenance Recommendations
+•	Reagent loading prosedürüne uy.
+•	Deforme pack kullanılmamalı.
+•	Loading port temizliği ve status indicator kontrolleri yapılmalı.
+
+Related Components
+Reagent loader, loading ports, RFID, position sensors, reagent packs, loader motor.
+
+Calibration Impact
+Etkilenen reagent pack registration/usage yapılamaz; yeni pack sonrası QC/calibration gerekebilir.
+
+Safety Risks
+Motion hazard, reagent exposure.
+
+Downtime Impact
+e 801 testlerinde ciddi throughput kaybı veya AU bazlı duruş.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Frozen User Interface / Control Unit Inoperable
+
+Failure Category
+Software / Electronic / Communication
+
+Severity Level
+High
+
+Technical Description
+User interface freeze ve sistemin uzun süre inoperable kalması durumunda safety shutdown kullanılır. Power button’a basılı tutarak zorla restart yapmak control unit PC’ye zarar verebilir.
+
+Trigger Conditions
+•	UI application freeze.
+•	Control unit PC unresponsive.
+•	System cannot be operated from UI.
+
+Observable Symptoms
+•	Touchscreen/GUI yanıt vermez.
+•	Alarm/operation control erişilemez.
+•	Kullanıcı operasyonu sürdüremez.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	UI application hang	Software
+Medium	Control unit PC resource/OS problem	Electronic/Software
+Medium	Communication deadlock	Communication
+Low	Hardware PC fault	Electronic
+Affected Modules / Systems
+Control unit PC, UI software, sample supply unit operation power, system communication.
+
+Engineering Interpretation
+UI freeze, cihaz kontrol komutları ile operator feedback zincirini koparır. Zorla power-off dosya sistemi/database riskini artırır. Safety shutdown, uygulamayı kontrollü şekilde kapatarak recovery süresini ve PC hasar riskini azaltır.
+
+Diagnostic Procedure
+1.	UI’nin gerçekten inoperable olup olmadığını doğrula.
+2.	Clock ile screenshot button arasındaki alana 5 saniye içinde 5 kez dokun.
+3.	Confirmation dialog açılmalı.
+4.	Confirm ile control unit shutdown başlat.
+5.	Control unit kapanınca Operation Power button’a 10 saniye basılı tutarak instrument off yap.
+6.	30 saniye bekle.
+7.	Operation Power ile restart et.
+
+Corrective Actions
+Immediate Actions
+•	Power button ile rastgele hard reset yapma.
+•	Safety shutdown prosedürü uygula.
+Recommended Repairs
+•	Restart sonrası system alarms ve data integrity kontrolü.
+•	System details report/screenshot varsa sakla.
+Advanced Service Actions
+•	Control unit logs, OS/application errors, storage health, communication logs.
+Replacement Recommendations
+•	Persistent ise control unit PC/storage/communication interface service.
+
+Preventive Maintenance Recommendations
+•	Software updates Roche assistance ile yapılmalı.
+•	Database backup düzenli.
+•	Control unit storage ve network stability izlenmeli.
+
+Related Components
+Control unit PC, UI application, operation power circuit, storage, communication interface.
+
+Calibration Impact
+Freeze sırasında devam eden işlemler doğrulanmalı; interrupted calibration/QC tekrar edilmelidir.
+
+Safety Risks
+Yanlış shutdown PC hasarı; yarım kalan mekanik/fluidik proses riski.
+
+Downtime Impact
+Tüm sistem operasyonu kesilebilir.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Barcode / Rack Barcode Reading Error
+
+Failure Category
+Sensor / Communication / Sample Handling
+
+Severity Level
+Medium-High
+
+Technical Description
+Barcode reader hataları sample/rack identification zincirini bozar. cobas pro report symbol listesinde rack barcode reading error “?????” ile gösterilir; sample ID için detected/not detected sembolleri kullanılır.
+
+Trigger Conditions
+•	Rack barcode okunamaz.
+•	Sample barcode algılanamaz.
+•	Barcode kirli/hasarlı/yanlış yerleştirilmiş.
+•	Reader surface kirli veya optical path bozuk.
+
+Observable Symptoms
+•	Rack/sample ID missing.
+•	Sample mismatch riski.
+•	Non-barcode mode hataları.
+•	Raporlarda ????? veya not detected.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Dirty/damaged barcode label	Consumable
+High	Barcode orientation/placement error	Sample Handling
+Medium	Reader surface dirty	Sensor
+Medium	Rack barcode damaged	Mechanical/Consumable
+Low	Barcode reader electronics failure	Electronic
+Affected Modules / Systems
+Sample supply unit, rack barcode reader, sample barcode reader, LIS/data manager, sample tracking.
+
+Engineering Interpretation
+Barcode identification, sample-order-result traceability için temel güvenlik katmanıdır. Reader, optik kontrast ve doğru geometri bekler. Okunamaz ID, sample mismatch veya manual assignment riskini artırır.
+
+Diagnostic Procedure
+1.	Report/alarm içindeki barcode error type belirle.
+2.	Barcode label hasar/kir/orientation kontrol et.
+3.	Rack barcode yüzeyini kontrol et.
+4.	Reader surface cleaning yap.
+5.	Sample/rack tekrar yüklenir.
+6.	Tekrarlarsa barcode reader check/service.
+
+Corrective Actions
+Immediate Actions
+•	Numune ID doğrulaması yap.
+•	Manual entry gerekiyorsa çift kontrol uygula.
+•	Label/rack değiştir.
+Recommended Repairs
+•	2D/sample barcode reader surface cleaning.
+•	Rack tray/rack cleaning.
+Advanced Service Actions
+•	Reader alignment, illumination, communication diagnostics.
+Replacement Recommendations
+•	Barcode label/rack, barcode reader, cable.
+
+Preventive Maintenance Recommendations
+•	Barcode reader surface düzenli temizlenmeli.
+•	Label quality ve placement standardize edilmeli.
+•	Rack trays temiz tutulmalı.
+
+Related Components
+Barcode readers, racks, sample tubes, labels, data manager/LIS.
+
+Calibration Impact
+Doğrudan kalibrasyon etkisi yok; calibrator/QC ID okunamazsa workflow etkilenir.
+
+Safety Risks
+Sample misidentification risk.
+
+Downtime Impact
+Sample workflow yavaşlar; manuel doğrulama gerekir.
+
+Detection Confidence
+High
+==================================================
+END FAILURE ENTRY
+==================================================
+FAILURE ENTRY
+==================================================
+Error / Failure Name
+Power Not Available / Electrical Supply Failure
+
+Failure Category
+Electrical / Software / Safety
+
+Severity Level
+Critical
+
+Technical Description
+Electrical supply power not available, cihazın ana elektrik beslemesiyle ilgili genel troubleshooting arıza alanıdır. cobas 8000 index’te instrument general troubleshooting altında power not available başlığı listelenir.
+
+Trigger Conditions
+•	Main supply loss.
+•	Circuit breaker/fuse issue.
+•	Power distribution fault.
+•	UPS/facility electrical instability.
+
+Observable Symptoms
+•	Instrument açılmaz.
+•	Module/control unit power yok.
+•	Data interruption.
+•	Operasyon durur.
+
+Most Probable Root Causes
+Probability	Root Cause	System Type
+High	Facility power interruption	Electrical
+Medium	Circuit breaker/fuse tripped	Electrical
+Medium	Power cable/connection issue	Electrical
+Low	Internal power supply failure	Electronic
+Affected Modules / Systems
+Entire instrument, control unit, data manager, modules, power supplies.
+
+Engineering Interpretation
+Elektrik beslemesi tüm motor, sensor, control ve refrigeration zincirinin temelidir. Ani kesinti, yarım kalan aspirasyon, reagent temperature drift ve database integrity riskleri yaratır.
+
+Diagnostic Procedure
+1.	Facility power ve outlet kontrol edilir.
+2.	Instrument main switch/circuit breaker kontrol edilir.
+3.	Control unit/data manager power status kontrol edilir.
+4.	Power recovery sonrası system alarms incelenir.
+5.	Interrupted samples/calibrations tekrar edilir.
+6.	Tekrar eden güç sorunu facility/Roche Service’e eskale edilir.
+
+Corrective Actions
+Immediate Actions
+•	Güvenli power recovery prosedürü uygula.
+•	Yarım kalan numuneleri tekrar çalış.
+Recommended Repairs
+•	Facility electrical check.
+•	UPS/stabilizer değerlendirmesi.
+Advanced Service Actions
+•	Internal power supply, fuse/circuit breaker, power distribution board diagnostics.
+Replacement Recommendations
+•	Fuse, power supply unit, power cable, UPS components.
+
+Preventive Maintenance Recommendations
+•	Stabil güç hattı.
+•	UPS/güç izleme.
+•	Ani shutdown sonrası backup ve system check.
+
+Related Components
+Main power, circuit breakers, fuses, PSU, control unit PC, data manager.
+
+Calibration Impact
+Power interruption sonrası QC/calibration status doğrulanmalı; interrupted calibration tekrarlanmalıdır.
+
+Safety Risks
+Electrical shock, data loss, reagent temperature drift.
+
+Downtime Impact
+Tam sistem duruşu.
+
+Detection Confidence
+Medium-High
+==================================================
+END FAILURE ENTRY
+
+3. FAILURE RELATIONSHIP ANALYSIS
+
+Dependency Chain 1 — Sample Fluidics → Pressure/LLD → Clot/Short/Precision
+Sample probe, syringe, tubing, LLD ve pressure sensor aynı aspirasyon olayını farklı açıdan izler. LLD sıvı yüzeyini algılayamazsa sample short veya LLD alarmı; pressure profili bozulursa clot; syringe içinde bubble/leak varsa poor reproducibility oluşur. Bu zincir hem numune sonuçlarını hem calibration/QC tekrarlarını etkiler.
+Dependency Chain 2 — ISE Reference Path → All ISE Tests
+ISE Reference Electrolyte path ve reference electrode tüm ISE testlerinin ortak referansıdır. Bu nedenle reference path air bubble/crystallization veya reference electrode fault tüm Na/K/Cl ölçümlerini etkiler. Tek electrode arızası ise yalnız ilgili iyonu etkiler. Kılavuz, every ISE test probleminde reference path crystallization, prime, drain port cleaning ve electrode replacement adımlarını önerir.
+Dependency Chain 3 — Reagent Stability → Calibration → QC Drift → Result Bias
+Reagent expired, onboard stability over, reagent temperature out of range ve reagent deterioration; önce calibration kalite kriterlerini, sonra QC drift’i, sonunda sample result bias’ını tetikler. Reagent tracking software alarm üretse de alarm olmadan QC drift görülebilir.
+Dependency Chain 4 — Thermal Control → Reaction Kinetics → Linearity/Sensitivity
+Incubator/reagent/wash buffer temperature sapmaları photometric ve immunological reaction kinetics’i değiştirir. Bunun sonucu >Lin, >Kin, Sens.E, QC drift veya high/low results olabilir.
+Dependency Chain 5 — Reagent Loader Mechanics → RFID/Registration → e 801 Test Availability
+e 801 reagent loader path, RFID reader, pack position sensor ve reagent database registration birbirine bağlıdır. Mechanical pack handling failure, reagent registration stopped durumuna ve e 801 testlerinin kullanılamamasına neden olur.
+Dependency Chain 6 — Control Unit UI → System Operability → Safe Shutdown
+Frozen UI, doğrudan analitik ölçüm hatası olmayabilir; ancak operator control kaybı ve uygunsuz hard reset PC damage riskini yaratır. Bu nedenle safety shutdown prosedürü bir yazılım arızası için güvenlik katmanıdır.
+
+4. MOST CRITICAL FAILURE PATTERNS
+
+1. ISE Reference/Electrode Instability
+Kritik çünkü tek reference path arızası tüm ISE testlerini etkileyebilir. Yanlış elektrolit sonucu klinik olarak yüksek risklidir. En güçlü göstergeler ISE.E, ISE.N, IStd.E, Slop.E, erratic ISE results ve ISE Check EMF instability’dir.
+2. Sample Aspiration Chain Failure
+Samp.C, Samp.S, LLD alarmı ve poor reproducibility aynı aspirasyon zincirinden gelir. Probe, syringe, pressure sensor, LLD ve tubing birlikte değerlendirilmelidir. Tek tek alarm temizlemek yerine bütün aspirasyon zincirini kontrol etmek gerekir.
+3. Calibration Quality Criterion Failures
+Cal.E, Dup.E, SD.E, Sens.E, Diff.E, S1A.E, Slop.E gibi alarm grubu testin matematiksel temelini invalid kılar. Kalibrasyon başarısızken sonuç üretmek servis açısından kabul edilemez.
+4. Reagent Temperature/Stability Failures
+ReagEx, OBS.RR/OBS.RM, Reag.T, WB.T ve Inc.T reagent/thermal stability sorunlarıdır. Alarm olmadan QC drift de üretebilirler. Bu arızalar doğrudan result bias üretir.
+5. e 801 Reagent Loader/Pack Handling
+Mekanik + sensor + RFID + software registration birlikte çalışır. Loader problemi sadece mekanik değildir; reagent availability, calibration, QC ve throughput’u etkiler.
+6. UI Freeze / Unsafe Restart
+Analitik bir data alarm değildir ama tüm sistem kontrolünü etkiler. Hard reset PC hasarı ve recovery süresi riskini artırır; safety shutdown prosedürü uygulanmalıdır.
+
+5. PREVENTIVE ENGINEERING RECOMMENDATIONS
+
+Calibration instability azaltma
+•	Calibration öncesi reagent status, expiry, onboard stability ve temperature kontrol edilmeli.
+•	Calibrator/QC material açıkta uzun süre bırakılmamalı.
+•	Failed calibration sonrası sadece kalibrasyonu tekrar etmek yerine alarm tipine göre pipetting, detector, reagent ve material zinciri kontrol edilmeli.
+Contamination azaltma
+•	Sample/reagent probes, wash stations, ISE flow path, e 801 aspiration pipes ve sipper paths düzenli temizlenmeli.
+•	Carryover şüphesinde special wash rules güncelliği doğrulanmalı.
+•	Fibrinli, köpüklü veya partiküllü numune yüklenmemeli.
+Pressure/fluidic failure azaltma
+•	Syringe bubble/leak günlük gözlenmeli.
+•	ISE reagent prime ve flow path wash trend bazlı uygulanmalı.
+•	Tubing kink/occlusion, salt buildup ve crystallization bakım sırasında özellikle kontrol edilmeli.
+Motor/mechanical wear azaltma
+•	Reagent loader, mixer, pipetter arm ve rack transport alanlarında yabancı cisim/kir birikimi engellenmeli.
+•	Reagent pack deformasyonu olan pack’ler kullanılmamalı.
+•	Loader status indicator flashing durumunda mekanizmaya zorla müdahale edilmemeli.
+Sensor degradation azaltma
+•	LLD probe yüzeyleri temiz/kuru tutulmalı.
+•	Barcode/RFID reader surfaces temizlenmeli.
+•	Temperature sensor alarm trendleri HVAC ve fan/filter temizliğiyle birlikte izlenmeli.
+Tubing blockage azaltma
+•	ISE reference path crystallization kontrol edilmeli.
+•	Drain port ve waste line temizliği planlı yapılmalı.
+•	Reagent/wash solution bottles stabil koşullarda saklanmalı.
+Electronic/software instability azaltma
+•	Control unit/data manager için düzenli backup yapılmalı.
+•	UI freeze durumunda safety shutdown uygulanmalı; hard power-off yapılmamalı.
+•	Software update ve board-level müdahaleler Roche Service desteğiyle yapılmalı.
+Thermal drift azaltma
+•	Oda sıcaklığı 18–32 °C aralığında tutulmalı; WB.T remedy bunu doğrudan vurgular.
+•	Rear fans unobstructed olmalı.
+•	Cooling unit filters temizlenmeli.
+•	Reagent temperature alarms sonrası QC/calibration verification yapılmalı.
+
+ARIZA GEÇMİŞTEN İLHAM AL VE ATIFTA BULUN:
+
+TECHNICAL FAILURE INTELLIGENCE REPORT
+En baskın arıza ekosistemi
+Sıra	Normalize kategori	Yaklaşık kayıt	Frekans
+1	ISE kalibrasyon / elektrot / sıvı hat kararsızlığı	140	Çok sık
+2	Mekanik taşıma / rack / tip-cup / reagent bottle shift	107	Çok sık
+3	Reagent loading / kit imha / e801 kit yönetimi	80	Sık
+4	Probe / pipetleme mekanik hareket arızaları	74	Sık
+5	Su / tank / yardımcı sistem kaynaklı stop	47	Orta-sık, Mayıs’ta artmış
+6	Pressure / vacuum / hava alma / fluidic basınç	34	Orta
+7	Test-spesifik kalibrasyon-kontrol geçmeme	23	Orta
+8	Software / stok / LIS / veri yönetimi	20	Orta
+9	Stop / modül maskeleme operasyonel olayları	19	Orta
+10	Fotometre / lamba / kuvet / optik	11	Nadir ama kritik
+Zaman trendi
+Kayıt yoğunluğu Mart 2026 ve Nisan 2026’da zirveye çıkıyor. Mayıs 2026’da toplam kayıt sayısı düşmüş gibi görünse de, su/tank/utility kaynaklı olaylarda belirgin sıçrama var. 2026 Mayıs kayıtlarında cihazlara su gelmediği, tankların boş olduğu ve sistemin S.Stop’a alındığı örnekler dikkat çekiyor. 
+En riskli sistemler
+ISE hattı en kronik alan. Kayıtlarda tekrar eden çözüm davranışı şu kombinasyon etrafında dönüyor: sipper temizliği, vacuum nozzle temizliği, elektrot bloğu temizliği, Na/K/Cl veya referans elektrot değişimi, ISE solüsyonlarının yenilenmesi, reagent prime, ISE check, kalibrasyon-kontrol tekrarı. Örnek kapanışlarda “sipper ve ISE hattı temizlenmiş”, “yenilenen ISE solüsyonları”, “cal.-contr. sonuçları uygun” gibi çözüm dizileri tekrar ediyor. 
+Probe hareket sistemi ikinci kritik alan. Reagent probe up/down hatasında prob kırığı görülüp probe değişimi ve ayar revizyonu yapılmış; sample probe tarafında mekanik ayar ve hasta/kontrol çalışması ile doğrulama yapılmış. 
+e801 kit/reagent loading olayları çoğunlukla gerçek cihaz tamirinden çok kit yönetimi/kit imha süreciyle kapanıyor. Çok sayıda kayıtta kapanış “Kit imhaya gönderildi” şeklinde. 
+
+2. NORMALIZED FAILURE CATEGORIES
+
+FAILURE CATEGORY 1
+Normalized Failure Name
+ISE Electrode / Fluidic Calibration Instability
+Failure Type
+Fluidic + Sensor + Calibration + Maintenance
+Related Raw Fault Descriptions
+•	Calibration Failed
+•	ISE calibration failed
+•	K geçmiyor
+•	Cl / K / Na kontrol geçmedi
+•	klor ve potasyum error
+•	slope değeri uygun değil
+•	pressure sensor error ile birlikte ISE stop
+•	sipper / nozzle / elektrot bloğu kirli
+•	ISE check sonrası kalibrasyon-kontrol uygunsuz
+Technical Interpretation
+Bu kategori ISE ölçüm hattında elektrot cevabının, sıvı aspirasyonunun veya referans sisteminin kararsızlaştığını gösterir. Teknik olarak sorun tek bir parçaya indirgenmemeli; kayıtlar elektrot yaşlanması + sipper/nozzle kontaminasyonu + tubing/hat problemi + solüsyon yenileme ihtiyacı kombinasyonuna işaret ediyor.
+ISE hattında Na/K/Cl elektrotları ve referans elektrot birlikte çalıştığı için bir elektrot sapması, sipper aspirasyon problemi veya nozzle kirlenmesi kalibrasyon eğrisini bozabilir. Bu yüzden teknisyenler genellikle tek işlem değil, temizlik + prime + ISE check + kalibrasyon/kontrol zinciri uygulamış.
+Frequency Analysis
+Very Frequent. Yaklaşık 140 kayıt ISE/elektrot/sipper/nozzle/kalibrasyon eksenine düştü. Özellikle Mart–Nisan 2026’da yüksek yoğunluk gözleniyor.
+Common Root Causes
+Probability	Root Cause	System Type
+High	Sipper / vacuum nozzle / elektrot bloğu kontaminasyonu	Fluidic / Sensor
+High	Na, K, Cl veya referans elektrot slope değerinin bozulması	Sensor / Calibration
+High	ISE solüsyonlarının yenilenme ihtiyacı	Reagent / Fluidic
+Medium	Tubing çıkması, yıpranması veya hat içi akış bozukluğu	Fluidic
+Medium	Bakım sonrası kalibrasyon-kontrol doğrulamasının eksik veya başarısız olması	Maintenance
+Technician Resolution Analysis
+Teknisyenlerin standart çözüm paterni:
+1.	Sipper probe, vacuum nozzle ve elektrot bloğu temizliği
+2.	Na/K/Cl veya referans elektrot değişimi
+3.	ISE internal standard / diluent / solüsyon yenileme
+4.	Reagent prime
+5.	ISE check
+6.	Kalibrasyon + kontrol çalışılması
+7.	Sonuçlar uygunsa testlerin aktif edilmesi
+Kapanış örneklerinde “sipper probe vacum nozzle ve elektrot bloğu temizlendi”, “Na K ve Cl elektrot değişimi yapıldı”, “reagent prime ve ISE check yapıldı”, “kalb kontroller uygun” ifadeleri birlikte geçiyor. 
+Knowledge Base Rule
+IF ISE Calibration Failed + K/Cl/Na kontrol geçmiyor
+THEN önce sipper/nozzle/elektrot bloğu temizliği → ISE solüsyon kontrolü → reagent prime → ISE check → cal/control.
+IF slope değeri uygunsuz devam ederse → ilgili elektrot veya referans elektrot değişimi.
+
+FAILURE CATEGORY 2
+Normalized Failure Name
+Probe Movement / Pipetting Mechanism Failure
+Failure Type
+Mechanical + Robotic Movement + Fluidic Interface
+Related Raw Fault Descriptions
+•	Reagent probe up-down
+•	Reagent probe up/down hatası
+•	Reagent probe kırıldı
+•	Sample probe mekanik ayar
+•	Sample probe değiştirildi
+•	Probe sıcak su ile yıkandı
+•	Probe temizlendi
+•	Sample C / sample short
+Technical Interpretation
+Bu grup pipetleme kolunun dikey hareket, prob hizalama, aspirasyon/dispense doğruluğu veya fiziksel prob bütünlüğü ile ilgilidir. Kayıtlar iki alt sınıfa ayrılıyor:
+1.	Mekanik hasar / kırık / hizalama: Reagent probe kırılması, up-down hatası, mekanik ayar revizyonu.
+2.	Kontaminasyon / tıkanma / sıvı temas problemi: Probe sıcak suyla yıkama, temizlik ve bakım sonrası aktif olma.
+Frequency Analysis
+Frequent. Yaklaşık 74 kayıt bu gruba düştü. Probe olayları daha az sayıda görünse de duruş etkisi yüksek; çünkü pipetleme sistemi modül çalışmasını doğrudan keser.
+Common Root Causes
+Probability	Root Cause	System Type
+High	Probe kırılması veya mekanik hizadan çıkma	Mechanical
+High	Probe ucunda kontaminasyon / tıkanma	Fluidic
+Medium	Up-down hareket mekanizması ayarsızlığı	Robotic Movement
+Medium	Numune/reagent aspirasyon pozisyon hatası	Mechanical / Fluidic
+Technician Resolution Analysis
+Kapanışlarda iki ana çözüm var:
+•	Parça değişimi + ayar: Reagent probe kırığı görülmüş, probe değiştirilmiş ve ayarlar revize edilmiş. 
+•	Mekanik ayar + doğrulama: Sample probe mekanik ayarları yapılmış, kontrol ve hasta çalışılarak cihaz faal teslim edilmiş. 
+Knowledge Base Rule
+IF reagent/sample probe up-down, sample short veya probe hareket hatası varsa
+THEN fiziksel prob kontrolü → kırık/eğrilik kontrolü → mekanik ayar → sıcak su/temizlik → kontrol + hasta doğrulaması.
+IF kırık varsa → probe değişimi zorunlu.
+
+FAILURE CATEGORY 3
+Normalized Failure Name
+Reagent Loading / Kit Handling Failure
+Failure Type
+Mechanical + Reagent Management + Operator/Process
+Related Raw Fault Descriptions
+•	Reagent loading error
+•	Reagent loader
+•	Cihazdan çıkan kit
+•	Assay kiti çöpe atılmış
+•	Kit imhaya gönderildi
+•	Reagent bottle shift
+Technical Interpretation
+Bu grup özellikle e801 ve reagent loading sistemi çevresinde yoğunlaşıyor. Teknik olarak iki farklı olay birleşiyor:
+1.	Gerçek yükleme/loader mekanik arızası
+2.	Kit yönetimi / kitin cihazdan çıkması / imhaya gönderilmesi
+Birçok kapanışta cihaz tamiri yerine kitin imhaya gönderilmesi ile kapanış yapılmış. Bu, olayların bir kısmının cihaz arızasından çok reagent logistics / kit handling süreci olduğunu düşündürüyor.
+Frequency Analysis
+Frequent. Yaklaşık 80 kayıt. Mart–Nisan 2026 döneminde yoğun.
+Common Root Causes
+Probability	Root Cause	System Type
+High	Kitin cihazdan çıkması veya yükleme sürecinde hata	Reagent Management
+High	Reagent loading mekanizması / loader uyarısı	Mechanical
+Medium	Operatör kaynaklı kit atımı / imha süreci	Operator-related
+Medium	Reagent bottle shift / pozisyon kayması	Mechanical
+Technician Resolution Analysis
+Çok sayıda olayda kapanış “Kit imhaya gönderildi” şeklinde. Bu nedenle bu kategori için çözüm prosedürü çoğu zaman mekanik müdahale değil, kitin izole edilmesi, imha süreci ve stok/test sürekliliğinin kontrolü olmuş. 
+Knowledge Base Rule
+IF reagent loading error + cihazdan çıkan kit
+THEN kit fiziksel durumu ve lot/miat kontrolü → loader/reagent position kontrolü → gerekiyorsa kit imha → yeni kit yükleme → kontrol çalışılması.
+IF aynı modülde reagent bottle shift tekrarlıyorsa → loader mekanik hizalama ve sensör kontrolü.
+
+FAILURE CATEGORY 4
+Normalized Failure Name
+Mechanical Transport / Rack / Tip-Cup / Magazine Failure
+Failure Type
+Mechanical + Robotic Movement
+Related Raw Fault Descriptions
+•	Tip cup gripper
+•	Tip/cup ayarları
+•	Magazine lifter
+•	MSB slider
+•	Reagent bottle shift
+•	Rack / taşıma hatası
+•	ProCell görmüyor
+•	Sampling stop
+Technical Interpretation
+Bu kategori cihazın numune, tip/cup, reagent veya sarf hareketini sağlayan mekanik taşıma alt sistemlerine işaret eder. Bu arızalar çoğu zaman sensör veya motor hatası gibi görünse de kök neden pratikte hizalama, toz/kir, mekanik pozisyon sapması veya taşıma elemanı tutukluğu olabilir.
+Frequency Analysis
+Very Frequent. Yaklaşık 107 kayıt. Özellikle Tip Cup / Gripper ve Reagent Bottle Shift ifadeleri tekrar ediyor.
+Common Root Causes
+Probability	Root Cause	System Type
+High	Gripper / lifter / slider pozisyon sapması	Mechanical
+High	Toz/kir nedeniyle sensör veya hareket algısının bozulması	Sensor / Mechanical
+Medium	Tip-cup mekanik ayarsızlığı	Robotic Movement
+Medium	Reagent bottle pozisyon kayması	Mechanical
+Technician Resolution Analysis
+Örnek kapanışta MSB slider için “sensor toz temizliği yapıldı” ifadesi var; tip/cup tarafında ise “Tip/cup ayarları revize edildi” şeklinde ayar müdahalesi görülüyor. 
+Knowledge Base Rule
+IF tip cup gripper / magazine lifter / slider hatası varsa
+THEN önce mekanik hareket yolu kontrolü → sensör/toz temizliği → pozisyon/ayar revizyonu → boş çalışma → hasta/kontrol doğrulaması.
+
+FAILURE CATEGORY 5
+Normalized Failure Name
+Pressure / Vacuum / Air-Fluidic Instability
+Failure Type
+Fluidic + Sensor + Maintenance
+Related Raw Fault Descriptions
+•	pressure sensor error
+•	pressure sensor eror
+•	basınç / vacuum / vacum
+•	cihazın havası alındı
+•	air purge
+•	probe sıcak su ile yıkandı
+•	gerekli yıkamalar verildi
+Technical Interpretation
+Pressure/vacuum hataları genellikle sıvı yolunda hava, tıkanıklık, aspirasyon direnci, prob kontaminasyonu veya sensör okuma sapması ile ilişkilidir. Kayıtlarda “cihazın havası alındı”, “gerekli yıkamalar verildi”, “probe sıcak su ile yıkandı” gibi müdahaleler, sorunun çoğunlukla akış hattı stabilizasyonu ile çözüldüğünü gösteriyor.
+Frequency Analysis
+Moderate. Yaklaşık 34 kayıt. Ancak pressure sensor olayları stop yaratabildiği için operasyonel kritiklik yüksek.
+Common Root Causes
+Probability	Root Cause	System Type
+High	Hatta hava kalması	Fluidic
+High	Probe/nozzle kontaminasyonu	Fluidic
+Medium	Pressure sensor algı sapması	Sensor
+Medium	Vacuum hattı yetersizliği	Fluidic
+Technician Resolution Analysis
+Kapanışlarda hava alma ve yıkama çok sık: “Cihazın havası alındı. Gerekli yıkamalar verildi. Cihaz aktif.” 
+Başka bir kayıtta pressure sensor için probe sıcak su ile yıkanmış, ilgili bakımlar verilmiş ve cihaz aktif edilmiştir. 
+Knowledge Base Rule
+IF pressure sensor / basınç / vacuum hatası varsa
+THEN air purge/hava alma → probe/nozzle sıcak su veya bakım temizliği → wash/prime → tekrar pressure check.
+IF aynı modülde tekrarlarsa → pressure sensor + tubing + vacuum hattı kontrol edilmeli.
+
+FAILURE CATEGORY 6
+Normalized Failure Name
+Water Supply / Tank / Utility-Induced Stop
+Failure Type
+Utility + Fluidic + Operational Stop
+Related Raw Fault Descriptions
+•	Cihazlara su gelmedi
+•	Tanklar boş
+•	Cihazlar S.Stop’a alındı
+•	Su firması ile görüşüldü
+•	Su / tank / utility kesintisi
+Technical Interpretation
+Bu kategori cihaz içi arızadan çok tesis/yardımcı sistem kaynaklıdır. Cihazlara su gelmemesi, tüm hatlarda veya birden fazla modülde eşzamanlı stop etkisi yaratabilir. Mayıs 2026’da belirgin artış göstermesi, lokal cihaz arızasından ziyade altyapı / su besleme sürekliliği problemine işaret ediyor.
+Frequency Analysis
+Moderate-to-Frequent, Mayıs 2026’da cluster artışı. Yaklaşık 47 kayıt; Mayıs ayında bu grubun ağırlığı belirgin yükseldi.
+Common Root Causes
+Probability	Root Cause	System Type
+High	Tankların boşalması	Utility
+High	Cihaza su beslemesinin kesilmesi	Utility / Fluidic
+Medium	Su firması veya merkezi hat kaynaklı kesinti	Facility
+Medium	Stop sonrası yeniden devreye alma ihtiyacı	Operational
+Technician Resolution Analysis
+Kayıtlarda cihazlara su gelmediği, tankların kontrol edilip boş görüldüğü ve cihazların S.Stop’a alındığı belirtiliyor. 
+Knowledge Base Rule
+IF birden fazla cihaz/modül eşzamanlı stop + su/tank ifadesi varsa
+THEN cihaz içi arızadan önce merkezi su besleme, tank seviyesi, su firması/tesis hattı kontrol edilmeli.
+IF tank boşsa → cihaz S.Stop güvenli modda tutulmalı, su besleme stabilize edilmeden modül açılmamalı.
+
+FAILURE CATEGORY 7
+Normalized Failure Name
+Photometer Lamp / Cuvette / Optical Measurement Failure
+Failure Type
+Optical + Maintenance + Calibration
+Related Raw Fault Descriptions
+•	Photometer lamp
+•	Lamba değişimi
+•	Küvet değişimi
+•	Cell / hücre değişimi
+•	Kontroller sonrası aktif
+Technical Interpretation
+Fotometre ve kuvet olayları düşük frekanslı ama yüksek etkili arızalardır. Optik ölçüm zinciri etkilendiğinde birden fazla test sonucu güvenilirliği bozulabilir. Bu nedenle sadece parça değişimi değil, tüm ilgili testlere kontrol çalışılmasıgerekir.
+Frequency Analysis
+Rare but critical. Yaklaşık 11 kayıt.
+Common Root Causes
+Probability	Root Cause	System Type
+High	Photometer lamp ömrü / lamba arızası	Optical
+Medium	Küvet/hücre performans düşüşü	Optical / Maintenance
+Medium	Bakım sonrası kontrol validasyonu ihtiyacı	Calibration
+Technician Resolution Analysis
+Örnek kayıtta lamba ve kuvet değişimi yapılmış, gerekli tüm bakımlar sonrası tüm testlere kontroller çalışılmış, sonuçlar uygun bulunmuş ve cihaz faal teslim edilmiştir. 
+Knowledge Base Rule
+IF photometer lamp / kuvet / cell blank hatası varsa
+THEN lamba/kuvet kontrolü → gerekirse değişim → bakım → tüm etkilenen testlerde QC doğrulaması → cihaz aktif.
+
+FAILURE CATEGORY 8
+Normalized Failure Name
+Test-Specific Calibration / Control Failure
+Failure Type
+Calibration + Reagent Lot + Application
+Related Raw Fault Descriptions
+•	TSH calibration failed
+•	AFP cal ve kontrol geçmedi
+•	CA 19-9 cal kontrol geçmedi
+•	TESTO ve BHCG cal-kontrol geçmemesi
+•	ACCP yedek kit kontrol geçmedi
+•	Yeni hazırlanan calibrator / control ile uygun
+Technical Interpretation
+Bu grup cihaz genel arızasından çok test-spesifik aplikasyon, lot, kalibratör veya kontrol materyali kaynaklıdır. Kapanışlarda çoğunlukla yeni hazırlanan kalibratör/kontrol ile sonuçların olması gereken değerlere geldiği belirtilmiş.
+Frequency Analysis
+Moderate. Yaklaşık 23 kayıt. Klinik operasyon açısından önemli; ancak genelde cihaz genel duruşundan çok ilgili testin geçici pasif/uygunsuz kalmasına yol açar.
+Common Root Causes
+Probability	Root Cause	System Type
+High	Kalibratör/kontrol materyali uygunsuzluğu	Calibration
+High	Yeni lot geçişi sonrası değer sapması	Reagent / Calibration
+Medium	Test-spesifik aplikasyon / kit performansı	Application
+Medium	Kontrol materyali hazırlama veya saklama etkisi	Operator / Process
+Technician Resolution Analysis
+Kapanışlarda “yeni hazırlanan cal ile çalışılan yeni control sonuçları olması gereken değerlerde bulunmuş” ve testlerin aktif edildiği tekrarlanıyor. 
+Knowledge Base Rule
+IF tekil test cal/control geçmiyor ve cihaz genelinde arıza yoksa
+THEN yeni kalibratör/kontrol hazırla → lot/miat kontrolü → cal/control tekrar → uygunsa test aktif.
+IF aynı test tekrarlıyorsa → aplikasyon, lot ve reagent pack geçmişi incelenmeli.
+
+3. TECHNICIAN RESOLUTION PATTERN LIBRARY
+Müdahale tipi	En çok kullanıldığı arıza	Teknik anlamı
+Sipper/nozzle/elektrot bloğu temizliği	ISE cal failed, K/Cl/Na geçmeme	Kontaminasyon ve akış kararsızlığı giderme
+Elektrot değişimi	Slope uygunsuzluğu, ISE tekrar eden fail	Sensör yaşlanması veya referans sapması
+Reagent prime + ISE check	ISE bakım sonrası doğrulama	Hat stabilizasyonu ve ölçüm doğrulaması
+Probe değişimi / ayar revizyonu	Probe up-down, sample/reagent probe	Mekanik hizalama ve fiziksel hasar giderme
+Kit imha	Reagent loading / cihazdan çıkan kit	Kit yönetimi ve güvenli devre dışı bırakma
+Hava alma + yıkama	Pressure / vacuum / hava problemi	Fluidic hattı stabilizasyonu
+Lamba/kuvet değişimi	Photometer lamp / optik hata	Optik ölçüm zinciri yenileme
+Tank/su kontrolü	Çoklu stop / S.Stop / su gelmiyor	Utility kaynaklı duruş yönetimi
+Kalibratör/kontrol yenileme	Test-spesifik cal/control fail	Reagent-lot veya kontrol materyali doğrulama
+4. HIGH-RISK RECURRING PATTERNS
+1. ISE hattı kronik zayıf nokta
+ISE olayları sadece “kalibrasyon geçmedi” olarak okunmamalı. Kapanışlar, sorunun çoğunlukla kirlenme + elektrot slope + solüsyon + tubing zincirinde olduğunu gösteriyor. Bu nedenle ISE için ayrı “önleyici bakım skoru” tutulmalı.
+2. Mayıs 2026’da utility/su problemi kümelenmesi
+Mayıs ayında su/tank kaynaklı olaylar belirgin artmış. Bu cihaz arızası değil, tesis altyapısı riski gibi ele alınmalı. Tek tek cihaz kaydı açmak yerine facility incident olarak kök neden takibi yapılmalı.
+3. Reagent loading kayıtlarının bir kısmı servis arızası değil, kit süreç olayı
+“Kit imhaya gönderildi” ile kapanan kayıtlar cihaz tamir bilgisinden çok kit yaşam döngüsü / stok / kullanıcı işlemibilgisidir. Bunlar teknik arıza havuzundan ayrı raporlanmalı.
+4. Probe arızaları az ama duruş etkisi yüksek
+Probe kırığı veya mekanik ayarsızlık doğrudan cihazı durdurur. Probe olaylarında “temizlikle geçti” ve “parça değişti” ayrımı net tutulmalı.
+
+5. AI-READABLE TROUBLESHOOTING KNOWLEDGE BASE
+
+- failure_key: ISE_CALIBRATION_FLUIDIC_INSTABILITY
+  trigger_terms:
+    - "Calibration Failed"
+    - "K geçmiyor"
+    - "Cl geçmiyor"
+    - "ISE check"
+    - "slope uygun değil"
+    - "sipper"
+    - "nozzle"
+    - "elektrot"
+  probable_causes:
+    high:
+      - sipper/nozzle contamination
+      - electrode slope drift
+      - ISE solution degradation
+    medium:
+      - tubing wear/disconnection
+      - reference electrode instability
+  recommended_resolution:
+    - clean sipper probe
+    - clean vacuum nozzle
+    - clean electrode block
+    - replace Na/K/Cl/reference electrode if slope abnormal
+    - renew ISE solutions
+    - run reagent prime
+    - run ISE check
+    - repeat calibration and control
+  validation:
+    - cal/control within expected range
+    - test reactivated
+
+- failure_key: PROBE_MECHANICAL_MOVEMENT_FAILURE
+  trigger_terms:
+    - "sample probe"
+    - "reagent probe"
+    - "up-down"
+    - "sample short"
+  probable_causes:
+    high:
+      - broken or bent probe
+      - mechanical misalignment
+      - probe contamination
+  recommended_resolution:
+    - inspect probe physically
+    - clean with approved maintenance procedure
+    - revise mechanical alignment
+    - replace probe if damaged
+    - run control and patient sample confirmation
+
+- failure_key: PRESSURE_VACUUM_AIR_FLUIDIC_ERROR
+  trigger_terms:
+    - "pressure sensor"
+    - "vacum"
+    - "hava"
+    - "air purge"
+  probable_causes:
+    high:
+      - air in fluidic line
+      - blocked probe/nozzle
+    medium:
+      - vacuum line instability
+      - pressure sensor read error
+  recommended_resolution:
+    - air purge / remove air
+    - perform wash cycles
+    - clean probe/nozzle
+    - check tubing and vacuum path
+    - confirm device active
+
+- failure_key: REAGENT_LOADING_KIT_HANDLING
+  trigger_terms:
+    - "reagent loading error"
+    - "reagent loader"
+    - "cihazdan çıkan kit"
+    - "kit imhaya gönderildi"
+  probable_causes:
+    high:
+      - kit loading/positioning issue
+      - kit removed from device
+    medium:
+      - loader alignment
+      - operator kit disposal process
+  recommended_resolution:
+    - inspect kit position and condition
+    - verify lot/expiry
+    - remove and quarantine defective kit
+    - send kit to disposal if required
+    - load replacement kit and verify test availability
+
+
+6. OPERATIONAL RECOMMENDATIONS
+1.	ISE için haftalık “electrode-health” takibi kurulmalı.
+Her ISE olayında Na/K/Cl slope, değişen elektrot, sipper/nozzle temizlik tarihi ve kullanılan solüsyon lotu ayrı alan olarak kaydedilmeli.
+2.	“Kit imha / reagent loading” kayıtları teknik servis arızasından ayrılmalı.
+Bunlar ayrı bir “reagent logistics incident” kategorisine alınırsa gerçek cihaz arıza oranı daha doğru görünür.
+3.	Mayıs 2026 su/tank olayları için tesis bazlı CAPA açılmalı.
+Cihaz bazlı müdahale yerine merkezi su besleme, tank seviye alarmı ve sorumluluk zinciri gözden geçirilmeli.
+4.	Probe arızalarında kapanış açıklaması zorunlu standardize edilmeli.
+“Müdahale edildi, cihaz faal” gibi kısa kapanışlar bilgi kaybı yaratıyor. Minimum kapanış formatı: fiziksel bulgu + yapılan işlem + değişen parça + doğrulama sonucu.
+5.	Pressure sensor olaylarında gerçek sensör arızası ile fluidic tıkanma ayrılmalı.
+Eğer probe sıcak su/yıkama/hava alma ile düzeliyorsa kategori “sensor fault” değil, “fluidic restriction / air in line” olmalı.
+6.	Tekrarlayan modül analizi düzenli yapılmalı.
+İlk sınıflandırmaya göre LINE 4, LINE 7, LINE 2 ve ACIL kayıt yoğunluğu yüksek görünüyor. Bu hatlarda ayrı MTBF/tekrar arıza izleme yapılmalı.
+
+7. EXECUTIVE ENGINEERING CONCLUSION
+Bu veri seti cihazların en zayıf noktasının tek bir parça değil, ISE fluidic-sensor-maintenance zinciri olduğunu gösteriyor. En değerli teknik bilgi kapanış açıklamalarında: teknisyenler ISE problemlerini çoğunlukla sipper/nozzle/elektrot bloğu temizliği, elektrot değişimi, solüsyon yenileme, reagent prime, ISE check ve kalibrasyon-kontrol doğrulamasıyla çözmüşler. 
+İkinci ana risk alanı mekanik hareket sistemleri: probe up/down, sample probe ayarı, tip-cup gripper, magazine lifter ve reagent bottle shift olayları cihaz duruşuna doğrudan etki ediyor. Reagent loading kayıtlarının önemli kısmı ise cihaz tamir bilgisinden çok kit yönetimi/imha süreci olarak ayrıştırılmalı.
+Mayıs 2026’da utility/su besleme kaynaklı olayların artması, cihaz içi arızadan bağımsız bir tesis altyapı riski olduğunu düşündürüyor. Bu nedenle teknik servis raporlamasında “cihaz arızası”, “aplikasyon/kalibrasyon”, “kit/stok süreci” ve “facility kaynaklı stop” kesin olarak ayrılmalıdır.
+
+
