@@ -6,7 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import BackButton from '@/components/BackButton';
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
-import { AlertTriangle, CheckCircle, Loader2, FlaskConical, FilePenLine, Wrench, Package, ArrowLeftRight, Warehouse, Building2, ChevronDown, ChevronUp, History, CalendarClock, RotateCcw, FileEdit, FilePlus, ClipboardList, Download, Upload } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Loader2, FlaskConical, FilePenLine, Wrench, Package, ArrowLeftRight, Warehouse, Building2, ChevronDown, ChevronUp, History, CalendarClock, RotateCcw, FileEdit, FilePlus, ClipboardList, Download, Upload, Calculator } from 'lucide-react';
 import {
   collection,
   onSnapshot,
@@ -1196,6 +1196,12 @@ export default function AplikasyonPaneliDetayPage() {
                   >
                     <FilePenLine className="mr-2 h-4 w-4" /> Yeni İşlem Oluştur
                   </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => navigateToAction('/kumulatif-hesaplama')}
+                  >
+                    <Calculator className="mr-2 h-4 w-4" /> Kümülatif Hesapla
+                  </Button>
                 </>
               ) : (
                 <>
@@ -1211,6 +1217,12 @@ export default function AplikasyonPaneliDetayPage() {
                     onClick={() => selectedDevice?.id && navigateToAction(`/aplikasyon-paneli/islem-formu/${selectedDevice.id}`)}
                   >
                     <FilePenLine className="mr-2 h-4 w-4" /> Aplikasyon İşlem Formu Aç
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => navigateToAction('/kumulatif-hesaplama')}
+                  >
+                    <Calculator className="mr-2 h-4 w-4" /> Kümülatif Hesapla
                   </Button>
                   <Button
                     variant="outline"
