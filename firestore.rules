@@ -153,6 +153,7 @@ service cloud.firestore {
     match /transferTemplates/{id}             { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /vehicles/{id}                      { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /testDefinitions/{id}               { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /testAutoSumDefinitions/{id}        { allow read: if inCompany(); allow write: if writingInCompany(); }
     // Product-code definitions are shared catalogs across every company.
     match /def_brands/{id}                    { allow read, write: if isSignedIn(); }
     match /def_labGroups/{id}                 { allow read, write: if isSignedIn(); }
@@ -167,6 +168,7 @@ service cloud.firestore {
     match /purchasingTaskDefinitions/{id}     { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /expensePeriods/{id}                { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /cihazUstuGecmisi/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /kumulatifHesaplamaGecmisi/{id}     { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /actionFormHistoryLogs/{id}         { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /actionFormPartReassignLogs/{id}    { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /postClosurePartChangeLogs/{id}     { allow read: if inCompany(); allow write: if writingInCompany(); }
