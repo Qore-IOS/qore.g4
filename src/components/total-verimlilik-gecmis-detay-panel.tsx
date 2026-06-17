@@ -24,6 +24,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
+import { loadTotalEfficiencyRows } from '@/lib/total-efficiency-record-storage';
 import { useToast } from '@/hooks/use-toast';
 import { totalVerimlilikLogger } from '@/lib/logger';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
@@ -121,18 +122,19 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
 
         if (docSnap.exists()) {
           const data = docSnap.data();
+          const rows = await loadTotalEfficiencyRows<TotalEfficiencyRecord['rows'][number]>(docSnap.id, data);
           setRecord({
             id: docSnap.id,
             poolId: data.poolId || '',
             poolName: data.poolName || '',
             month: data.month ?? 0,
             year: data.year ?? 0,
-            rows: data.rows || [],
+            rows,
             createdAt: data.createdAt || null,
             createdByName: data.createdByName || '',
-            efficiencyMetrics: data.rows?.length && data.efficiencyMetrics?.hakEdisVerisiGirildi === undefined
-              ? calculateEfficiencyMetrics(data.rows)
-              : data.efficiencyMetrics || (data.rows?.length ? calculateEfficiencyMetrics(data.rows) : undefined),
+            efficiencyMetrics: rows.length && data.efficiencyMetrics?.hakEdisVerisiGirildi === undefined
+              ? calculateEfficiencyMetrics(rows)
+              : data.efficiencyMetrics || (rows.length ? calculateEfficiencyMetrics(rows) : undefined),
             isAraKayit: data.isAraKayit === true,
           });
         } else {
