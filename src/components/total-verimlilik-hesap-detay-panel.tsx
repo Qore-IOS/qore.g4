@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { doc, getDoc } from 'firebase/firestore';
+import { loadTotalEfficiencyRows } from '@/lib/total-efficiency-record-storage';
 import { Calendar, History, Loader2 } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -65,12 +66,13 @@ export default function TotalVerimlilikHesapDetayPanel({ recordId, labId }: Prop
         }
 
         const data = docSnap.data();
+        const rows = await loadTotalEfficiencyRows<TotalEfficiencyRecord['rows'][number]>(docSnap.id, data);
         setRecord({
           id: docSnap.id,
           poolName: data.poolName || '',
           month: data.month ?? 0,
           year: data.year ?? 0,
-          rows: data.rows || [],
+          rows,
           createdAt: data.createdAt || null,
           createdByName: data.createdByName || '',
           isAraKayit: data.isAraKayit === true,
