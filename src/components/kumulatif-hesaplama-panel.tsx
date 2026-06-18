@@ -41,7 +41,7 @@ import {
   X,
   XCircle,
 } from 'lucide-react';
-import { addDoc, collection, getDocs, orderBy, serverTimestamp } from 'firebase/firestore';
+import { addDoc, collection, doc, getDocs, increment, orderBy, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { db } from '@/lib/firebase';
@@ -307,6 +307,27 @@ export default function KumulatifHesaplamaPanel() {
   }
 
 
+  async function updateTestCountersFromRows() {
+    const defsSnap = await getDocs(scopedQuery('testDefinitions', currentCompanyId, isSuperAdmin, orderBy('sutKodu', 'asc')));
+    const batch = writeBatch(db);
+    let updateCount = 0;
+    defsSnap.docs.forEach((defDoc) => {
+      const def = defDoc.data() as any;
+      const linked = new Set((def.linkedStokKodlari || []).map((code: unknown) => String(code).trim()).filter(Boolean));
+      if (linked.size === 0) return;
+      const incrementBy = rows.reduce((sum, row) => linked.has(row.stokKodu) ? sum + (row.total || 0) : sum, 0);
+      if (incrementBy <= 0) return;
+      batch.update(doc(db, 'testDefinitions', defDoc.id), {
+        counterValue: increment(incrementBy),
+        counterUpdatedAt: serverTimestamp(),
+      });
+      updateCount += 1;
+    });
+    if (updateCount > 0) await batch.commit();
+    return updateCount;
+  }
+
+
   async function handleSaveHistory() {
     if (!rows.length) return;
     setIsSavingHistory(true);
@@ -338,7 +359,8 @@ export default function KumulatifHesaplamaPanel() {
         createdByUid: currentUser?.uid || null,
         createdByName: currentUserProfile?.name || currentUser?.email || null,
       });
-      toast({ title: 'Kaydedildi', description: `${period} dönemi kümülatif hesaplama geçmişe kaydedildi.` });
+      const counterUpdateCount = await updateTestCountersFromRows();
+      toast({ title: 'Kaydedildi', description: `${period} dönemi kümülatif hesaplama geçmişe kaydedildi.${counterUpdateCount ? ` ${counterUpdateCount} test counterı güncellendi.` : ''}` });
     } catch (e: any) {
       toast({ title: 'Kayıt başarısız', description: e?.message || 'Geçmiş kaydı oluşturulamadı.', variant: 'destructive' });
     } finally {

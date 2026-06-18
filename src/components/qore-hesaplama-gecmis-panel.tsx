@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { Download, Loader2, Table2, Trash2 } from 'lucide-react';
 import { deleteDoc, doc, orderBy } from 'firebase/firestore';
 import BackButton from '@/components/BackButton';
@@ -230,7 +231,7 @@ export default function QoreHesaplamaGecmisPanel({ kind }: { kind: HistoryKind }
           const row = ws.getRow(index + 2);
           row.getCell(1).value = def.sutKodu || '';
           row.getCell(2).value = def.sutTestAdi || '';
-          row.getCell(3).value = '';
+          row.getCell(3).value = Number(def.counterValue || 0);
           [1, 2, 3].forEach((col) => {
             row.getCell(col).border = thinBorder;
             row.getCell(col).alignment = { vertical: 'middle', horizontal: col === 2 ? 'left' : 'center' };
@@ -328,6 +329,9 @@ export default function QoreHesaplamaGecmisPanel({ kind }: { kind: HistoryKind }
               </div>
               <Button variant="outline" onClick={() => void exportPeriodRecords(periodExport)} disabled={!periodExport}>
                 <Download className="mr-2 h-4 w-4" /> Seçili Dönemi Toplu Excel Al
+              </Button>
+              <Button asChild variant="outline">
+                <Link href="/yonetim/test-yonetimi">Counter / Test Yönetimi</Link>
               </Button>
             </div>
           )}
