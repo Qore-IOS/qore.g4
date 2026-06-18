@@ -9,7 +9,7 @@ function toIsoString(value: any): string | null {
   return null;
 }
 
-const REQUEST_SOURCES = ['lab_to_depot', 'lab_to_office'] as const;
+const REQUEST_SOURCES = ['lab_to_depot', 'lab_to_office', 'depot_to_office'] as const;
 const LAB_IDS_IN_CHUNK_SIZE = 30;
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
@@ -42,9 +42,9 @@ function uniqueById(orders: HistoryOrder[]): HistoryOrder[] {
 
 function isProductRequestOrder(order: FirebaseFirestore.DocumentData): boolean {
   if (!Array.isArray(order.items)) return false;
-  if (!order.labId) return false;
-  if (!order.requestSource) return true; // Legacy product requests did not persist requestSource.
-  return REQUEST_SOURCES.includes(order.requestSource);
+  if (!order.requestSource) return !!order.labId; // Legacy product requests did not persist requestSource.
+  if (order.requestSource === 'depot_to_office') return !!order.depotId || order.isDepotRequest === true;
+  return !!order.labId && REQUEST_SOURCES.includes(order.requestSource);
 }
 
 function sortHistoryOrders(orders: HistoryOrder[]): HistoryOrder[] {
@@ -70,6 +70,11 @@ async function fetchOrdersByLabId(labId: string): Promise<HistoryOrder[]> {
   return sortHistoryOrders(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
 }
 
+async function fetchOrdersByDepotId(depotId: string): Promise<HistoryOrder[]> {
+  const snapshot = await adminDb.collection('orders').where('depotId', '==', depotId).get();
+  return sortHistoryOrders(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+}
+
 async function fetchOrdersByCreatedById(createdById: string): Promise<HistoryOrder[]> {
   const snapshot = await adminDb.collection('orders').where('createdById', '==', createdById).get();
   return sortHistoryOrders(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
@@ -91,20 +96,23 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const createdById = searchParams.get('createdById');
     const labId = searchParams.get('labId');
+    const depotId = searchParams.get('depotId');
     const labIds = searchParams.get('labIds')?.split(',').filter(Boolean);
     const pageSizeParam = searchParams.get('pageSize');
     const startAfterId = searchParams.get('startAfterId');
     const countOnly = searchParams.get('countOnly');
 
     let allData: HistoryOrder[];
-    if (labIds && labIds.length > 0) {
+    if (depotId) {
+      allData = await fetchOrdersByDepotId(depotId);
+    } else if (labIds && labIds.length > 0) {
       allData = await fetchOrdersByLabIds(labIds);
     } else if (labId) {
       allData = await fetchOrdersByLabId(labId);
     } else if (createdById) {
       allData = await fetchOrdersByCreatedById(createdById);
     } else {
-      return NextResponse.json({ error: 'Filtreleme kriteri (labId veya createdById) zorunludur.' }, { status: 400 });
+      return NextResponse.json({ error: 'Filtreleme kriteri (depotId, labId veya createdById) zorunludur.' }, { status: 400 });
     }
 
     if (countOnly === 'true') {

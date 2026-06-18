@@ -866,6 +866,18 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
         newOrder.depotName = depotName || 'Bilinmeyen Depo';
         newOrder.requestedManagerIds = managerIds;
         newOrder.requestedManagerEmails = managerUsers.filter(u => managerIds.includes(u.uid)).map(u => u.email).filter(Boolean);
+        newOrder.depotFulfillment = {
+          items: orderItems.map(item => ({
+            itemId: item.id,
+            stokKodu: item.stokKodu,
+            requestedAdet: Number(item.adet) || 0,
+            deliveredAdet: 0,
+            missingAdet: Number(item.adet) || 0,
+            fulfilled: false,
+          })),
+          appliedDepoStokIds: [],
+          partialDeliveries: [],
+        };
       } else if (!isPeripheralFlow) {
         newOrder.depotId = selectedDepotId;
         newOrder.depotName = depotName || 'Bilinmeyen Depo';
@@ -996,7 +1008,7 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
             </button>
           </PopoverTrigger>
           <PopoverContent className="w-56 p-1" align="end">
-            <button onClick={() => { router.push(selectedLabId ? `/urun-talep/gecmis?labId=${selectedLabId}` : '/urun-talep/gecmis'); setMoreMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)]">
+            <button onClick={() => { router.push(isDepotRequestFlow && depotRequestId ? `/urun-talep/gecmis?depotId=${depotRequestId}` : selectedLabId ? `/urun-talep/gecmis?labId=${selectedLabId}` : '/urun-talep/gecmis'); setMoreMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)]">
               <History className="h-4 w-4 text-[var(--dashboard-muted)]" /> Geçmiş
             </button>
             <button onClick={() => { router.push('/cihazdan-cikan-kit'); setMoreMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)]">
