@@ -8,6 +8,7 @@ import {
   doc,
   Timestamp,
   updateDoc,
+  where,
   type QueryDocumentSnapshot,
   type DocumentData,
 } from 'firebase/firestore';
@@ -118,20 +119,17 @@ export async function loadPendingCalculationFiles(opts: {
   currentCompanyId?: string | null;
   isSuperAdmin?: boolean;
 }): Promise<PendingCalculationFileDoc[]> {
-  const now = Date.now();
-  const docs = await getScopedDocs(COLLECTION, opts.currentCompanyId, opts.isSuperAdmin);
-  return docs
-    .map(mapPendingDoc)
-    .filter((pending) => {
-      const expiresAt = pending.expiresAt?.toDate ? pending.expiresAt.toDate().getTime() : null;
-      return (
-        pending.kind === opts.kind &&
-        pending.hospitalId === opts.hospitalId &&
-        pending.period === opts.period &&
-        pending.status === 'pending' &&
-        (!expiresAt || expiresAt > now)
-      );
-    });
+  const docs = await getScopedDocs(
+    COLLECTION,
+    opts.currentCompanyId,
+    opts.isSuperAdmin,
+    where('kind', '==', opts.kind),
+    where('hospitalId', '==', opts.hospitalId),
+    where('period', '==', opts.period),
+    where('status', '==', 'pending'),
+    where('expiresAt', '>', Timestamp.now()),
+  );
+  return docs.map(mapPendingDoc);
 }
 
 export async function deletePendingCalculationFiles(ids: string[]): Promise<void> {
@@ -146,14 +144,13 @@ export async function deleteExpiredPendingCalculationFiles(opts?: {
   currentCompanyId?: string | null;
   isSuperAdmin?: boolean;
 }): Promise<number> {
-  const now = Date.now();
-  const docs = await getScopedDocs(COLLECTION, opts?.currentCompanyId, opts?.isSuperAdmin);
-  const expired = docs
-    .map(mapPendingDoc)
-    .filter((pending) => {
-      const expiresAt = pending.expiresAt?.toDate ? pending.expiresAt.toDate().getTime() : null;
-      return pending.status === 'pending' && !!expiresAt && expiresAt <= now;
-    });
-  await Promise.all(expired.map((pending) => deleteDoc(doc(db, COLLECTION, pending.id))));
-  return expired.length;
+  const docs = await getScopedDocs(
+    COLLECTION,
+    opts?.currentCompanyId,
+    opts?.isSuperAdmin,
+    where('status', '==', 'pending'),
+    where('expiresAt', '<=', Timestamp.now()),
+  );
+  await Promise.all(docs.map((docSnap) => deleteDoc(doc(db, COLLECTION, docSnap.id))));
+  return docs.length;
 }
