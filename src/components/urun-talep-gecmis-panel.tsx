@@ -58,14 +58,14 @@ function getStatusBadge(status: string) {
   }
 }
 
-export default function UrunTalepGecmisPanel() {
+export default function UrunTalepGecmisPanel({ depotId }: { depotId?: string } = {}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toast } = useToast();
   const { currentUser, currentUserProfile } = useAuth();
 
   const urlLabId = searchParams.get('labId');
-  const urlDepotId = searchParams.get('depotId');
+  const urlDepotId = depotId || searchParams.get('depotId') || '';
 
   const [loading, setLoading] = useState(true);
   const [orders, setOrders] = useState<RequestHistoryItem[]>([]);

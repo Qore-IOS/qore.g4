@@ -1008,7 +1008,7 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
             </button>
           </PopoverTrigger>
           <PopoverContent className="w-56 p-1" align="end">
-            <button onClick={() => { router.push(isDepotRequestFlow && depotRequestId ? `/urun-talep/gecmis?depotId=${depotRequestId}` : selectedLabId ? `/urun-talep/gecmis?labId=${selectedLabId}` : '/urun-talep/gecmis'); setMoreMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)]">
+            <button onClick={() => { router.push(isDepotRequestFlow && depotRequestId ? `/urun-talep/depo/${depotRequestId}/gecmis` : selectedLabId ? `/urun-talep/gecmis?labId=${selectedLabId}` : '/urun-talep/gecmis'); setMoreMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)]">
               <History className="h-4 w-4 text-[var(--dashboard-muted)]" /> Geçmiş
             </button>
             <button onClick={() => { router.push('/cihazdan-cikan-kit'); setMoreMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)]">

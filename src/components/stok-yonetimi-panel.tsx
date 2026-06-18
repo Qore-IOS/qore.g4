@@ -1676,7 +1676,7 @@ export default function StokYonetimiPanel() {
               <DropdownMenuItem onSelect={() => router.push(`/urun-talep/depo/${selectedDepotId}`)} disabled={!selectedDepotId}>
                 <ClipboardPlus className="h-4 w-4 mr-2" /> Talep Oluştur
               </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => router.push(`/urun-talep/gecmis?depotId=${selectedDepotId}`)} disabled={!selectedDepotId}>
+              <DropdownMenuItem onSelect={() => router.push(`/urun-talep/depo/${selectedDepotId}/gecmis`)} disabled={!selectedDepotId}>
                 <History className="h-4 w-4 mr-2" /> Talep Geçmişi
               </DropdownMenuItem>
             </DropdownMenuContent>
