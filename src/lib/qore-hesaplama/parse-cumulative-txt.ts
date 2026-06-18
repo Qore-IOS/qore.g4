@@ -102,6 +102,27 @@ function mapDelimHeader(cells: string[]): DelimHeader | null {
 
 const delimCell = (cells: string[], i?: number) => (i !== undefined && i < cells.length ? TRIM(cells[i]) : '');
 
+// Cihaz TXT çıktılarında metrik kolonları sağa hizalıdır. Bazı satırlarda
+// özellikle CALIB./CONTROL/RERUN orta kolonlarındaki sayılar başlık başlangıç
+// offsetlerinden birkaç karakter sola taşabildiği için fixed-width token
+// ataması orta kolonları kaydırabilir (örn. CONTROL değeri RERUN'a düşer).
+// TEST + 4 haneli CODE + 6 sayısal metrik yapısı sabit olduğundan veri
+// satırlarında önce satır sonundan sayısal alanları yakalamak daha güvenlidir.
+function parseMetricLine(line: string): Partial<Record<Field, string>> | null {
+  const m = expandTabs(line).match(/^\s*(.+?)\s+(\d{4})\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s+(-?\d+)\s*$/);
+  if (!m) return null;
+  return {
+    test: TRIM(m[1]),
+    code: m[2],
+    routine: m[3],
+    calib: m[4],
+    control: m[5],
+    rerun: m[6],
+    stat: m[7],
+    total: m[8],
+  };
+}
+
 export async function parseCumulativeTxtFiles(files: File[]): Promise<CumulativeRow[]> {
   const out: CumulativeRow[] = [];
 
@@ -165,7 +186,7 @@ export async function parseCumulativeTxtFiles(files: File[]): Promise<Cumulative
           total: delimCell(parts, delimHeader.total),
         };
       } else if (fixedCols) {
-        cells = readCells(expandTabs(raw), fixedCols);
+        cells = parseMetricLine(raw) ?? readCells(expandTabs(raw), fixedCols);
       }
       if (!cells) continue; // başlık görülmeden veri okuma
 
