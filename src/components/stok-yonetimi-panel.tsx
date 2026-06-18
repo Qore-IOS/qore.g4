@@ -32,7 +32,7 @@ import {
   ChevronLeft, ChevronRight, MoreHorizontal, Eye,
   FileDown, ListChecks, BarChart3, ChevronsUpDown, FileText,
   AlertTriangle, FlaskConical, ShieldCheck, TrendingUp, ArrowRight,
-  CheckCircle2, XCircle, Send,
+  CheckCircle2, XCircle, Send, ClipboardPlus,
 } from 'lucide-react';
 import { exportDataToExcel } from '@/lib/utils';
 import { differenceInDays, parse, isValid, compareAsc } from 'date-fns';
@@ -1696,6 +1696,9 @@ export default function StokYonetimiPanel() {
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-[var(--dashboard-muted)]">Operasyon / Sayım</DropdownMenuLabel>
+              <DropdownMenuItem onSelect={() => router.push(`/urun-talep/depo/${selectedDepotId}`)} disabled={!selectedDepotId}>
+                <ClipboardPlus className="h-4 w-4 mr-2" /> Ürün Talep
+              </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => router.push('/depo-sayim')}>
                 <ListChecks className="h-4 w-4 mr-2" /> Marka Sayımı Başlat
               </DropdownMenuItem>
