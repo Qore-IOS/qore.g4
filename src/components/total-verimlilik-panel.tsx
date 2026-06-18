@@ -1753,6 +1753,91 @@ export default function TotalVerimlilikPanel({
     return hospitals.filter(h => poolLabIds.includes(h.id));
   }, [hospitals, poolLabIds]);
 
+
+  const handleImportDeviceCalculationHistory = useCallback(async () => {
+    if (!rows.length) {
+      toast({ title: 'Veri yok', description: 'Önce Total Verimlilik satırlarını oluşturun.', variant: 'destructive' });
+      return;
+    }
+
+    const period = `${String(selectedMonth + 1).padStart(2, '0')}-${selectedYear}`;
+
+    const toMillis = (value: any): number => {
+      const date = value?.toDate ? value.toDate() : value instanceof Date ? value : null;
+      return date ? date.getTime() : 0;
+    };
+
+    try {
+      const [kumulatifDocs, cihazDocs] = await Promise.all([
+        getScopedDocs('kumulatifHesaplamaGecmisi', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc')),
+        getScopedDocs('cihazUstuGecmisi', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc')),
+      ]);
+
+      const cumulativeByLabProduct = new Map<string, number>();
+      const deviceByLabProduct = new Map<string, number>();
+
+      const putLatestValue = (target: Map<string, number>, key: string, value: number) => {
+        if (!target.has(key)) target.set(key, value);
+      };
+
+      kumulatifDocs
+        .map((docSnap) => docSnap.data() as any)
+        .filter((record) => String(record.period || '') === period)
+        .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt))
+        .forEach((record) => {
+          const labId = String(record.hospitalId || '').trim();
+          if (!labId) return;
+          (Array.isArray(record.items) ? record.items : []).forEach((item: any) => {
+            const productId = String(item.productId || '').trim();
+            if (!productId) return;
+            putLatestValue(cumulativeByLabProduct, `${labId}|${productId}`, Number(item.total || 0));
+          });
+        });
+
+      cihazDocs
+        .map((docSnap) => docSnap.data() as any)
+        .filter((record) => String(record.period || '') === period)
+        .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt))
+        .forEach((record) => {
+          const labId = String(record.hospitalId || '').trim();
+          if (!labId) return;
+          (Array.isArray(record.items) ? record.items : []).forEach((item: any) => {
+            const productId = String(item.productId || '').trim();
+            if (!productId) return;
+            putLatestValue(deviceByLabProduct, `${labId}|${productId}`, Number(item.value || 0));
+          });
+        });
+
+      let cumulativeMatches = 0;
+      let deviceMatches = 0;
+
+      setRows((prevRows) => {
+        const updatedRows = prevRows.map((row) => {
+          const key = `${row.labId}|${row.stokKodu}`;
+          const cumulativeValue = cumulativeByLabProduct.get(key);
+          const deviceValue = deviceByLabProduct.get(key);
+          if (cumulativeValue === undefined && deviceValue === undefined) return row;
+          if (cumulativeValue !== undefined) cumulativeMatches += 1;
+          if (deviceValue !== undefined) deviceMatches += 1;
+          return {
+            ...row,
+            ...(cumulativeValue !== undefined ? { kumulatifTotal: cumulativeValue } : {}),
+            ...(deviceValue !== undefined ? { donemSonuCihazUstuTest: deviceValue } : {}),
+          };
+        });
+        return recomputeAllRows(updatedRows, interLabTransfers);
+      });
+
+      toast({
+        title: 'Cihaz bilgileri alındı',
+        description: `${period} dönemi için ${cumulativeMatches} kümülatif ve ${deviceMatches} cihaz üstü satırı güncellendi.`,
+      });
+    } catch (error: any) {
+      totalVerimlilikLogger.error('Cihaz bilgileri geçmişten alınırken hata oluştu', error);
+      toast({ title: 'Veri alınamadı', description: error?.message || 'Kümülatif/cihaz üstü geçmişi okunamadı.', variant: 'destructive' });
+    }
+  }, [rows.length, selectedMonth, selectedYear, currentCompanyId, isSuperAdmin, recomputeAllRows, interLabTransfers, toast]);
+
   // Excel export
   const handleExportExcel = useCallback(() => {
     if (rows.length === 0) return;
@@ -3695,11 +3780,15 @@ export default function TotalVerimlilikPanel({
             disabled={rows.length === 0}
             className="flex items-center gap-1 px-2 h-7 rounded text-[11px] font-medium border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"
           >
-            <FileSpreadsheet className="h-3 w-3" />Excel
+            <FileSpreadsheet className="h-3 w-3" />Veri
             <ChevronDown className="h-3 w-3" />
           </button>
           {openDrop === 'excel' && (
             <div className="absolute top-full left-0 mt-1 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-md shadow-lg min-w-[200px] z-50 p-1">
+              <button onClick={() => { void handleImportDeviceCalculationHistory(); setOpenDrop(null); }} className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[11.5px] hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded">
+                <Download className="h-3 w-3" />Cihaz Bilgilerini Al
+              </button>
+              <div className="h-px bg-zinc-200 dark:bg-zinc-700 my-1" />
               <button onClick={() => { handleExportExcel(); setOpenDrop(null); }} className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[11.5px] hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded">
                 <Download className="h-3 w-3" />Excel'e Aktar
               </button>
