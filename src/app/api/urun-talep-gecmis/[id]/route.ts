@@ -19,7 +19,7 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
 
     const order = snapshot.data();
 
-    if (order?.requestSource !== 'lab_to_depot' && order?.requestSource !== 'lab_to_office') {
+    if (order?.requestSource && order.requestSource !== 'lab_to_depot' && order.requestSource !== 'lab_to_office') {
       return NextResponse.json({ error: 'Bu kayıt ürün talep geçmişine ait değil.' }, { status: 400 });
     }
 
