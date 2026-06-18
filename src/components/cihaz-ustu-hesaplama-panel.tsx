@@ -31,24 +31,34 @@ import {
   CheckCircle,
   Download,
   FileText,
+  History,
+  Save,
   Loader2,
+  Network,
   Plus,
   Trash2,
   UploadCloud,
   X,
   XCircle,
 } from 'lucide-react';
-import { getDocs, orderBy } from 'firebase/firestore';
+import { addDoc, collection, getDocs, orderBy, serverTimestamp } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
+import { db } from '@/lib/firebase';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import type { Hospital } from '@/lib/types';
 import { exportDataToExcel } from '@/lib/utils';
 import { cn } from '@/lib/utils';
+import Link from 'next/link';
 import BackButton from '@/components/BackButton';
 import { parseReagentPdfFiles, type ReagentRow } from '@/lib/qore-hesaplama/parse-reagent';
 import { parseReagentTxtFiles } from '@/lib/qore-hesaplama/parse-reagent-txt';
 import { aggregateReagent, type AggregatedReagentRow } from '@/lib/qore-hesaplama/aggregate';
+import { applyReagentAutoSum } from '@/lib/qore-hesaplama/auto-sum-definitions';
+import { normalizeTestName } from '@/lib/qore-hesaplama/test-name-matcher';
+import { ALL_FILTER_VALUE, type CalculationProductRow, useQoreCalculationProducts } from '@/hooks/useQoreCalculationProducts';
+import { useTestAutoSumDefinitions } from '@/hooks/useTestAutoSumDefinitions';
+import { buildCalculationPeriod, deleteExpiredPendingCalculationFiles, loadPendingCalculationFiles, markPendingCalculationFilesConsumed, pendingPayloadToFile, type PendingCalculationFileDoc } from '@/lib/qore-hesaplama/pending-calculation-files';
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => ({
   value: i,
@@ -62,7 +72,7 @@ const isTxt = (f: File) => f.type.startsWith('text/') || /\.(txt|csv)$/i.test(f.
 
 export default function CihazUstuHesaplamaPanel() {
   const { toast } = useToast();
-  const { currentCompanyId, isSuperAdmin } = useAuth();
+  const { currentCompanyId, currentUser, currentUserProfile, isSuperAdmin } = useAuth();
 
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [loadingHospitals, setLoadingHospitals] = useState(true);
@@ -71,10 +81,17 @@ export default function CihazUstuHesaplamaPanel() {
   const [year, setYear] = useState(new Date().getFullYear());
 
   const [files, setFiles] = useState<File[]>([]);
+  const [pendingDocs, setPendingDocs] = useState<PendingCalculationFileDoc[]>([]);
+  const [loadedPendingIds, setLoadedPendingIds] = useState<string[]>([]);
+  const [isLoadingPending, setIsLoadingPending] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
   const [isParsing, setIsParsing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [rows, setRows] = useState<AggregatedReagentRow[]>([]);
+  const [isSavingHistory, setIsSavingHistory] = useState(false);
+  const [rows, setRows] = useState<Array<CalculationProductRow & AggregatedReagentRow & { matchedTests: string[] }>>([]);
+  const [unmatchedTests, setUnmatchedTests] = useState<AggregatedReagentRow[]>([]);
+  const [brandFilter, setBrandFilter] = useState(ALL_FILTER_VALUE);
+  const [productGroupFilter, setProductGroupFilter] = useState(ALL_FILTER_VALUE);
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [anchor, setAnchor] = useState<string | null>(null);
@@ -85,6 +102,76 @@ export default function CihazUstuHesaplamaPanel() {
     () => hospitals.find((h) => h.id === hospitalId)?.name || '',
     [hospitals, hospitalId]
   );
+
+  const { definitions: autoSumDefinitions } = useTestAutoSumDefinitions();
+
+  const { rows: scopedProducts, brandOptions, productGroupOptions, isLoadingScope, scopeError, scopeLabel, scopedLabIds } = useQoreCalculationProducts({
+    hospitalId,
+    hospitals,
+    currentCompanyId,
+    isSuperAdmin,
+  });
+
+  const filteredProducts = useMemo(() => scopedProducts.filter((product) => (
+    (brandFilter === ALL_FILTER_VALUE || product.marka === brandFilter) &&
+    (productGroupFilter === ALL_FILTER_VALUE || product.urunGrubu === productGroupFilter)
+  )), [scopedProducts, brandFilter, productGroupFilter]);
+
+  const selectedPeriod = useMemo(() => buildCalculationPeriod(month, year), [month, year]);
+
+  const refreshPendingDocs = useCallback(async () => {
+    if (!hospitalId) {
+      setPendingDocs([]);
+      return;
+    }
+    setIsLoadingPending(true);
+    try {
+      await deleteExpiredPendingCalculationFiles({ currentCompanyId, isSuperAdmin });
+      const docs = await loadPendingCalculationFiles({
+        kind: 'cihazUstu',
+        hospitalId,
+        period: selectedPeriod,
+        currentCompanyId,
+        isSuperAdmin,
+      });
+      setPendingDocs(docs);
+    } catch (err) {
+      console.error('Pending calculation files could not be loaded:', err);
+      setPendingDocs([]);
+    } finally {
+      setIsLoadingPending(false);
+    }
+  }, [hospitalId, selectedPeriod, currentCompanyId, isSuperAdmin]);
+
+  useEffect(() => {
+    refreshPendingDocs();
+  }, [refreshPendingDocs]);
+
+  const usePendingFiles = useCallback(async () => {
+    if (pendingDocs.length === 0) return;
+    setIsLoadingPending(true);
+    try {
+      const restored = (await Promise.all(pendingDocs.flatMap((pending) => pending.files).map(pendingPayloadToFile)))
+        .filter((file) => isPdf(file) || isTxt(file));
+      setFiles(restored);
+      setLoadedPendingIds(pendingDocs.map((pending) => pending.id));
+      setRows([]);
+      setUnmatchedTests([]);
+      setError(null);
+      toast({ title: 'Bekleyen dosyalar yüklendi', description: `${restored.length} dosya ayrıştırmaya hazır.` });
+    } catch (err: any) {
+      toast({ title: 'Bekleyen dosyalar açılamadı', description: err?.message || 'Dosya verisi okunamadı.', variant: 'destructive' });
+    } finally {
+      setIsLoadingPending(false);
+    }
+  }, [pendingDocs, toast]);
+
+  const visibleRows = rows.length > 0 ? rows : filteredProducts.map((product) => ({
+    ...product,
+    test: product.testAdi || product.stokKodu,
+    available: 0,
+    matchedTests: [],
+  }));
 
   useEffect(() => {
     (async () => {
@@ -101,7 +188,8 @@ export default function CihazUstuHesaplamaPanel() {
   }, [currentCompanyId, isSuperAdmin]);
 
   const hasComputed = rows.length > 0;
-  const canParse = files.length > 0 && !!hospitalId && !isParsing;
+  const availableUnmatchedProducts = useMemo(() => rows.filter((row) => row.matchedTests.length === 0), [rows]);
+  const canParse = files.length > 0 && !!hospitalId && filteredProducts.length > 0 && !isParsing && !isLoadingScope;
 
   function cancelCombine() {
     setAnchor(null);
@@ -112,7 +200,9 @@ export default function CihazUstuHesaplamaPanel() {
     const accepted = incoming.filter((f) => isPdf(f) || isTxt(f));
     if (!accepted.length) return;
     setFiles((prev) => [...prev, ...accepted]);
+    setLoadedPendingIds([]);
     setRows([]);
+    setUnmatchedTests([]);
     setError(null);
     cancelCombine();
   }, []);
@@ -122,6 +212,7 @@ export default function CihazUstuHesaplamaPanel() {
       const next = prev.filter((_, i) => i !== index);
       if (next.length === 0) {
         setRows([]);
+        setUnmatchedTests([]);
         cancelCombine();
       }
       return next;
@@ -136,6 +227,7 @@ export default function CihazUstuHesaplamaPanel() {
     setError(null);
     setIsParsing(true);
     setRows([]);
+    setUnmatchedTests([]);
     cancelCombine();
     try {
       const pdfs = files.filter(isPdf);
@@ -145,11 +237,34 @@ export default function CihazUstuHesaplamaPanel() {
         parseReagentTxtFiles(txts),
       ]);
       const merged: ReagentRow[] = [...pdfRows, ...txtRows];
-      const aggregated = aggregateReagent(merged);
-      setRows(aggregated);
+      const aggregated = applyReagentAutoSum(aggregateReagent(merged), autoSumDefinitions);
+      const byTest = new Map<string, AggregatedReagentRow[]>();
+      aggregated.forEach((row) => {
+        const key = normalizeTestName(row.test);
+        byTest.set(key, [...(byTest.get(key) ?? []), row]);
+      });
+      const usedTestKeys = new Set<string>();
+      const matched = filteredProducts.map((product) => {
+        const productTestKey = normalizeTestName(product.testAdi);
+        const matches = byTest.get(productTestKey) ?? [];
+        if (matches.length > 0) usedTestKeys.add(productTestKey);
+        return {
+          ...product,
+          test: product.testAdi || product.stokKodu,
+          available: matches.reduce((sum, match) => sum + (match.available || 0), 0),
+          matchedTests: matches.map((match) => match.test),
+        };
+      });
+      setRows(matched);
+      setUnmatchedTests(aggregated.filter((row) => !usedTestKeys.has(normalizeTestName(row.test))));
       if (aggregated.length === 0) {
         setError('Geçerli veri satırı çıkarılamadı. Dosya içeriğini ve biçimini kontrol edin.');
       } else {
+        if (loadedPendingIds.length > 0) {
+          await markPendingCalculationFilesConsumed(loadedPendingIds);
+          setLoadedPendingIds([]);
+          refreshPendingDocs();
+        }
         // Tarama sonrası dosyalar sistemde tutulmaz.
         setFiles([]);
       }
@@ -192,9 +307,60 @@ export default function CihazUstuHesaplamaPanel() {
     cancelCombine();
   }
 
+  function assignUnmatchedTest(testName: string, stokKodu: string) {
+    const source = unmatchedTests.find((item) => item.test === testName);
+    if (!source || !stokKodu) return;
+
+    setRows((prev) => prev.map((row) => row.stokKodu === stokKodu
+      ? {
+          ...row,
+          test: row.testAdi || row.stokKodu,
+          available: source.available,
+          matchedTests: [...row.matchedTests, source.test],
+        }
+      : row
+    ));
+    setUnmatchedTests((prev) => prev.filter((item) => item.test !== testName));
+  }
+
+
+  async function handleSaveHistory() {
+    if (!rows.length) return;
+    setIsSavingHistory(true);
+    try {
+      const period = `${String(month + 1).padStart(2, '0')}-${year}`;
+      await addDoc(collection(db, 'cihazUstuGecmisi'), {
+        companyId: currentCompanyId || '__legacy__',
+        hospitalId,
+        hospitalName,
+        scopedLabIds,
+        scopeLabel: scopeLabel || hospitalName,
+        month: month + 1,
+        year,
+        period,
+        rowCount: rows.length,
+        items: rows.map((r) => ({
+          productId: r.stokKodu,
+          productName: r.stokAdi,
+          testName: r.testAdi,
+          matchedTests: r.matchedTests,
+          value: r.available || 0,
+        })),
+        createdAt: serverTimestamp(),
+        createdByUid: currentUser?.uid || null,
+        createdByName: currentUserProfile?.name || currentUser?.email || null,
+      });
+      toast({ title: 'Kaydedildi', description: `${period} dönemi cihaz üstü hesaplama geçmişe kaydedildi.` });
+    } catch (e: any) {
+      toast({ title: 'Kayıt başarısız', description: e?.message || 'Geçmiş kaydı oluşturulamadı.', variant: 'destructive' });
+    } finally {
+      setIsSavingHistory(false);
+    }
+  }
+
   function handleExport() {
     if (!rows.length) return;
-    const data = rows.map((r) => ({ Test: r.test, 'Toplam Kullanılabilir': r.available }));
+    const data = rows.map((r) => ({ 'Stok Kodu': r.stokKodu, 'Stok Adı': r.stokAdi, 'Test Adı': r.testAdi, 'Eşleşen Dosya Testi': r.matchedTests.join(', '), 'Toplam Kullanılabilir': r.available }));
     const fname = `CihazUstu_${hospitalName || 'Lab'}_${String(month + 1).padStart(2, '0')}-${year}`;
     exportDataToExcel(data, fname, 'Cihaz Üstü', toast);
   }
@@ -226,7 +392,7 @@ export default function CihazUstuHesaplamaPanel() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="col-span-1 md:col-span-2">
               <label className="text-sm font-medium">Laboratuvar</label>
-              <Select value={hospitalId} onValueChange={setHospitalId} disabled={loadingHospitals}>
+              <Select value={hospitalId} onValueChange={(v) => { setHospitalId(v); setRows([]); setUnmatchedTests([]); }} disabled={loadingHospitals}>
                 <SelectTrigger className="mt-1">
                   <SelectValue placeholder={loadingHospitals ? 'Yükleniyor...' : 'Seçiniz'} />
                 </SelectTrigger>
@@ -239,7 +405,7 @@ export default function CihazUstuHesaplamaPanel() {
             </div>
             <div>
               <label className="text-sm font-medium">Ay</label>
-              <Select value={String(month)} onValueChange={(v) => setMonth(Number(v))}>
+              <Select value={String(month)} onValueChange={(v) => { setMonth(Number(v)); setRows([]); setUnmatchedTests([]); }}>
                 <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {MONTHS.map((m) => (
@@ -250,12 +416,53 @@ export default function CihazUstuHesaplamaPanel() {
             </div>
             <div>
               <label className="text-sm font-medium">Yıl</label>
-              <Select value={String(year)} onValueChange={(v) => setYear(Number(v))}>
+              <Select value={String(year)} onValueChange={(v) => { setYear(Number(v)); setRows([]); setUnmatchedTests([]); }}>
                 <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {YEARS.map((y) => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}
                 </SelectContent>
               </Select>
+            </div>
+          </div>
+
+          {pendingDocs.length > 0 && (
+            <Alert className="border-amber-200 bg-amber-50 text-amber-900">
+              <FileText className="h-4 w-4" />
+              <AlertTitle>Sayım ekranından gelen bekleyen dosya var</AlertTitle>
+              <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <span>{selectedPeriod} döneminde bu laboratuvar için {pendingDocs.reduce((sum, pending) => sum + pending.files.length, 0)} cihaz üstü dosyası hesaplamaya hazır bekliyor.</span>
+                <Button size="sm" variant="outline" onClick={usePendingFiles} disabled={isLoadingPending}>
+                  {isLoadingPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Dosyaları Kullan
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 rounded-xl border bg-muted/20 p-4">
+            <div>
+              <label className="text-sm font-medium">Marka Filtresi</label>
+              <Select value={brandFilter} onValueChange={(v) => { setBrandFilter(v); setRows([]); setUnmatchedTests([]); }}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL_FILTER_VALUE}>Tüm Markalar</SelectItem>
+                  {brandOptions.map((brand) => <SelectItem key={brand} value={brand}>{brand}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <label className="text-sm font-medium">Ürün Grubu Filtresi</label>
+              <Select value={productGroupFilter} onValueChange={(v) => { setProductGroupFilter(v); setRows([]); setUnmatchedTests([]); }}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ALL_FILTER_VALUE}>Tüm Ürün Grupları</SelectItem>
+                  {productGroupOptions.map((group) => <SelectItem key={group} value={group}>{group}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col justify-end text-sm text-muted-foreground">
+              <span>{isLoadingScope ? 'Ürünler yükleniyor…' : `${filteredProducts.length} ürün listeleniyor`}</span>
+              {scopeLabel && <span>Ortak stok havuzu: {scopeLabel}</span>}
             </div>
           </div>
 
@@ -305,6 +512,12 @@ export default function CihazUstuHesaplamaPanel() {
           )}
 
           <div className="flex flex-wrap gap-3">
+            <Button asChild variant="outline">
+              <Link href="/oto-toplam-tanimlari"><Network className="mr-2 h-4 w-4" /> Oto Toplam Tanımları</Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link href="/cihaz-ustu-hesaplama/gecmis"><History className="mr-2 h-4 w-4" /> Geçmiş</Link>
+            </Button>
             <Button onClick={handleParse} disabled={!canParse}>
               {isParsing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Activity className="mr-2 h-4 w-4" />}
               {files.length > 0 ? `${files.length} Dosyayı Ayrıştır` : 'Ayrıştır'}
@@ -314,12 +527,22 @@ export default function CihazUstuHesaplamaPanel() {
                 <Button variant="outline" onClick={removeZeroRows} disabled={!hasZeroRows || combineMode}>
                   <Trash2 className="mr-2 h-4 w-4" /> 0 Olanları Kaldır
                 </Button>
+                <Button variant="outline" onClick={handleSaveHistory} disabled={combineMode || isSavingHistory}>
+                  {isSavingHistory ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />} Kaydet
+                </Button>
                 <Button variant="outline" onClick={handleExport} disabled={combineMode}>
                   <Download className="mr-2 h-4 w-4" /> Excel'e Aktar
                 </Button>
               </>
             )}
           </div>
+
+          {scopeError && (
+            <Alert variant="destructive">
+              <AlertTitle>Hata</AlertTitle>
+              <AlertDescription>{scopeError}</AlertDescription>
+            </Alert>
+          )}
 
           {error && (
             <Alert variant="destructive">
@@ -328,10 +551,41 @@ export default function CihazUstuHesaplamaPanel() {
             </Alert>
           )}
 
-          {hasComputed && (
+          {unmatchedTests.length > 0 && (
+            <Alert>
+              <AlertTitle>Eşleşmeyen testler bulundu</AlertTitle>
+              <AlertDescription className="space-y-3 pt-2">
+                <p>PDF/TXT içinden gelen ama seçili lab ürün listesinde otomatik eşleşmeyen testleri, boşta kalan ürünlerden birine aktarabilirsiniz.</p>
+                <div className="space-y-2">
+                  {unmatchedTests.map((item) => (
+                    <div key={item.test} className="grid grid-cols-1 md:grid-cols-[1fr_1.3fr] gap-2 items-center rounded-md border bg-background/60 p-2">
+                      <div className="text-sm">
+                        <div className="font-medium">{item.test}</div>
+                        <div className="text-xs text-muted-foreground">Toplam Kullanılabilir: {item.available}</div>
+                      </div>
+                      <Select onValueChange={(stokKodu) => assignUnmatchedTest(item.test, stokKodu)} disabled={availableUnmatchedProducts.length === 0}>
+                        <SelectTrigger>
+                          <SelectValue placeholder={availableUnmatchedProducts.length ? 'Boşta kalan ürün/test seçin' : 'Boşta kalan ürün yok'} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {availableUnmatchedProducts.map((product) => (
+                            <SelectItem key={product.stokKodu} value={product.stokKodu}>
+                              {product.stokKodu} • {product.stokAdi} • {product.testAdi || 'Test adı yok'}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ))}
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {(visibleRows.length > 0) && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Sonuçlar — Test • Toplam Kullanılabilir ({rows.length} test)</CardTitle>
+                <CardTitle className="text-base">Ürün Bazlı Cihaz Üstü Eşleşmeler ({visibleRows.length} ürün)</CardTitle>
                 <CardDescription>
                   {hospitalName ? `${hospitalName} – ${MONTHS[month].label} ${year}` : `${MONTHS[month].label} ${year}`}
                   {combineMode && ' • Birleştirme modu: ana teste eklenecek testleri seçin.'}
@@ -343,13 +597,16 @@ export default function CihazUstuHesaplamaPanel() {
                     <TableHeader className="sticky top-0 bg-background z-10">
                       <TableRow>
                         <TableHead className="w-10" />
-                        <TableHead>Test</TableHead>
+                        <TableHead>Stok Kodu</TableHead>
+                        <TableHead>Stok Adı</TableHead>
+                        <TableHead>Test Adı</TableHead>
+                        <TableHead>Eşleşen Dosya Testi</TableHead>
                         <TableHead className="text-right">Toplam Kullanılabilir</TableHead>
                         <TableHead className="w-28" />
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {rows.map((r) => {
+                      {visibleRows.map((r) => {
                         const isAnchor = combineMode && anchor === r.test;
                         const isPickable = combineMode && !isAnchor;
                         const isPicked = picked.has(r.test);
@@ -375,7 +632,10 @@ export default function CihazUstuHesaplamaPanel() {
                                 <Plus className="h-4 w-4" />
                               </Button>
                             </TableCell>
-                            <TableCell className="font-medium">{r.test}</TableCell>
+                            <TableCell className="font-medium">{r.stokKodu}</TableCell>
+                            <TableCell>{r.stokAdi}</TableCell>
+                            <TableCell>{r.testAdi || '—'}</TableCell>
+                            <TableCell className="text-muted-foreground">{r.matchedTests.join(', ') || '—'}</TableCell>
                             <TableCell className="text-right font-semibold">{r.available}</TableCell>
                             <TableCell className="text-right">
                               {isAnchor && (

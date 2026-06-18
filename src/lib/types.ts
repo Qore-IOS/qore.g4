@@ -1169,6 +1169,8 @@ export interface TestDefinitionGlobal {
   sutTestAdi: string;
   /** Bu teste bağlı bir veya birden çok ürün stok kodu */
   linkedStokKodlari: string[];
+  /** Test counter başlangıç/güncel değeri */
+  counterValue?: number;
   /** SUT karşılığı hak ediş tutarı (TL) */
   hakEdisMiktari: number;
   /** Hak ediş tutarının para birimi (varsayılan TRY) */
