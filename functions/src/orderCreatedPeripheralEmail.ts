@@ -32,6 +32,8 @@ type OrderDoc = {
   createdById?: string;
   requestSource?: string;
   isPeripheral?: boolean;
+  isDepotRequest?: boolean;
+  requestedManagerEmails?: string[];
   urgency?: 'normal' | 'acil' | 'cok_acil';
   note?: string;
 };
@@ -362,7 +364,7 @@ async function buildExcelBuffer(orderId: string, order: OrderDoc, itemInfoMap?: 
   });
 
   const buffer = await workbook.xlsx.writeBuffer();
-  return buffer as Buffer;
+  return buffer as unknown as Buffer;
 }
 
 async function resolveLogisticsRecipients(): Promise<{ emails: string[]; debug: Record<string, unknown> }> {
@@ -399,7 +401,8 @@ export const onPeripheralOrderCreatedSendMail = functions
     const order = snap.data() as OrderDoc;
 
     const isPeripheralRequest =
-      order?.isPeripheral === true || order?.requestSource === 'lab_to_office';
+      order?.isPeripheral === true || order?.requestSource === 'lab_to_office' || order?.requestSource === 'depot_to_office';
+    const isDepotRequest = order?.requestSource === 'depot_to_office' || order?.isDepotRequest === true;
 
     const logEntry: Record<string, unknown> = {
       type: 'peripheral_order_email',
@@ -407,6 +410,7 @@ export const onPeripheralOrderCreatedSendMail = functions
       labId: order?.labId || null,
       labName: order?.kurumAdi || null,
       isPeripheral: order?.isPeripheral ?? null,
+      isDepotRequest,
       requestSource: order?.requestSource ?? null,
       itemsCount: (order?.items || []).length,
       urgency: order?.urgency ?? null,
@@ -463,12 +467,22 @@ export const onPeripheralOrderCreatedSendMail = functions
 
       logEntry.orderGroups = Array.from(new Set(Array.from(itemGroupMap.values())));
 
-      // Build per-user filtered recipient list
-      const recipients = users.map((user) => {
-        const groupNames = resolveUserGroupNames(user, labGroupNamesById);
-        const filtered = filterItemsForUserGroups(orderItems, itemGroupMap, groupNames);
-        return { user, groupNames, filtered };
-      });
+      // Build per-user filtered recipient list. Depot-origin requests are sent
+      // only to the explicitly selected managers and include all request items.
+      const selectedEmails = Array.isArray((order as any).requestedManagerEmails)
+        ? ((order as any).requestedManagerEmails as unknown[]).map(e => String(e || '').trim().toLowerCase()).filter(Boolean)
+        : [];
+      const recipients = isDepotRequest && selectedEmails.length > 0
+        ? selectedEmails.map((email, index) => ({
+            user: { uid: `selected-${index}`, email, name: email, role: 'selected_manager', assignedLabGroups: [] } as any,
+            groupNames: new Set<string>(),
+            filtered: orderItems,
+          }))
+        : users.map((user) => {
+            const groupNames = resolveUserGroupNames(user, labGroupNamesById);
+            const filtered = filterItemsForUserGroups(orderItems, itemGroupMap, groupNames);
+            return { user, groupNames, filtered };
+          });
 
       const sendable = recipients.filter((r) => r.user.email && r.filtered.length > 0);
       logEntry.recipients = sendable.map((r) => r.user.email);
@@ -485,7 +499,7 @@ export const onPeripheralOrderCreatedSendMail = functions
       steps.push(`Alıcı sorgusu: OK (${sendable.length} alıcı eşleşti)`);
 
       const senderEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
-      const labName = order.kurumAdi || 'Bilinmeyen Laboratuvar';
+      const labName = order.kurumAdi || (isDepotRequest ? 'Bilinmeyen Depo' : 'Bilinmeyen Laboratuvar');
       const urgencyKey = (order.urgency && URGENCY_META[order.urgency] ? order.urgency : 'normal') as keyof typeof URGENCY_META;
       const urgencyMeta = URGENCY_META[urgencyKey];
       const noteText = (order.note || '').trim();
@@ -528,12 +542,12 @@ export const onPeripheralOrderCreatedSendMail = functions
           await transporter.sendMail({
             from: senderEmail,
             to: r.user.email!,
-            subject: `${subjectPrefix}[Perifer Talep] ${labName} — ${filteredTotalQty} adet (${urgencyMeta.label})`,
+            subject: `${subjectPrefix}[${isDepotRequest ? 'Depo Talep' : 'Perifer Talep'}] ${labName} — ${filteredTotalQty} adet (${urgencyMeta.label})`,
             text:
-              `Perifer laboratuvardan yeni sipariş talebi açıldı.\n` +
+              `${isDepotRequest ? 'Depodan' : 'Perifer laboratuvardan'} yeni sipariş talebi açıldı.\n` +
               `Aciliyet: ${urgencyMeta.label}\n` +
               `Sipariş ID: ${orderId}\n` +
-              `Laboratuvar: ${labName}\n` +
+              `${isDepotRequest ? 'Depo' : 'Laboratuvar'}: ${labName}\n` +
               `Talep Eden: ${order.createdBy || '-'}\n` +
               `Atanan Grup(lar): ${groupsLine}\n` +
               `Kalem Sayısı: ${filteredItemCount}\n` +
@@ -542,14 +556,14 @@ export const onPeripheralOrderCreatedSendMail = functions
               `\nDetaylar ekteki Excel dosyasındadır.`,
             html: `
               <div style="font-family: -apple-system, Segoe UI, Roboto, sans-serif; color:#0f172a;">
-                <h2 style="margin:0 0 8px 0; color:#1e293b;">Perifer Laboratuvar Ürün Talebi</h2>
+                <h2 style="margin:0 0 8px 0; color:#1e293b;">${isDepotRequest ? 'Depo Ürün Talebi' : 'Perifer Laboratuvar Ürün Talebi'}</h2>
                 <div style="display:inline-block; margin:0 0 14px 0; padding:6px 14px; border-radius:999px; background:${urgencyMeta.emailBg}; color:${urgencyMeta.emailText}; border:2px solid ${urgencyMeta.emailBadgeBorder}; font-weight:bold; font-size:13px; letter-spacing:0.5px;">
                   ACİLİYET: ${urgencyMeta.label.toLocaleUpperCase('tr-TR')}
                 </div>
-                <p style="margin:0 0 12px 0;">Aşağıdaki perifer laboratuvardan size atanan grup(lar)a ait yeni bir ürün talebi açıldı:</p>
+                <p style="margin:0 0 12px 0;">${isDepotRequest ? 'Aşağıdaki depodan size iletilen yeni bir ürün talebi açıldı:' : 'Aşağıdaki perifer laboratuvardan size atanan grup(lar)a ait yeni bir ürün talebi açıldı:'}</p>
                 <table style="border-collapse:collapse; font-size:14px;">
                   <tr><td style="padding:6px 12px; background:#e0f2fe; border:1px solid #94a3b8;"><b>Sipariş ID</b></td><td style="padding:6px 12px; border:1px solid #94a3b8;">${orderId}</td></tr>
-                  <tr><td style="padding:6px 12px; background:#e0e7ff; border:1px solid #94a3b8;"><b>Laboratuvar</b></td><td style="padding:6px 12px; border:1px solid #94a3b8;">${labName}</td></tr>
+                  <tr><td style="padding:6px 12px; background:#e0e7ff; border:1px solid #94a3b8;"><b>${isDepotRequest ? 'Depo' : 'Laboratuvar'}</b></td><td style="padding:6px 12px; border:1px solid #94a3b8;">${labName}</td></tr>
                   <tr><td style="padding:6px 12px; background:#fef3c7; border:1px solid #94a3b8;"><b>Talep Eden</b></td><td style="padding:6px 12px; border:1px solid #94a3b8;">${order.createdBy || '-'}</td></tr>
                   <tr><td style="padding:6px 12px; background:#ccfbf1; border:1px solid #94a3b8;"><b>Atanan Grup(lar)</b></td><td style="padding:6px 12px; border:1px solid #94a3b8;">${groupsLine}</td></tr>
                   <tr><td style="padding:6px 12px; background:${urgencyMeta.emailBg}; border:1px solid #94a3b8;"><b>Aciliyet</b></td><td style="padding:6px 12px; border:1px solid #94a3b8; color:${urgencyMeta.emailText}; font-weight:bold;">${urgencyMeta.label}</td></tr>
@@ -561,7 +575,7 @@ export const onPeripheralOrderCreatedSendMail = functions
               </div>`,
             attachments: [
               {
-                filename: `perifer_siparis_${orderId}.xlsx`,
+                filename: `${isDepotRequest ? 'depo' : 'perifer'}_siparis_${orderId}.xlsx`,
                 content: excelBuffer,
                 contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
               },
