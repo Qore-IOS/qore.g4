@@ -1714,6 +1714,9 @@ export default function StokYonetimiPanel() {
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-[var(--dashboard-muted)]">Operasyon / Sayım</DropdownMenuLabel>
+              <DropdownMenuItem onSelect={() => router.push(`/urun-talep/depo/${selectedDepotId}`)} disabled={!selectedDepotId}>
+                <ClipboardPlus className="h-4 w-4 mr-2" /> Ürün Talep
+              </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => router.push('/depo-sayim')}>
                 <ListChecks className="h-4 w-4 mr-2" /> Marka Sayımı Başlat
               </DropdownMenuItem>
