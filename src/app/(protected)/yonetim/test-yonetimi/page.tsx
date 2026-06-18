@@ -129,8 +129,8 @@ export default function HakEdisPage() {
       return;
     }
     const hakEdis = parseHakEdisAmount(newHakEdisMiktari);
-    if (isNaN(hakEdis) || hakEdis <= 0) {
-      toast({ title: 'Geçersiz Değer', description: 'Hak ediş miktarı geçerli bir sayı olmalı.', variant: 'destructive' });
+    if (isNaN(hakEdis) || hakEdis < 0) {
+      toast({ title: 'Geçersiz Değer', description: 'Hak ediş miktarı 0 veya pozitif bir sayı olmalı.', variant: 'destructive' });
       return;
     }
 
@@ -211,7 +211,7 @@ export default function HakEdisPage() {
         const hakEdis = parseHakEdisAmount(r[2]);
         const stokKodlari = parseLinkedStokKodlariFromCells(r.slice(3));
 
-        if (!sutKodu || !sutTestAdi || isNaN(hakEdis) || hakEdis <= 0) {
+        if (!sutKodu || !sutTestAdi || isNaN(hakEdis) || hakEdis < 0) {
           skipped++;
           skipReasons.push(`${sutKodu || '(boş)'}: geçersiz değer`);
           continue;
