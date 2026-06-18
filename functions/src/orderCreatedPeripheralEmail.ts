@@ -25,6 +25,8 @@ type OrderItem = {
 type OrderDoc = {
   id?: string;
   labId?: string;
+  depotId?: string;
+  depotName?: string;
   kurumAdi?: string;
   items?: OrderItem[];
   createdAt?: admin.firestore.Timestamp;
@@ -92,36 +94,52 @@ function getTransporter() {
 }
 
 async function buildExcelBuffer(orderId: string, order: OrderDoc, itemInfoMap?: Map<string, ProductInfo>): Promise<Buffer> {
+  const isDepotRequest = order.requestSource === 'depot_to_office' || order.isDepotRequest === true;
   const labId = order.labId;
+  const depotId = order.depotId;
+  const stockOwnerId = isDepotRequest ? depotId : labId;
+  const stockOwnerCollection = isDepotRequest ? 'depots' : 'hospitals';
+  const stockOwnerLabel = isDepotRequest ? 'depo' : 'lab';
 
-  // 1. Fetch minMaxRules (max amount per stokKodu)
+  // 1. Fetch minMaxRules (max amount per stokKodu). Depot-origin requests must
+  // use depots/{depotId}/minMaxRules so the "30 Günlük Max" column mirrors the
+  // selected depot's stock-management configuration.
   const rulesMap: Record<string, number> = {};
-  if (labId) {
+  if (stockOwnerId) {
     try {
-      const rulesSnap = await db.collection('hospitals').doc(labId).collection('minMaxRules').get();
+      const rulesSnap = await db.collection(stockOwnerCollection).doc(stockOwnerId).collection('minMaxRules').get();
       rulesSnap.forEach(doc => {
         const data = doc.data();
-        if (data.stokKodu && data.max !== undefined) {
-          rulesMap[data.stokKodu] = Number(data.max);
+        const stokKodu = data.stokKodu || doc.id;
+        if (stokKodu && data.max !== undefined) {
+          rulesMap[stokKodu] = Number(data.max);
         }
       });
     } catch (err) {
-      logger.error(`Error fetching minMaxRules for lab ${labId}:`, err);
+      logger.error(`Error fetching minMaxRules for ${stockOwnerLabel} ${stockOwnerId}:`, err);
     }
   }
 
-  // 2. Fetch depoStok for lab stock and closest miad lot count
-  const labStokMap: Record<string, number> = {};
+  // 2. Fetch depoStok for current stock and closest miad lot count. Lab requests
+  // continue to read shipped stock by hedefKurumId; depot requests read the
+  // unshipped stock physically in the selected depot.
+  const stockMap: Record<string, number> = {};
   const closestMiadLotMap: Record<string, number> = {};
 
-  if (labId) {
+  if (stockOwnerId) {
     try {
-      const depoStokSnap = await db
-        .collection('depoStok')
-        .where('isShipped', '==', true)
-        .where('hedefKurumId', '==', labId)
-        .get();
+      let depoStokQuery: FirebaseFirestore.Query = db.collection('depoStok');
+      if (isDepotRequest) {
+        depoStokQuery = depoStokQuery
+          .where('depotId', '==', stockOwnerId)
+          .where('isShipped', '==', false);
+      } else {
+        depoStokQuery = depoStokQuery
+          .where('isShipped', '==', true)
+          .where('hedefKurumId', '==', stockOwnerId);
+      }
 
+      const depoStokSnap = await depoStokQuery.get();
       const items = depoStokSnap.docs.map(d => d.data());
       const groupedByStok: Record<string, any[]> = {};
 
@@ -132,7 +150,7 @@ async function buildExcelBuffer(orderId: string, order: OrderDoc, itemInfoMap?: 
       });
 
       for (const [stokKodu, groupItems] of Object.entries(groupedByStok)) {
-        labStokMap[stokKodu] = groupItems.length;
+        stockMap[stokKodu] = groupItems.length;
 
         const itemsWithMiad = groupItems.filter(i => i.miad);
         if (itemsWithMiad.length > 0) {
@@ -157,7 +175,7 @@ async function buildExcelBuffer(orderId: string, order: OrderDoc, itemInfoMap?: 
         }
       }
     } catch (err) {
-      logger.error(`Error fetching depoStok for lab ${labId}:`, err);
+      logger.error(`Error fetching depoStok for ${stockOwnerLabel} ${stockOwnerId}:`, err);
     }
   }
 
@@ -166,14 +184,14 @@ async function buildExcelBuffer(orderId: string, order: OrderDoc, itemInfoMap?: 
   workbook.creator = 'INV-zen';
   workbook.created = new Date();
 
-  const sheet = workbook.addWorksheet('Perifer Talep', {
+  const sheet = workbook.addWorksheet(isDepotRequest ? 'Depo Talep' : 'Perifer Talep', {
     properties: { defaultRowHeight: 18 },
   });
 
   const createdAtText = order.createdAt?.toDate?.()
     ? order.createdAt.toDate().toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' })
     : new Date().toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' });
-  const labName = order.kurumAdi || '-';
+  const labName = order.kurumAdi || order.depotName || '-';
   const createdBy = order.createdBy || '-';
   const totalQty = (order.items || []).reduce((s, it) => s + Number(it.adet || 0), 0);
   const urgencyKey = (order.urgency && URGENCY_META[order.urgency] ? order.urgency : 'normal') as keyof typeof URGENCY_META;
@@ -183,7 +201,7 @@ async function buildExcelBuffer(orderId: string, order: OrderDoc, itemInfoMap?: 
   // --- Title row (merged across columns) ---
   sheet.mergeCells('A1:G1');
   const titleCell = sheet.getCell('A1');
-  titleCell.value = 'PERİFER LABORATUVAR ÜRÜN TALEBİ';
+  titleCell.value = isDepotRequest ? 'DEPO ÜRÜN TALEBİ' : 'PERİFER LABORATUVAR ÜRÜN TALEBİ';
   titleCell.font = { bold: true, size: 16, color: { argb: 'FFFFFFFF' } };
   titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
   titleCell.fill = {
@@ -206,8 +224,8 @@ async function buildExcelBuffer(orderId: string, order: OrderDoc, itemInfoMap?: 
   };
   const infoRows: InfoRow[] = [
     { label: 'Sipariş ID',     value: orderId,                 labelFill: 'FFE0F2FE', valueFill: 'FFFFFFFF' },
-    { label: 'Laboratuvar',    value: labName,                 labelFill: 'FFE0E7FF', valueFill: 'FFFFFFFF' },
-    { label: 'Laboratuvar ID', value: labId || '-',            labelFill: 'FFCCFBF1', valueFill: 'FFFFFFFF' },
+    { label: isDepotRequest ? 'Depo' : 'Laboratuvar', value: labName, labelFill: 'FFE0E7FF', valueFill: 'FFFFFFFF' },
+    { label: isDepotRequest ? 'Depo ID' : 'Laboratuvar ID', value: stockOwnerId || '-', labelFill: 'FFCCFBF1', valueFill: 'FFFFFFFF' },
     { label: 'Talep Eden',     value: createdBy,               labelFill: 'FFFEF3C7', valueFill: 'FFFFFFFF' },
     { label: 'Tarih',          value: createdAtText,           labelFill: 'FFFEE2E2', valueFill: 'FFFFFFFF' },
     {
@@ -263,7 +281,7 @@ async function buildExcelBuffer(orderId: string, order: OrderDoc, itemInfoMap?: 
   // --- Header row sits right after info rows ---
   const HEADER_ROW = 2 + infoRows.length;
   sheet.views = [{ state: 'frozen', ySplit: HEADER_ROW }];
-  const headers = ['#', 'Stok Kodu', 'Stok Adı', 'Lab Stok', '30 Günlük Max', 'Yakın Miad Lot Adedi', 'Talep Adedi'];
+  const headers = ['#', 'Stok Kodu', 'Stok Adı', isDepotRequest ? 'Depo Stok' : 'Lab Stok', '30 Günlük Max', 'Yakın Miad Lot Adedi', 'Talep Adedi'];
   const headerRow = sheet.getRow(HEADER_ROW);
   headerRow.height = 32;
 
@@ -284,7 +302,7 @@ async function buildExcelBuffer(orderId: string, order: OrderDoc, itemInfoMap?: 
   const items = order.items || [];
   items.forEach((item, idx) => {
     const sKodu = item.stokKodu || '-';
-    const labStok = labStokMap[sKodu] ?? 0;
+    const mevcutStok = stockMap[sKodu] ?? 0;
     const maxAdet = rulesMap[sKodu] ?? 0;
     const yakinMiad = closestMiadLotMap[sKodu] ?? 0;
     const talep = Number(item.adet || 0);
@@ -304,7 +322,7 @@ async function buildExcelBuffer(orderId: string, order: OrderDoc, itemInfoMap?: 
       idx + 1,
       sKodu,
       item.stokAdi || '-',
-      labStok,
+      mevcutStok,
       maxAdet,
       yakinMiad,
       talepCellValue,
@@ -571,7 +589,7 @@ export const onPeripheralOrderCreatedSendMail = functions
                   <tr><td style="padding:6px 12px; background:#dcfce7; border:1px solid #94a3b8;"><b>Toplam Adet</b></td><td style="padding:6px 12px; border:1px solid #94a3b8; font-weight:bold; font-size:16px;">${filteredTotalQty}</td></tr>
                   ${noteHtml}
                 </table>
-                <p style="margin:16px 0 0 0;">Sipariş detayları (lab stok, max adet, talep adedi) ekteki Excel dosyasındadır.</p>
+                <p style="margin:16px 0 0 0;">Sipariş detayları (${isDepotRequest ? 'depo stok' : 'lab stok'}, max adet, talep adedi) ekteki Excel dosyasındadır.</p>
               </div>`,
             attachments: [
               {
