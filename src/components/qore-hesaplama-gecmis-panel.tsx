@@ -168,7 +168,8 @@ export default function QoreHesaplamaGecmisPanel({ kind }: { kind: HistoryKind }
 
     try {
       const ExcelJS = await import('exceljs');
-      const { saveAs } = await import('file-saver');
+      const fileSaverModule = await import('file-saver');
+      const saveAs = fileSaverModule.saveAs || (fileSaverModule as any).default?.saveAs || (fileSaverModule as any).default;
       const workbook = new ExcelJS.Workbook();
       workbook.creator = 'QORE';
       workbook.created = new Date();
