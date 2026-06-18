@@ -72,7 +72,10 @@ async function fetchOrdersByLabId(labId: string): Promise<HistoryOrder[]> {
 
 async function fetchOrdersByDepotId(depotId: string): Promise<HistoryOrder[]> {
   const snapshot = await adminDb.collection('orders').where('depotId', '==', depotId).get();
-  return sortHistoryOrders(snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
+  const depotRequests = snapshot.docs
+    .map((doc) => ({ id: doc.id, ...doc.data() }))
+    .filter((order) => order.requestSource === 'depot_to_office' || order.isDepotRequest === true);
+  return sortHistoryOrders(depotRequests);
 }
 
 async function fetchOrdersByCreatedById(createdById: string): Promise<HistoryOrder[]> {
