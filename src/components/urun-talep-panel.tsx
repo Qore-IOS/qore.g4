@@ -42,7 +42,7 @@ import {
   setDoc,
   serverTimestamp,
 } from 'firebase/firestore';
-import type { Depot, Hospital, ProductCode, MinMaxRule, OrderItem, OrderUrgency } from '@/lib/types';
+import type { Depot, Hospital, ProductCode, MinMaxRule, OrderItem, OrderUrgency, User } from '@/lib/types';
 import { Textarea } from '@/components/ui/textarea';
 import { AlertTriangle, AlertCircle, Flame } from 'lucide-react';
 import { generateId, playNotificationSound, cn } from '@/lib/utils';
@@ -561,7 +561,7 @@ function UrgencyDialog({ open, onOpenChange, totalItems, totalAdet, loading, onC
    MAIN PANEL
    ======================================================= */
 
-export default function UrunTalepPanel() {
+export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: string } = {}) {
   const router = useRouter();
   const { toast } = useToast();
   const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
@@ -576,6 +576,9 @@ export default function UrunTalepPanel() {
   const [selectedDepotId, setSelectedDepotId] = useState<string>('');
   const [selectedLabId, setSelectedLabId] = useState<string>('');
   const [labMinMaxRules, setLabMinMaxRules] = useState<MinMaxRule[]>([]);
+  const [managerUsers, setManagerUsers] = useState<User[]>([]);
+  const [selectedManagerIds, setSelectedManagerIds] = useState<string[]>([]);
+  const [managerDialogOpen, setManagerDialogOpen] = useState(false);
 
   // Order Basket
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
@@ -606,6 +609,9 @@ export default function UrunTalepPanel() {
     [userHospitals, selectedLabId]
   );
 
+  const isDepotRequestFlow = !!depotRequestId;
+  const selectedDepotForRequest = useMemo(() => depots.find(d => d.id === (depotRequestId || selectedDepotId)) ?? null, [depots, depotRequestId, selectedDepotId]);
+
   const isPeripheralFlow = selectedLab?.perifer === true;
 
   // Auto-select: if the user is assigned to exactly one lab, pick it immediately.
@@ -622,8 +628,8 @@ export default function UrunTalepPanel() {
   }, [singleAutoLab, selectedLabId]);
 
   // Show/hide logic
-  const showLabPicker = !singleAutoLab;
-  const showDepotPicker = !isPeripheralFlow && !selectedLab?.defaultDepotId;
+  const showLabPicker = !isDepotRequestFlow && !singleAutoLab;
+  const showDepotPicker = !isDepotRequestFlow && !isPeripheralFlow && !selectedLab?.defaultDepotId;
 
   // Available products (min-max defined)
   const availableProducts = useMemo(() => {
@@ -677,7 +683,7 @@ export default function UrunTalepPanel() {
     return map;
   }, [allProducts]);
 
-  const isCreateReady = !!selectedLabId && orderItems.length > 0 && (isPeripheralFlow || !!selectedDepotId);
+  const isCreateReady = isDepotRequestFlow ? !!depotRequestId && orderItems.length > 0 : (!!selectedLabId && orderItems.length > 0 && (isPeripheralFlow || !!selectedDepotId));
 
 
   // -- Data Fetching --
@@ -697,6 +703,8 @@ export default function UrunTalepPanel() {
       setDepots(depotDocs.map(d => ({ id: d.id, ...d.data() } as Depot)));
       setAllHospitals(hospitalDocs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
       setAllProducts(productDocs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
+      const userDocs = await getScopedDocs('users', currentCompanyId, isSuperAdmin);
+      setManagerUsers(userDocs.map(d => ({ uid: d.id, ...d.data() } as User)).filter(u => ['admin', 'lojistik_sorumlusu'].includes(u.role || '') && !!u.email));
     } catch (err) {
       console.error('Error fetching initial data:', err);
       toast({ title: 'Hata', description: 'Gerekli veriler yüklenemedi.', variant: 'destructive' });
@@ -709,8 +717,27 @@ export default function UrunTalepPanel() {
     fetchData();
   }, [fetchData]);
 
-  // Fetch Min-Max rules and handle automated depot selection when a lab is selected
+  // Fetch Min-Max rules and handle automated depot selection when a lab/depot is selected
   useEffect(() => {
+    if (isDepotRequestFlow) {
+      if (!depotRequestId) return;
+      setSelectedDepotId(depotRequestId);
+      setSelectedLabId('');
+      const fetchDepotRules = async () => {
+        setLoading(true);
+        try {
+          const rulesSnap = await getDocs(collection(db, 'depots', depotRequestId, 'minMaxRules'));
+          setLabMinMaxRules(rulesSnap.docs.map(d => ({ stokKodu: d.id, ...d.data() } as MinMaxRule)));
+        } catch (err) {
+          console.error('Error fetching depot min-max rules:', err);
+          setLabMinMaxRules([]);
+          toast({ title: 'Hata', description: 'Bu depo için tanımlı ürünler alınamadı.', variant: 'destructive' });
+        } finally { setLoading(false); }
+      };
+      fetchDepotRules();
+      return;
+    }
+
     if (!selectedLabId) {
       setLabMinMaxRules([]);
       setOrderItems([]);
@@ -742,7 +769,7 @@ export default function UrunTalepPanel() {
       }
     };
     fetchRules();
-  }, [selectedLabId, toast, allHospitals, isPeripheralFlow]);
+  }, [selectedLabId, toast, allHospitals, isPeripheralFlow, isDepotRequestFlow, depotRequestId]);
 
 
   // -- Handlers --
@@ -780,6 +807,14 @@ export default function UrunTalepPanel() {
   // open the urgency/note dialog and let it call submitOrderRequest after
   // confirmation; for non-peripheral flow we submit immediately.
   const handleCreateClick = () => {
+    if (isDepotRequestFlow) {
+      if (orderItems.length === 0) {
+        toast({ title: 'Eksik Bilgi', description: 'En az bir ürün seçmelisiniz.', variant: 'destructive' });
+        return;
+      }
+      setManagerDialogOpen(true);
+      return;
+    }
     if (!selectedLabId || orderItems.length === 0) {
       toast({ title: 'Eksik Bilgi', description: 'Laboratuvar ve en az bir ürün seçmelisiniz.', variant: 'destructive' });
       return;
@@ -796,32 +831,54 @@ export default function UrunTalepPanel() {
     submitOrderRequest();
   };
 
-  const submitOrderRequest = async (urgency?: OrderUrgency, note?: string) => {
-    if (!selectedLabId || orderItems.length === 0) return;
-    if (!isPeripheralFlow && !selectedDepotId) return;
+  const submitOrderRequest = async (urgency?: OrderUrgency, note?: string, managerIds: string[] = []) => {
+    if (isDepotRequestFlow) {
+      if (!depotRequestId || orderItems.length === 0 || managerIds.length === 0) return;
+    } else {
+      if (!selectedLabId || orderItems.length === 0) return;
+      if (!isPeripheralFlow && !selectedDepotId) return;
+    }
 
     setLoading(true);
     try {
       const orderId = generateId();
-      const labName = allHospitals.find(h => h.id === selectedLabId)?.name || 'Bilinmeyen Kurum';
-      const depotName = depots.find(d => d.id === selectedDepotId)?.name || '';
+      const labName = isDepotRequestFlow ? (selectedDepotForRequest?.name || 'Bilinmeyen Depo') : (allHospitals.find(h => h.id === selectedLabId)?.name || 'Bilinmeyen Kurum');
+      const depotName = depots.find(d => d.id === (isDepotRequestFlow ? depotRequestId : selectedDepotId))?.name || '';
 
       // Perifer talepleri depo ataması yapmadan kayıt edilir; hangi depoya
       // yönlendirileceğine ofis lojistik sorumlusu karar verir.
       const newOrder: Record<string, any> = {
         id: orderId,
-        labId: selectedLabId,
+        labId: isDepotRequestFlow ? null : selectedLabId,
         kurumAdi: labName,
         items: orderItems,
         status: 'pending' as const,
         createdAt: serverTimestamp(),
         createdBy: currentUserProfile?.name || currentUser?.email || 'Unknown User',
         createdById: currentUser?.uid || 'unknown',
-        requestSource: isPeripheralFlow ? ('lab_to_office' as const) : ('lab_to_depot' as const),
-        isPeripheral: isPeripheralFlow,
+        requestSource: isDepotRequestFlow ? ('depot_to_office' as const) : (isPeripheralFlow ? ('lab_to_office' as const) : ('lab_to_depot' as const)),
+        isPeripheral: isPeripheralFlow || isDepotRequestFlow,
+        isDepotRequest: isDepotRequestFlow,
         transferredAt: null,
       };
-      if (!isPeripheralFlow) {
+      if (isDepotRequestFlow) {
+        newOrder.depotId = depotRequestId;
+        newOrder.depotName = depotName || 'Bilinmeyen Depo';
+        newOrder.requestedManagerIds = managerIds;
+        newOrder.requestedManagerEmails = managerUsers.filter(u => managerIds.includes(u.uid)).map(u => u.email).filter(Boolean);
+        newOrder.depotFulfillment = {
+          items: orderItems.map(item => ({
+            itemId: item.id,
+            stokKodu: item.stokKodu,
+            requestedAdet: Number(item.adet) || 0,
+            deliveredAdet: 0,
+            missingAdet: Number(item.adet) || 0,
+            fulfilled: false,
+          })),
+          appliedDepoStokIds: [],
+          partialDeliveries: [],
+        };
+      } else if (!isPeripheralFlow) {
         newOrder.depotId = selectedDepotId;
         newOrder.depotName = depotName || 'Bilinmeyen Depo';
       } else {
@@ -847,14 +904,15 @@ export default function UrunTalepPanel() {
       await emitOrderCreatedFromRequest({
         actor: { uid: currentUserProfile?.uid || '', name: currentUserProfile?.name || '' },
         orderId: orderId,
-        labId: selectedLabId,
+        labId: isDepotRequestFlow ? undefined : selectedLabId,
         labName,
-        depotId: isPeripheralFlow ? '' : selectedDepotId,
+        depotId: isDepotRequestFlow ? undefined : (isPeripheralFlow ? '' : selectedDepotId),
         isPeripheral: isPeripheralFlow,
         itemsSummary,
         itemsCount: orderItems.length,
         totalAdet: totalAdetForNotif,
-        urgency: isPeripheralFlow ? (urgency ?? 'normal') : undefined,
+        urgency: (isPeripheralFlow || isDepotRequestFlow) ? (urgency ?? 'normal') : undefined,
+        extraTargets: isDepotRequestFlow ? managerIds.map(id => `user:${id}`) : undefined,
         audienceHint: {
           userId: currentUserProfile?.uid,
           role: currentUserProfile?.role,
@@ -867,15 +925,19 @@ export default function UrunTalepPanel() {
       playNotificationSound();
       toast({
         title: 'Talep Oluşturuldu',
-        description: isPeripheralFlow
-          ? 'Talebiniz ofis lojistiğine iletildi.'
-          : `Siparişiniz "${depotName}" deposuna iletildi.`,
+        description: isDepotRequestFlow
+          ? 'Talebiniz seçtiğiniz yöneticilere iletildi.'
+          : isPeripheralFlow
+            ? 'Talebiniz ofis lojistiğine iletildi.'
+            : `Siparişiniz "${depotName}" deposuna iletildi.`,
       });
 
       // Reset form — but keep the auto-selected lab so the user can
       // immediately create another request without re-picking it.
       setOrderItems([]);
-      if (!singleAutoLab) {
+      setManagerDialogOpen(false);
+      setSelectedManagerIds([]);
+      if (!isDepotRequestFlow && !singleAutoLab) {
         setSelectedLabId('');
         setLabMinMaxRules([]);
       }
@@ -906,13 +968,15 @@ export default function UrunTalepPanel() {
             Ürün Talep
           </h1>
           <p className="text-[11px] sm:text-xs text-[var(--dashboard-muted)] truncate">
-            {selectedLabName
-              ? `${selectedLabName}${isPeripheralFlow ? ' · Perifer' : ''}`
-              : 'Yetkili laboratuvarlar için ürün talebi oluşturun'}
+            {isDepotRequestFlow
+              ? `${selectedDepotForRequest?.name || 'Depo'} · Depo Talebi`
+              : selectedLabName
+                ? `${selectedLabName}${isPeripheralFlow ? ' · Perifer' : ''}`
+                : 'Yetkili laboratuvarlar için ürün talebi oluşturun'}
           </p>
         </div>
 
-        <DutyInfo selectedLabId={selectedLabId || null} />
+        {!isDepotRequestFlow && <DutyInfo selectedLabId={selectedLabId || null} />}
 
         {/* CTA — Create Order (top right) */}
         <button
@@ -944,7 +1008,7 @@ export default function UrunTalepPanel() {
             </button>
           </PopoverTrigger>
           <PopoverContent className="w-56 p-1" align="end">
-            <button onClick={() => { router.push(selectedLabId ? `/urun-talep/gecmis?labId=${selectedLabId}` : '/urun-talep/gecmis'); setMoreMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)]">
+            <button onClick={() => { router.push(isDepotRequestFlow && depotRequestId ? `/urun-talep/gecmis?depotId=${depotRequestId}` : selectedLabId ? `/urun-talep/gecmis?labId=${selectedLabId}` : '/urun-talep/gecmis'); setMoreMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)]">
               <History className="h-4 w-4 text-[var(--dashboard-muted)]" /> Geçmiş
             </button>
             <button onClick={() => { router.push('/cihazdan-cikan-kit'); setMoreMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)]">
@@ -1026,7 +1090,7 @@ export default function UrunTalepPanel() {
 
 
       {/* ====================== MAIN SPLIT VIEW ====================== */}
-      {selectedLabId && (
+      {(selectedLabId || isDepotRequestFlow) && (
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-4 sm:gap-5">
 
           {/* -- LEFT: Product Catalog -- */}
@@ -1324,7 +1388,7 @@ export default function UrunTalepPanel() {
       )}
 
       {/* Empty state when no lab selected */}
-      {!selectedLabId && !loading && (
+      {!selectedLabId && !isDepotRequestFlow && !loading && (
         <div className="cihaz-card-strong flex flex-col items-center justify-center py-16 sm:py-20 text-center px-4">
           <div className="w-16 h-16 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] flex items-center justify-center mb-4">
             <FlaskConical className="h-6 w-6 text-[var(--dashboard-muted)]" />
@@ -1335,7 +1399,7 @@ export default function UrunTalepPanel() {
       )}
 
       {/* Loading state */}
-      {loading && !selectedLabId && (
+      {loading && !selectedLabId && !isDepotRequestFlow && (
         <div className="cihaz-card-strong flex flex-col items-center justify-center py-16 sm:py-20">
           <Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)] mb-3" />
           <p className="text-sm text-[var(--dashboard-muted)]">Veriler yükleniyor...</p>
@@ -1351,6 +1415,36 @@ export default function UrunTalepPanel() {
         existingQty={qtyDialogProduct ? (orderItems.find(i => i.stokKodu === qtyDialogProduct.stokKodu)?.adet ?? 0) : 0}
         onConfirm={handleQtyConfirm}
       />
+
+
+      <Dialog open={managerDialogOpen} onOpenChange={setManagerDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Talebin İletileceği Yönetici</DialogTitle>
+            <DialogDescription>Firma adminleri ve lojistik yöneticileri arasından bir veya daha fazla alıcı seçin.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 max-h-72 overflow-auto py-2">
+            {managerUsers.length === 0 ? (
+              <p className="text-sm text-[var(--dashboard-muted)]">Uygun yönetici bulunamadı.</p>
+            ) : managerUsers.map(user => {
+              const checked = selectedManagerIds.includes(user.uid);
+              return (
+                <button key={user.uid} type="button" onClick={() => setSelectedManagerIds(prev => checked ? prev.filter(id => id !== user.uid) : [...prev, user.uid])} className={cn("w-full flex items-center gap-3 rounded-xl border p-3 text-left", checked ? "border-[var(--dashboard-accent)] bg-[var(--dashboard-accent)]/10" : "border-[var(--dashboard-stroke)]")}>
+                  <span className={cn("w-5 h-5 rounded-md border flex items-center justify-center", checked ? "bg-[var(--dashboard-accent)] text-white" : "bg-[var(--dashboard-surface)]")}>{checked && <Check className="h-3.5 w-3.5" />}</span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold truncate">{user.name || user.email}</span>
+                    <span className="block text-xs text-[var(--dashboard-muted)] truncate">{user.email} · {user.role === 'admin' ? 'Admin' : 'Lojistik Yöneticisi'}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex gap-2 pt-2">
+            <button type="button" onClick={() => setManagerDialogOpen(false)} disabled={loading} className="flex-1 py-2.5 rounded-xl bg-[var(--dashboard-surface-2)] font-semibold">İptal</button>
+            <button type="button" onClick={() => submitOrderRequest('normal', undefined, selectedManagerIds)} disabled={loading || selectedManagerIds.length === 0} className={cn("flex-1 py-2.5 rounded-xl font-bold text-white", selectedManagerIds.length > 0 ? "bg-green-600" : "bg-gray-400")}>{loading ? 'Gönderiliyor...' : 'Talebi İlet'}</button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* ====================== URGENCY DIALOG (peripheral) ====================== */}
       <UrgencyDialog
