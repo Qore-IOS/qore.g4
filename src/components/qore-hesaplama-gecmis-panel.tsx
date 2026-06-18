@@ -15,6 +15,7 @@ import { db } from '@/lib/firebase';
 import { getScopedDocs } from '@/lib/firestore-helpers';
 import { exportDataToExcel } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import { useTestDefinitions } from '@/hooks/useFirebaseQueries';
 
 type HistoryKind = 'kumulatif' | 'cihazUstu';
 
@@ -79,6 +80,12 @@ function toSheetName(record: HistoryRecord, index: number): string {
   return (base || `Lab_${index + 1}`).substring(0, 31);
 }
 
+function getPeriodMonthLabel(period: string): string {
+  const month = Number(period.split('-')[0]);
+  if (!month || month < 1 || month > 12) return period;
+  return new Date(0, month - 1, 1).toLocaleString('tr-TR', { month: 'long' }).toLocaleUpperCase('tr-TR');
+}
+
 function formatDate(value: any): string {
   const date = value?.toDate ? value.toDate() : value instanceof Date ? value : null;
   return date ? date.toLocaleString('tr-TR') : '-';
@@ -88,6 +95,7 @@ export default function QoreHesaplamaGecmisPanel({ kind }: { kind: HistoryKind }
   const cfg = config[kind];
   const { currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
+  const { data: testDefinitions = [] } = useTestDefinitions();
   const [records, setRecords] = useState<HistoryRecord[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -150,29 +158,151 @@ export default function QoreHesaplamaGecmisPanel({ kind }: { kind: HistoryKind }
 
 
 
-  function exportPeriodRecords(period: string) {
+  async function exportPeriodRecords(period: string) {
     if (kind !== 'kumulatif' || !period) return;
     const periodRecords = records.filter((record) => (record.period || `${record.month ?? '-'}-${record.year ?? '-'}`) === period);
     if (!periodRecords.length) {
       toast({ title: 'Veri yok', description: `${period} dönemine ait kümülatif geçmiş kaydı bulunamadı.` });
       return;
     }
-    const sheets = periodRecords.reduce<Record<string, any[]>>((acc, record, index) => {
-      acc[toSheetName(record, index)] = (record.items || []).map((item) => ({
-        'Stok Kodu': item.productId,
-        'Stok Adı': item.productName || '',
-        'Test Adı': item.testName || '',
-        'Eşleşen Dosya Testi': (item.matchedTests || []).join(', '),
-        Routine: item.routine || 0,
-        Rerun: item.rerun || 0,
-        Calib: item.calib || 0,
-        Control: item.control || 0,
-        Total: item.total || 0,
-        'Verimlilik (%)': getEfficiencyValue(item) ?? '',
-      }));
-      return acc;
-    }, {});
-    exportDataToExcel(sheets, `Kumulatif_Donemsel_${period}`, toast);
+
+    try {
+      const ExcelJS = await import('exceljs');
+      const { saveAs } = await import('file-saver');
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = 'QORE';
+      workbook.created = new Date();
+
+      const thinBorder = {
+        top: { style: 'thin' as const },
+        left: { style: 'thin' as const },
+        bottom: { style: 'thin' as const },
+        right: { style: 'thin' as const },
+      };
+      const fills = {
+        headerPink: { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFFFC7CE' } },
+        month: { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFFFFFCC' } },
+        titleBlue: { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FF9CCAE4' } },
+        routine: { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFDDEBF7' } },
+        rerun: { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFFFF2CC' } },
+        stat: { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFD9D2F4' } },
+        calib: { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFEADCF8' } },
+        control: { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFD5F5F0' } },
+        total: { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFB4A7F5' } },
+        efficiency: { type: 'pattern' as const, pattern: 'solid' as const, fgColor: { argb: 'FFFF4F93' } },
+      };
+
+      periodRecords.forEach((record, recordIndex) => {
+        const ws = workbook.addWorksheet(toSheetName(record, recordIndex));
+        ws.views = [{ state: 'frozen', xSplit: 0, ySplit: 10 }];
+        ws.columns = [
+          { key: 'sutKodu', width: 18 },
+          { key: 'sutTestAdi', width: 38 },
+          { key: 'counter', width: 16 },
+          { key: 'blank1', width: 4 },
+          { key: 'blank2', width: 4 },
+          { key: 'stokKodu', width: 18 },
+          { key: 'stokAdi', width: 36 },
+          { key: 'urunTestAdi', width: 20 },
+          { key: 'routine', width: 14 },
+          { key: 'rerun', width: 14 },
+          { key: 'stat', width: 12 },
+          { key: 'calib', width: 12 },
+          { key: 'control', width: 12 },
+          { key: 'total', width: 12 },
+          { key: 'efficiency', width: 14 },
+        ];
+
+        // Sol blok: Hak Ediş/Test Yönetimi tanımları (A-C)
+        const leftHeader = ws.getRow(1);
+        leftHeader.getCell(1).value = 'SUT Kodu';
+        leftHeader.getCell(2).value = 'Test Adı';
+        leftHeader.getCell(3).value = 'Test Counter';
+        [1, 2, 3].forEach((col) => {
+          const cell = leftHeader.getCell(col);
+          cell.fill = fills.headerPink;
+          cell.font = { bold: true };
+          cell.alignment = { horizontal: 'center' };
+          cell.border = thinBorder;
+        });
+        testDefinitions.forEach((def: any, index: number) => {
+          const row = ws.getRow(index + 2);
+          row.getCell(1).value = def.sutKodu || '';
+          row.getCell(2).value = def.sutTestAdi || '';
+          row.getCell(3).value = '';
+          [1, 2, 3].forEach((col) => {
+            row.getCell(col).border = thinBorder;
+            row.getCell(col).alignment = { vertical: 'middle', horizontal: col === 2 ? 'left' : 'center' };
+          });
+        });
+
+        // Sağ blok: F10'dan başlayan kümülatif ürün verileri
+        ws.mergeCells('I1:O1');
+        const monthCell = ws.getCell('I1');
+        monthCell.value = getPeriodMonthLabel(period);
+        monthCell.fill = fills.month;
+        monthCell.font = { bold: true, italic: true };
+        monthCell.alignment = { horizontal: 'center' };
+        monthCell.border = thinBorder;
+
+        ws.mergeCells('F4:O5');
+        const titleCell = ws.getCell('F4');
+        titleCell.value = `${record.scopeLabel || record.hospitalName || record.hospitalId || 'LAB'} (TOPLAM)`;
+        titleCell.fill = fills.titleBlue;
+        titleCell.font = { bold: true, size: 14 };
+        titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+        titleCell.border = thinBorder;
+
+        const headerRow = ws.getRow(10);
+        const headers = ['Stok Kodu', 'Stok Adı', 'Test', 'Routine', 'Rerun', 'Stat', 'Calib.', 'Control', 'Total', '% VERİMLİLİK'];
+        headers.forEach((header, index) => {
+          const cell = headerRow.getCell(6 + index);
+          cell.value = header;
+          cell.fill = fills.month;
+          cell.font = { bold: true, italic: index >= 2 };
+          cell.alignment = { horizontal: 'center' };
+          cell.border = thinBorder;
+        });
+
+        (record.items || []).forEach((item, index) => {
+          const row = ws.getRow(11 + index);
+          const efficiency = getEfficiencyValue(item);
+          const values = [
+            item.productId || '',
+            item.productName || '',
+            item.testName || '',
+            item.routine || 0,
+            item.rerun || 0,
+            0,
+            item.calib || 0,
+            item.control || 0,
+            item.total || 0,
+            efficiency == null ? '' : Math.round(efficiency),
+          ];
+          values.forEach((value, valueIndex) => {
+            const col = 6 + valueIndex;
+            const cell = row.getCell(col);
+            cell.value = value;
+            cell.border = thinBorder;
+            cell.alignment = { horizontal: valueIndex <= 2 ? 'left' : 'center' };
+            if (valueIndex === 2) cell.font = { bold: true, italic: true };
+            if (valueIndex === 3) cell.fill = fills.routine;
+            if (valueIndex === 4) cell.fill = fills.rerun;
+            if (valueIndex === 5) cell.fill = fills.stat;
+            if (valueIndex === 6) cell.fill = fills.calib;
+            if (valueIndex === 7) cell.fill = fills.control;
+            if (valueIndex === 8) cell.fill = fills.total;
+            if (valueIndex === 9) cell.fill = fills.efficiency;
+          });
+        });
+      });
+
+      const buffer = await workbook.xlsx.writeBuffer();
+      saveAs(new Blob([buffer]), `Kumulatif_Donemsel_${period}.xlsx`);
+      toast({ title: 'Başarılı', description: `${period} dönemi şirket formatında Excel'e aktarıldı.` });
+    } catch (error: any) {
+      toast({ title: 'Excel oluşturulamadı', description: error?.message || 'Dönemsel Excel çıktısı hazırlanamadı.', variant: 'destructive' });
+    }
   }
   return (
     <div className="p-4 md:p-6 space-y-6">
@@ -195,7 +325,7 @@ export default function QoreHesaplamaGecmisPanel({ kind }: { kind: HistoryKind }
                   </SelectContent>
                 </Select>
               </div>
-              <Button variant="outline" onClick={() => exportPeriodRecords(periodExport)} disabled={!periodExport}>
+              <Button variant="outline" onClick={() => void exportPeriodRecords(periodExport)} disabled={!periodExport}>
                 <Download className="mr-2 h-4 w-4" /> Seçili Dönemi Toplu Excel Al
               </Button>
             </div>
