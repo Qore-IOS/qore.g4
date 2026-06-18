@@ -58,6 +58,7 @@ import { applyCumulativeAutoSum } from '@/lib/qore-hesaplama/auto-sum-definition
 import { normalizeTestName } from '@/lib/qore-hesaplama/test-name-matcher';
 import { ALL_FILTER_VALUE, type CalculationProductRow, useQoreCalculationProducts } from '@/hooks/useQoreCalculationProducts';
 import { useTestAutoSumDefinitions } from '@/hooks/useTestAutoSumDefinitions';
+import { buildCalculationPeriod, deleteExpiredPendingCalculationFiles, loadPendingCalculationFiles, markPendingCalculationFilesConsumed, pendingPayloadToFile, type PendingCalculationFileDoc } from '@/lib/qore-hesaplama/pending-calculation-files';
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => ({
   value: i,
@@ -81,6 +82,9 @@ export default function KumulatifHesaplamaPanel() {
   const [year, setYear] = useState(new Date().getFullYear());
 
   const [files, setFiles] = useState<File[]>([]);
+  const [pendingDocs, setPendingDocs] = useState<PendingCalculationFileDoc[]>([]);
+  const [loadedPendingIds, setLoadedPendingIds] = useState<string[]>([]);
+  const [isLoadingPending, setIsLoadingPending] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
   const [isParsing, setIsParsing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -114,6 +118,55 @@ export default function KumulatifHesaplamaPanel() {
     (brandFilter === ALL_FILTER_VALUE || product.marka === brandFilter) &&
     (productGroupFilter === ALL_FILTER_VALUE || product.urunGrubu === productGroupFilter)
   )), [scopedProducts, brandFilter, productGroupFilter]);
+
+  const selectedPeriod = useMemo(() => buildCalculationPeriod(month, year), [month, year]);
+
+  const refreshPendingDocs = useCallback(async () => {
+    if (!hospitalId) {
+      setPendingDocs([]);
+      return;
+    }
+    setIsLoadingPending(true);
+    try {
+      await deleteExpiredPendingCalculationFiles();
+      const docs = await loadPendingCalculationFiles({
+        kind: 'kumulatif',
+        hospitalId,
+        period: selectedPeriod,
+        currentCompanyId,
+        isSuperAdmin,
+      });
+      setPendingDocs(docs);
+    } catch (err) {
+      console.error('Pending calculation files could not be loaded:', err);
+      setPendingDocs([]);
+    } finally {
+      setIsLoadingPending(false);
+    }
+  }, [hospitalId, selectedPeriod, currentCompanyId, isSuperAdmin]);
+
+  useEffect(() => {
+    refreshPendingDocs();
+  }, [refreshPendingDocs]);
+
+  const usePendingFiles = useCallback(async () => {
+    if (pendingDocs.length === 0) return;
+    setIsLoadingPending(true);
+    try {
+      const restored = (await Promise.all(pendingDocs.flatMap((pending) => pending.files).map(pendingPayloadToFile)))
+        .filter((file) => isPdf(file) || isTxt(file));
+      setFiles(restored);
+      setLoadedPendingIds(pendingDocs.map((pending) => pending.id));
+      setRows([]);
+      setUnmatchedTests([]);
+      setError(null);
+      toast({ title: 'Bekleyen dosyalar yüklendi', description: `${restored.length} dosya ayrıştırmaya hazır.` });
+    } catch (err: any) {
+      toast({ title: 'Bekleyen dosyalar açılamadı', description: err?.message || 'Dosya verisi okunamadı.', variant: 'destructive' });
+    } finally {
+      setIsLoadingPending(false);
+    }
+  }, [pendingDocs, toast]);
 
   const visibleRows = rows.length > 0 ? rows : filteredProducts.map((product) => ({
     ...product,
@@ -153,6 +206,7 @@ export default function KumulatifHesaplamaPanel() {
     const accepted = incoming.filter((f) => isPdf(f) || isTxt(f));
     if (!accepted.length) return;
     setFiles((prev) => [...prev, ...accepted]);
+    setLoadedPendingIds([]);
     setRows([]);
     setUnmatchedTests([]);
     setError(null);
@@ -219,6 +273,11 @@ export default function KumulatifHesaplamaPanel() {
       if (aggregated.length === 0) {
         setError('Geçerli veri satırı çıkarılamadı. Dosya içeriğini ve biçimini kontrol edin.');
       } else {
+        if (loadedPendingIds.length > 0) {
+          await markPendingCalculationFilesConsumed(loadedPendingIds);
+          setLoadedPendingIds([]);
+          refreshPendingDocs();
+        }
         // Tarama sonrası dosyalar sistemde tutulmaz.
         setFiles([]);
       }
@@ -446,6 +505,20 @@ export default function KumulatifHesaplamaPanel() {
               </Select>
             </div>
           </div>
+
+          {pendingDocs.length > 0 && (
+            <Alert className="border-amber-200 bg-amber-50 text-amber-900">
+              <FileText className="h-4 w-4" />
+              <AlertTitle>Sayım ekranından gelen bekleyen dosya var</AlertTitle>
+              <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <span>{selectedPeriod} döneminde bu laboratuvar için {pendingDocs.reduce((sum, pending) => sum + pending.files.length, 0)} kümülatif dosyası hesaplamaya hazır bekliyor.</span>
+                <Button size="sm" variant="outline" onClick={usePendingFiles} disabled={isLoadingPending}>
+                  {isLoadingPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Dosyaları Kullan
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 rounded-xl border bg-muted/20 p-4">
             <div>

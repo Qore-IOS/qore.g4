@@ -80,6 +80,7 @@ service cloud.firestore {
       allow write: if writingInCompany();
       match /minMaxRules/{ruleId}             { allow read, write: if isSignedIn(); }
       match /subPoints/{spId}                 { allow read, write: if isSignedIn(); }
+      match /stockCounts/{countId}            { allow read, write: if isSignedIn(); }
     }
     match /borcDepots/{id}                    { allow read: if inCompany(); allow write: if writingInCompany(); }
 
@@ -169,6 +170,7 @@ service cloud.firestore {
     match /expensePeriods/{id}                { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /cihazUstuGecmisi/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /kumulatifHesaplamaGecmisi/{id}     { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /qoreCalculationPendingFiles/{id}   { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /actionFormHistoryLogs/{id}         { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /actionFormPartReassignLogs/{id}    { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /postClosurePartChangeLogs/{id}     { allow read: if inCompany(); allow write: if writingInCompany(); }
