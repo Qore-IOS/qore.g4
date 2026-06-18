@@ -3,6 +3,7 @@
 // Referans uygulamadaki davranış birebir korunmuştur.
 import type { CumulativeRow } from './parse-cumulative';
 import type { ReagentRow } from './parse-reagent';
+import { normalizeTestName } from './test-name-matcher';
 
 /**
  * Kümülatif: test adına göre (TR-duyarsız, büyük harf anahtar) grupla ve tüm
@@ -11,7 +12,7 @@ import type { ReagentRow } from './parse-reagent';
 export function aggregateCumulative(rows: CumulativeRow[]): CumulativeRow[] {
   const map = new Map<string, CumulativeRow>();
   for (const r of rows) {
-    const key = r.test.trim().toUpperCase();
+    const key = normalizeTestName(r.test) || r.test.trim().toUpperCase();
     const prev = map.get(key);
     if (!prev) {
       map.set(key, { ...r, test: r.test.trim() });
@@ -39,7 +40,7 @@ export type AggregatedReagentRow = { test: string; available: number };
 export function aggregateReagent(rows: ReagentRow[]): AggregatedReagentRow[] {
   const byTest = new Map<string, { test: string; bySrc: Map<string, Set<number>> }>();
   for (const r of rows) {
-    const testKey = r.test.trim().toUpperCase();
+    const testKey = normalizeTestName(r.test) || r.test.trim().toUpperCase();
     let entry = byTest.get(testKey);
     if (!entry) {
       entry = { test: r.test.trim(), bySrc: new Map() };
