@@ -39,16 +39,50 @@ import { useProductCodes, useTestDefinitions } from '@/hooks/useFirebaseQueries'
 const COLLECTION = 'testDefinitions';
 
 /**
- * Excel kolon parser: bağlı ürün kodları "STOK1;STOK2,STOK3" gibi noktalı virgül
- * veya virgül ayrılmış olarak gelebilir; ya da tek string.
+ * Excel stok kodu parser: yeni şablonda A=SUT kodu, B=test adı, C=hak ediş,
+ * D ve sonrasındaki her hücre ise teste bağlı tek bir stok kodudur. Eski dosyalardan
+ * gelebilecek "STOK1;STOK2" hücrelerini de toleranslı parçalar.
  */
 function parseLinkedStokKodlari(raw: unknown): string[] {
   if (!raw) return [];
-  if (Array.isArray(raw)) return raw.map((x) => String(x).trim()).filter(Boolean);
   return String(raw)
     .split(/[;,|]/)
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+function parseLinkedStokKodlariFromCells(cells: unknown[]): string[] {
+  return Array.from(new Set(cells.flatMap(parseLinkedStokKodlari)));
+}
+
+function parseHakEdisAmount(raw: unknown): number {
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : NaN;
+  let value = String(raw ?? '').trim();
+  if (!value) return NaN;
+  value = value.replace(/₺|tl|try/gi, '').replace(/\s+/g, '');
+  const hasComma = value.includes(',');
+  const hasDot = value.includes('.');
+  if (hasComma && hasDot) {
+    // Son ayırıcı ondalık kabul edilir: 1.234,56 veya 1,234.56
+    value = value.lastIndexOf(',') > value.lastIndexOf('.')
+      ? value.replace(/\./g, '').replace(',', '.')
+      : value.replace(/,/g, '');
+  } else if (hasComma) {
+    value = value.replace(',', '.');
+  }
+  value = value.replace(/[^0-9.-]/g, '');
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount : NaN;
+}
+
+
+function normHeader(raw: unknown): string {
+  return String(raw ?? '').toLowerCase().replace(/ı/g, 'i').replace(/ğ/g, 'g').replace(/ü/g, 'u').replace(/ş/g, 's').replace(/ö/g, 'o').replace(/ç/g, 'c').replace(/\s+/g, ' ').trim();
+}
+
+function parseCounterAmount(raw: unknown): number {
+  const value = parseHakEdisAmount(raw);
+  return Number.isFinite(value) && value >= 0 ? Math.round(value) : 0;
 }
 
 export default function HakEdisPage() {
@@ -67,6 +101,7 @@ export default function HakEdisPage() {
   const [newSutKodu, setNewSutKodu] = useState('');
   const [newSutTestAdi, setNewSutTestAdi] = useState('');
   const [newLinkedStokKodlari, setNewLinkedStokKodlari] = useState<string[]>([]);
+  const [newCounterValue, setNewCounterValue] = useState('0');
   const [newHakEdisMiktari, setNewHakEdisMiktari] = useState('');
   const [isProductPopoverOpen, setIsProductPopoverOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -100,13 +135,14 @@ export default function HakEdisPage() {
   // -------------------------------------------------------------------------
 
   const handleAdd = async () => {
-    if (!newSutKodu.trim() || !newSutTestAdi.trim() || newLinkedStokKodlari.length === 0 || !newHakEdisMiktari.trim()) {
-      toast({ title: 'Eksik Bilgi', description: 'Tüm alanlar doldurulmalıdır.', variant: 'destructive' });
+    if (!newSutKodu.trim() || !newSutTestAdi.trim() || !newHakEdisMiktari.trim()) {
+      toast({ title: 'Eksik Bilgi', description: 'SUT kodu, test adı ve hak ediş miktarı doldurulmalıdır. Ürün bağlantısı opsiyoneldir.', variant: 'destructive' });
       return;
     }
-    const hakEdis = parseFloat(newHakEdisMiktari.replace(',', '.'));
-    if (isNaN(hakEdis) || hakEdis <= 0) {
-      toast({ title: 'Geçersiz Değer', description: 'Hak ediş miktarı geçerli bir sayı olmalı.', variant: 'destructive' });
+    const hakEdis = parseHakEdisAmount(newHakEdisMiktari);
+    const counterValue = parseCounterAmount(newCounterValue);
+    if (isNaN(hakEdis) || hakEdis < 0) {
+      toast({ title: 'Geçersiz Değer', description: 'Hak ediş miktarı 0 veya pozitif bir sayı olmalı.', variant: 'destructive' });
       return;
     }
 
@@ -116,6 +152,7 @@ export default function HakEdisPage() {
         sutKodu: newSutKodu.trim(),
         sutTestAdi: newSutTestAdi.trim(),
         linkedStokKodlari: newLinkedStokKodlari,
+        counterValue,
         hakEdisMiktari: hakEdis,
         currency: 'TRY',
         aktif: true,
@@ -128,6 +165,7 @@ export default function HakEdisPage() {
       setNewSutKodu('');
       setNewSutTestAdi('');
       setNewLinkedStokKodlari([]);
+      setNewCounterValue('0');
       setNewHakEdisMiktari('');
     } catch (e) {
       console.error('add error', e);
@@ -169,7 +207,19 @@ export default function HakEdisPage() {
       const wb = XLSX.read(data);
       const ws = wb.Sheets[wb.SheetNames[0]];
       const rows = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
-      const dataRows = rows.slice(1).filter((r) => r && r.length >= 4 && r[0]);
+      const header = (rows[0] || []).map(normHeader);
+      const sutIdx = header.findIndex((h) => h.includes('sut')) >= 0 ? header.findIndex((h) => h.includes('sut')) : 0;
+      const counterIdx = header.findIndex((h) => h.includes('counter'));
+      const hakIdxFromHeader = header.findIndex((h) => h.includes('hak'));
+      const hakIdx = hakIdxFromHeader >= 0 ? hakIdxFromHeader : (counterIdx >= 0 ? 3 : 2);
+      const testIdxFromHeader = header.findIndex((h, i) => i !== sutIdx && h.includes('test') && !h.includes('counter'));
+      const testIdx = testIdxFromHeader >= 0 ? testIdxFromHeader : 1;
+      const stockHeaderIdxs = header
+        .map((h, i) => ({ h, i }))
+        .filter(({ h }) => h.includes('stok'))
+        .map(({ i }) => i);
+      const firstStockIdx = Math.max(sutIdx, testIdx, hakIdx, counterIdx) + 1;
+      const dataRows = rows.slice(1).filter((r) => r && r.length >= 3 && r[sutIdx]);
 
       if (dataRows.length === 0) {
         toast({ title: 'Uyarı', description: 'Excel dosyasında geçerli veri yok.', variant: 'destructive' });
@@ -182,24 +232,29 @@ export default function HakEdisPage() {
       const skipReasons: string[] = [];
 
       for (const r of dataRows) {
-        const sutKodu = String(r[0] || '').trim();
-        const sutTestAdi = String(r[1] || '').trim();
-        const stokKodlari = parseLinkedStokKodlari(r[2]);
-        const hakEdis = parseFloat(String(r[3] || '0').replace(',', '.'));
+        const sutKodu = String(r[sutIdx] || '').trim();
+        const sutTestAdi = String(r[testIdx] || '').trim();
+        const counterValue = counterIdx >= 0 ? parseCounterAmount(r[counterIdx]) : 0;
+        const hakEdis = parseHakEdisAmount(r[hakIdx]);
+        const stockCells = stockHeaderIdxs.length > 0 ? stockHeaderIdxs.map((idx) => r[idx]) : r.slice(firstStockIdx);
+        const stokKodlari = parseLinkedStokKodlariFromCells(stockCells);
 
-        if (!sutKodu || !sutTestAdi || stokKodlari.length === 0 || isNaN(hakEdis) || hakEdis <= 0) {
+        if (!sutKodu || !sutTestAdi || isNaN(hakEdis) || hakEdis < 0) {
           skipped++;
           skipReasons.push(`${sutKodu || '(boş)'}: geçersiz değer`);
           continue;
         }
 
-        // Sistemde olmayan stok kodlarını filtrele
+        // Sistemde olmayan stok kodlarını filtrele; stok kodu yazılmamışsa tanım ürünsüz oluşturulabilir.
         const validStokKodlari = stokKodlari.filter((k) => productMap.has(k));
         const missing = stokKodlari.filter((k) => !productMap.has(k));
-        if (validStokKodlari.length === 0) {
+        if (stokKodlari.length > 0 && validStokKodlari.length === 0) {
           skipped++;
-          skipReasons.push(`${sutKodu}: hiçbir stok kodu sistemde yok (${missing.join(', ')})`);
+          skipReasons.push(`${sutKodu}: yazılan stok kodlarının hiçbiri sistemde yok (${missing.join(', ')})`);
           continue;
+        }
+        if (missing.length > 0) {
+          skipReasons.push(`${sutKodu}: sistemde olmayan stok kodları atlandı (${missing.join(', ')})`);
         }
 
         const ref = doc(collection(db, COLLECTION));
@@ -207,6 +262,7 @@ export default function HakEdisPage() {
           sutKodu,
           sutTestAdi,
           linkedStokKodlari: validStokKodlari,
+          counterValue,
           hakEdisMiktari: hakEdis,
           currency: 'TRY',
           aktif: true,
@@ -234,16 +290,19 @@ export default function HakEdisPage() {
   };
 
   const handleExcelExport = () => {
-    const rows = testDefs.map((d) => ({
-      'SUT Kodu': d.sutKodu,
-      'SUT Test Adı': d.sutTestAdi,
-      'Bağlı Stok Kodları (;)': (d.linkedStokKodlari || []).join(';'),
-      'Bağlı Ürün Adları': (d.linkedStokKodlari || [])
-        .map((k) => productMap.get(k)?.stokAdi)
-        .filter(Boolean)
-        .join('; '),
-      'Hak Ediş (TL)': d.hakEdisMiktari,
-    }));
+    const maxLinkedCount = Math.max(1, ...testDefs.map((d) => (d.linkedStokKodlari || []).length));
+    const rows = testDefs.map((d) => {
+      const row: Record<string, any> = {
+        'SUT Kodu': d.sutKodu,
+        'SUT Test Adı': d.sutTestAdi,
+        Counter: d.counterValue || 0,
+        'Hak Ediş (TL)': d.hakEdisMiktari,
+      };
+      for (let i = 0; i < maxLinkedCount; i++) {
+        row[`Stok Kodu ${i + 1}`] = (d.linkedStokKodlari || [])[i] || '';
+      }
+      return row;
+    });
 
     const ws = XLSX.utils.json_to_sheet(rows);
     const wb = XLSX.utils.book_new();
@@ -253,20 +312,12 @@ export default function HakEdisPage() {
 
   const handleDownloadTemplate = () => {
     const templateData = [
-      {
-        'SUT Kodu': '900.010',
-        'SUT Test Adı': 'Glikoz Tayini',
-        'Bağlı Stok Kodları (;)': 'STOK001;STOK002',
-        'Hak Ediş (TL)': 5.5,
-      },
-      {
-        'SUT Kodu': '900.020',
-        'SUT Test Adı': 'Hemogram',
-        'Bağlı Stok Kodları (;)': 'STOK010',
-        'Hak Ediş (TL)': 8.0,
-      },
+      ['SUT Kodu', 'SUT Test Adı', 'Counter', 'Hak Ediş (TL)', 'Stok Kodu 1', 'Stok Kodu 2', 'Stok Kodu 3'],
+      ['900.010', 'Glikoz Tayini', 0, 5.5, 'STOK001', 'STOK002', ''],
+      ['900.020', 'Hemogram', 0, 8.0, 'STOK010', '', ''],
+      ['900.030', 'Ürünsüz Tanım Örneği', 0, 4.25, '', '', ''],
     ];
-    const ws = XLSX.utils.json_to_sheet(templateData);
+    const ws = XLSX.utils.aoa_to_sheet(templateData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Şablon');
     XLSX.writeFile(wb, 'test_tanimlari_sablon.xlsx');
@@ -348,9 +399,9 @@ export default function HakEdisPage() {
           <Card className="border">
             <CardHeader>
               <CardTitle className="text-lg">Yeni Test Tanımı Ekle</CardTitle>
-              <CardDescription>Bir teste birden çok ürün bağlanabilir.</CardDescription>
+              <CardDescription>Bir teste ürün bağlanmayabilir ya da istenen sayıda ürün bağlanabilir.</CardDescription>
             </CardHeader>
-            <CardContent className="grid grid-cols-1 md:grid-cols-5 gap-4 items-start">
+            <CardContent className="grid grid-cols-1 md:grid-cols-6 gap-4 items-start">
               <Input
                 placeholder="SUT Kodu (örn: 900.010)"
                 value={newSutKodu}
@@ -367,7 +418,7 @@ export default function HakEdisPage() {
                 <Popover open={isProductPopoverOpen} onOpenChange={setIsProductPopoverOpen}>
                   <PopoverTrigger asChild>
                     <Button variant="outline" role="combobox" className="w-full justify-between font-normal">
-                      {newLinkedStokKodlari.length === 0 ? 'Ürün(ler) Seçin...' : `${newLinkedStokKodlari.length} ürün`}
+                      {newLinkedStokKodlari.length === 0 ? 'Ürün(ler) Seçin (opsiyonel)' : `${newLinkedStokKodlari.length} ürün`}
                       <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                     </Button>
                   </PopoverTrigger>
@@ -419,6 +470,14 @@ export default function HakEdisPage() {
                   </div>
                 )}
               </div>
+
+              <Input
+                placeholder="Counter başlangıç"
+                value={newCounterValue}
+                onChange={(e) => setNewCounterValue(e.target.value)}
+                type="text"
+                inputMode="numeric"
+              />
 
               <Input
                 placeholder="Hak Ediş (TL)"
@@ -474,6 +533,7 @@ export default function HakEdisPage() {
                         <TableHead className="w-[120px]">SUT Kodu</TableHead>
                         <TableHead>SUT Test Adı</TableHead>
                         <TableHead>Bağlı Ürünler</TableHead>
+                        <TableHead className="text-right w-[120px]">Counter</TableHead>
                         <TableHead className="text-right w-[150px]">Hak Ediş (TL)</TableHead>
                         <TableHead className="text-right w-[140px]">İşlem</TableHead>
                       </TableRow>
@@ -485,7 +545,9 @@ export default function HakEdisPage() {
                           <TableCell>{d.sutTestAdi}</TableCell>
                           <TableCell>
                             <div className="flex flex-wrap gap-1">
-                              {(d.linkedStokKodlari || []).map((k) => {
+                              {(d.linkedStokKodlari || []).length === 0 ? (
+                                <span className="text-xs text-muted-foreground">Ürün bağlantısı yok</span>
+                              ) : (d.linkedStokKodlari || []).map((k) => {
                                 const p = productMap.get(k);
                                 return (
                                   <Badge key={k} variant="outline" className="gap-1">
@@ -495,6 +557,9 @@ export default function HakEdisPage() {
                                 );
                               })}
                             </div>
+                          </TableCell>
+                          <TableCell className="text-right font-semibold">
+                            {Number(d.counterValue || 0).toLocaleString('tr-TR')}
                           </TableCell>
                           <TableCell className="text-right font-semibold text-amber-700">
                             ₺{Number(d.hakEdisMiktari || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2 })}
