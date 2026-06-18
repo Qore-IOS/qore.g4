@@ -126,7 +126,7 @@ export default function CihazUstuHesaplamaPanel() {
     }
     setIsLoadingPending(true);
     try {
-      await deleteExpiredPendingCalculationFiles();
+      await deleteExpiredPendingCalculationFiles({ currentCompanyId, isSuperAdmin });
       const docs = await loadPendingCalculationFiles({
         kind: 'cihazUstu',
         hospitalId,

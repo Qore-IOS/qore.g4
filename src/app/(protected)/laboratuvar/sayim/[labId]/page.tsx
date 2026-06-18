@@ -29,6 +29,8 @@ import {
   X,
   PackageX,
   ArrowRight,
+  UploadCloud,
+  FileText,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { ProductCode, DepoStokItem, ConsumptionRecord, MinMaxRule } from '@/lib/types';
@@ -847,15 +849,15 @@ export default function LaboratuvarSayimPage() {
     }
   }, [labId, labName, currentUserProfile, currentCompanyId, productEntries, isSaving, countPeriod, countMonth, countYear, toast]);
 
-  const completeUploadStep = useCallback((uploaded: boolean) => {
+  const completeUploadStep = useCallback(() => {
     setModalFiles([]);
-    setUploadFlow((prev) => {
-      if (!prev) return null;
-      if (prev.step === 'cihazUstu') return { ...prev, step: 'kumulatif' };
-      router.push(`/laboratuvar/sayim/${labId}/history`);
-      return null;
-    });
-  }, [labId, router]);
+    if (uploadFlow?.step === 'cihazUstu') {
+      setUploadFlow({ ...uploadFlow, step: 'kumulatif' });
+      return;
+    }
+    setUploadFlow(null);
+    router.push(`/laboratuvar/sayim/${labId}/history`);
+  }, [labId, router, uploadFlow]);
 
   const handleCalculationFileUpload = useCallback(async () => {
     if (!uploadFlow || !labId || modalFiles.length === 0) return;
@@ -881,7 +883,7 @@ export default function LaboratuvarSayimPage() {
         [uploadFlow.step === 'cihazUstu' ? 'cihazUstuUploadedAt' : 'kumulatifUploadedAt']: Timestamp.now(),
       });
       toast({ title: 'Dosya kaydedildi', description: `${uploadFlow.step === 'cihazUstu' ? 'Cihaz üstü' : 'Kümülatif'} dosyaları ${countPeriod} dönemi için beklemeye alındı.` });
-      completeUploadStep(true);
+      completeUploadStep();
     } catch (err: any) {
       toast({ title: 'Dosya kaydedilemedi', description: err?.message || 'Beklenmeyen hata oluştu.', variant: 'destructive' });
     } finally {
@@ -890,7 +892,7 @@ export default function LaboratuvarSayimPage() {
   }, [uploadFlow, labId, modalFiles, labName, countMonth, countYear, currentCompanyId, currentUserProfile, toast, countPeriod, completeUploadStep]);
 
   const skipUploadStep = useCallback(() => {
-    completeUploadStep(false);
+    completeUploadStep();
   }, [completeUploadStep]);
 
   // ------------------------------------------------------------------
@@ -1229,39 +1231,78 @@ export default function LaboratuvarSayimPage() {
         </main>
       </div>
 
-      <Dialog open={!!uploadFlow} onOpenChange={() => {}}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{uploadFlow?.step === 'cihazUstu' ? 'Cihaz üstü dosyalarını yükle' : 'Kümülatif dosyalarını yükle'}</DialogTitle>
-            <DialogDescription>
-              {labName} laboratuvarı için {countPeriod} dönemine ait dosyaları beklemeye alın. Bu adım isteğe bağlıdır; atlanan dosyalar sayım geçmişinden daha sonra yüklenebilir.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-3">
-            <Input
-              type="file"
-              multiple
-              accept=".pdf,.txt,.csv,application/pdf,text/*"
-              onChange={(event) => setModalFiles(Array.from(event.target.files || []))}
-            />
-            {modalFiles.length > 0 && (
-              <div className="rounded-lg border p-3 text-xs text-[var(--dashboard-muted)] space-y-1">
-                {modalFiles.map((file) => (
-                  <div key={`${file.name}-${file.size}`} className="flex justify-between gap-2">
-                    <span className="truncate">{file.name}</span>
-                    <span>{Math.ceil(file.size / 1024)} KB</span>
-                  </div>
-                ))}
-              </div>
-            )}
+      <Dialog open={!!uploadFlow} onOpenChange={(open) => { if (!open && !isUploadingCalcFile) skipUploadStep(); }}>
+        <DialogContent className="max-w-2xl rounded-3xl p-0 overflow-hidden">
+          <div className="bg-gradient-to-br from-sky-500 via-cyan-500 to-blue-600 px-6 py-5 text-white">
+            <DialogHeader className="text-left">
+              <DialogTitle className="text-xl font-bold">Sayım Dosyalarını Yükle</DialogTitle>
+              <DialogDescription className="text-white/85">
+                {labName} — {countPeriod}. Dosyaları şimdi yükleyebilir veya bu adımı geçip sayım geçmişinden daha sonra tamamlayabilirsiniz.
+              </DialogDescription>
+            </DialogHeader>
           </div>
 
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={skipUploadStep} disabled={isUploadingCalcFile}>Atla</Button>
+          <div className="grid gap-5 p-6 md:grid-cols-[1.1fr_0.9fr]">
+            <label className="flex min-h-56 cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-sky-200 bg-sky-50/60 p-6 text-center transition hover:bg-sky-50">
+              <UploadCloud className="mb-3 h-10 w-10 text-sky-500" />
+              <span className="text-sm font-semibold text-slate-800">Dosyaları seç veya buraya bırak</span>
+              <span className="mt-1 text-xs text-slate-500">PDF, TXT ve CSV dosyaları desteklenir.</span>
+              <Input
+                type="file"
+                multiple
+                accept=".pdf,.txt,.csv,application/pdf,text/*"
+                className="sr-only"
+                onChange={(event) => setModalFiles(Array.from(event.target.files || []))}
+              />
+            </label>
+
+            <div className="space-y-4">
+              <div className="rounded-2xl border bg-muted/30 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Akış</p>
+                <div className="mt-3 space-y-3">
+                  {[
+                    { key: 'cihazUstu', label: '1. Cihaz üstü dosyası' },
+                    { key: 'kumulatif', label: '2. Kümülatif dosyası' },
+                  ].map((step) => {
+                    const active = uploadFlow?.step === step.key;
+                    return (
+                      <div key={step.key} className="flex items-center gap-3">
+                        <span className={cn('h-3 w-3 rounded-full', active ? 'bg-sky-500 ring-4 ring-sky-100' : 'bg-slate-300')} />
+                        <span className={cn('text-sm', active ? 'font-semibold text-slate-900' : 'text-muted-foreground')}>{step.label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border p-4">
+                <p className="text-sm font-semibold">Seçilen dosyalar</p>
+                {modalFiles.length > 0 ? (
+                  <div className="mt-3 max-h-36 space-y-2 overflow-y-auto pr-1">
+                    {modalFiles.map((file) => (
+                      <div key={`${file.name}-${file.size}`} className="flex items-center justify-between gap-3 rounded-lg bg-muted/50 px-3 py-2 text-xs">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <FileText className="h-4 w-4 shrink-0 text-sky-500" />
+                          <span className="truncate">{file.name}</span>
+                        </span>
+                        <span className="shrink-0 text-muted-foreground">{Math.ceil(file.size / 1024)} KB</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-3 text-xs text-muted-foreground">Henüz dosya seçilmedi.</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 border-t bg-muted/20 px-6 py-4">
+            <Button variant="outline" onClick={skipUploadStep} disabled={isUploadingCalcFile}>
+              {uploadFlow?.step === 'cihazUstu' ? 'Atla ve İleri' : 'Atla ve Bitir'}
+            </Button>
             <Button onClick={handleCalculationFileUpload} disabled={isUploadingCalcFile || modalFiles.length === 0}>
               {isUploadingCalcFile && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Beklemeye Al
+              {uploadFlow?.step === 'cihazUstu' ? 'Yükle ve İleri' : 'Yükle ve Bitir'}
             </Button>
           </DialogFooter>
         </DialogContent>

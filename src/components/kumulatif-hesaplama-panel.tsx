@@ -128,7 +128,7 @@ export default function KumulatifHesaplamaPanel() {
     }
     setIsLoadingPending(true);
     try {
-      await deleteExpiredPendingCalculationFiles();
+      await deleteExpiredPendingCalculationFiles({ currentCompanyId, isSuperAdmin });
       const docs = await loadPendingCalculationFiles({
         kind: 'kumulatif',
         hospitalId,
