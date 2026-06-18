@@ -55,6 +55,26 @@ function parseLinkedStokKodlariFromCells(cells: unknown[]): string[] {
   return Array.from(new Set(cells.flatMap(parseLinkedStokKodlari)));
 }
 
+function parseHakEdisAmount(raw: unknown): number {
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : NaN;
+  let value = String(raw ?? '').trim();
+  if (!value) return NaN;
+  value = value.replace(/₺|tl|try/gi, '').replace(/\s+/g, '');
+  const hasComma = value.includes(',');
+  const hasDot = value.includes('.');
+  if (hasComma && hasDot) {
+    // Son ayırıcı ondalık kabul edilir: 1.234,56 veya 1,234.56
+    value = value.lastIndexOf(',') > value.lastIndexOf('.')
+      ? value.replace(/\./g, '').replace(',', '.')
+      : value.replace(/,/g, '');
+  } else if (hasComma) {
+    value = value.replace(',', '.');
+  }
+  value = value.replace(/[^0-9.-]/g, '');
+  const amount = Number(value);
+  return Number.isFinite(amount) ? amount : NaN;
+}
+
 export default function HakEdisPage() {
   const { toast } = useToast();
   const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
@@ -108,7 +128,7 @@ export default function HakEdisPage() {
       toast({ title: 'Eksik Bilgi', description: 'SUT kodu, test adı ve hak ediş miktarı doldurulmalıdır. Ürün bağlantısı opsiyoneldir.', variant: 'destructive' });
       return;
     }
-    const hakEdis = parseFloat(newHakEdisMiktari.replace(',', '.'));
+    const hakEdis = parseHakEdisAmount(newHakEdisMiktari);
     if (isNaN(hakEdis) || hakEdis <= 0) {
       toast({ title: 'Geçersiz Değer', description: 'Hak ediş miktarı geçerli bir sayı olmalı.', variant: 'destructive' });
       return;
@@ -188,7 +208,7 @@ export default function HakEdisPage() {
       for (const r of dataRows) {
         const sutKodu = String(r[0] || '').trim();
         const sutTestAdi = String(r[1] || '').trim();
-        const hakEdis = parseFloat(String(r[2] || '0').replace(',', '.'));
+        const hakEdis = parseHakEdisAmount(r[2]);
         const stokKodlari = parseLinkedStokKodlariFromCells(r.slice(3));
 
         if (!sutKodu || !sutTestAdi || isNaN(hakEdis) || hakEdis <= 0) {
