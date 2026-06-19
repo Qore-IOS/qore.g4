@@ -58,13 +58,14 @@ function getStatusBadge(status: string) {
   }
 }
 
-export default function UrunTalepGecmisPanel() {
+export default function UrunTalepGecmisPanel({ depotId }: { depotId?: string } = {}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toast } = useToast();
   const { currentUser, currentUserProfile } = useAuth();
 
   const urlLabId = searchParams.get('labId');
+  const urlDepotId = depotId || searchParams.get('depotId') || '';
 
   const [loading, setLoading] = useState(true);
   const [orders, setOrders] = useState<RequestHistoryItem[]>([]);
@@ -83,16 +84,19 @@ export default function UrunTalepGecmisPanel() {
 
   const totalPages = Math.max(1, Math.ceil(totalCount / rowsPerPage));
 
-  // Determine labIds from profile or URL
-  const labFilter = urlLabId || (currentUserProfile?.assignedLaboratories || []).join(',');
+  // Determine location filter from URL/profile. Depot-origin history must stay
+  // scoped to the selected depot instead of falling back to all lab requests.
+  const labFilter = urlDepotId ? '' : (urlLabId || (currentUserProfile?.assignedLaboratories || []).join(','));
+  const depotFilter = urlDepotId || '';
 
   /**
    * Fetch total count from the server
    */
-  const fetchTotalCount = useCallback(async (uid: string, filter: string, signal: AbortSignal) => {
+  const fetchTotalCount = useCallback(async (uid: string, filter: string, depotId: string, signal: AbortSignal) => {
     try {
       let url = `/api/urun-talep-gecmis?countOnly=true`;
-      if (filter.includes(',')) url += `&labIds=${filter}`;
+      if (depotId) url += `&depotId=${depotId}`;
+      else if (filter.includes(',')) url += `&labIds=${filter}`;
       else if (filter) url += `&labId=${filter}`;
       else url += `&createdById=${uid}`;
 
@@ -112,6 +116,7 @@ export default function UrunTalepGecmisPanel() {
   const fetchPage = useCallback(async (
     uid: string,
     filter: string,
+    depotId: string,
     pageNum: number,
     pageSize: number,
     cursors: (string | null)[],
@@ -122,7 +127,8 @@ export default function UrunTalepGecmisPanel() {
       const startAfterId = pageNum > 1 ? cursors[pageNum - 2] : null;
 
       let url = `/api/urun-talep-gecmis?pageSize=${pageSize}`;
-      if (filter.includes(',')) url += `&labIds=${filter}`;
+      if (depotId) url += `&depotId=${depotId}`;
+      else if (filter.includes(',')) url += `&labIds=${filter}`;
       else if (filter) url += `&labId=${filter}`;
       else url += `&createdById=${uid}`;
 
@@ -161,15 +167,15 @@ export default function UrunTalepGecmisPanel() {
   useEffect(() => {
     setPage(1);
     cursorStackRef.current = [];
-  }, [rowsPerPage]);
+  }, [rowsPerPage, labFilter, depotFilter]);
 
   // Fetch total count on mount and when labs change
   useEffect(() => {
     if (!currentUser?.uid) return;
     const controller = new AbortController();
-    fetchTotalCount(currentUser.uid, labFilter, controller.signal);
+    fetchTotalCount(currentUser.uid, labFilter, depotFilter, controller.signal);
     return () => controller.abort();
-  }, [currentUser?.uid, labFilter, fetchTotalCount]);
+  }, [currentUser?.uid, labFilter, depotFilter, fetchTotalCount]);
 
   // Fetch current page data
   useEffect(() => {
@@ -178,9 +184,9 @@ export default function UrunTalepGecmisPanel() {
       return;
     }
     const controller = new AbortController();
-    fetchPage(currentUser.uid, labFilter, page, rowsPerPage, cursorStackRef.current, controller.signal);
+    fetchPage(currentUser.uid, labFilter, depotFilter, page, rowsPerPage, cursorStackRef.current, controller.signal);
     return () => controller.abort();
-  }, [currentUser?.uid, labFilter, page, rowsPerPage, fetchPage]);
+  }, [currentUser?.uid, labFilter, depotFilter, page, rowsPerPage, fetchPage]);
 
   const handleDelete = async (orderId: string) => {
     setIsDeleting(true);
@@ -198,8 +204,8 @@ export default function UrunTalepGecmisPanel() {
       
       // Refresh current page
       if (currentUser?.uid) {
-        fetchTotalCount(currentUser.uid, labFilter, new AbortController().signal);
-        fetchPage(currentUser.uid, labFilter, page, rowsPerPage, cursorStackRef.current, new AbortController().signal);
+        fetchTotalCount(currentUser.uid, labFilter, depotFilter, new AbortController().signal);
+        fetchPage(currentUser.uid, labFilter, depotFilter, page, rowsPerPage, cursorStackRef.current, new AbortController().signal);
       }
     } catch (error) {
       toast({
@@ -215,7 +221,7 @@ export default function UrunTalepGecmisPanel() {
 
   return (
     <div className="p-4 space-y-4">
-      <BackButton fallback="/urun-talep" />
+      <BackButton fallback={depotFilter ? `/urun-talep/depo/${depotFilter}` : '/urun-talep'} />
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -223,7 +229,7 @@ export default function UrunTalepGecmisPanel() {
             Ürün Talep Geçmişi
           </CardTitle>
           <CardDescription>
-            {labFilter ? 'Laboratuvarınıza ait talepleri görüntüleyin.' : 'Önceki taleplerinizi görüntüleyin.'} Satıra tıklayarak sipariş detayını açabilirsiniz.
+            {depotFilter ? 'Seçili depoya ait talepleri görüntüleyin.' : labFilter ? 'Laboratuvarınıza ait talepleri görüntüleyin.' : 'Önceki taleplerinizi görüntüleyin.'} Satıra tıklayarak sipariş detayını açabilirsiniz.
             {totalCount > 0 && (
               <span className="ml-2 font-medium">({totalCount} kayıt)</span>
             )}
