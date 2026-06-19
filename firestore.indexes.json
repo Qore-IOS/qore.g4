@@ -402,6 +402,25 @@
       "fields": [
         { "fieldPath": "companyId", "order": "ASCENDING" },
         { "fieldPath": "depotId", "order": "ASCENDING" },
+        { "fieldPath": "isShipped", "order": "ASCENDING" },
+        { "fieldPath": "stokKodu", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "depoStok",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "depotId", "order": "ASCENDING" },
+        { "fieldPath": "isShipped", "order": "ASCENDING" },
+        { "fieldPath": "stokKodu", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "depoStok",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "companyId", "order": "ASCENDING" },
+        { "fieldPath": "depotId", "order": "ASCENDING" },
         { "fieldPath": "eklenmeTarihi", "order": "DESCENDING" }
       ]
     },
