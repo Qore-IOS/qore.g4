@@ -1,6 +1,7 @@
 import { MAX_TOKENS, ERROR_MESSAGES } from './config';
 import { executeSmartQuery, SmartQueryResult } from './smartQueryEngine';
 import { generateWithGemini } from './geminiClient';
+import { generateWithOpenAIExtension, isOpenAIExtensionConfigured } from './openaiExtensionClient';
 import { aiLogger } from '@/lib/logger';
 import { TOTAL_VERIMLILIK_ANALIZ_RAPORU } from './efficiencyReportContext';
 
@@ -77,8 +78,13 @@ function classifyError(error: unknown): string {
   if (error instanceof Error) {
     const msg = error.message.toLowerCase();
 
+    if (msg.includes('openai extension response timed out')) {
+      return 'ChatGPT uzantısından zamanında cevap alınamadı. Lütfen Firebase Extension koleksiyon yolu, response alanı ve Cloud Functions loglarını kontrol edin.';
+    }
     if (msg.includes('401') || msg.includes('api key') || msg.includes('authentication') || msg.includes('unauthorized')) {
-      return 'API anahtari gecersiz veya suresi dolmus. Lutfen Gemini API anahtarinizi kontrol edin.';
+      return isOpenAIExtensionConfigured()
+        ? 'OpenAI API anahtarı geçersiz veya süresi dolmuş. Lütfen Firebase Extension OPENAI_API_KEY secret değerini kontrol edin.'
+        : 'API anahtari gecersiz veya suresi dolmus. Lutfen Gemini API anahtarinizi kontrol edin.';
     }
     if (msg.includes('429') || msg.includes('rate')) {
       return ERROR_MESSAGES.RATE_LIMIT;
@@ -145,12 +151,18 @@ export async function smartChat(
       { role: 'user', content: contextualPrompt },
     ];
 
-    const response = await generateWithGemini({
-      systemPrompt: ENHANCED_SYSTEM_PROMPT,
-      messages,
-      temperature: 0.1,
-      maxOutputTokens: MAX_TOKENS,
-    });
+    const response = isOpenAIExtensionConfigured()
+      ? await generateWithOpenAIExtension({
+        systemPrompt: ENHANCED_SYSTEM_PROMPT,
+        messages,
+        temperature: 0.1,
+      })
+      : await generateWithGemini({
+        systemPrompt: ENHANCED_SYSTEM_PROMPT,
+        messages,
+        temperature: 0.1,
+        maxOutputTokens: MAX_TOKENS,
+      });
 
     return {
       message: response.text,
