@@ -41,6 +41,7 @@ import {
   doc,
   setDoc,
   serverTimestamp,
+  where,
 } from 'firebase/firestore';
 import type { Depot, Hospital, ProductCode, MinMaxRule, OrderItem, OrderUrgency, User } from '@/lib/types';
 import { Textarea } from '@/components/ui/textarea';
@@ -772,7 +773,66 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
   }, [selectedLabId, toast, allHospitals, isPeripheralFlow, isDepotRequestFlow, depotRequestId]);
 
 
+
   // -- Handlers --
+
+  const handleAutoFillDepotRequest = async () => {
+    if (!isDepotRequestFlow || !depotRequestId) return;
+    if (labMinMaxRules.length === 0) {
+      toast({ title: 'Min/Max Yok', description: 'Bu depo için tanımlı min/max kuralı bulunamadı.', variant: 'destructive' });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const stockDocs = await getScopedDocs(
+        'depoStok',
+        currentCompanyId,
+        isSuperAdmin,
+        where('depotId', '==', depotRequestId),
+        where('isShipped', '==', false),
+      );
+
+      const stockByCode = new Map<string, number>();
+      stockDocs.forEach((docSnap) => {
+        const data = docSnap.data() as any;
+        const code = String(data.stokKodu || '').trim();
+        if (!code) return;
+        stockByCode.set(code, (stockByCode.get(code) || 0) + Math.max(1, Number(data.adet) || 1));
+      });
+
+      const nextItems: OrderItem[] = [];
+      labMinMaxRules.forEach((rule) => {
+        const stokKodu = String(rule.stokKodu || '').trim();
+        if (!stokKodu) return;
+        const maxAdet = Number(rule.max) || 0;
+        if (maxAdet <= 0) return;
+        const currentStock = stockByCode.get(stokKodu) || 0;
+        const needed = Math.max(0, maxAdet - currentStock);
+        if (needed <= 0) return;
+        const product = allProducts.find(p => p.stokKodu === stokKodu);
+        nextItems.push({
+          id: product?.id || stokKodu,
+          stokKodu,
+          stokAdi: product?.stokAdi || (rule as any).stokAdi || stokKodu,
+          adet: needed,
+        });
+      });
+
+      setOrderItems(nextItems);
+      toast({
+        title: nextItems.length > 0 ? 'Talep Listesi Oluşturuldu' : 'Talep İhtiyacı Yok',
+        description: nextItems.length > 0
+          ? `${nextItems.length} kalem ürün min/max eksiğine göre listeye eklendi.`
+          : 'Depo stoğu tanımlı max adetleri karşılıyor.',
+      });
+    } catch (err) {
+      console.error('Error auto-filling depot request:', err);
+      toast({ title: 'Hata', description: 'Depo stokları okunarak otomatik talep listesi oluşturulamadı.', variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleProductClick = (product: ProductCode) => {
     setQtyDialogProduct(product);
@@ -977,6 +1037,22 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
         </div>
 
         {!isDepotRequestFlow && <DutyInfo selectedLabId={selectedLabId || null} />}
+
+        {isDepotRequestFlow && (
+          <button
+            onClick={handleAutoFillDepotRequest}
+            disabled={loading || labMinMaxRules.length === 0}
+            className={cn(
+              "hidden sm:flex items-center gap-2 px-4 py-2.5 rounded-2xl text-sm font-bold transition-all",
+              !loading && labMinMaxRules.length > 0
+                ? "cihaz-tool-item text-[var(--dashboard-text)]"
+                : "cihaz-pressed text-[var(--dashboard-muted)] cursor-not-allowed"
+            )}
+          >
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Package className="h-4 w-4" />}
+            Eksikleri Listele
+          </button>
+        )}
 
         {/* CTA — Create Order (top right) */}
         <button
@@ -1367,6 +1443,21 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
                 </div>
               </div>
               <div className="flex-1" />
+              {isDepotRequestFlow && (
+                <button
+                  onClick={handleAutoFillDepotRequest}
+                  disabled={loading || labMinMaxRules.length === 0}
+                  className={cn(
+                    "sm:hidden flex items-center gap-2 px-3 py-2.5 rounded-2xl text-xs font-bold transition-all",
+                    !loading && labMinMaxRules.length > 0
+                      ? "cihaz-tool-item text-[var(--dashboard-text)]"
+                      : "cihaz-pressed text-[var(--dashboard-muted)] cursor-not-allowed"
+                  )}
+                >
+                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Package className="h-4 w-4" />}
+                  Eksikleri Listele
+                </button>
+              )}
               {/* Mobile CTA */}
               <button
                 onClick={handleCreateClick}
