@@ -41,6 +41,7 @@ import {
   doc,
   setDoc,
   serverTimestamp,
+  where,
 } from 'firebase/firestore';
 import type { Depot, Hospital, ProductCode, MinMaxRule, OrderItem, OrderUrgency, User } from '@/lib/types';
 import { Textarea } from '@/components/ui/textarea';
