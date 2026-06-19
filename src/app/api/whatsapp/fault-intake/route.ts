@@ -18,6 +18,7 @@ type IncomingMessage = {
   imageUrl?: string | null;
   imageBase64?: string | null;
   imageMimeType?: string | null;
+  fromMe?: boolean;
   raw: any;
 };
 
@@ -48,6 +49,7 @@ const DEFAULT_HOSPITAL_NAME = 'Göztepe Merkez';
 const BOT_ACTOR_UID = 'whatsapp-ai';
 const BOT_ACTOR_NAME = 'WhatsApp AI';
 const DOC_CHAR_LIMIT = 70_000;
+const LOG_IGNORED_MESSAGES = process.env.WHATSAPP_FAULT_LOG_IGNORED === 'true';
 
 function normalizeText(value: unknown): string {
   return String(value ?? '')
@@ -110,6 +112,16 @@ function isImagePayload(payload: any): boolean {
   return type.includes('image') || mime.startsWith('image/');
 }
 
+function firstBoolean(payload: any, paths: string[][]): boolean | undefined {
+  for (const pathParts of paths) {
+    let current = payload;
+    for (const part of pathParts) current = current?.[part];
+    if (typeof current === 'boolean') return current;
+    if (typeof current === 'string' && ['true', 'false'].includes(current.toLowerCase())) return current.toLowerCase() === 'true';
+  }
+  return undefined;
+}
+
 function parseIncomingPayload(payload: any): IncomingMessage {
   const messageId = getFirstString(payload, [
     ['messageId'], ['id'], ['message_id'], ['data', 'id'], ['data', 'messageId'], ['message', 'id'], ['message', 'messageId'],
@@ -143,6 +155,7 @@ function parseIncomingPayload(payload: any): IncomingMessage {
     imageUrl: isImagePayload(payload) ? imageUrl : imageUrl,
     imageBase64,
     imageMimeType,
+    fromMe: firstBoolean(payload, [['fromMe'], ['data', 'fromMe'], ['message', 'fromMe']]),
     raw: payload,
   };
 }
@@ -450,18 +463,59 @@ function buildSuccessReply(reportId: string, lineNo: number, ai: AiExtraction, d
   ].filter(Boolean).join('\n');
 }
 
+export async function GET() {
+  const docs = await Promise.allSettled([
+    readFile(path.join(process.cwd(), 'docs', 'whatsapp-fault-ai-master.md'), 'utf8'),
+    readFile(path.join(process.cwd(), 'public', 'teknik-doc-2.txt'), 'utf8'),
+  ]);
+
+  return NextResponse.json({
+    success: true,
+    service: 'whatsapp-fault-intake',
+    message: 'Endpoint aktif. WhatsApp webhooklari icin POST kullanilmalidir.',
+    accepts: ['POST'],
+    sourceGroupId: SOURCE_GROUP_ID,
+    sourceGroupName: SOURCE_GROUP_NAME,
+    docs: {
+      master: docs[0].status === 'fulfilled',
+      teknikDoc2: docs[1].status === 'fulfilled',
+    },
+    env: {
+      geminiConfigured: Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY),
+      ultraMsgConfigured: Boolean(
+        (process.env.ULTRAMSG_INSTANCE_ID || process.env.WHATSAPP_INSTANCE_ID || process.env.WHATSAPP_ULTRAMSG_INSTANCE_ID) &&
+        (process.env.ULTRAMSG_TOKEN || process.env.WHATSAPP_TOKEN || process.env.WHATSAPP_ULTRAMSG_TOKEN)
+      ),
+    },
+  });
+}
+
 export async function POST(request: NextRequest) {
   const rawPayload = await request.json().catch(() => null);
   if (!rawPayload) return NextResponse.json({ success: false, error: 'JSON webhook payload gerekli.' }, { status: 400 });
 
   const incoming = parseIncomingPayload(rawPayload);
+  if (incoming.fromMe) {
+    if (LOG_IGNORED_MESSAGES) {
+      await adminDb.collection('whatsappFaultIntakeLogs').doc(incoming.messageId).set({
+        status: 'ignored_from_me',
+        sourceGroupId: incoming.groupId || null,
+        raw: rawPayload,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+    return NextResponse.json({ success: true, ignored: true, reason: 'from_me' });
+  }
+
   if (incoming.groupId !== SOURCE_GROUP_ID) {
-    await adminDb.collection('whatsappFaultIntakeLogs').doc(incoming.messageId).set({
-      status: 'ignored_wrong_group',
-      sourceGroupId: incoming.groupId || null,
-      raw: rawPayload,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    }, { merge: true });
+    if (LOG_IGNORED_MESSAGES) {
+      await adminDb.collection('whatsappFaultIntakeLogs').doc(incoming.messageId).set({
+        status: 'ignored_wrong_group',
+        sourceGroupId: incoming.groupId || null,
+        raw: rawPayload,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
     return NextResponse.json({ success: true, ignored: true, reason: 'wrong_group' });
   }
 
