@@ -34,6 +34,8 @@ Bu endpoint iki master bilgi kaynağını birlikte okur:
 
 AI alarm ayrıştırması, görsel + caption + bu iki doküman bağlamı ile yapılır. Endpoint yalnızca `905362840155-1615537145@g.us` grubundan gelen mesajları işler; diğer grup/bireysel mesajlar loglanıp otomatik arıza akışına alınmaz.
 
+Varsayılan davranışta hedef grup dışındaki mesajlar ve botun kendi gönderdiği mesajlar Firestore loglarını kirletmemek için sessizce yok sayılır. Debug/audit amacıyla bu yok sayılan mesajları da `whatsappFaultIntakeLogs` koleksiyonuna yazmak isterseniz sunucu ortam değişkeni olarak `WHATSAPP_FAULT_LOG_IGNORED=true` tanımlanabilir.
+
 ## Kullanıcı mesaj standardı
 
 Kullanıcılar WhatsApp grubuna arıza fotoğrafı gönderirken fotoğraf açıklamasına veya alt mesajına Line bilgisini yazmalıdır.
