@@ -244,6 +244,7 @@ export async function emitOrderCreatedFromRequest(params: {
   totalAdet?: number;
   urgency?: 'normal' | 'acil' | 'cok_acil';
   audienceHint?: AudienceHint;
+  extraTargets?: string[];
 }) {
   const urgencyLabel =
     params.urgency === 'cok_acil' ? ' · ÇOK ACİL' :
@@ -268,7 +269,7 @@ export async function emitOrderCreatedFromRequest(params: {
     message,
     resource: { type: "order", id: params.orderId },
     actor: params.actor,
-    targets: getTargetKeys({ includeAdmins: true, depotId: params.depotId }),
+    targets: getTargetKeys({ includeAdmins: !params.extraTargets?.length, depotId: params.depotId, extraTargets: params.extraTargets }),
     meta: {
       orderId: params.orderId,
       labId: params.labId,
@@ -294,6 +295,7 @@ export async function emitOrderCreated(params: {
   itemsCount?: number;
   totalAdet?: number;
   audienceHint?: AudienceHint;
+
 }) {
   const titlePrefix = params.isPeripheral ? '[Perifer] ' : '';
   const labPart = params.labName ? ` · ${params.labName}` : '';
@@ -334,6 +336,7 @@ export async function emitTransferToLab(params: {
   shipmentId?: string;
   labId: string;
   audienceHint?: AudienceHint;
+
 }) {
   await createNotification({
     type: "transfer_to_lab",
@@ -356,6 +359,7 @@ export async function emitLabCountCompleted(params: {
   labName?: string;
   countId?: string;
   audienceHint?: AudienceHint;
+
 }) {
   await createNotification({
     type: "lab_count_completed",
