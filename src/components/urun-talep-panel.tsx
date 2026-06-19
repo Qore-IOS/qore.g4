@@ -557,53 +557,6 @@ function UrgencyDialog({ open, onOpenChange, totalItems, totalAdet, loading, onC
   );
 }
 
-function parseStockExpiryDate(value: unknown): Date | null {
-  if (!value) return null;
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
-  if (typeof (value as { toDate?: unknown }).toDate === 'function') {
-    const date = (value as { toDate: () => Date }).toDate();
-    return Number.isNaN(date.getTime()) ? null : date;
-  }
-  if (typeof value === 'object' && value !== null) {
-    const seconds = (value as { seconds?: unknown; _seconds?: unknown }).seconds ?? (value as { _seconds?: unknown })._seconds;
-    if (typeof seconds === 'number') {
-      const date = new Date(seconds * 1000);
-      return Number.isNaN(date.getTime()) ? null : date;
-    }
-  }
-  if (typeof value === 'string') {
-    const trimmed = value.trim();
-    const turkishDate = trimmed.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
-    if (turkishDate) {
-      const [, day, month, year] = turkishDate;
-      const date = new Date(Number(year), Number(month) - 1, Number(day));
-      return Number.isNaN(date.getTime()) ? null : date;
-    }
-    const parsed = new Date(trimmed);
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
-  }
-  return null;
-}
-
-function daysUntilStockExpiry(value: unknown): number | null {
-  const expiryDate = parseStockExpiryDate(value);
-  if (!expiryDate) return null;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const expiry = new Date(expiryDate);
-  expiry.setHours(0, 0, 0, 0);
-  return Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-}
-
-function chunkArray<T>(items: T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let index = 0; index < items.length; index += size) {
-    chunks.push(items.slice(index, index + size));
-  }
-  return chunks;
-}
-
-
 /* =======================================================
    MAIN PANEL
    ======================================================= */
@@ -853,86 +806,34 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
 
     setLoading(true);
     try {
-      const productByCode = new Map<string, ProductCode>();
-      allProducts.forEach(product => {
-        const code = String(product.stokKodu || '').trim();
-        if (code) productByCode.set(code, product);
-      });
-
-      const rules = labMinMaxRules
-        .map(rule => ({ rule, stokKodu: String(rule.stokKodu || '').trim() }))
-        .filter(({ stokKodu, rule }) => stokKodu && (Number(rule.max) || 0) > 0);
-      const stokKodlari = Array.from(new Set(rules.map(({ stokKodu }) => stokKodu)));
-
-      let stockDocs: Awaited<ReturnType<typeof getScopedDocs>> = [];
-      try {
-        const stockChunks = await Promise.all(
-          chunkArray(stokKodlari, 30).map((codes) => getScopedDocs(
-            'depoStok',
-            currentCompanyId,
-            isSuperAdmin,
-            where('depotId', '==', depotRequestId),
-            where('isShipped', '==', false),
-            where('stokKodu', 'in', codes),
-          ))
-        );
-        const seenDocIds = new Set<string>();
-        stockDocs = stockChunks.flat().filter((docSnap) => {
-          if (seenDocIds.has(docSnap.id)) return false;
-          seenDocIds.add(docSnap.id);
-          return true;
-        });
-      } catch (indexedQueryError) {
-        console.warn('Indexed depot stock query failed, falling back to depot-wide scan:', indexedQueryError);
-        stockDocs = await getScopedDocs(
-          'depoStok',
-          currentCompanyId,
+      const response = await fetch('/api/urun-talep/depo-auto-fill', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          depotId: depotRequestId,
+          hedefIsGunu,
+          companyId: currentCompanyId,
           isSuperAdmin,
-          where('depotId', '==', depotRequestId),
-          where('isShipped', '==', false),
-        );
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || 'Depo talep hesaplaması yapılamadı.');
       }
 
-      const wantedCodes = new Set(stokKodlari);
-      const usableStockByCode = new Map<string, number>();
-      const soonExpiringStockByCode = new Map<string, number>();
-      for (const docSnap of stockDocs) {
-        const data = docSnap.data() as any;
-        const code = String(data.stokKodu || '').trim();
-        if (!code || !wantedCodes.has(code)) continue;
-        const qty = Math.max(1, Number(data.adet) || 1);
-        const expiryDays = daysUntilStockExpiry(data.miad);
-        const isSoonExpiring = typeof expiryDays === 'number' && expiryDays < 30;
-        const targetMap = isSoonExpiring ? soonExpiringStockByCode : usableStockByCode;
-        targetMap.set(code, (targetMap.get(code) || 0) + qty);
-      }
+      const nextItems: OrderItem[] = Array.isArray(payload.items)
+        ? payload.items.map((item: any) => ({
+          id: String(item.id || item.stokKodu),
+          stokKodu: String(item.stokKodu || ''),
+          stokAdi: String(item.stokAdi || item.stokKodu || ''),
+          adet: Number(item.adet) || 0,
+        })).filter((item: OrderItem) => item.stokKodu && item.adet > 0)
+        : [];
+      const explanations: Record<string, string> = payload.explanations && typeof payload.explanations === 'object'
+        ? payload.explanations
+        : Object.fromEntries((payload.items || []).filter((item: any) => item?.stokKodu && item?.explanation).map((item: any) => [item.stokKodu, item.explanation]));
+      const toplamIhtiyac = Number(payload.totalNeeded) || nextItems.reduce((sum, item) => sum + (Number(item.adet) || 0), 0);
 
-      const explanations: Record<string, string> = {};
-      const nextItems: OrderItem[] = [];
-      for (const { rule, stokKodu } of rules) {
-        const maxAdet = Number(rule.max) || 0;
-        const maxGun = Number(rule.maxGun) || 0;
-        const hedefAdet = maxGun > 0 ? Math.ceil((hedefIsGunu / maxGun) * maxAdet) : maxAdet;
-        const kullanilabilirStok = usableStockByCode.get(stokKodu) || 0;
-        const yaklasanMiadStok = soonExpiringStockByCode.get(stokKodu) || 0;
-        const ihtiyacAdet = Math.max(0, hedefAdet - kullanilabilirStok);
-        if (ihtiyacAdet <= 0) continue;
-
-        const product = productByCode.get(stokKodu);
-        const stokAdi = product?.stokAdi || (rule as any).stokAdi || stokKodu;
-        explanations[stokKodu] = maxGun > 0
-          ? `${maxAdet} adet / ${maxGun} iş günü tanımından ${hedefIsGunu} iş günü için hedef ${hedefAdet} adet hesaplandı. Kullanılabilir stok ${kullanilabilirStok} adet.${yaklasanMiadStok > 0 ? ` Miadına 30 günden az kalan ${yaklasanMiadStok} adet stoğa dahil edilmedi.` : ''}`
-          : `Max gün tanımı olmadığı için hedef ${hedefAdet} adet kabul edildi. Kullanılabilir stok ${kullanilabilirStok} adet.${yaklasanMiadStok > 0 ? ` Miadına 30 günden az kalan ${yaklasanMiadStok} adet stoğa dahil edilmedi.` : ''}`;
-
-        nextItems.push({
-          id: product?.id || stokKodu,
-          stokKodu,
-          stokAdi,
-          adet: ihtiyacAdet,
-        });
-      }
-
-      const toplamIhtiyac = nextItems.reduce((sum, item) => sum + (Number(item.adet) || 0), 0);
       setOrderItems(nextItems);
       setAutoFillExplanations(explanations);
       setAutoFillDialogOpen(false);
@@ -944,7 +845,7 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
       });
     } catch (err) {
       console.error('Error auto-filling depot request:', err);
-      toast({ title: 'Hata', description: 'Depo stokları okunarak otomatik talep listesi oluşturulamadı.', variant: 'destructive' });
+      toast({ title: 'Hata', description: err instanceof Error ? err.message : 'Depo stokları okunarak otomatik talep listesi oluşturulamadı.', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
