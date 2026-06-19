@@ -88,33 +88,50 @@ function getTransporter() {
 }
 async function buildExcelBuffer(orderId, order, itemInfoMap) {
     var _a, _b, _c;
+    const isDepotRequest = order.requestSource === 'depot_to_office' || order.isDepotRequest === true;
     const labId = order.labId;
-    // 1. Fetch minMaxRules (max amount per stokKodu)
+    const depotId = order.depotId;
+    const stockOwnerId = isDepotRequest ? depotId : labId;
+    const stockOwnerCollection = isDepotRequest ? 'depots' : 'hospitals';
+    const stockOwnerLabel = isDepotRequest ? 'depo' : 'lab';
+    // 1. Fetch minMaxRules (max amount per stokKodu). Depot-origin requests must
+    // use depots/{depotId}/minMaxRules so the "30 Günlük Max" column mirrors the
+    // selected depot's stock-management configuration.
     const rulesMap = {};
-    if (labId) {
+    if (stockOwnerId) {
         try {
-            const rulesSnap = await db.collection('hospitals').doc(labId).collection('minMaxRules').get();
+            const rulesSnap = await db.collection(stockOwnerCollection).doc(stockOwnerId).collection('minMaxRules').get();
             rulesSnap.forEach(doc => {
                 const data = doc.data();
-                if (data.stokKodu && data.max !== undefined) {
-                    rulesMap[data.stokKodu] = Number(data.max);
+                const stokKodu = data.stokKodu || doc.id;
+                if (stokKodu && data.max !== undefined) {
+                    rulesMap[stokKodu] = Number(data.max);
                 }
             });
         }
         catch (err) {
-            firebase_functions_1.logger.error(`Error fetching minMaxRules for lab ${labId}:`, err);
+            firebase_functions_1.logger.error(`Error fetching minMaxRules for ${stockOwnerLabel} ${stockOwnerId}:`, err);
         }
     }
-    // 2. Fetch depoStok for lab stock and closest miad lot count
-    const labStokMap = {};
+    // 2. Fetch depoStok for current stock and closest miad lot count. Lab requests
+    // continue to read shipped stock by hedefKurumId; depot requests read the
+    // unshipped stock physically in the selected depot.
+    const stockMap = {};
     const closestMiadLotMap = {};
-    if (labId) {
+    if (stockOwnerId) {
         try {
-            const depoStokSnap = await db
-                .collection('depoStok')
-                .where('isShipped', '==', true)
-                .where('hedefKurumId', '==', labId)
-                .get();
+            let depoStokQuery = db.collection('depoStok');
+            if (isDepotRequest) {
+                depoStokQuery = depoStokQuery
+                    .where('depotId', '==', stockOwnerId)
+                    .where('isShipped', '==', false);
+            }
+            else {
+                depoStokQuery = depoStokQuery
+                    .where('isShipped', '==', true)
+                    .where('hedefKurumId', '==', stockOwnerId);
+            }
+            const depoStokSnap = await depoStokQuery.get();
             const items = depoStokSnap.docs.map(d => d.data());
             const groupedByStok = {};
             items.forEach(item => {
@@ -125,7 +142,7 @@ async function buildExcelBuffer(orderId, order, itemInfoMap) {
                 groupedByStok[item.stokKodu].push(item);
             });
             for (const [stokKodu, groupItems] of Object.entries(groupedByStok)) {
-                labStokMap[stokKodu] = groupItems.length;
+                stockMap[stokKodu] = groupItems.length;
                 const itemsWithMiad = groupItems.filter(i => i.miad);
                 if (itemsWithMiad.length > 0) {
                     itemsWithMiad.sort((a, b) => {
@@ -150,20 +167,20 @@ async function buildExcelBuffer(orderId, order, itemInfoMap) {
             }
         }
         catch (err) {
-            firebase_functions_1.logger.error(`Error fetching depoStok for lab ${labId}:`, err);
+            firebase_functions_1.logger.error(`Error fetching depoStok for ${stockOwnerLabel} ${stockOwnerId}:`, err);
         }
     }
     // 3. Build Excel
     const workbook = new exceljs.Workbook();
     workbook.creator = 'INV-zen';
     workbook.created = new Date();
-    const sheet = workbook.addWorksheet('Perifer Talep', {
+    const sheet = workbook.addWorksheet(isDepotRequest ? 'Depo Talep' : 'Perifer Talep', {
         properties: { defaultRowHeight: 18 },
     });
     const createdAtText = ((_c = (_b = order.createdAt) === null || _b === void 0 ? void 0 : _b.toDate) === null || _c === void 0 ? void 0 : _c.call(_b))
         ? order.createdAt.toDate().toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' })
         : new Date().toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' });
-    const labName = order.kurumAdi || '-';
+    const labName = order.kurumAdi || order.depotName || '-';
     const createdBy = order.createdBy || '-';
     const totalQty = (order.items || []).reduce((s, it) => s + Number(it.adet || 0), 0);
     const urgencyKey = (order.urgency && URGENCY_META[order.urgency] ? order.urgency : 'normal');
@@ -172,7 +189,7 @@ async function buildExcelBuffer(orderId, order, itemInfoMap) {
     // --- Title row (merged across columns) ---
     sheet.mergeCells('A1:G1');
     const titleCell = sheet.getCell('A1');
-    titleCell.value = 'PERİFER LABORATUVAR ÜRÜN TALEBİ';
+    titleCell.value = isDepotRequest ? 'DEPO ÜRÜN TALEBİ' : 'PERİFER LABORATUVAR ÜRÜN TALEBİ';
     titleCell.font = { bold: true, size: 16, color: { argb: 'FFFFFFFF' } };
     titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
     titleCell.fill = {
@@ -184,8 +201,8 @@ async function buildExcelBuffer(orderId, order, itemInfoMap) {
     sheet.getRow(1).height = 28;
     const infoRows = [
         { label: 'Sipariş ID', value: orderId, labelFill: 'FFE0F2FE', valueFill: 'FFFFFFFF' },
-        { label: 'Laboratuvar', value: labName, labelFill: 'FFE0E7FF', valueFill: 'FFFFFFFF' },
-        { label: 'Laboratuvar ID', value: labId || '-', labelFill: 'FFCCFBF1', valueFill: 'FFFFFFFF' },
+        { label: isDepotRequest ? 'Depo' : 'Laboratuvar', value: labName, labelFill: 'FFE0E7FF', valueFill: 'FFFFFFFF' },
+        { label: isDepotRequest ? 'Depo ID' : 'Laboratuvar ID', value: stockOwnerId || '-', labelFill: 'FFCCFBF1', valueFill: 'FFFFFFFF' },
         { label: 'Talep Eden', value: createdBy, labelFill: 'FFFEF3C7', valueFill: 'FFFFFFFF' },
         { label: 'Tarih', value: createdAtText, labelFill: 'FFFEE2E2', valueFill: 'FFFFFFFF' },
         {
@@ -238,7 +255,7 @@ async function buildExcelBuffer(orderId, order, itemInfoMap) {
     // --- Header row sits right after info rows ---
     const HEADER_ROW = 2 + infoRows.length;
     sheet.views = [{ state: 'frozen', ySplit: HEADER_ROW }];
-    const headers = ['#', 'Stok Kodu', 'Stok Adı', 'Lab Stok', '30 Günlük Max', 'Yakın Miad Lot Adedi', 'Talep Adedi'];
+    const headers = ['#', 'Stok Kodu', 'Stok Adı', isDepotRequest ? 'Depo Stok' : 'Lab Stok', '30 Günlük Max', 'Yakın Miad Lot Adedi', 'Talep Adedi'];
     const headerRow = sheet.getRow(HEADER_ROW);
     headerRow.height = 32;
     headers.forEach((label, i) => {
@@ -258,7 +275,7 @@ async function buildExcelBuffer(orderId, order, itemInfoMap) {
     items.forEach((item, idx) => {
         var _a, _b, _c;
         const sKodu = item.stokKodu || '-';
-        const labStok = (_a = labStokMap[sKodu]) !== null && _a !== void 0 ? _a : 0;
+        const mevcutStok = (_a = stockMap[sKodu]) !== null && _a !== void 0 ? _a : 0;
         const maxAdet = (_b = rulesMap[sKodu]) !== null && _b !== void 0 ? _b : 0;
         const yakinMiad = (_c = closestMiadLotMap[sKodu]) !== null && _c !== void 0 ? _c : 0;
         const talep = Number(item.adet || 0);
@@ -274,7 +291,7 @@ async function buildExcelBuffer(orderId, order, itemInfoMap) {
             idx + 1,
             sKodu,
             item.stokAdi || '-',
-            labStok,
+            mevcutStok,
             maxAdet,
             yakinMiad,
             talepCellValue,
@@ -362,13 +379,15 @@ exports.onPeripheralOrderCreatedSendMail = functions
     var _a, _b, _c;
     const orderId = context.params.orderId;
     const order = snap.data();
-    const isPeripheralRequest = (order === null || order === void 0 ? void 0 : order.isPeripheral) === true || (order === null || order === void 0 ? void 0 : order.requestSource) === 'lab_to_office';
+    const isPeripheralRequest = (order === null || order === void 0 ? void 0 : order.isPeripheral) === true || (order === null || order === void 0 ? void 0 : order.requestSource) === 'lab_to_office' || (order === null || order === void 0 ? void 0 : order.requestSource) === 'depot_to_office';
+    const isDepotRequest = (order === null || order === void 0 ? void 0 : order.requestSource) === 'depot_to_office' || (order === null || order === void 0 ? void 0 : order.isDepotRequest) === true;
     const logEntry = {
         type: 'peripheral_order_email',
         orderId,
         labId: (order === null || order === void 0 ? void 0 : order.labId) || null,
         labName: (order === null || order === void 0 ? void 0 : order.kurumAdi) || null,
         isPeripheral: (_a = order === null || order === void 0 ? void 0 : order.isPeripheral) !== null && _a !== void 0 ? _a : null,
+        isDepotRequest,
         requestSource: (_b = order === null || order === void 0 ? void 0 : order.requestSource) !== null && _b !== void 0 ? _b : null,
         itemsCount: ((order === null || order === void 0 ? void 0 : order.items) || []).length,
         urgency: (_c = order === null || order === void 0 ? void 0 : order.urgency) !== null && _c !== void 0 ? _c : null,
@@ -420,12 +439,22 @@ exports.onPeripheralOrderCreatedSendMail = functions
         const itemGroupMap = (0, peripheralRecipients_1.groupMapFromInfo)(itemInfoMap);
         steps.push(`Grup/kullanıcı yüklemesi: OK (kalem grup eşlemesi=${itemGroupMap.size}, def_labGroups=${labGroupNamesById.size}, lojistik kullanıcı=${users.length})`);
         logEntry.orderGroups = Array.from(new Set(Array.from(itemGroupMap.values())));
-        // Build per-user filtered recipient list
-        const recipients = users.map((user) => {
-            const groupNames = (0, peripheralRecipients_1.resolveUserGroupNames)(user, labGroupNamesById);
-            const filtered = (0, peripheralRecipients_1.filterItemsForUserGroups)(orderItems, itemGroupMap, groupNames);
-            return { user, groupNames, filtered };
-        });
+        // Build per-user filtered recipient list. Depot-origin requests are sent
+        // only to the explicitly selected managers and include all request items.
+        const selectedEmails = Array.isArray(order.requestedManagerEmails)
+            ? order.requestedManagerEmails.map(e => String(e || '').trim().toLowerCase()).filter(Boolean)
+            : [];
+        const recipients = isDepotRequest && selectedEmails.length > 0
+            ? selectedEmails.map((email, index) => ({
+                user: { uid: `selected-${index}`, email, name: email, role: 'selected_manager', assignedLabGroups: [] },
+                groupNames: new Set(),
+                filtered: orderItems,
+            }))
+            : users.map((user) => {
+                const groupNames = (0, peripheralRecipients_1.resolveUserGroupNames)(user, labGroupNamesById);
+                const filtered = (0, peripheralRecipients_1.filterItemsForUserGroups)(orderItems, itemGroupMap, groupNames);
+                return { user, groupNames, filtered };
+            });
         const sendable = recipients.filter((r) => r.user.email && r.filtered.length > 0);
         logEntry.recipients = sendable.map((r) => r.user.email);
         if (sendable.length === 0) {
@@ -438,7 +467,7 @@ exports.onPeripheralOrderCreatedSendMail = functions
         }
         steps.push(`Alıcı sorgusu: OK (${sendable.length} alıcı eşleşti)`);
         const senderEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
-        const labName = order.kurumAdi || 'Bilinmeyen Laboratuvar';
+        const labName = order.kurumAdi || (isDepotRequest ? 'Bilinmeyen Depo' : 'Bilinmeyen Laboratuvar');
         const urgencyKey = (order.urgency && URGENCY_META[order.urgency] ? order.urgency : 'normal');
         const urgencyMeta = URGENCY_META[urgencyKey];
         const noteText = (order.note || '').trim();
@@ -476,11 +505,11 @@ exports.onPeripheralOrderCreatedSendMail = functions
                 await transporter.sendMail({
                     from: senderEmail,
                     to: r.user.email,
-                    subject: `${subjectPrefix}[Perifer Talep] ${labName} — ${filteredTotalQty} adet (${urgencyMeta.label})`,
-                    text: `Perifer laboratuvardan yeni sipariş talebi açıldı.\n` +
+                    subject: `${subjectPrefix}[${isDepotRequest ? 'Depo Talep' : 'Perifer Talep'}] ${labName} — ${filteredTotalQty} adet (${urgencyMeta.label})`,
+                    text: `${isDepotRequest ? 'Depodan' : 'Perifer laboratuvardan'} yeni sipariş talebi açıldı.\n` +
                         `Aciliyet: ${urgencyMeta.label}\n` +
                         `Sipariş ID: ${orderId}\n` +
-                        `Laboratuvar: ${labName}\n` +
+                        `${isDepotRequest ? 'Depo' : 'Laboratuvar'}: ${labName}\n` +
                         `Talep Eden: ${order.createdBy || '-'}\n` +
                         `Atanan Grup(lar): ${groupsLine}\n` +
                         `Kalem Sayısı: ${filteredItemCount}\n` +
@@ -489,14 +518,14 @@ exports.onPeripheralOrderCreatedSendMail = functions
                         `\nDetaylar ekteki Excel dosyasındadır.`,
                     html: `
               <div style="font-family: -apple-system, Segoe UI, Roboto, sans-serif; color:#0f172a;">
-                <h2 style="margin:0 0 8px 0; color:#1e293b;">Perifer Laboratuvar Ürün Talebi</h2>
+                <h2 style="margin:0 0 8px 0; color:#1e293b;">${isDepotRequest ? 'Depo Ürün Talebi' : 'Perifer Laboratuvar Ürün Talebi'}</h2>
                 <div style="display:inline-block; margin:0 0 14px 0; padding:6px 14px; border-radius:999px; background:${urgencyMeta.emailBg}; color:${urgencyMeta.emailText}; border:2px solid ${urgencyMeta.emailBadgeBorder}; font-weight:bold; font-size:13px; letter-spacing:0.5px;">
                   ACİLİYET: ${urgencyMeta.label.toLocaleUpperCase('tr-TR')}
                 </div>
-                <p style="margin:0 0 12px 0;">Aşağıdaki perifer laboratuvardan size atanan grup(lar)a ait yeni bir ürün talebi açıldı:</p>
+                <p style="margin:0 0 12px 0;">${isDepotRequest ? 'Aşağıdaki depodan size iletilen yeni bir ürün talebi açıldı:' : 'Aşağıdaki perifer laboratuvardan size atanan grup(lar)a ait yeni bir ürün talebi açıldı:'}</p>
                 <table style="border-collapse:collapse; font-size:14px;">
                   <tr><td style="padding:6px 12px; background:#e0f2fe; border:1px solid #94a3b8;"><b>Sipariş ID</b></td><td style="padding:6px 12px; border:1px solid #94a3b8;">${orderId}</td></tr>
-                  <tr><td style="padding:6px 12px; background:#e0e7ff; border:1px solid #94a3b8;"><b>Laboratuvar</b></td><td style="padding:6px 12px; border:1px solid #94a3b8;">${labName}</td></tr>
+                  <tr><td style="padding:6px 12px; background:#e0e7ff; border:1px solid #94a3b8;"><b>${isDepotRequest ? 'Depo' : 'Laboratuvar'}</b></td><td style="padding:6px 12px; border:1px solid #94a3b8;">${labName}</td></tr>
                   <tr><td style="padding:6px 12px; background:#fef3c7; border:1px solid #94a3b8;"><b>Talep Eden</b></td><td style="padding:6px 12px; border:1px solid #94a3b8;">${order.createdBy || '-'}</td></tr>
                   <tr><td style="padding:6px 12px; background:#ccfbf1; border:1px solid #94a3b8;"><b>Atanan Grup(lar)</b></td><td style="padding:6px 12px; border:1px solid #94a3b8;">${groupsLine}</td></tr>
                   <tr><td style="padding:6px 12px; background:${urgencyMeta.emailBg}; border:1px solid #94a3b8;"><b>Aciliyet</b></td><td style="padding:6px 12px; border:1px solid #94a3b8; color:${urgencyMeta.emailText}; font-weight:bold;">${urgencyMeta.label}</td></tr>
@@ -504,11 +533,11 @@ exports.onPeripheralOrderCreatedSendMail = functions
                   <tr><td style="padding:6px 12px; background:#dcfce7; border:1px solid #94a3b8;"><b>Toplam Adet</b></td><td style="padding:6px 12px; border:1px solid #94a3b8; font-weight:bold; font-size:16px;">${filteredTotalQty}</td></tr>
                   ${noteHtml}
                 </table>
-                <p style="margin:16px 0 0 0;">Sipariş detayları (lab stok, max adet, talep adedi) ekteki Excel dosyasındadır.</p>
+                <p style="margin:16px 0 0 0;">Sipariş detayları (${isDepotRequest ? 'depo stok' : 'lab stok'}, max adet, talep adedi) ekteki Excel dosyasındadır.</p>
               </div>`,
                     attachments: [
                         {
-                            filename: `perifer_siparis_${orderId}.xlsx`,
+                            filename: `${isDepotRequest ? 'depo' : 'perifer'}_siparis_${orderId}.xlsx`,
                             content: excelBuffer,
                             contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
                         },
