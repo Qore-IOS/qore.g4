@@ -557,26 +557,6 @@ function UrgencyDialog({ open, onOpenChange, totalItems, totalAdet, loading, onC
   );
 }
 
-type DepotAutoFillRow = {
-  stokKodu: string;
-  stokAdi: string;
-  maxAdet: number;
-  maxGun: number;
-  hedefAdet: number;
-  kullanilabilirStok: number;
-  yaklasanMiadStok: number;
-  ihtiyacAdet: number;
-};
-
-type DepotAutoFillSummary = {
-  hedefIsGunu: number;
-  kalemSayisi: number;
-  toplamIhtiyac: number;
-  kullanilabilirStok: number;
-  miadNedeniyleHaric: number;
-  rows: DepotAutoFillRow[];
-};
-
 function parseStockExpiryDate(value: unknown): Date | null {
   if (!value) return null;
   if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
@@ -615,6 +595,14 @@ function daysUntilStockExpiry(value: unknown): number | null {
   return Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 }
 
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
 
 /* =======================================================
    MAIN PANEL
@@ -640,7 +628,7 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
   const [managerDialogOpen, setManagerDialogOpen] = useState(false);
   const [autoFillDialogOpen, setAutoFillDialogOpen] = useState(false);
   const [autoFillTargetDays, setAutoFillTargetDays] = useState<number | string>(30);
-  const [autoFillSummary, setAutoFillSummary] = useState<DepotAutoFillSummary | null>(null);
+  const [autoFillExplanations, setAutoFillExplanations] = useState<Record<string, string>>({});
 
   // Order Basket
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
@@ -732,6 +720,13 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
   // Cart summary
   const totalDraftItems = orderItems.length;
   const totalDraftAdet = orderItems.reduce((sum, i) => sum + (Number(i.adet) || 0), 0);
+  const orderQuantityByCode = useMemo(() => {
+    const map = new Map<string, number>();
+    orderItems.forEach(item => {
+      if (item.stokKodu) map.set(item.stokKodu, Number(item.adet) || 0);
+    });
+    return map;
+  }, [orderItems]);
 
   const selectedLabName = useMemo(
     () => userHospitals.find(h => h.id === selectedLabId)?.name ?? '',
@@ -803,6 +798,7 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
     if (!selectedLabId) {
       setLabMinMaxRules([]);
       setOrderItems([]);
+      setAutoFillExplanations({});
       setSelectedDepotId('');
       return;
     }
@@ -839,7 +835,6 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
 
   const openAutoFillDialog = () => {
     setAutoFillTargetDays(30);
-    setAutoFillSummary(null);
     setAutoFillDialogOpen(true);
   };
 
@@ -858,79 +853,93 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
 
     setLoading(true);
     try {
-      const stockDocs = await getScopedDocs(
-        'depoStok',
-        currentCompanyId,
-        isSuperAdmin,
-        where('depotId', '==', depotRequestId),
-        where('isShipped', '==', false),
-      );
+      const productByCode = new Map<string, ProductCode>();
+      allProducts.forEach(product => {
+        const code = String(product.stokKodu || '').trim();
+        if (code) productByCode.set(code, product);
+      });
 
+      const rules = labMinMaxRules
+        .map(rule => ({ rule, stokKodu: String(rule.stokKodu || '').trim() }))
+        .filter(({ stokKodu, rule }) => stokKodu && (Number(rule.max) || 0) > 0);
+      const stokKodlari = Array.from(new Set(rules.map(({ stokKodu }) => stokKodu)));
+
+      let stockDocs: Awaited<ReturnType<typeof getScopedDocs>> = [];
+      try {
+        const stockChunks = await Promise.all(
+          chunkArray(stokKodlari, 30).map((codes) => getScopedDocs(
+            'depoStok',
+            currentCompanyId,
+            isSuperAdmin,
+            where('depotId', '==', depotRequestId),
+            where('isShipped', '==', false),
+            where('stokKodu', 'in', codes),
+          ))
+        );
+        const seenDocIds = new Set<string>();
+        stockDocs = stockChunks.flat().filter((docSnap) => {
+          if (seenDocIds.has(docSnap.id)) return false;
+          seenDocIds.add(docSnap.id);
+          return true;
+        });
+      } catch (indexedQueryError) {
+        console.warn('Indexed depot stock query failed, falling back to depot-wide scan:', indexedQueryError);
+        stockDocs = await getScopedDocs(
+          'depoStok',
+          currentCompanyId,
+          isSuperAdmin,
+          where('depotId', '==', depotRequestId),
+          where('isShipped', '==', false),
+        );
+      }
+
+      const wantedCodes = new Set(stokKodlari);
       const usableStockByCode = new Map<string, number>();
       const soonExpiringStockByCode = new Map<string, number>();
-      stockDocs.forEach((docSnap) => {
+      for (const docSnap of stockDocs) {
         const data = docSnap.data() as any;
         const code = String(data.stokKodu || '').trim();
-        if (!code) return;
+        if (!code || !wantedCodes.has(code)) continue;
         const qty = Math.max(1, Number(data.adet) || 1);
         const expiryDays = daysUntilStockExpiry(data.miad);
         const isSoonExpiring = typeof expiryDays === 'number' && expiryDays < 30;
         const targetMap = isSoonExpiring ? soonExpiringStockByCode : usableStockByCode;
         targetMap.set(code, (targetMap.get(code) || 0) + qty);
-      });
+      }
 
-      const rows: DepotAutoFillRow[] = [];
+      const explanations: Record<string, string> = {};
       const nextItems: OrderItem[] = [];
-      labMinMaxRules.forEach((rule) => {
-        const stokKodu = String(rule.stokKodu || '').trim();
-        if (!stokKodu) return;
+      for (const { rule, stokKodu } of rules) {
         const maxAdet = Number(rule.max) || 0;
-        if (maxAdet <= 0) return;
         const maxGun = Number(rule.maxGun) || 0;
         const hedefAdet = maxGun > 0 ? Math.ceil((hedefIsGunu / maxGun) * maxAdet) : maxAdet;
         const kullanilabilirStok = usableStockByCode.get(stokKodu) || 0;
         const yaklasanMiadStok = soonExpiringStockByCode.get(stokKodu) || 0;
         const ihtiyacAdet = Math.max(0, hedefAdet - kullanilabilirStok);
-        const product = allProducts.find(p => p.stokKodu === stokKodu);
+        if (ihtiyacAdet <= 0) continue;
+
+        const product = productByCode.get(stokKodu);
         const stokAdi = product?.stokAdi || (rule as any).stokAdi || stokKodu;
+        explanations[stokKodu] = maxGun > 0
+          ? `${maxAdet} adet / ${maxGun} iş günü tanımından ${hedefIsGunu} iş günü için hedef ${hedefAdet} adet hesaplandı. Kullanılabilir stok ${kullanilabilirStok} adet.${yaklasanMiadStok > 0 ? ` Miadına 30 günden az kalan ${yaklasanMiadStok} adet stoğa dahil edilmedi.` : ''}`
+          : `Max gün tanımı olmadığı için hedef ${hedefAdet} adet kabul edildi. Kullanılabilir stok ${kullanilabilirStok} adet.${yaklasanMiadStok > 0 ? ` Miadına 30 günden az kalan ${yaklasanMiadStok} adet stoğa dahil edilmedi.` : ''}`;
 
-        if (ihtiyacAdet > 0 || yaklasanMiadStok > 0) {
-          rows.push({
-            stokKodu,
-            stokAdi,
-            maxAdet,
-            maxGun,
-            hedefAdet,
-            kullanilabilirStok,
-            yaklasanMiadStok,
-            ihtiyacAdet,
-          });
-        }
-
-        if (ihtiyacAdet <= 0) return;
         nextItems.push({
           id: product?.id || stokKodu,
           stokKodu,
           stokAdi,
           adet: ihtiyacAdet,
         });
-      });
+      }
 
-      const summary: DepotAutoFillSummary = {
-        hedefIsGunu,
-        kalemSayisi: nextItems.length,
-        toplamIhtiyac: nextItems.reduce((sum, item) => sum + (Number(item.adet) || 0), 0),
-        kullanilabilirStok: Array.from(usableStockByCode.values()).reduce((sum, qty) => sum + qty, 0),
-        miadNedeniyleHaric: Array.from(soonExpiringStockByCode.values()).reduce((sum, qty) => sum + qty, 0),
-        rows: rows.sort((a, b) => b.ihtiyacAdet - a.ihtiyacAdet || b.yaklasanMiadStok - a.yaklasanMiadStok),
-      };
-
+      const toplamIhtiyac = nextItems.reduce((sum, item) => sum + (Number(item.adet) || 0), 0);
       setOrderItems(nextItems);
-      setAutoFillSummary(summary);
+      setAutoFillExplanations(explanations);
+      setAutoFillDialogOpen(false);
       toast({
         title: nextItems.length > 0 ? 'Talep Listesi Oluşturuldu' : 'Talep İhtiyacı Yok',
         description: nextItems.length > 0
-          ? `${hedefIsGunu} iş günü için ${nextItems.length} kalemde ${summary.toplamIhtiyac} adet ihtiyaç listeye eklendi.`
+          ? `${hedefIsGunu} iş günü için ${nextItems.length} kalemde ${toplamIhtiyac} adet ihtiyaç listeye eklendi.`
           : `${hedefIsGunu} iş günü için kullanılabilir depo stoğu yeterli görünüyor.`,
       });
     } catch (err) {
@@ -949,6 +958,12 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
   const handleQtyConfirm = (productId: string, qty: number) => {
     const product = allProducts.find(p => p.id === productId);
     if (!product || qty <= 0) return;
+    setAutoFillExplanations(prev => {
+      if (!prev[product.stokKodu]) return prev;
+      const next = { ...prev };
+      delete next[product.stokKodu];
+      return next;
+    });
 
     setOrderItems(prev => {
       const existing = prev.find(item => item.stokKodu === product.stokKodu);
@@ -967,6 +982,15 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
   };
 
   const removeOrderItem = (productId: string) => {
+    const removedItem = orderItems.find(item => item.id === productId);
+    if (removedItem?.stokKodu) {
+      setAutoFillExplanations(current => {
+        if (!current[removedItem.stokKodu]) return current;
+        const next = { ...current };
+        delete next[removedItem.stokKodu];
+        return next;
+      });
+    }
     setOrderItems(prev => prev.filter(item => item.id !== productId));
   };
 
@@ -1102,6 +1126,7 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
       // Reset form — but keep the auto-selected lab so the user can
       // immediately create another request without re-picking it.
       setOrderItems([]);
+      setAutoFillExplanations({});
       setManagerDialogOpen(false);
       setSelectedManagerIds([]);
       if (!isDepotRequestFlow && !singleAutoLab) {
@@ -1274,7 +1299,7 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
 
       {/* ====================== MAIN SPLIT VIEW ====================== */}
       {(selectedLabId || isDepotRequestFlow) && (
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-4 sm:gap-5">
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-4 sm:gap-5">
 
           {/* -- LEFT: Product Catalog -- */}
           <div className="cihaz-card-strong flex flex-col overflow-hidden">
@@ -1355,14 +1380,14 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
                 </div>
               ) : (
                 filteredProducts.map((product) => {
-                  const inCart = orderItems.find(item => item.stokKodu === product.stokKodu);
+                  const inCartQty = orderQuantityByCode.get(product.stokKodu) || 0;
                   return (
                     <button
                       key={product.id}
                       onClick={() => handleProductClick(product)}
                       className={cn(
                         "w-full text-left px-4 sm:px-5 py-3 border-b border-[var(--dashboard-stroke)] last:border-b-0 transition-all hover:bg-[var(--dashboard-surface-2)] active:bg-[var(--dashboard-surface-2)] group",
-                        inCart && "bg-[var(--dashboard-accent)]/5"
+                        inCartQty > 0 && "bg-[var(--dashboard-accent)]/5"
                       )}
                     >
                       <div className="flex items-center gap-3">
@@ -1379,10 +1404,10 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
                             )}
                           </div>
                         </div>
-                        {inCart ? (
+                        {inCartQty > 0 ? (
                           <div className="flex items-center gap-1.5 shrink-0">
                             <span className="text-xs font-bold text-[var(--dashboard-accent)] bg-[var(--dashboard-accent)]/10 px-2 py-1 rounded-lg">
-                              {inCart.adet} adet
+                              {inCartQty} adet
                             </span>
                             <Plus className="h-4 w-4 text-[var(--dashboard-accent)]" />
                           </div>
@@ -1422,7 +1447,7 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
               <div className="flex-1" />
               {orderItems.length > 0 && (
                 <button
-                  onClick={() => setOrderItems([])}
+                  onClick={() => { setOrderItems([]); setAutoFillExplanations({}); }}
                   className="cihaz-tool-item flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -1441,7 +1466,7 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
             )}
 
             {/* Cart items */}
-            <div className="flex-1 overflow-auto max-h-[40vh] sm:max-h-[50vh]">
+            <div className="flex-1 overflow-auto max-h-[55vh] sm:max-h-[60vh]">
               {orderItems.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-[30vh] sm:h-[35vh] text-center px-4">
                   <div className="w-14 h-14 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] flex items-center justify-center mb-4">
@@ -1458,6 +1483,7 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
                   const itemAmbalaj = meta?.ambalajDegeri ?? 0;
                   const itemBirim = meta?.anaBirim || '';
                   const itemTotalUnits = itemAmbalaj > 0 ? itemAmbalaj * (item.adet ?? 0) : 0;
+                  const autoFillExplanation = autoFillExplanations[item.stokKodu || ''];
                   return (
                     <div key={item.id} className="border-b border-[var(--dashboard-stroke)] last:border-b-0">
                       {/* Desktop row */}
@@ -1472,6 +1498,11 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
                               </span>
                             )}
                           </p>
+                          {autoFillExplanation && (
+                            <p className="mt-1.5 rounded-lg bg-amber-500/10 px-2 py-1 text-[10px] leading-relaxed text-amber-800 dark:text-amber-300">
+                              {autoFillExplanation}
+                            </p>
+                          )}
                         </div>
                         <div className="flex items-center justify-center">
                           <div className="flex items-center gap-0.5">
@@ -1517,6 +1548,11 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
                                 </span>
                               )}
                             </p>
+                            {autoFillExplanation && (
+                              <p className="mt-1.5 rounded-lg bg-amber-500/10 px-2 py-1 text-[10px] leading-relaxed text-amber-800 dark:text-amber-300">
+                                {autoFillExplanation}
+                              </p>
+                            )}
                           </div>
                           <div className="flex items-center gap-1">
                             <button onClick={() => { const newQty = Math.max(1, (item.adet ?? 1) - 1); setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: newQty } : i)); }} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
@@ -1616,88 +1652,34 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
 
 
       <Dialog open={autoFillDialogOpen} onOpenChange={(open) => { if (!loading) setAutoFillDialogOpen(open); }}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Min/Max Eksiklerini Listele</DialogTitle>
+            <DialogTitle>Eksikleri Listele</DialogTitle>
             <DialogDescription>
-              İstenen iş günü yeterliliğine göre hedef adet hesaplanır. Miadına 30 günden az kalan lotlar kullanılabilir stok sayılmaz ve nedenleri aşağıda açıklanır.
+              Talep listesinin kaç iş günlük yeterlilik için hazırlanacağını girin. Hesaplama açıklamaları oluşan sipariş satırlarının altında gösterilir.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4">
-            <div className="rounded-2xl border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)] p-4">
-              <label className="text-xs font-semibold text-[var(--dashboard-muted)]">Hedef iş günü</label>
-              <Input
-                type="number"
-                min={1}
-                value={autoFillTargetDays}
-                onChange={(event) => setAutoFillTargetDays(event.target.value)}
-                className="mt-2"
-                placeholder="Örn. 30"
-                disabled={loading}
-              />
-              <p className="mt-2 text-xs text-[var(--dashboard-muted)]">
-                Örnek: Max 50 adet / 60 iş günü tanımlı bir ürün için 30 iş günü hedefi 25 adet stok hedefi oluşturur.
-              </p>
-            </div>
-
-            {autoFillSummary && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  <div className="rounded-xl bg-[var(--dashboard-surface-2)] p-3">
-                    <p className="text-[10px] uppercase text-[var(--dashboard-muted)]">Hedef</p>
-                    <p className="text-lg font-bold">{autoFillSummary.hedefIsGunu} iş günü</p>
-                  </div>
-                  <div className="rounded-xl bg-[var(--dashboard-surface-2)] p-3">
-                    <p className="text-[10px] uppercase text-[var(--dashboard-muted)]">Liste</p>
-                    <p className="text-lg font-bold">{autoFillSummary.kalemSayisi} kalem</p>
-                  </div>
-                  <div className="rounded-xl bg-[var(--dashboard-surface-2)] p-3">
-                    <p className="text-[10px] uppercase text-[var(--dashboard-muted)]">İhtiyaç</p>
-                    <p className="text-lg font-bold">{autoFillSummary.toplamIhtiyac} adet</p>
-                  </div>
-                  <div className="rounded-xl bg-amber-500/10 p-3">
-                    <p className="text-[10px] uppercase text-amber-700">Miad Dışı</p>
-                    <p className="text-lg font-bold text-amber-700">{autoFillSummary.miadNedeniyleHaric} adet</p>
-                  </div>
-                </div>
-
-                <ScrollArea className="max-h-64 rounded-2xl border border-[var(--dashboard-stroke)]">
-                  <div className="divide-y divide-[var(--dashboard-stroke)]">
-                    {autoFillSummary.rows.length === 0 ? (
-                      <div className="p-4 text-sm text-[var(--dashboard-muted)]">
-                        Seçilen iş günü hedefi için eksik ürün bulunmadı. Miadı 30 günden az olduğu için dışlanan lot da yok.
-                      </div>
-                    ) : autoFillSummary.rows.slice(0, 12).map((row) => (
-                      <div key={row.stokKodu} className="p-3 text-sm">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="font-semibold truncate">{row.stokAdi}</p>
-                            <p className="text-xs text-[var(--dashboard-muted)]">{row.stokKodu}</p>
-                          </div>
-                          <span className={cn("shrink-0 rounded-full px-2.5 py-1 text-xs font-bold", row.ihtiyacAdet > 0 ? "bg-red-500/10 text-red-700" : "bg-green-500/10 text-green-700")}>
-                            {row.ihtiyacAdet > 0 ? `${row.ihtiyacAdet} adet ihtiyaç` : 'Yeterli'}
-                          </span>
-                        </div>
-                        <p className="mt-2 text-xs leading-relaxed text-[var(--dashboard-muted)]">
-                          {row.maxGun > 0
-                            ? `${row.maxAdet} adet / ${row.maxGun} iş günü tanımından ${autoFillSummary.hedefIsGunu} iş günü için hedef ${row.hedefAdet} adet hesaplandı.`
-                            : `Max gün tanımı olmadığı için hedef depo max adedi olan ${row.hedefAdet} adet kabul edildi.`}
-                          {' '}Kullanılabilir stok {row.kullanilabilirStok} adet.
-                          {row.yaklasanMiadStok > 0 && ` Miadına 30 günden az kalan ${row.yaklasanMiadStok} adet hesaplamaya dahil edilmedi.`}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </ScrollArea>
-              </div>
-            )}
+          <div className="rounded-2xl border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)] p-4">
+            <label className="text-xs font-semibold text-[var(--dashboard-muted)]">Hedef iş günü</label>
+            <Input
+              type="number"
+              min={1}
+              value={autoFillTargetDays}
+              onChange={(event) => setAutoFillTargetDays(event.target.value)}
+              className="mt-2"
+              placeholder="Örn. 30"
+              disabled={loading}
+            />
+            <p className="mt-2 text-xs text-[var(--dashboard-muted)]">
+              Örnek: Max 50 adet / 60 iş günü tanımlı bir ürün için 30 iş günü hedefi 25 adet stok hedefi oluşturur.
+            </p>
           </div>
           <div className="flex gap-2 pt-2">
             <button type="button" onClick={() => setAutoFillDialogOpen(false)} disabled={loading} className="flex-1 py-2.5 rounded-xl bg-[var(--dashboard-surface-2)] font-semibold">
-              {autoFillSummary ? 'Kapat' : 'Vazgeç'}
+              Vazgeç
             </button>
             <button type="button" onClick={handleAutoFillDepotRequest} disabled={loading} className="flex-1 py-2.5 rounded-xl bg-[var(--dashboard-accent)] text-white font-bold">
-              {loading ? 'Hesaplanıyor...' : autoFillSummary ? 'Yeniden Hesapla' : 'Eksikleri Listele'}
+              {loading ? 'Hesaplanıyor...' : 'Eksikleri Listele'}
             </button>
           </div>
         </DialogContent>
