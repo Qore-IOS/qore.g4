@@ -19,6 +19,21 @@ WhatsApp arıza fotoğrafları yalnızca aşağıdaki grup kimliğinden okunacak
 
 Bu grup Qore içinde varsayılan olarak **Göztepe Merkez** laboratuvar kaynağı kabul edilir. Farklı gruplar veya bireysel sohbetlerden gelen mesajlar bu otomatik arıza alım akışına dahil edilmemelidir.
 
+## Webhook endpoint
+
+Gelen WhatsApp arıza mesajları aşağıdaki endpoint'e yönlendirilmelidir:
+
+```text
+POST /api/whatsapp/fault-intake
+```
+
+Bu endpoint iki master bilgi kaynağını birlikte okur:
+
+1. `docs/whatsapp-fault-ai-master.md`
+2. `public/teknik-doc-2.txt`
+
+AI alarm ayrıştırması, görsel + caption + bu iki doküman bağlamı ile yapılır. Endpoint yalnızca `905362840155-1615537145@g.us` grubundan gelen mesajları işler; diğer grup/bireysel mesajlar loglanıp otomatik arıza akışına alınmaz.
+
 ## Kullanıcı mesaj standardı
 
 Kullanıcılar WhatsApp grubuna arıza fotoğrafı gönderirken fotoğraf açıklamasına veya alt mesajına Line bilgisini yazmalıdır.
