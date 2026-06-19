@@ -581,6 +581,7 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
   const [managerDialogOpen, setManagerDialogOpen] = useState(false);
   const [autoFillDialogOpen, setAutoFillDialogOpen] = useState(false);
   const [autoFillTargetDays, setAutoFillTargetDays] = useState<number | string>(30);
+  const [autoFillProductGroup, setAutoFillProductGroup] = useState<string>('all');
   const [autoFillExplanations, setAutoFillExplanations] = useState<Record<string, string>>({});
 
   // Order Basket
@@ -788,6 +789,7 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
 
   const openAutoFillDialog = () => {
     setAutoFillTargetDays(30);
+    setAutoFillProductGroup('all');
     setAutoFillDialogOpen(true);
   };
 
@@ -812,6 +814,7 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
         body: JSON.stringify({
           depotId: depotRequestId,
           hedefIsGunu,
+          urunGrubu: autoFillProductGroup,
           companyId: currentCompanyId,
           isSuperAdmin,
         }),
@@ -1561,16 +1564,34 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
             </DialogDescription>
           </DialogHeader>
           <div className="rounded-2xl border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)] p-4">
-            <label className="text-xs font-semibold text-[var(--dashboard-muted)]">Hedef iş günü</label>
-            <Input
-              type="number"
-              min={1}
-              value={autoFillTargetDays}
-              onChange={(event) => setAutoFillTargetDays(event.target.value)}
-              className="mt-2"
-              placeholder="Örn. 30"
-              disabled={loading}
-            />
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-semibold text-[var(--dashboard-muted)]">Hedef iş günü</label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={autoFillTargetDays}
+                  onChange={(event) => setAutoFillTargetDays(event.target.value)}
+                  className="mt-2"
+                  placeholder="Örn. 30"
+                  disabled={loading}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-[var(--dashboard-muted)]">Ürün grubu</label>
+                <Select value={autoFillProductGroup} onValueChange={setAutoFillProductGroup} disabled={loading}>
+                  <SelectTrigger className="mt-2 bg-[var(--dashboard-surface)] border-[var(--dashboard-stroke)] rounded-xl">
+                    <SelectValue placeholder="Ürün grubu" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Her ikisi de</SelectItem>
+                    <SelectItem value="kit">Kit</SelectItem>
+                    <SelectItem value="sarf">Sarf</SelectItem>
+                    <SelectItem value="yedek_parca">Yedek Parça</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
             <p className="mt-2 text-xs text-[var(--dashboard-muted)]">
               Örnek: Max 50 adet / 60 iş günü tanımlı bir ürün için 30 iş günü hedefi 25 adet stok hedefi oluşturur.
             </p>

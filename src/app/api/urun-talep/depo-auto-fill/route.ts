@@ -16,8 +16,15 @@ type AutoFillItem = {
   id: string;
   stokKodu: string;
   stokAdi: string;
+  urunGrubu?: string;
   adet: number;
   explanation: string;
+};
+
+type ProductMetaForAutoFill = {
+  id: string;
+  stokAdi: string;
+  urunGrubu?: string;
 };
 
 function chunkArray<T>(items: T[], size: number): T[][] {
@@ -78,15 +85,19 @@ async function fetchDepotRules(depotId: string): Promise<MinMaxRuleForAutoFill[]
     .filter((rule) => String(rule.stokKodu || '').trim() && (Number(rule.max) || 0) > 0);
 }
 
-async function fetchProductNames(stokKodlari: string[]): Promise<Map<string, { id: string; stokAdi: string }>> {
-  const productByCode = new Map<string, { id: string; stokAdi: string }>();
+async function fetchProductNames(stokKodlari: string[]): Promise<Map<string, ProductMetaForAutoFill>> {
+  const productByCode = new Map<string, ProductMetaForAutoFill>();
   await Promise.all(chunkArray(stokKodlari, STOCK_CODE_CHUNK_SIZE).map(async (codes) => {
     const snap = await adminDb.collection('productCodes').where('stokKodu', 'in', codes).get();
     snap.docs.forEach((doc) => {
       const data = doc.data();
       const stokKodu = String(data.stokKodu || '').trim();
       if (stokKodu && !productByCode.has(stokKodu)) {
-        productByCode.set(stokKodu, { id: doc.id, stokAdi: data.stokAdi || stokKodu });
+        productByCode.set(stokKodu, {
+          id: doc.id,
+          stokAdi: data.stokAdi || stokKodu,
+          urunGrubu: typeof data.urunGrubu === 'string' ? data.urunGrubu : undefined,
+        });
       }
     });
   }));
@@ -123,6 +134,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json().catch(() => ({}));
     const depotId = String(body.depotId || '').trim();
     const hedefIsGunu = Math.ceil(Number(body.hedefIsGunu));
+    const urunGrubu = String(body.urunGrubu || 'all').trim();
     const isSuperAdmin = body.isSuperAdmin === true;
     const companyId = normalizeCompanyId(body.companyId);
 
@@ -137,9 +149,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, items: [], explanations: {}, totalNeeded: 0, itemCount: 0 });
     }
 
+    const productByCode = await fetchProductNames(stokKodlari);
+    const filteredRules = urunGrubu === 'all'
+      ? rules
+      : rules.filter((rule) => productByCode.get(String(rule.stokKodu || '').trim())?.urunGrubu === urunGrubu);
+    const wantedCodes = new Set(filteredRules.map((rule) => String(rule.stokKodu || '').trim()).filter(Boolean));
+    if (wantedCodes.size === 0) {
+      return NextResponse.json({ ok: true, items: [], explanations: {}, totalNeeded: 0, itemCount: 0, indexed: true });
+    }
+
     let stockDocs: FirebaseFirestore.QueryDocumentSnapshot[] = [];
     try {
-      stockDocs = await fetchIndexedDepotStockDocs({ depotId, stokKodlari, companyId, isSuperAdmin });
+      stockDocs = await fetchIndexedDepotStockDocs({ depotId, stokKodlari: Array.from(wantedCodes), companyId, isSuperAdmin });
     } catch (error) {
       if (isMissingIndexError(error)) {
         return NextResponse.json({
@@ -150,8 +171,6 @@ export async function POST(request: NextRequest) {
       throw error;
     }
 
-    const productByCode = await fetchProductNames(stokKodlari);
-    const wantedCodes = new Set(stokKodlari);
     const usableStockByCode = new Map<string, number>();
     const soonExpiringStockByCode = new Map<string, number>();
 
@@ -167,7 +186,7 @@ export async function POST(request: NextRequest) {
 
     const items: AutoFillItem[] = [];
     const explanations: Record<string, string> = {};
-    for (const rule of rules) {
+    for (const rule of filteredRules) {
       const stokKodu = String(rule.stokKodu || '').trim();
       const maxAdet = Number(rule.max) || 0;
       const maxGun = Number(rule.maxGun) || 0;
@@ -186,6 +205,7 @@ export async function POST(request: NextRequest) {
         id: product?.id || stokKodu,
         stokKodu,
         stokAdi: product?.stokAdi || rule.stokAdi || stokKodu,
+        urunGrubu: product?.urunGrubu,
         adet: ihtiyacAdet,
         explanation,
       });
