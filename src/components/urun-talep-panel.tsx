@@ -79,6 +79,12 @@ function formatShiftDate(date: unknown): string {
   return formatDate(d, 'd MMM yyyy', { locale: tr });
 }
 
+
+function getStockQuantityForLimit(item: any): number {
+  const value = Number(item?.adet);
+  return Number.isFinite(value) && value > 0 ? value : 1;
+}
+
 function DutyScheduleModal({ open, onOpenChange, selectedLabId }: { open: boolean; onOpenChange: (open: boolean) => void; selectedLabId: string | null }) {
   const { data: upcomingShifts = [], isLoading } = useUpcomingDutyShifts(selectedLabId);
 
@@ -231,7 +237,7 @@ interface QuantityDialogProps {
   onOpenChange: (open: boolean) => void;
   product: ProductCode | null;
   existingQty: number;
-  onConfirm: (productId: string, qty: number) => void;
+  onConfirm: (productId: string, qty: number) => boolean | void | Promise<boolean | void>;
 }
 
 function QuantityDialog({ open, onOpenChange, product, existingQty, onConfirm }: QuantityDialogProps) {
@@ -253,10 +259,10 @@ function QuantityDialog({ open, onOpenChange, product, existingQty, onConfirm }:
     }
   }, [open, product?.id]);
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     if (product && numericQty > 0) {
-      onConfirm(product.id, numericQty);
-      onOpenChange(false);
+      const result = await onConfirm(product.id, numericQty);
+      if (result !== false) onOpenChange(false);
     }
   };
 
@@ -617,6 +623,17 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
   const selectedDepotForRequest = useMemo(() => depots.find(d => d.id === (depotRequestId || selectedDepotId)) ?? null, [depots, depotRequestId, selectedDepotId]);
 
   const isPeripheralFlow = selectedLab?.perifer === true;
+  const orderLimitEnabled = isDepotRequestFlow
+    ? selectedDepotForRequest?.orderLimitEnabled === true
+    : selectedLab?.orderLimitEnabled === true;
+
+  const minMaxRuleByCode = useMemo(() => {
+    const map = new Map<string, MinMaxRule>();
+    labMinMaxRules.forEach(rule => {
+      if (rule.stokKodu) map.set(rule.stokKodu, rule);
+    });
+    return map;
+  }, [labMinMaxRules]);
 
   // Auto-select: if the user is assigned to exactly one lab, pick it immediately.
   // (expanded from original: now works for ALL single-lab users, not just perifer)
@@ -859,9 +876,57 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
     setQtyDialogOpen(true);
   };
 
-  const handleQtyConfirm = (productId: string, qty: number) => {
+  const getCurrentStockForLimit = useCallback(async (product: ProductCode): Promise<number> => {
+    const stokKodu = product.stokKodu;
+    if (!stokKodu) return 0;
+
+    const docs = isDepotRequestFlow
+      ? await getScopedDocs(
+        'depoStok',
+        currentCompanyId,
+        isSuperAdmin,
+        where('depotId', '==', depotRequestId || selectedDepotId),
+        where('isShipped', '==', false),
+        where('stokKodu', '==', stokKodu)
+      )
+      : await getScopedDocs(
+        'depoStok',
+        currentCompanyId,
+        isSuperAdmin,
+        where('hedefKurumId', '==', selectedLabId),
+        where('isShipped', '==', true),
+        where('stokKodu', '==', stokKodu)
+      );
+
+    return docs.reduce((sum, docSnap) => sum + getStockQuantityForLimit(docSnap.data()), 0);
+  }, [currentCompanyId, depotRequestId, isDepotRequestFlow, isSuperAdmin, selectedDepotId, selectedLabId]);
+
+  const validateManualOrderLimit = useCallback(async (product: ProductCode, requestedTotal: number): Promise<boolean> => {
+    if (!orderLimitEnabled) return true;
+    const rule = minMaxRuleByCode.get(product.stokKodu);
+    const maxAdet = Number(rule?.max) || 0;
+    if (!rule || maxAdet <= 0) return true;
+
+    const currentStock = await getCurrentStockForLimit(product);
+    const maxOrderable = Math.max(0, maxAdet - currentStock);
+    if (requestedTotal <= maxOrderable) return true;
+
+    const locationLabel = isDepotRequestFlow ? 'depo' : 'laboratuvar';
+    toast({
+      title: 'Sipariş kısıtlaması',
+      description: `${product.stokAdi} için tanımlı max ${maxAdet} adet. Mevcut ${locationLabel} stoğu ${currentStock} adet olduğu için en fazla ${maxOrderable} adet talep edilebilir.`,
+      variant: 'destructive',
+    });
+    return false;
+  }, [getCurrentStockForLimit, isDepotRequestFlow, minMaxRuleByCode, orderLimitEnabled, toast]);
+
+  const handleQtyConfirm = async (productId: string, qty: number) => {
     const product = allProducts.find(p => p.id === productId);
-    if (!product || qty <= 0) return;
+    if (!product || qty <= 0) return false;
+    const existingQty = orderItems.find(item => item.stokKodu === product.stokKodu)?.adet ?? 0;
+    const requestedTotal = existingQty + qty;
+    const isValid = await validateManualOrderLimit(product, requestedTotal);
+    if (!isValid) return false;
     setAutoFillExplanations(prev => {
       if (!prev[product.stokKodu]) return prev;
       const next = { ...prev };
@@ -883,6 +948,25 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
         { id: product.id, stokKodu: product.stokKodu, stokAdi: product.stokAdi, adet: qty },
       ];
     });
+    return true;
+  };
+
+  const updateOrderItemQuantity = async (item: OrderItem, nextQty: number) => {
+    const normalizedQty = Math.max(1, Number(nextQty) || 1);
+    const product = allProducts.find(p => p.stokKodu === item.stokKodu || p.id === item.id);
+    if (product) {
+      const isValid = await validateManualOrderLimit(product, normalizedQty);
+      if (!isValid) return;
+    }
+    setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: normalizedQty } : i));
+    if (item.stokKodu) {
+      setAutoFillExplanations(current => {
+        if (!current[item.stokKodu!]) return current;
+        const next = { ...current };
+        delete next[item.stokKodu!];
+        return next;
+      });
+    }
   };
 
   const removeOrderItem = (productId: string) => {
@@ -1411,19 +1495,14 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
                         <div className="flex items-center justify-center">
                           <div className="flex items-center gap-0.5">
                             <button
-                              onClick={() => {
-                                const newQty = Math.max(1, (item.adet ?? 1) - 1);
-                                setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: newQty } : i));
-                              }}
+                              onClick={() => { updateOrderItemQuantity(item, (item.adet ?? 1) - 1); }}
                               className="w-6 h-6 rounded-md bg-[var(--dashboard-surface-2)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors"
                             >
                               <Minus className="h-3 w-3" />
                             </button>
                             <span className="text-center text-sm font-bold text-[var(--dashboard-text)] min-w-[32px]">{item.adet}</span>
                             <button
-                              onClick={() => {
-                                setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: (i.adet ?? 1) + 1 } : i));
-                              }}
+                              onClick={() => { updateOrderItemQuantity(item, (item.adet ?? 1) + 1); }}
                               className="w-6 h-6 rounded-md bg-[var(--dashboard-surface-2)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors"
                             >
                               <Plus className="h-3 w-3" />
@@ -1459,11 +1538,11 @@ export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: st
                             )}
                           </div>
                           <div className="flex items-center gap-1">
-                            <button onClick={() => { const newQty = Math.max(1, (item.adet ?? 1) - 1); setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: newQty } : i)); }} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
+                            <button onClick={() => { updateOrderItemQuantity(item, (item.adet ?? 1) - 1); }} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
                               <Minus className="h-3 w-3" />
                             </button>
                             <span className="text-center text-sm font-bold min-w-[28px]">{item.adet}</span>
-                            <button onClick={() => { setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: (i.adet ?? 1) + 1 } : i)); }} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
+                            <button onClick={() => { updateOrderItemQuantity(item, (item.adet ?? 1) + 1); }} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
                               <Plus className="h-3 w-3" />
                             </button>
                             <button onClick={() => removeOrderItem(item.id)} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-100 ml-1">

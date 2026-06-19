@@ -117,6 +117,7 @@ export default function DepoYonetimPanel() {
         ceomedEnabled: currentDepot.ceomedEnabled || false,
         ceomedDepoKodu: currentDepot.ceomedEnabled ? (currentDepot.ceomedDepoKodu || '').toString().trim() : '',
         ceomedCariKodu: (currentDepot.ceomedCariKodu || '').toString().trim().toUpperCase(),
+        orderLimitEnabled: currentDepot.orderLimitEnabled ?? false,
       };
 
       if (currentDepot.id) {
@@ -300,6 +301,19 @@ export default function DepoYonetimPanel() {
                 </div>
                 </>
               )}
+
+              <div className="flex items-start justify-between gap-3 p-3 border rounded-md">
+                <div className="space-y-0.5">
+                  <label className="text-sm font-medium">Sipariş Kısıtlaması</label>
+                  <p className="text-xs text-muted-foreground">
+                    Aktifse manuel depo ürün talebinde, mevcut depo stoğu + talep adedi tanımlı max adedi aşamaz.
+                  </p>
+                </div>
+                <Switch
+                  checked={currentDepot.orderLimitEnabled || false}
+                  onCheckedChange={(checked) => setCurrentDepot({ ...currentDepot, orderLimitEnabled: checked })}
+                />
+              </div>
 
               <div>
                 <label className="text-sm text-muted-foreground">Ceomed Cari Kodu</label>
