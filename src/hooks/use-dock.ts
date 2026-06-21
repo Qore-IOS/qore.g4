@@ -33,6 +33,7 @@ import {
   LogOut,
   Wrench,
   ShieldAlert,
+  AlertTriangle,
   ShoppingBag,
   Truck,
   Building,
@@ -213,6 +214,12 @@ const subItemMap: Record<string, DockSubItem[]> = {
       label: "Geçmiş Stok Raporu",
       icon: History,
       href: "/raporlama/gecmis-stok-raporu",
+    },
+    {
+      key: "stock-risk-report",
+      label: "Stok Risk Raporu",
+      icon: AlertTriangle,
+      href: "/raporlama/stock-risk-report",
     },
     {
       key: "kumulatif-hesaplama",
