@@ -16,23 +16,13 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.shortcutScheduler = void 0;
 const admin = __importStar(require("firebase-admin"));
@@ -40,6 +30,7 @@ const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firebase_functions_1 = require("firebase-functions");
 const firestore_1 = require("firebase-admin/firestore");
 const handlers_1 = require("./shortcuts/handlers");
+const delivery_1 = require("./shortcuts/delivery");
 if (!admin.apps.length)
     admin.initializeApp();
 const db = admin.firestore();
@@ -193,13 +184,26 @@ async function processShortcut(shortcutRef, now) {
         const completedAt = new Date();
         const nextRunAt = computeNextRunAt(locked.schedule, completedAt);
         const status = result.status || 'success';
+        const delivery = await (0, delivery_1.deliverShortcutResult)({
+            shortcut: locked,
+            runRef,
+            result,
+        });
+        const serializedResult = serializeHandlerResult(result);
+        const generatedAttachments = delivery.attachments.map(({ name, contentType, storagePath, publicUrl, sizeBytes }) => ({
+            name,
+            contentType,
+            path: storagePath,
+            url: publicUrl,
+            sizeBytes,
+        }));
         await runRef.set({
             status,
             completedAt: firestore_1.FieldValue.serverTimestamp(),
-            result: serializeHandlerResult(result),
-            message: result.summaryText || null,
+            result: Object.assign(Object.assign({}, serializedResult), { deliverySummary: delivery.summary, generatedAttachments, deliveryAttempts: delivery.attempts }),
+            message: delivery.summary || result.summaryText || null,
         }, { merge: true });
-        await appendRunLog(runRef, status === 'failed' ? 'error' : 'info', result.summaryText || 'Shortcut run completed.', serializeHandlerResult(result));
+        await appendRunLog(runRef, status === 'failed' ? 'error' : 'info', result.summaryText || 'Shortcut run completed.', Object.assign(Object.assign({}, serializedResult), { generatedAttachments, deliveryAttempts: delivery.attempts }));
         await shortcutRef.update({
             lastRunAt: firestore_1.FieldValue.serverTimestamp(),
             nextRunAt: nextRunAt ? firestore_1.Timestamp.fromDate(nextRunAt) : null,
