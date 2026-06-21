@@ -24,10 +24,11 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.shortcutScheduler = void 0;
+exports.shortcutScheduler = exports.onShortcutRunRequestCreated = void 0;
 const admin = __importStar(require("firebase-admin"));
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firebase_functions_1 = require("firebase-functions");
+const functions = __importStar(require("firebase-functions"));
 const firestore_1 = require("firebase-admin/firestore");
 const handlers_1 = require("./shortcuts/handlers");
 const delivery_1 = require("./shortcuts/delivery");
@@ -135,15 +136,20 @@ async function appendRunLog(runRef, level, message, meta = {}) {
         createdAt: firestore_1.FieldValue.serverTimestamp(),
     });
 }
-async function processShortcut(shortcutRef, now) {
-    const runRef = db.collection('shortcutRuns').doc();
+async function executeShortcutRun(shortcutRef, runRef, trigger, requestedByUid) {
     const locked = await db.runTransaction(async (tx) => {
         const snap = await tx.get(shortcutRef);
         if (!snap.exists)
             return null;
         const shortcut = Object.assign({ id: snap.id }, snap.data());
-        const nextRunAt = toDate(shortcut.nextRunAt);
-        if (shortcut.enabled !== true || !nextRunAt || nextRunAt.getTime() > now.getTime())
+        const mode = shortcut.runMode || (shortcut.nextRunAt ? 'scheduled' : 'manual');
+        const allowsManual = mode === 'manual' || mode === 'manual_and_scheduled';
+        const allowsScheduled = mode === 'scheduled' || mode === 'manual_and_scheduled';
+        if (shortcut.enabled !== true)
+            return null;
+        if (trigger === 'manual' && !allowsManual)
+            throw new Error('Shortcut does not allow manual runs');
+        if (trigger === 'scheduled' && !allowsScheduled)
             return null;
         tx.update(shortcutRef, {
             processingRunId: runRef.id,
@@ -155,18 +161,20 @@ async function processShortcut(shortcutRef, now) {
             companyId: shortcut.companyId || null,
             panelKey: shortcut.panelKey || null,
             actionKey: shortcut.actionKey || null,
+            trigger,
+            requestedByUid: requestedByUid || null,
             status: 'processing',
             startedAt: firestore_1.FieldValue.serverTimestamp(),
             createdAt: firestore_1.FieldValue.serverTimestamp(),
             createdByUid: shortcut.createdByUid || null,
             createdByName: shortcut.createdByName || null,
-        });
+        }, { merge: true });
         return shortcut;
     });
     if (!locked)
         return;
     try {
-        await appendRunLog(runRef, 'info', 'Shortcut run started.');
+        await appendRunLog(runRef, 'info', `Shortcut ${trigger} run started.`);
         const permission = await verifyShortcutPermissions(locked);
         if (!permission.ok)
             throw new Error(permission.reason || 'Permission check failed');
@@ -182,7 +190,7 @@ async function processShortcut(shortcutRef, now) {
             now: new Date(),
         });
         const completedAt = new Date();
-        const nextRunAt = computeNextRunAt(locked.schedule, completedAt);
+        const nextRunAt = trigger === 'scheduled' ? computeNextRunAt(locked.schedule, completedAt) : toDate(locked.nextRunAt);
         const status = result.status || 'success';
         const delivery = await (0, delivery_1.deliverShortcutResult)({
             shortcut: locked,
@@ -207,7 +215,7 @@ async function processShortcut(shortcutRef, now) {
         await shortcutRef.update({
             lastRunAt: firestore_1.FieldValue.serverTimestamp(),
             nextRunAt: nextRunAt ? firestore_1.Timestamp.fromDate(nextRunAt) : null,
-            enabled: nextRunAt ? locked.enabled : false,
+            enabled: trigger === 'scheduled' && !nextRunAt ? false : locked.enabled,
             processingRunId: firestore_1.FieldValue.delete(),
             processingStartedAt: firestore_1.FieldValue.delete(),
             updatedAt: firestore_1.FieldValue.serverTimestamp(),
@@ -215,8 +223,8 @@ async function processShortcut(shortcutRef, now) {
     }
     catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        const retryAt = computeNextRunAt(locked.schedule, new Date());
-        firebase_functions_1.logger.error('Shortcut run failed', { shortcutId: shortcutRef.id, runId: runRef.id, err });
+        const retryAt = trigger === 'scheduled' ? computeNextRunAt(locked.schedule, new Date()) : toDate(locked.nextRunAt);
+        firebase_functions_1.logger.error('Shortcut run failed', { shortcutId: shortcutRef.id, runId: runRef.id, trigger, err });
         await runRef.set({
             status: 'failed',
             completedAt: firestore_1.FieldValue.serverTimestamp(),
@@ -226,13 +234,47 @@ async function processShortcut(shortcutRef, now) {
         await shortcutRef.update({
             lastRunAt: firestore_1.FieldValue.serverTimestamp(),
             nextRunAt: retryAt ? firestore_1.Timestamp.fromDate(retryAt) : null,
-            enabled: retryAt ? locked.enabled : false,
+            enabled: trigger === 'scheduled' && !retryAt ? false : locked.enabled,
             processingRunId: firestore_1.FieldValue.delete(),
             processingStartedAt: firestore_1.FieldValue.delete(),
             updatedAt: firestore_1.FieldValue.serverTimestamp(),
         });
     }
 }
+async function processShortcut(shortcutRef, now) {
+    const snap = await shortcutRef.get();
+    if (!snap.exists)
+        return;
+    const shortcut = Object.assign({ id: snap.id }, snap.data());
+    const nextRunAt = toDate(shortcut.nextRunAt);
+    const mode = shortcut.runMode || (nextRunAt ? 'scheduled' : 'manual');
+    if (shortcut.enabled !== true || !nextRunAt || nextRunAt.getTime() > now.getTime())
+        return;
+    if (mode !== 'scheduled' && mode !== 'manual_and_scheduled')
+        return;
+    await executeShortcutRun(shortcutRef, db.collection('shortcutRuns').doc(), 'scheduled');
+}
+exports.onShortcutRunRequestCreated = functions
+    .region('europe-west1')
+    .firestore.document('shortcutRunRequests/{requestId}')
+    .onCreate(async (snap) => {
+    const request = snap.data() || {};
+    const shortcutId = String(request.shortcutId || '').trim();
+    if (!shortcutId) {
+        await snap.ref.set({ status: 'failed', error: 'shortcutId is required', completedAt: firestore_1.FieldValue.serverTimestamp() }, { merge: true });
+        return;
+    }
+    const runRef = db.collection('shortcutRuns').doc();
+    await snap.ref.set({ status: 'processing', runId: runRef.id, startedAt: firestore_1.FieldValue.serverTimestamp() }, { merge: true });
+    try {
+        await executeShortcutRun(db.collection('shortcuts').doc(shortcutId), runRef, 'manual', request.requestedByUid || null);
+        await snap.ref.set({ status: 'completed', completedAt: firestore_1.FieldValue.serverTimestamp() }, { merge: true });
+    }
+    catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        await snap.ref.set({ status: 'failed', error: message, completedAt: firestore_1.FieldValue.serverTimestamp() }, { merge: true });
+    }
+});
 exports.shortcutScheduler = (0, scheduler_1.onSchedule)({
     schedule: 'every 1 minutes',
     region: 'europe-west1',
