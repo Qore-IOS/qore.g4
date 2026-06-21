@@ -11,6 +11,7 @@ interface ShortcutBuilderModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   accessibleViews: readonly string[];
+  onSave?: (payload: { panelKey?: string; panelLabel?: string; actionKey?: string; actionLabel?: string; actionDescription?: string; actionHref?: string; runMode: 'manual' | 'scheduled' | 'manual_and_scheduled'; scheduleLabel: string; schedule?: { type: 'once' | 'interval'; intervalDays?: number } | string | null; outputs: string[]; filters: string[] }) => Promise<void> | void;
 }
 
 const FILTER_OPTIONS = [
@@ -32,7 +33,7 @@ const OUTPUT_OPTIONS = [
   { key: 'excel', label: 'Excel', icon: FileSpreadsheet },
 ];
 
-const SCHEDULE_OPTIONS = ['Tek seferlik', 'Günlük', 'Haftalık', 'Aylık', 'Özel cron'];
+const SCHEDULE_OPTIONS = ['Manuel', 'Tek seferlik', 'Günlük', 'Haftalık', 'Aylık', 'Özel cron'];
 
 const STEP_LABELS = [
   'Panel seçimi',
@@ -50,14 +51,14 @@ const actionKindLabel: Record<ShortcutAction['kind'], string> = {
   notification: 'Bildirim',
 };
 
-export function ShortcutBuilderModal({ open, onOpenChange, accessibleViews }: ShortcutBuilderModalProps) {
+export function ShortcutBuilderModal({ open, onOpenChange, accessibleViews, onSave }: ShortcutBuilderModalProps) {
   const panels = useMemo(() => getShortcutCatalogForViews(accessibleViews), [accessibleViews]);
   const [step, setStep] = useState(0);
   const [selectedPanelKey, setSelectedPanelKey] = useState<string>();
   const [selectedActionKey, setSelectedActionKey] = useState<string>();
   const [selectedFilters, setSelectedFilters] = useState<string[]>(['Tarih aralığı']);
   const [selectedOutputs, setSelectedOutputs] = useState<string[]>(['app']);
-  const [schedule, setSchedule] = useState('Tek seferlik');
+  const [schedule, setSchedule] = useState('Manuel');
   const [cron, setCron] = useState('0 9 * * 1');
 
   const selectedPanel = panels.find((panel) => String(panel.panelKey) === selectedPanelKey) ?? panels[0];
@@ -78,6 +79,26 @@ export function ShortcutBuilderModal({ open, onOpenChange, accessibleViews }: Sh
   const choosePanel = (panel: ShortcutPanelCatalogItem) => {
     setSelectedPanelKey(String(panel.panelKey));
     setSelectedActionKey(panel.actions[0]?.key);
+  };
+
+  const runMode = schedule === 'Manuel' ? 'manual' : schedule === 'Tek seferlik' ? 'manual_and_scheduled' : 'manual_and_scheduled';
+  const schedulePayload = schedule === 'Manuel' ? null : schedule === 'Günlük' ? { type: 'interval' as const, intervalDays: 1 } : schedule === 'Haftalık' ? { type: 'interval' as const, intervalDays: 7 } : schedule === 'Aylık' ? { type: 'interval' as const, intervalDays: 30 } : schedule === 'Tek seferlik' ? { type: 'once' as const } : cron;
+
+  const saveShortcut = async () => {
+    await onSave?.({
+      panelKey: selectedPanel ? String(selectedPanel.panelKey) : undefined,
+      panelLabel: selectedPanel?.panelLabel,
+      actionKey: selectedAction?.handlerKey || selectedAction?.key,
+      actionLabel: selectedAction?.label,
+      actionDescription: selectedAction?.description,
+      actionHref: selectedAction?.href,
+      runMode,
+      scheduleLabel: schedule === 'Özel cron' ? `${schedule} · ${cron}` : schedule,
+      schedule: schedulePayload,
+      outputs: selectedOutputs,
+      filters: selectedFilters,
+    });
+    resetAndClose(false);
   };
 
   const outputLabels = selectedOutputs
@@ -175,6 +196,7 @@ export function ShortcutBuilderModal({ open, onOpenChange, accessibleViews }: Sh
                     <SummaryRow label="Fonksiyon / rapor" value={selectedAction?.label} />
                     <SummaryRow label="Filtreler" value={selectedFilters.join(', ') || 'Filtre yok'} />
                     <SummaryRow label="Çıktı" value={outputLabels || 'Seçilmedi'} />
+                    <SummaryRow label="Çalışma modu" value={runMode} />
                     <SummaryRow label="Zamanlama" value={schedule === 'Özel cron' ? `${schedule} · ${cron}` : schedule} />
                   </div>
                   <p className="text-sm text-muted-foreground">Kaydettiğiniz kestirme daha sonra kişisel başlangıç menünüzde ve otomasyon kuyruğunda kullanılmak üzere hazır hale gelir.</p>
@@ -192,7 +214,7 @@ export function ShortcutBuilderModal({ open, onOpenChange, accessibleViews }: Sh
                 İleri <ChevronRight className="ml-1 h-4 w-4" />
               </Button>
             ) : (
-              <Button type="button" onClick={() => resetAndClose(false)}>
+              <Button type="button" onClick={saveShortcut}>
                 <Save className="mr-1 h-4 w-4" /> Kaydet
               </Button>
             )}
