@@ -7,7 +7,11 @@ export type ShortcutParamKey =
   | 'depo'
   | 'marka'
   | 'urunGrubu'
+  | 'urunKoduMarka'
   | 'tarihAraligi'
+  | 'sorumluKullanici'
+  | 'durum'
+  | 'oncelik'
   | 'esikDegeri'
   | 'esikGunSayisi'
   | 'alicilar'
@@ -45,7 +49,11 @@ const PARAMS = {
   depo: { key: 'depo', label: 'Depo', type: 'string[]' },
   marka: { key: 'marka', label: 'Marka', type: 'string[]' },
   urunGrubu: { key: 'urunGrubu', label: 'Ürün grubu', type: 'string[]' },
+  urunKoduMarka: { key: 'urunKoduMarka', label: 'Ürün kodu / marka', type: 'string[]' },
   tarihAraligi: { key: 'tarihAraligi', label: 'Tarih aralığı', type: 'date-range' },
+  sorumluKullanici: { key: 'sorumluKullanici', label: 'Sorumlu kullanıcı', type: 'string[]' },
+  durum: { key: 'durum', label: 'Durum', type: 'string[]' },
+  oncelik: { key: 'oncelik', label: 'Öncelik', type: 'string[]' },
   esikDegeri: { key: 'esikDegeri', label: 'Eşik değeri', type: 'number' },
   esikGunSayisi: { key: 'esikGunSayisi', label: 'Eşik gün sayısı', type: 'number' },
   alicilar: { key: 'alicilar', label: 'Alıcılar', type: 'string[]' },
@@ -71,6 +79,32 @@ const navigationAction = (
   href,
 });
 
+const OPERATIONAL_FILTER_PARAMS = [
+  PARAMS.depo,
+  PARAMS.lab,
+  PARAMS.sorumluKullanici,
+  PARAMS.durum,
+  PARAMS.tarihAraligi,
+  PARAMS.oncelik,
+];
+
+const reportAction = (
+  panelKey: string,
+  actionKey: string,
+  label: string,
+  description: string,
+  handlerKey = `${panelKey}.${actionKey}`,
+  href?: string,
+): ShortcutAction => ({
+  key: `${panelKey}.${actionKey}`,
+  label,
+  description,
+  kind: 'report',
+  params: OPERATIONAL_FILTER_PARAMS,
+  handlerKey,
+  href,
+});
+
 export const SHORTCUT_CATALOG: ShortcutPanelCatalogItem[] = [
   {
     panelKey: 'dashboard',
@@ -91,6 +125,9 @@ export const SHORTCUT_CATALOG: ShortcutPanelCatalogItem[] = [
     actions: [
       navigationAction('mal-kabul', 'Mal kabul başlat', '/mal-kabul', 'Yeni mal kabul akışını aç.'),
       navigationAction('mal-kabul-gecmis', 'Mal kabul geçmişi', '/mal-kabul/gecmis', 'Geçmiş mal kabul kayıtlarını listele.'),
+      reportAction('mal-kabul', 'bekleyen-irsaliyeler', 'Bekleyen irsaliyeler', 'Seçilen filtrelere göre bekleyen irsaliyeleri listele.', undefined, '/mal-kabul'),
+      reportAction('mal-kabul', 'eksik-fazla-kabul-uyarisi', 'Eksik/fazla kabul uyarısı', 'Eksik veya fazla kabul riski taşıyan irsaliyeler için uyarı raporu hazırla.', undefined, '/mal-kabul/gecmis'),
+      reportAction('mal-kabul', 'gunluk-kabul-ozeti', 'Günlük kabul özeti', 'Günlük mal kabul hareketlerini depo, laboratuvar ve sorumlu bazında özetle.', undefined, '/mal-kabul/gecmis'),
     ],
   },
   {
@@ -101,13 +138,21 @@ export const SHORTCUT_CATALOG: ShortcutPanelCatalogItem[] = [
       navigationAction('siparisler', 'Siparişleri aç', '/siparisler'),
       navigationAction('siparis-gecmis', 'Sipariş geçmişi', '/siparisler?tab=tamamlanan', 'Tamamlanan siparişleri göster.'),
       navigationAction('direkt-transfer', 'Direkt transfer oluştur', '/direkt-transfer', 'Depolar arası direkt transfer ekranını aç.'),
+      reportAction('siparisler', 'onay-bekleyen-siparisler', 'Onay bekleyen siparişler', 'Onay bekleyen siparişleri seçilen operasyonel filtrelere göre listele.', undefined, '/siparisler'),
+      reportAction('siparisler', 'geciken-siparisler', 'Geciken siparişler', 'Geciken siparişleri depo, laboratuvar, durum, tarih ve öncelik kırılımlarıyla raporla.', undefined, '/siparisler'),
+      reportAction('siparisler', 'haftalik-siparis-ozeti', 'Haftalık sipariş özeti', 'Haftalık sipariş hacmini ve durum dağılımını sorumlu kullanıcı bazında özetle.', undefined, '/siparisler'),
     ],
   },
   {
     panelKey: 'direkt-transfer',
     panelLabel: panelLabel('direkt-transfer', 'Direkt Transfer'),
     requiredView: 'direkt-transfer',
-    actions: [navigationAction('direkt-transfer', 'Direkt transfer aç', '/direkt-transfer')],
+    actions: [
+      navigationAction('direkt-transfer', 'Direkt transfer aç', '/direkt-transfer'),
+      reportAction('direkt-transfer', 'acik-transfer-talepleri', 'Açık transfer talepleri', 'Açık transfer taleplerini seçilen filtrelere göre listele.', undefined, '/direkt-transfer'),
+      reportAction('direkt-transfer', 'geciken-transferler', 'Geciken transferler', 'Geciken transfer taleplerini depo, sorumlu kullanıcı, durum ve öncelik kırılımlarıyla raporla.', undefined, '/direkt-transfer'),
+      reportAction('direkt-transfer', 'kullanici-depo-bazli-transfer-ozeti', 'Kullanıcı/depo bazlı transfer özeti', 'Transfer hareketlerini kullanıcı ve depo bazında özetle.', undefined, '/direkt-transfer'),
+    ],
   },
   {
     panelKey: 'route-planlayici',
@@ -161,6 +206,46 @@ export const SHORTCUT_CATALOG: ShortcutPanelCatalogItem[] = [
       navigationAction('urun-talep', 'Ürün talebi oluştur', '/urun-talep', 'Ürün talep ekranını aç.'),
       navigationAction('tuketim-istatistikleri', 'Tüketim istatistikleri', '/tuketim-istatistikleri', 'Ürün kullanım istatistiklerini aç.'),
       navigationAction('kullanim-dogrulama', 'Kullanım doğrulama', '/kullanim-dogrulama', 'Kullanım doğrulama kuyruğunu aç.'),
+      {
+        key: 'urun-kullanim.gunluk-tuketim-ozeti',
+        label: 'Günlük tüketim özeti',
+        description: 'Seçilen laboratuvar, tarih aralığı, ürün kodu/marka, eşik miktar ve alıcı grubuna göre günlük tüketim özetini PDF, Excel ve kısa mesaj özeti olarak üret.',
+        kind: 'report',
+        params: [PARAMS.lab, PARAMS.tarihAraligi, PARAMS.urunKoduMarka, PARAMS.esikDegeri, PARAMS.alicilar, PARAMS.ciktiFormati],
+        handlerKey: 'urun-kullanim.daily-consumption-summary',
+      },
+      {
+        key: 'urun-kullanim.haftalik-lab-tuketim-raporu',
+        label: 'Haftalık lab tüketim raporu',
+        description: 'Laboratuvar bazlı haftalık tüketim raporunu filtrelere göre PDF, Excel ve kısa mesaj özeti olarak hazırla.',
+        kind: 'report',
+        params: [PARAMS.lab, PARAMS.tarihAraligi, PARAMS.urunKoduMarka, PARAMS.esikDegeri, PARAMS.alicilar, PARAMS.ciktiFormati],
+        handlerKey: 'urun-kullanim.weekly-lab-consumption-report',
+      },
+      {
+        key: 'urun-kullanim.fefo-disi-kullanim-listesi',
+        label: 'FEFO dışı kullanım listesi',
+        description: 'Miad önceliğine uymayan kullanımları seçili filtrelerle listeleyip PDF, Excel ve kısa mesaj özeti olarak üret.',
+        kind: 'report',
+        params: [PARAMS.lab, PARAMS.tarihAraligi, PARAMS.urunKoduMarka, PARAMS.esikDegeri, PARAMS.alicilar, PARAMS.ciktiFormati],
+        handlerKey: 'urun-kullanim.non-fefo-usage-list',
+      },
+      {
+        key: 'urun-kullanim.seri-lot-tekrar-kullanim-suphesi',
+        label: 'Seri/lot tekrar kullanım şüphesi',
+        description: 'Aynı seri/lot için tekrar kullanım şüphesi oluşturan kayıtları PDF, Excel ve kısa mesaj özetiyle raporla.',
+        kind: 'report',
+        params: [PARAMS.lab, PARAMS.tarihAraligi, PARAMS.urunKoduMarka, PARAMS.esikDegeri, PARAMS.alicilar, PARAMS.ciktiFormati],
+        handlerKey: 'urun-kullanim.serial-lot-reuse-suspicions',
+      },
+      {
+        key: 'urun-kullanim.cihaz-lab-bazli-sarf-kirilimi',
+        label: 'Cihaz/lab bazlı sarf kırılımı',
+        description: 'Cihaz ve laboratuvar bazında sarf tüketim kırılımını PDF, Excel ve kısa mesaj özeti olarak üret.',
+        kind: 'report',
+        params: [PARAMS.lab, PARAMS.tarihAraligi, PARAMS.urunKoduMarka, PARAMS.esikDegeri, PARAMS.alicilar, PARAMS.ciktiFormati],
+        handlerKey: 'urun-kullanim.device-lab-consumable-breakdown',
+      },
     ],
   },
   {
@@ -245,6 +330,43 @@ export const SHORTCUT_CATALOG: ShortcutPanelCatalogItem[] = [
     actions: [
       navigationAction('teknik-servis', 'Teknik servis', '/teknik-servis'),
       navigationAction('ariza-yonetimi', 'Tüm arızalar', '/ariza-yonetimi'),
+      ...FAULT_OPERATIONS_SHORTCUT_ACTIONS.map((action) => ({
+        ...action,
+        key: action.key.replace('ariza-yonetimi.', 'cihaz-yonetimi-ana.'),
+      })),
+    ],
+  },
+  {
+    panelKey: 'teknik-servis',
+    panelLabel: panelLabel('teknik-servis', 'Teknik Servis'),
+    requiredView: 'teknik-servis',
+    actions: [
+      navigationAction('teknik-servis', 'Teknik servis panelini aç', '/teknik-servis'),
+      ...FAULT_OPERATIONS_SHORTCUT_ACTIONS.map((action) => ({
+        ...action,
+        key: action.key.replace('ariza-yonetimi.', 'teknik-servis.').replace('cihaz-yonetimi.', 'teknik-servis.'),
+      })),
+    ],
+  },
+  {
+    panelKey: 'aplikasyon-paneli',
+    panelLabel: panelLabel('aplikasyon-paneli', 'Aplikasyon Paneli'),
+    requiredView: 'aplikasyon-paneli',
+    actions: [
+      navigationAction('aplikasyon-paneli', 'Aplikasyon panelini aç', '/aplikasyon-paneli'),
+      ...FAULT_OPERATIONS_SHORTCUT_ACTIONS.map((action) => ({
+        ...action,
+        key: action.key.replace('ariza-yonetimi.', 'aplikasyon-paneli.').replace('cihaz-yonetimi.', 'aplikasyon-paneli.'),
+      })),
+    ],
+  },
+  {
+    panelKey: 'ariza-yonetimi',
+    panelLabel: panelLabel('ariza-yonetimi', 'Arıza Yönetimi'),
+    requiredView: 'ariza-yonetimi',
+    actions: [
+      navigationAction('ariza-yonetimi', 'Tüm arızaları aç', '/ariza-yonetimi'),
+      ...FAULT_OPERATIONS_SHORTCUT_ACTIONS,
     ],
   },
   {
@@ -257,7 +379,12 @@ export const SHORTCUT_CATALOG: ShortcutPanelCatalogItem[] = [
     panelKey: 'satin-alma',
     panelLabel: panelLabel('satin-alma', 'Planlama Birimi'),
     requiredView: 'satin-alma',
-    actions: [navigationAction('satin-alma', 'Planlama birimini aç', '/satin-alma')],
+    actions: [
+      navigationAction('satin-alma', 'Planlama birimini aç', '/satin-alma'),
+      reportAction('satin-alma', 'gorev-gecikmeleri', 'Görev gecikmeleri', 'Planlama ve satın alma görev gecikmelerini operasyonel filtrelerle raporla.', undefined, '/satin-alma'),
+      reportAction('satin-alma', 'workflow-bekleyenleri', 'Workflow bekleyenleri', 'Workflow adımlarında bekleyen satın alma işlerini listele.', undefined, '/satin-alma'),
+      reportAction('satin-alma', 'haftalik-planlama-ozeti', 'Haftalık planlama özeti', 'Haftalık planlama işlerini durum, öncelik ve sorumlu kullanıcı kırılımlarıyla özetle.', undefined, '/satin-alma'),
+    ],
   },
   {
     panelKey: 'kullanici-talepleri',
