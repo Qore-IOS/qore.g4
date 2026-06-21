@@ -34,7 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cleanupExpiredIrsaliyeDosyalari = exports.maintenanceUpcomingReminder = exports.faultInterventionReminder = exports.onNotificationCreated = exports.onBankTransactionWritten = exports.backfillCompanyStats = exports.dailyStatsRollover = exports.onFaultWritten = exports.onShipmentWritten = exports.onTuketimWritten = exports.onDepoStokWritten = exports.onUserClaimSync = exports.onDepoStokAccepted = exports.onPeripheralOrderCreatedSendWhatsApp = exports.onPeripheralOrderCreatedSendMail = exports.onDeviceFaultReportResolved = exports.onAplikasyonFormCreated = exports.onTeknikServisFormCreated = exports.nfcLoginWithSerial = exports.mirrorPresenceToFirestore = exports.createCustomTokenForNfcUser = exports.revokeUserSessions = void 0;
+exports.cleanupExpiredIrsaliyeDosyalari = exports.maintenanceUpcomingReminder = exports.faultInterventionReminder = exports.onNotificationCreated = exports.shortcutScheduler = exports.onBankTransactionWritten = exports.backfillCompanyStats = exports.dailyStatsRollover = exports.onFaultWritten = exports.onShipmentWritten = exports.onTuketimWritten = exports.onDepoStokWritten = exports.onUserClaimSync = exports.onDepoStokAccepted = exports.onPeripheralOrderCreatedSendWhatsApp = exports.onPeripheralOrderCreatedSendMail = exports.onDeviceFaultReportResolved = exports.onAplikasyonFormCreated = exports.onTeknikServisFormCreated = exports.nfcLoginWithSerial = exports.mirrorPresenceToFirestore = exports.createCustomTokenForNfcUser = exports.revokeUserSessions = void 0;
 const admin = __importStar(require("firebase-admin"));
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firebase_functions_1 = require("firebase-functions");
@@ -72,6 +72,8 @@ Object.defineProperty(exports, "dailyStatsRollover", { enumerable: true, get: fu
 Object.defineProperty(exports, "backfillCompanyStats", { enumerable: true, get: function () { return companyStatsAggregation_1.backfillCompanyStats; } });
 var cariReconciliation_1 = require("./cariReconciliation");
 Object.defineProperty(exports, "onBankTransactionWritten", { enumerable: true, get: function () { return cariReconciliation_1.onBankTransactionWritten; } });
+var shortcutScheduler_1 = require("./shortcutScheduler");
+Object.defineProperty(exports, "shortcutScheduler", { enumerable: true, get: function () { return shortcutScheduler_1.shortcutScheduler; } });
 function chunk(arr, size = 500) {
     const out = [];
     for (let i = 0; i < arr.length; i += size)
