@@ -79,6 +79,63 @@ const navigationAction = (
   href,
 });
 
+const FAULT_OPERATIONS_SHORTCUT_ACTIONS: ShortcutAction[] = [
+  {
+    key: 'ariza-yonetimi.acik-ariza-yaslandirma-raporu',
+    label: 'Açık arıza yaşlandırma raporu',
+    description: 'Açık arızaları bekleme süresine göre sıralayıp yeni shortcut scheduler ile raporla.',
+    kind: 'report',
+    params: [PARAMS.lab, PARAMS.esikDegeri, PARAMS.alicilar, PARAMS.ciktiFormati],
+    handlerKey: 'fault-open-aging-report',
+    href: '/ariza-yonetimi',
+  },
+  {
+    key: 'ariza-yonetimi.sla-asimi-uyarisi',
+    label: 'SLA aşımı uyarısı',
+    description: 'Müdahale veya çözüm SLA eşiğini aşan açık arızaları shortcut scheduler üzerinden bildir.',
+    kind: 'notification',
+    params: [PARAMS.lab, PARAMS.esikDegeri, PARAMS.alicilar, PARAMS.gonderimKanali],
+    handlerKey: 'fault-sla-breach-alert',
+    href: '/ariza-yonetimi?status=mudahale_bekliyor',
+  },
+  {
+    key: 'ariza-yonetimi.parca-bekleyen-islemler',
+    label: 'Parça bekleyen işlemler',
+    description: 'Parça beklediği işaretlenen veya açıklamasında parça bekleme bilgisi olan açık arıza işlemlerini listele.',
+    kind: 'report',
+    params: [PARAMS.lab, PARAMS.alicilar, PARAMS.ciktiFormati],
+    handlerKey: 'fault-pending-parts-operations',
+    href: '/ariza-yonetimi',
+  },
+  {
+    key: 'ariza-yonetimi.teknisyen-haftalik-is-ozeti',
+    label: 'Teknisyen bazlı haftalık iş özeti',
+    description: 'Son 7 gündeki atanan, açık ve kapanan arızaları teknisyen bazında özetle.',
+    kind: 'report',
+    params: [PARAMS.tarihAraligi, PARAMS.alicilar, PARAMS.ciktiFormati],
+    handlerKey: 'technician-weekly-work-summary',
+    href: '/cihaz-yonetimi-ana',
+  },
+  {
+    key: 'ariza-yonetimi.kapanmis-ariza-kalite-kontrol',
+    label: 'Kapanmış arıza kalite kontrol raporu',
+    description: 'Kapanmış arızalarda açıklama ve çözüm süresi gibi kalite kontrol sinyallerini raporla.',
+    kind: 'report',
+    params: [PARAMS.tarihAraligi, PARAMS.lab, PARAMS.alicilar, PARAMS.ciktiFormati],
+    handlerKey: 'closed-fault-quality-control-report',
+    href: '/ariza-yonetimi?status=cozuldu',
+  },
+  {
+    key: 'cihaz-yonetimi.bakim-yaklasan-tarih-bildirimi',
+    label: 'Cihaz bakım yaklaşan tarih bildirimi',
+    description: 'Scheduled bakım hatırlatıcılarıyla aynı bakım planı verisini kullanarak yaklaşan bakım tarihlerini bildir.',
+    kind: 'notification',
+    params: [PARAMS.lab, PARAMS.esikGunSayisi, PARAMS.alicilar, PARAMS.gonderimKanali],
+    handlerKey: 'device-maintenance-upcoming-date-notification',
+    href: '/cihaz-tanimlamalari/periyodik-bakim-yonetimi',
+  },
+];
+
 const OPERATIONAL_FILTER_PARAMS = [
   PARAMS.depo,
   PARAMS.lab,
