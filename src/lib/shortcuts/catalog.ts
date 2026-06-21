@@ -330,6 +330,43 @@ export const SHORTCUT_CATALOG: ShortcutPanelCatalogItem[] = [
     actions: [
       navigationAction('teknik-servis', 'Teknik servis', '/teknik-servis'),
       navigationAction('ariza-yonetimi', 'Tüm arızalar', '/ariza-yonetimi'),
+      ...FAULT_OPERATIONS_SHORTCUT_ACTIONS.map((action) => ({
+        ...action,
+        key: action.key.replace('ariza-yonetimi.', 'cihaz-yonetimi-ana.'),
+      })),
+    ],
+  },
+  {
+    panelKey: 'teknik-servis',
+    panelLabel: panelLabel('teknik-servis', 'Teknik Servis'),
+    requiredView: 'teknik-servis',
+    actions: [
+      navigationAction('teknik-servis', 'Teknik servis panelini aç', '/teknik-servis'),
+      ...FAULT_OPERATIONS_SHORTCUT_ACTIONS.map((action) => ({
+        ...action,
+        key: action.key.replace('ariza-yonetimi.', 'teknik-servis.').replace('cihaz-yonetimi.', 'teknik-servis.'),
+      })),
+    ],
+  },
+  {
+    panelKey: 'aplikasyon-paneli',
+    panelLabel: panelLabel('aplikasyon-paneli', 'Aplikasyon Paneli'),
+    requiredView: 'aplikasyon-paneli',
+    actions: [
+      navigationAction('aplikasyon-paneli', 'Aplikasyon panelini aç', '/aplikasyon-paneli'),
+      ...FAULT_OPERATIONS_SHORTCUT_ACTIONS.map((action) => ({
+        ...action,
+        key: action.key.replace('ariza-yonetimi.', 'aplikasyon-paneli.').replace('cihaz-yonetimi.', 'aplikasyon-paneli.'),
+      })),
+    ],
+  },
+  {
+    panelKey: 'ariza-yonetimi',
+    panelLabel: panelLabel('ariza-yonetimi', 'Arıza Yönetimi'),
+    requiredView: 'ariza-yonetimi',
+    actions: [
+      navigationAction('ariza-yonetimi', 'Tüm arızaları aç', '/ariza-yonetimi'),
+      ...FAULT_OPERATIONS_SHORTCUT_ACTIONS,
     ],
   },
   {
