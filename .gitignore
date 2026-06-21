@@ -59,3 +59,7 @@ qore-studio-work
 # Multi-tenancy audit reports (may contain tenant data)
 audit-report.json
 reports/audit-*.json
+
+# Python bytecode (skill scripts)
+__pycache__/
+*.pyc
