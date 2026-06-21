@@ -6,8 +6,12 @@ import { useTheme } from 'next-themes';
 import type { Hospital, ConsumptionRecord, ProductCode, DailyConsumptionStats, DeviceFaultReport, PurchasingTask } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { TrendingUp, ChevronLeft, ChevronRight, UserPlus2, TimerReset, ActivitySquare, AlertTriangle, CalendarCheck, Banknote, RefreshCw, ArrowUpRight } from 'lucide-react';
-import { Sparkline } from '@/components/maliyet-gozlem/charts';
+import { TrendingUp, ChevronLeft, ChevronRight, UserPlus2, TimerReset, ActivitySquare, AlertTriangle, CalendarCheck, Banknote, RefreshCw, ArrowUpRight, Bell, Maximize2, Check, X as XIcon, Search } from 'lucide-react';
+import {
+  HOME_C, fmtInt, fmtTL, useCountUp, ClayLineChart, Ring,
+  Card as ClayCard, CardHead, Pill, Tag, ClayIconBtn, Segmented, ClayBar,
+} from '@/components/dashboard-v2/clay-home';
+import { ClayShell } from '@/components/mal-kabul/clay-kit';
 import {
   format, startOfWeek, endOfWeek, eachDayOfInterval,
   subDays, addDays, subWeeks, addWeeks, subMonths, addMonths, subYears, addYears,
@@ -45,6 +49,36 @@ const motionProps = {
   initial: { scale: 1, y: 0 },
   whileHover: { scale: 1.03, y: -5, transition: { type: 'spring', stiffness: 300, damping: 20 } },
 };
+
+// ── clay dashboard sub-components (count-up animated) ─────────────────────────
+function CountText({ value, format = fmtInt, style }: { value: number; format?: (n: number) => string; style?: React.CSSProperties }) {
+  const v = useCountUp(value, 1000);
+  return <span style={style}>{format(v)}</span>;
+}
+
+function MiniKpi({ s, i }: { s: { value: number; tone: string; bg: string; icon: any; label: string; href: string }; i: number }) {
+  const v = useCountUp(s.value, 1000);
+  const Icon = s.icon;
+  return (
+    <Link href={s.href} style={{ textDecoration: 'none', padding: '14px 10px', borderRadius: HOME_C.radiusSm, background: HOME_C.surfaceHi, boxShadow: HOME_C.clayFlat, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7, textAlign: 'center', animation: `mkPopIn ${320 + i * 120}ms ${HOME_C.ease}` }}>
+      <span style={{ width: 38, height: 38, borderRadius: 12, display: 'grid', placeItems: 'center', color: s.tone, background: s.bg, boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.7)' }}><Icon size={19} /></span>
+      <span style={{ fontSize: 28, fontWeight: 800, color: HOME_C.ink1, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{fmtInt(v)}</span>
+      <span style={{ fontSize: 12, fontWeight: 600, color: HOME_C.ink2, lineHeight: 1.2 }}>{s.label}</span>
+    </Link>
+  );
+}
+
+function ShortcutTile({ panel, i }: { panel: any; i: number }) {
+  const [p, setP] = useState(false);
+  const Icon = panel.icon;
+  return (
+    <Link href={panel.href} onPointerDown={() => setP(true)} onPointerUp={() => setP(false)} onPointerLeave={() => setP(false)}
+      style={{ textDecoration: 'none', boxSizing: 'border-box', position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '16px 8px', borderRadius: HOME_C.radius, background: `linear-gradient(180deg, ${HOME_C.surfaceHi}, ${HOME_C.surface2})`, boxShadow: p ? HOME_C.clayPress : HOME_C.clay, color: HOME_C.ink1, transition: `transform 220ms ${HOME_C.ease}, box-shadow 220ms ${HOME_C.ease}`, transform: p ? 'translateY(2px) scale(0.96)' : 'none', animation: `mkPopIn ${260 + i * 45}ms ${HOME_C.ease}` }}>
+      <span style={{ width: 46, height: 46, borderRadius: 14, display: 'grid', placeItems: 'center', background: 'radial-gradient(120% 120% at 30% 24%, #FFFFFF, #ECE4D4 82%)', boxShadow: HOME_C.clayFlat, color: HOME_C.accent }}><Icon size={22} /></span>
+      <span style={{ fontSize: 12.5, fontWeight: 700, textAlign: 'center', lineHeight: 1.2 }}>{panel.label}</span>
+    </Link>
+  );
+}
 
 interface DashboardPanelProps {
     hospitals: Hospital[];
@@ -128,15 +162,22 @@ export default function DashboardV2({
   const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>('weekly');
   const [trendDate, setTrendDate] = useState(new Date());
 
-  // Mobil / küçük tablet tespiti — responsive layout için
-  const [isMobile, setIsMobile] = useState(false);
+  // Responsive: mobile (<720) / tablet (<1080) / wide — clay layout breakpoints
+  const [mode, setMode] = useState<'mobile' | 'tablet' | 'wide'>('wide');
   useEffect(() => {
-    const mql = window.matchMedia('(max-width: 768px)');
-    const update = () => setIsMobile(mql.matches);
+    const get = (): 'mobile' | 'tablet' | 'wide' => {
+      const w = window.innerWidth;
+      return w < 720 ? 'mobile' : w < 1080 ? 'tablet' : 'wide';
+    };
+    const update = () => setMode(get());
     update();
-    mql.addEventListener('change', update);
-    return () => mql.removeEventListener('change', update);
+    window.addEventListener('resize', update);
+    window.addEventListener('orientationchange', update);
+    return () => { window.removeEventListener('resize', update); window.removeEventListener('orientationchange', update); };
   }, []);
+  const isMobile = mode === 'mobile';
+  const tablet = mode === 'tablet';
+  const wide = mode === 'wide';
 
   const calendarScrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -792,8 +833,9 @@ export default function DashboardV2({
 
   if (isLoading) return <DashboardSkeleton />;
 
-  // Tüketim trendi sparkline verisi
+  // Tüketim trendi — animasyonlu çizgi grafik verisi
   const trendSpark = stockConsumptionTrend.map((d: any) => Number(d['Tüketim']) || 0);
+  const trendLabels = stockConsumptionTrend.map((d: any) => String(d.date ?? ''));
   const trendTotal = trendSpark.reduce((a, b) => a + b, 0);
 
   // Fault total (atama+müdahale)
@@ -802,320 +844,155 @@ export default function DashboardV2({
   const hasStockCost = totalStockCost !== null && totalStockCost > 0;
 
   const faultStats = [
-    { key: 'atama', label: 'Atama Bekleyen', value: faultKpis.atamaBekleyen, color: '#fb923c', icon: UserPlus2, href: '/ariza-yonetimi?status=atama_bekliyor' },
-    { key: 'mb', label: 'Müdahale Bekleyen', value: faultKpis.mudahaleBekleyen, color: '#fc7272', icon: TimerReset, href: '/ariza-yonetimi?status=mudahale_bekliyor' },
-    { key: 'me', label: 'Müdahale Edilen', value: faultKpis.mudahaleEdilen, color: '#42e46d', icon: ActivitySquare, href: '/ariza-yonetimi?status=mudahale_ediliyor' },
+    { key: 'atama', label: 'Atama Bekleyen', value: faultKpis.atamaBekleyen, tone: HOME_C.accent, bg: `${HOME_C.accent}14`, icon: UserPlus2, href: '/ariza-yonetimi?status=atama_bekliyor' },
+    { key: 'mb', label: 'Müdahale Bekleyen', value: faultKpis.mudahaleBekleyen, tone: HOME_C.danger, bg: 'rgba(192,121,106,0.12)', icon: TimerReset, href: '/ariza-yonetimi?status=mudahale_bekliyor' },
+    { key: 'me', label: 'Müdahale Edilen', value: faultKpis.mudahaleEdilen, tone: HOME_C.waterDeep, bg: 'rgba(111,181,133,0.14)', icon: ActivitySquare, href: '/ariza-yonetimi?status=mudahale_ediliyor' },
   ];
 
-  const combinedTimeline: Array<{ id: string; label: string; type: 'past' | 'today' | 'future' | 'today-task' }> = [
-    ...personalCalendarKpi.timelineItems,
-    ...personalCalendarKpi.todayTasks.map((t) => ({ id: t.id, label: t.label, type: 'today-task' as const })),
-  ];
-  const todayCount = personalCalendarKpi.todayTasks.length;
+  // Bugün — yapılan / toplam görev
+  const totalToday = todayTasks.length;
+  const doneToday = todayTasks.filter((t: any) => t.completed).length;
+  const todayPct = totalToday ? Math.round((doneToday / totalToday) * 100) : 0;
+
+  // Miad göstergesi (gauge — adet kapaklı oran)
+  const miadCount = typeof expiringProductsCount === 'number' ? expiringProductsCount : 0;
+  const miadPct = Math.min(miadCount / 50, 1);
+
+  // Kullanıcı baş harfleri
+  const userName = currentUserProfile?.name || 'Lojistik & Stok';
+  const initials = userName.trim().split(/\s+/).slice(0, 2).map((s) => s[0]).join('').toUpperCase() || 'QO';
+
+  const periodSeg = (['daily', 'weekly', 'monthly', 'yearly'] as TrendPeriod[]);
+  const periodLabel: Record<TrendPeriod, string> = { daily: 'G', weekly: 'H', monthly: 'A', yearly: 'Y' };
+
+  const gap = isMobile ? 12 : 14;
 
   return (
     <>
-      <div
-        className="mg-root"
-        style={{
-          minHeight: '100vh',
-          padding: isMobile ? '12px 12px 20px' : '16px 20px 24px',
-          background: `radial-gradient(ellipse at 0% 0%, rgba(251,146,60,0.06) 0%, transparent 50%),
-                       radial-gradient(ellipse at 100% 100%, rgba(167,139,250,0.04) 0%, transparent 50%),
-                       var(--mg-bg)`,
-          color: 'var(--mg-text)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: isMobile ? 10 : 14,
-        }}
-      >
-        {/* Karşılama */}
-        <div style={{ display: 'flex', alignItems: isMobile ? 'flex-start' : 'baseline', justifyContent: 'space-between', gap: isMobile ? 4 : 12, flexWrap: 'wrap', flexDirection: isMobile ? 'column' : 'row' }}>
-          <h1 style={{ fontSize: isMobile ? 18 : 22, fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--mg-text)', margin: 0 }}>
-            {currentUserProfile?.name || 'Lojistik & Stok Paneli'}
-          </h1>
-          <span style={{ fontSize: isMobile ? 11 : 12, fontWeight: 600, color: 'var(--mg-muted)', letterSpacing: '0.04em' }}>
-            {format(new Date(), isMobile ? 'dd MMM yyyy · EEEE' : 'dd MMMM yyyy · EEEE', { locale: tr })}
-          </span>
-        </div>
+      <ClayShell style={{ padding: isMobile ? '16px 14px 30px' : wide ? '18px 26px 28px' : '20px 22px 30px' }}>
+        <div style={{ maxWidth: 1480, margin: '0 auto', display: 'flex', flexDirection: 'column', gap }}>
 
-        {/* Üst sıra: 3 KPI kart — mobilde MIAD+Maliyet yan yana, Cihaz Atama tek satır */}
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1.6fr 1fr 1.4fr', gap: isMobile ? 10 : 12 }}>
-          {/* Cihaz Atama Durumu */}
-          <div style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.025), rgba(255,255,255,0.005))', border: '1px solid var(--mg-border)', borderRadius: 18, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <ActivitySquare size={14} style={{ color: 'var(--mg-accent)' }} />
-              <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--mg-text)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                Cihaz Atama Durumu
-              </span>
-              <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 800, padding: '2px 7px', borderRadius: 6, background: 'var(--mg-surface-2)', color: 'var(--mg-muted)' }}>
-                {faultTotal} toplam
-              </span>
+          {/* Header */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 12 : 16, flexWrap: 'wrap' }}>
+            <div style={{ width: isMobile ? 44 : 50, height: isMobile ? 44 : 50, borderRadius: 16, flexShrink: 0, display: 'grid', placeItems: 'center', color: '#fff', background: `radial-gradient(circle at 32% 28%, ${HOME_C.accent2}, ${HOME_C.accent})`, boxShadow: `inset 0 1px 1px rgba(255,255,255,0.4), 0 10px 20px -8px ${HOME_C.accentGlow}`, fontSize: isMobile ? 17 : 20, fontWeight: 800 }}>{initials}</div>
+            <div style={{ minWidth: 0 }}>
+              <h1 style={{ margin: 0, fontSize: isMobile ? 21 : 26, fontWeight: 800, letterSpacing: '-0.02em', color: HOME_C.ink1 }}>{userName}</h1>
+              <div style={{ fontSize: 13.5, fontWeight: 600, color: HOME_C.ink2 }}>Hoş geldin · genel bakış</div>
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
-              {faultStats.map((s) => {
-                const Icon = s.icon;
-                return (
-                  <Link key={s.key} href={s.href} style={{ textDecoration: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '6px 4px', borderRadius: 10, background: 'var(--mg-surface-2)', border: '1px solid var(--mg-border)', transition: 'all 0.2s' }}>
-                    <span style={{ width: 28, height: 28, borderRadius: 8, background: s.color + '18', color: s.color, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <Icon size={14} />
-                    </span>
-                    <span style={{ fontSize: 22, fontWeight: 400, color: 'var(--mg-text)', letterSpacing: '-0.04em', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
-                      {s.value.toLocaleString('tr-TR')}
-                    </span>
-                    <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--mg-muted)', textAlign: 'center', lineHeight: 1.15 }}>
-                      {s.label}
-                    </span>
-                  </Link>
-                );
-              })}
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+              {!isMobile && <span style={{ fontSize: 14, fontWeight: 700, color: HOME_C.ink2, fontFamily: 'ui-monospace, monospace' }}>{format(new Date(), 'dd MMMM yyyy · EEEE', { locale: tr })}</span>}
+              <ClayIconBtn round><Bell size={18} /></ClayIconBtn>
             </div>
           </div>
 
-          {/* MIAD ≤ 45 Gün */}
-          <Link href="/stok-yonetimi" style={{ textDecoration: 'none', background: 'linear-gradient(135deg, rgba(167,139,250,0.05), rgba(167,139,250,0.01))', border: '1px solid var(--mg-border)', borderRadius: 18, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, position: 'relative', overflow: 'hidden' }}>
-            <div style={{ position: 'absolute', top: -30, right: -30, width: 100, height: 100, borderRadius: '50%', background: '#a78bfa', filter: 'blur(50px)', opacity: 0.1, pointerEvents: 'none' }} />
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <AlertTriangle size={14} style={{ color: '#a78bfa' }} />
-                <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--mg-text)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                  MIAD ≤ 45 Gün
-                </span>
-              </div>
-              <ArrowUpRight size={14} style={{ color: 'var(--mg-muted)' }} />
+          {/* KPI row */}
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : tablet ? '1fr 1fr' : 'minmax(0,1.1fr) minmax(0,1fr) minmax(0,1fr)', gap, alignItems: 'stretch' }}>
+            {/* Cihaz Atama Durumu */}
+            <div style={{ gridColumn: tablet ? '1 / -1' : 'auto' }}>
+              <ClayCard>
+                <CardHead ico={<ActivitySquare size={19} />} title="Cihaz Atama Durumu" tone="accent" right={<Pill>{faultTotal} toplam</Pill>} />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginTop: 16 }}>
+                  {faultStats.map((s, i) => <MiniKpi key={s.key} s={s} i={i} />)}
+                </div>
+              </ClayCard>
             </div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <span style={{ fontSize: 38, fontWeight: 400, color: 'var(--mg-text)', letterSpacing: '-0.04em', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
-                {typeof expiringProductsCount === 'number' ? expiringProductsCount.toLocaleString('tr-TR') : '…'}
-              </span>
-              <span style={{ fontSize: 11, color: 'var(--mg-muted)', fontWeight: 500 }}>ürün</span>
-            </div>
-            <span style={{ fontSize: 11, color: 'var(--mg-muted)', fontWeight: 500 }}>Tüm depolarda yaklaşan</span>
-          </Link>
 
-          {/* Anlık Maliyet */}
-          <div onClick={() => setIsStockCostDetailOpen(true)} style={{ background: 'linear-gradient(135deg, rgba(66,228,109,0.05), rgba(66,228,109,0.01))', border: '1px solid var(--mg-border)', borderRadius: 18, padding: '14px 16px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 10, position: 'relative', overflow: 'hidden' }}>
-            <div style={{ position: 'absolute', top: -30, right: -30, width: 100, height: 100, borderRadius: '50%', background: '#42e46d', filter: 'blur(50px)', opacity: 0.1, pointerEvents: 'none' }} />
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Banknote size={14} style={{ color: 'var(--mg-success)' }} />
-                <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--mg-text)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                  Anlık Maliyet
-                </span>
+            {/* Miad ≤ 45 Gün */}
+            <Link href="/stok-yonetimi" style={{ textDecoration: 'none', display: 'block' }}>
+              <ClayCard hover>
+                <CardHead ico={<AlertTriangle size={19} />} title="Miad ≤ 45 Gün" tone="amber" right={<span style={{ color: HOME_C.ink3, display: 'inline-flex' }}><ArrowUpRight size={16} /></span>} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginTop: 14 }}>
+                  <Ring pct={miadPct} size={86} stroke={10} color={HOME_C.amber} delay={200}>
+                    <div style={{ textAlign: 'center' }}>
+                      <CountText value={miadCount} style={{ fontSize: 26, fontWeight: 800, color: HOME_C.ink1, lineHeight: 1, fontVariantNumeric: 'tabular-nums', display: 'block' }} />
+                      <div style={{ fontSize: 11, fontWeight: 600, color: HOME_C.ink3 }}>ürün</div>
+                    </div>
+                  </Ring>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: HOME_C.ink2, lineHeight: 1.45 }}>Tüm depolarda miadı yaklaşan ürünler</div>
+                    <div style={{ marginTop: 12 }}><Tag tone={HOME_C.amber} bg={HOME_C.amberSoft}>≤ 45 gün penceresi</Tag></div>
+                  </div>
+                </div>
+              </ClayCard>
+            </Link>
+
+            {/* Anlık Maliyet */}
+            <ClayCard tone="ok" onClick={() => setIsStockCostDetailOpen(true)} hover>
+              <CardHead ico={<Banknote size={19} />} title="Anlık Maliyet" tone="ok" right={<ClayIconBtn spin onClick={() => loadStockCostSnapshot(true)}><RefreshCw size={16} /></ClayIconBtn>} />
+              <div style={{ marginTop: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+                  {totalStockCost === null
+                    ? <span style={{ fontSize: 34, fontWeight: 800, color: HOME_C.ink3 }}>…</span>
+                    : <CountText value={totalStockCost} format={fmtTL} style={{ fontSize: isMobile ? 30 : 36, fontWeight: 800, color: HOME_C.ink1, lineHeight: 1, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }} />}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 11, marginTop: 14, padding: '12px 16px', borderRadius: HOME_C.radiusSm, background: 'rgba(192,121,106,0.10)', boxShadow: 'inset 0 0 0 1px rgba(192,121,106,0.18)' }}>
+                  <span style={{ color: HOME_C.danger, display: 'inline-flex' }}><AlertTriangle size={18} /></span>
+                  <span style={{ fontSize: 13.5, fontWeight: 800, color: HOME_C.danger, letterSpacing: '0.02em' }}>RİSKLİ STOK</span>
+                  <span style={{ marginLeft: 'auto', fontSize: 17, fontWeight: 800, color: HOME_C.danger, fontVariantNumeric: 'tabular-nums' }}>{riskyCost !== null ? fmtTL(riskyCost) : '…'}</span>
+                </div>
               </div>
-              <button type="button" onClick={(e) => { e.preventDefault(); e.stopPropagation(); loadStockCostSnapshot(true); }} title="Yenile" style={{ width: 24, height: 24, borderRadius: '50%', border: '1px solid var(--mg-border)', background: 'var(--mg-surface-2)', color: 'var(--mg-text-2)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                <RefreshCw size={11} className={isRefreshingStockCost ? 'animate-spin' : ''} />
-              </button>
-            </div>
-            <div>
-              <div style={{ fontSize: 28, fontWeight: 400, color: hasStockCost ? 'var(--mg-text)' : 'var(--mg-muted)', letterSpacing: '-0.04em', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
-                {totalStockCost === null
-                  ? '…'
-                  : new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(totalStockCost)}
-              </div>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: 'var(--mg-danger-soft)', borderRadius: 10, border: '1px solid var(--mg-danger-soft)', justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <AlertTriangle size={11} style={{ color: 'var(--mg-danger)' }} />
-                <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--mg-danger)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>Riskli</span>
-              </div>
-              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--mg-danger)', fontVariantNumeric: 'tabular-nums' }}>
-                {riskyCost !== null
-                  ? new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(riskyCost)
-                  : '…'}
-              </span>
-            </div>
+            </ClayCard>
           </div>
-        </div>
 
-        {/* Orta sıra: Tüketim Trendi + Bugün (sabit yükseklik) — mobilde alt alta */}
-        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1.6fr) minmax(0, 1fr)', gap: isMobile ? 10 : 12 }}>
-          {/* Tüketim Trendi */}
-          <div onClick={() => setIsConsumptionModalOpen(true)} style={{ background: 'var(--mg-surface)', border: '1px solid var(--mg-border)', borderRadius: 18, padding: '14px 16px', cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 10, height: isMobile ? 200 : 240 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <TrendingUp size={14} style={{ color: 'var(--mg-accent)' }} />
-                <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--mg-text)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                  Tüketim Trendi
-                </span>
+          {/* Trend + Today */}
+          <div style={{ display: 'grid', gridTemplateColumns: wide ? 'minmax(0,1.55fr) minmax(0,1fr)' : '1fr', gap }}>
+            {/* Tüketim Trendi */}
+            <ClayCard onClick={() => setIsConsumptionModalOpen(true)} hover>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 6, flexWrap: 'wrap' }}>
+                <CardHead ico={<TrendingUp size={19} />} title="Tüketim Trendi" tone="accent" flush />
+                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <Segmented value={trendPeriod} onChange={(v) => setTrendPeriod(v)} options={periodSeg.map(p => ({ v: p, l: periodLabel[p] }))} />
+                  <ClayIconBtn onClick={() => setIsConsumptionModalOpen(true)}><Maximize2 size={16} /></ClayIconBtn>
+                </div>
               </div>
-              <div style={{ display: 'inline-flex', gap: 3, background: 'var(--mg-surface-2)', padding: 3, borderRadius: 8, border: '1px solid var(--mg-border)' }}>
-                {(['daily', 'weekly', 'monthly', 'yearly'] as TrendPeriod[]).map((p) => (
-                  <button
-                    key={p}
-                    onClick={(e) => { e.stopPropagation(); setTrendPeriod(p); }}
-                    style={{
-                      padding: '3px 9px',
-                      borderRadius: 6,
-                      border: 'none',
-                      cursor: 'pointer',
-                      fontFamily: 'inherit',
-                      fontSize: 10,
-                      fontWeight: 700,
-                      letterSpacing: '0.02em',
-                      background: trendPeriod === p ? 'var(--mg-accent)' : 'transparent',
-                      color: trendPeriod === p ? '#0a0a0c' : 'var(--mg-text-2)',
-                      transition: 'all 0.2s',
-                    }}
-                  >
-                    {p === 'daily' ? 'G' : p === 'weekly' ? 'H' : p === 'monthly' ? 'A' : 'Y'}
-                  </button>
+              <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12 }}>
+                <div style={{ minWidth: 0 }}>
+                  <CountText value={trendTotal} style={{ fontSize: isMobile ? 32 : 40, fontWeight: 800, color: HOME_C.ink1, lineHeight: 1, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', display: 'block' }} />
+                  <div style={{ fontSize: 13, fontWeight: 600, color: HOME_C.ink2, marginTop: 6 }}>{trendTitle}</div>
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                  <ClayIconBtn round onClick={() => handleTrendNav('prev')}><ChevronLeft size={16} /></ClayIconBtn>
+                  <ClayIconBtn round onClick={() => handleTrendNav('next')}><ChevronRight size={16} /></ClayIconBtn>
+                </div>
+              </div>
+              <div style={{ marginTop: 8 }}>
+                <ClayLineChart data={trendSpark.length ? trendSpark : [0]} labels={trendLabels.length ? trendLabels : ['']} height={isMobile ? 180 : wide ? 176 : 210} animKey={trendPeriod + trendTitle} yTicks />
+              </div>
+            </ClayCard>
+
+            {/* Bugün */}
+            <ClayCard>
+              <CardHead ico={<CalendarCheck size={19} />} title="Bugün" tone="accent" right={<Pill>{doneToday}/{totalToday} görev</Pill>} />
+              <div style={{ marginTop: 10, marginBottom: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 700, color: HOME_C.ink3, marginBottom: 7 }}>
+                  <span>{format(new Date(), 'dd MMMM yyyy · EEEE', { locale: tr })}</span><span>%{todayPct}</span>
+                </div>
+                <ClayBar pct={todayPct} />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: isMobile ? 'none' : wide ? 168 : 220, overflowY: 'auto', paddingRight: 4 }}>
+                {totalToday === 0 ? (
+                  <div style={{ padding: '30px 0', textAlign: 'center', color: HOME_C.ink3, fontSize: 13, fontWeight: 600 }}>Bugün için planlanmış görev yok.</div>
+                ) : todayTasks.map((t: any, i: number) => (
+                  <div key={t.id || i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 13px', borderRadius: HOME_C.radiusSm, background: t.completed ? 'rgba(111,181,133,0.09)' : HOME_C.surfaceHi, boxShadow: t.completed ? 'none' : HOME_C.clayFlat, animation: `mkPopIn ${300 + Math.min(i, 8) * 80}ms ${HOME_C.ease}` }}>
+                    <span style={{ width: 26, height: 26, borderRadius: '50%', flexShrink: 0, display: 'grid', placeItems: 'center', background: t.completed ? HOME_C.waterSolid : HOME_C.surface2, boxShadow: t.completed ? '0 4px 9px -3px rgba(111,181,133,0.6)' : HOME_C.clayInset, color: t.completed ? '#fff' : HOME_C.ink3 }}>{t.completed ? <Check size={14} /> : <span style={{ width: 7, height: 7, borderRadius: '50%', background: HOME_C.accent }} />}</span>
+                    <span style={{ fontSize: 12.5, fontWeight: 700, color: HOME_C.ink3, fontFamily: 'ui-monospace, monospace', flexShrink: 0 }}>{t.startTime}</span>
+                    <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: t.completed ? HOME_C.ink3 : HOME_C.ink1, textDecoration: t.completed ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title}</span>
+                  </div>
                 ))}
               </div>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-              <div>
-                <div style={{ fontSize: 28, fontWeight: 400, color: 'var(--mg-text)', letterSpacing: '-0.04em', fontVariantNumeric: 'tabular-nums', lineHeight: 1 }}>
-                  {trendTotal.toLocaleString('tr-TR')}
-                </div>
-                <div style={{ fontSize: 10, color: 'var(--mg-muted)', marginTop: 4, fontWeight: 500 }}>{trendTitle}</div>
-              </div>
-              <div style={{ display: 'flex', gap: 4 }}>
-                <button onClick={(e) => { e.stopPropagation(); handleTrendNav('prev'); }} style={{ width: 26, height: 26, borderRadius: '50%', border: '1px solid var(--mg-border)', background: 'var(--mg-surface-2)', color: 'var(--mg-text-2)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <ChevronLeft size={13} />
-                </button>
-                <button onClick={(e) => { e.stopPropagation(); handleTrendNav('next'); }} style={{ width: 26, height: 26, borderRadius: '50%', border: '1px solid var(--mg-border)', background: 'var(--mg-surface-2)', color: 'var(--mg-text-2)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <ChevronRight size={13} />
-                </button>
-              </div>
-            </div>
-            <div style={{ flex: 1, minHeight: 0, display: 'flex' }}>
-              <div style={{ flex: 1 }}>
-                <Sparkline data={trendSpark.length > 0 ? trendSpark : [0]} color="#fb923c" width={700} height={110} fill />
-              </div>
-            </div>
+            </ClayCard>
           </div>
 
-          {/* Bugün/Etkinlikler */}
-          <div style={{ background: 'var(--mg-surface)', border: '1px solid var(--mg-border)', borderRadius: 18, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10, height: isMobile ? 220 : 240, overflow: 'hidden' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-              <CalendarCheck size={14} style={{ color: 'var(--mg-accent)' }} />
-              <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--mg-text)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                Bugün
-              </span>
-              <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 800, padding: '2px 7px', borderRadius: 6, background: todayCount > 0 ? 'var(--mg-accent)' : 'var(--mg-surface-2)', color: todayCount > 0 ? '#0a0a0c' : 'var(--mg-muted)' }}>
-                {todayCount} görev
-              </span>
+          {/* Sık Kullanılanlar — kahve kart / krem butonlar */}
+          <ClayCard tone="brown" pad={isMobile ? 14 : 18}>
+            <CardHead ico={<Search size={19} />} title="Sık Kullanılanlar" onLight right={<Pill onLight>{visiblePanels.length}</Pill>} />
+            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${isMobile ? 3 : tablet ? 5 : 7}, 1fr)`, gap: isMobile ? 10 : 12, marginTop: 16 }}>
+              {visiblePanels.map((panel, i) => <ShortcutTile key={panel.key} panel={panel} i={i} />)}
             </div>
-            {combinedTimeline.length === 0 ? (
-              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: 'var(--mg-muted)', textAlign: 'center' }}>
-                Bugün için planlanmış görev yok.
-              </div>
-            ) : (
-              <div
-                ref={calendarScrollRef}
-                style={{
-                  flex: 1,
-                  minHeight: 0,
-                  overflowY: 'auto',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 4,
-                  paddingRight: 4,
-                  scrollbarWidth: 'thin',
-                }}
-              >
-                {combinedTimeline.map((item) => {
-                  const isToday = item.type === 'today';
-                  const isPast = item.type === 'past';
-                  const isTodayTask = item.type === 'today-task';
-                  return (
-                    <div
-                      key={item.id}
-                      data-today={isToday}
-                      style={{
-                        padding: '5px 10px',
-                        borderRadius: 8,
-                        background: isToday
-                          ? 'var(--mg-accent-soft)'
-                          : isTodayTask
-                            ? 'var(--mg-success-soft)'
-                            : 'var(--mg-surface-2)',
-                        border: '1px solid ' + (isToday ? 'rgba(251,146,60,0.3)' : isTodayTask ? 'var(--mg-success-soft)' : 'var(--mg-border)'),
-                        fontSize: isToday ? 12 : 11,
-                        fontWeight: isToday ? 700 : 500,
-                        color: isToday
-                          ? 'var(--mg-accent)'
-                          : isTodayTask
-                            ? 'var(--mg-success)'
-                            : isPast
-                              ? 'var(--mg-muted)'
-                              : 'var(--mg-text-2)',
-                        textDecoration: isPast ? 'line-through' : 'none',
-                        flexShrink: 0,
-                      }}
-                    >
-                      {item.label}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
+          </ClayCard>
 
-        {/* Sık Kullanılanlar */}
-        <div style={{ background: 'var(--mg-surface)', border: '1px solid var(--mg-border)', borderRadius: 18, padding: '12px 16px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--mg-text)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-              Sık Kullanılanlar
-            </span>
-            <span style={{ fontSize: 10, fontWeight: 800, padding: '2px 7px', borderRadius: 6, background: 'var(--mg-surface-2)', color: 'var(--mg-muted)' }}>
-              {visiblePanels.length}
-            </span>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(3, 1fr)' : 'repeat(auto-fit, minmax(100px, 1fr))', gap: isMobile ? 6 : 8 }}>
-            {visiblePanels.map((panel) => {
-              const Icon = panel.icon;
-              const isFrequent = ['arama', 'stok-yonetimi', 'laboratuvar-yonetimi', 'satin-alma'].includes(panel.key);
-              const hasAttention = ['siparisler', 'sarf-dagitim', 'cihaz-yonetimi-ana'].includes(panel.key);
-              return (
-                <Link
-                  key={panel.key}
-                  href={panel.href!}
-                  style={{
-                    textDecoration: 'none',
-                    background: isFrequent ? 'var(--mg-accent-soft)' : 'var(--mg-surface-2)',
-                    border: '1px solid ' + (isFrequent ? 'rgba(251,146,60,0.3)' : 'var(--mg-border)'),
-                    borderRadius: 12,
-                    padding: '8px 6px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: 5,
-                    position: 'relative',
-                    transition: 'all 0.2s',
-                    minHeight: 66,
-                  }}
-                >
-                  {hasAttention && (
-                    <span style={{ position: 'absolute', top: 5, right: 5, width: 6, height: 6, borderRadius: '50%', background: 'var(--mg-accent)' }} />
-                  )}
-                  <span
-                    style={{
-                      width: 26,
-                      height: 26,
-                      borderRadius: 8,
-                      background: 'var(--mg-surface)',
-                      color: isFrequent ? 'var(--mg-accent)' : 'var(--mg-text-2)',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      border: '1px solid var(--mg-border)',
-                    }}
-                  >
-                    <Icon size={13} />
-                  </span>
-                  <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--mg-text-2)', textAlign: 'center', lineHeight: 1.2 }}>
-                    {panel.label}
-                  </span>
-                </Link>
-              );
-            })}
-          </div>
         </div>
-      </div>
+      </ClayShell>
 
       {isConsumptionModalOpen && (
         <ConsumptionTrendModal
@@ -1132,51 +1009,57 @@ export default function DashboardV2({
       )}
 
       <Dialog open={isStockCostDetailOpen} onOpenChange={setIsStockCostDetailOpen}>
-        <DialogContent className="max-w-5xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Anlık Maliyet Detayı</DialogTitle>
-            <DialogDescription>
+        <DialogContent className="max-w-5xl max-h-[85vh] overflow-y-auto border-0 p-0" style={{ background: `linear-gradient(180deg, ${HOME_C.surface} 0%, ${HOME_C.surface2} 100%)`, boxShadow: HOME_C.clay, borderRadius: HOME_C.radiusLg }}>
+          <DialogHeader style={{ padding: '22px 26px 16px', borderBottom: `1px solid ${HOME_C.line}` }}>
+            <DialogTitle style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 20, fontWeight: 800, color: HOME_C.ink1, letterSpacing: '-0.02em' }}>
+              <span style={{ width: 40, height: 40, borderRadius: 13, display: 'grid', placeItems: 'center', color: HOME_C.waterDeep, background: 'rgba(111,181,133,0.14)', boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.7)' }}><Banknote size={20} /></span>
+              Anlık Maliyet Detayı
+            </DialogTitle>
+            <DialogDescription style={{ fontSize: 13.5, color: HOME_C.ink2, fontWeight: 500, marginTop: 4 }}>
               Kırılım sırası: Marka → Kurum (Depo/Lab) → Ürün.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '16px 26px 26px' }}>
             {stockCostBreakdown.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Detay verisi bulunamadı.</p>
+              <p style={{ fontSize: 14, color: HOME_C.ink3, fontWeight: 600, textAlign: 'center', padding: '40px 0' }}>Detay verisi bulunamadı.</p>
             ) : stockCostBreakdown.map((brand) => (
-              <details key={brand.brand} className="rounded-lg border p-3" open>
-                <summary className="cursor-pointer font-semibold text-sm flex items-center justify-between gap-2">
+              <details key={brand.brand} style={{ borderRadius: HOME_C.radius, background: HOME_C.surfaceHi, boxShadow: HOME_C.clayFlat, padding: 14 }} open>
+                <summary style={{ cursor: 'pointer', listStyle: 'none', fontWeight: 800, fontSize: 14.5, color: HOME_C.ink1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
                   <span>{brand.brand}</span>
-                  <span className="text-emerald-700">
-                    {new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(brand.tryTotal)}
+                  <span style={{ color: HOME_C.waterDeep, fontVariantNumeric: 'tabular-nums' }}>
+                    {fmtTL(brand.tryTotal)}
                   </span>
                 </summary>
-                <div className="mt-2 space-y-2">
+                <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {brand.locations.map((location) => (
-                    <details key={`${location.type}-${location.id}`} className="rounded-md border p-2">
-                      <summary className="cursor-pointer text-sm flex items-center justify-between gap-2">
-                        <span>{location.type === 'depo' ? 'Depo' : 'Lab'}: {location.name}</span>
-                        <span className="font-medium text-slate-700">
-                          {new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(location.tryTotal)}
+                    <details key={`${location.type}-${location.id}`} style={{ borderRadius: HOME_C.radiusSm, background: HOME_C.surface2, boxShadow: HOME_C.clayInset, padding: 12 }}>
+                      <summary style={{ cursor: 'pointer', listStyle: 'none', fontSize: 13.5, fontWeight: 700, color: HOME_C.ink1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+                          <Tag tone={location.type === 'depo' ? HOME_C.accent : HOME_C.skyDeep} bg={location.type === 'depo' ? `${HOME_C.accent}16` : 'rgba(124,168,222,0.16)'}>{location.type === 'depo' ? 'Depo' : 'Lab'}</Tag>
+                          {location.name}
+                        </span>
+                        <span style={{ fontWeight: 700, color: HOME_C.ink2, fontVariantNumeric: 'tabular-nums' }}>
+                          {fmtTL(location.tryTotal)}
                         </span>
                       </summary>
-                      <div className="mt-2 overflow-x-auto">
-                        <table className="w-full text-xs">
+                      <div style={{ marginTop: 10, overflowX: 'auto' }}>
+                        <table style={{ width: '100%', fontSize: 12.5, borderCollapse: 'collapse' }}>
                           <thead>
-                            <tr className="text-left text-muted-foreground border-b">
-                              <th className="py-1 pr-2">Stok Kodu</th>
-                              <th className="py-1 pr-2">Ürün</th>
-                              <th className="py-1 pr-2">Adet</th>
-                              <th className="py-1 pr-2 text-right">Toplam (TRY)</th>
+                            <tr style={{ textAlign: 'left', color: HOME_C.ink3, borderBottom: `1px solid ${HOME_C.line}` }}>
+                              <th style={{ padding: '6px 8px 6px 0', fontWeight: 700 }}>Stok Kodu</th>
+                              <th style={{ padding: '6px 8px 6px 0', fontWeight: 700 }}>Ürün</th>
+                              <th style={{ padding: '6px 8px 6px 0', fontWeight: 700 }}>Adet</th>
+                              <th style={{ padding: '6px 0 6px 8px', fontWeight: 700, textAlign: 'right' }}>Toplam (TRY)</th>
                             </tr>
                           </thead>
                           <tbody>
                             {location.products.map((product) => (
-                              <tr key={product.stokKodu} className="border-b last:border-0">
-                                <td className="py-1 pr-2 font-mono">{product.stokKodu}</td>
-                                <td className="py-1 pr-2">{product.stokAdi}</td>
-                                <td className="py-1 pr-2">{product.quantity}</td>
-                                <td className="py-1 pr-2 text-right font-medium">
-                                  {new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(product.tryTotal)}
+                              <tr key={product.stokKodu} style={{ borderBottom: `1px solid ${HOME_C.line}` }}>
+                                <td style={{ padding: '7px 8px 7px 0', fontFamily: 'ui-monospace, monospace', color: HOME_C.ink2 }}>{product.stokKodu}</td>
+                                <td style={{ padding: '7px 8px 7px 0', color: HOME_C.ink1, fontWeight: 600 }}>{product.stokAdi}</td>
+                                <td style={{ padding: '7px 8px 7px 0', color: HOME_C.ink2 }}>{product.quantity}</td>
+                                <td style={{ padding: '7px 0 7px 8px', textAlign: 'right', fontWeight: 700, color: HOME_C.ink1, fontVariantNumeric: 'tabular-nums' }}>
+                                  {fmtTL(product.tryTotal)}
                                 </td>
                               </tr>
                             ))}
