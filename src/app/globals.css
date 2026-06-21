@@ -2950,11 +2950,43 @@
   }
 }
 
-/* Dock item styling - Apple-like colorful 3D icons (macOS-proportioned) */
+/* Dock item styling - flat, KPI-card inspired and GPU-friendly. */
+.qdock-flat-shell {
+  background: rgba(255, 255, 255, 0.84);
+  border: 1px solid rgba(255, 255, 255, 0.62);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.08),
+    0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.dark .qdock-flat-shell,
+.night .qdock-flat-shell {
+  background: rgba(20, 24, 31, 0.92);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.38),
+    0 1px 3px rgba(0, 0, 0, 0.26);
+}
+
+.qdock-menu-surface {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.62);
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.1),
+    0 2px 6px rgba(0, 0, 0, 0.06);
+}
+
+.dark .qdock-menu-surface,
+.night .qdock-menu-surface {
+  background: rgba(20, 24, 31, 0.96);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
 .dock-item-wrapper {
   @apply w-14 h-14 rounded-2xl flex items-center justify-center;
   position: relative;
-  transition: background 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .dock-item-wrapper:hover {
@@ -2993,10 +3025,6 @@
   transition: filter 0.15s ease;
 }
 
-/* Hover glow effect on icon */
-.dock-item-wrapper:hover .dock-item-icon {
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2)) brightness(1.1);
-}
 
 /* Dock tooltip styling - renders via portal above everything */
 .dock-tooltip {
@@ -3006,8 +3034,6 @@
     rgba(255, 255, 255, 0.72) 0%,
     rgba(255, 255, 255, 0.5) 100%
   );
-  backdrop-filter: blur(18px) saturate(190%) brightness(1.05);
-  -webkit-backdrop-filter: blur(18px) saturate(190%) brightness(1.05);
   border: 1px solid rgba(255, 255, 255, 0.65);
   box-shadow:
     0 8px 24px rgba(0, 0, 0, 0.12),
