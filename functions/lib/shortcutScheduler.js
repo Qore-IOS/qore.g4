@@ -31,6 +31,7 @@ const firebase_functions_1 = require("firebase-functions");
 const functions = __importStar(require("firebase-functions"));
 const firestore_1 = require("firebase-admin/firestore");
 const handlers_1 = require("./shortcuts/handlers");
+const delivery_1 = require("./shortcuts/delivery");
 if (!admin.apps.length)
     admin.initializeApp();
 const db = admin.firestore();
@@ -191,13 +192,26 @@ async function executeShortcutRun(shortcutRef, runRef, trigger, requestedByUid) 
         const completedAt = new Date();
         const nextRunAt = trigger === 'scheduled' ? computeNextRunAt(locked.schedule, completedAt) : toDate(locked.nextRunAt);
         const status = result.status || 'success';
+        const delivery = await (0, delivery_1.deliverShortcutResult)({
+            shortcut: locked,
+            runRef,
+            result,
+        });
+        const serializedResult = serializeHandlerResult(result);
+        const generatedAttachments = delivery.attachments.map(({ name, contentType, storagePath, publicUrl, sizeBytes }) => ({
+            name,
+            contentType,
+            path: storagePath,
+            url: publicUrl,
+            sizeBytes,
+        }));
         await runRef.set({
             status,
             completedAt: firestore_1.FieldValue.serverTimestamp(),
-            result: serializeHandlerResult(result),
-            message: result.summaryText || null,
+            result: Object.assign(Object.assign({}, serializedResult), { deliverySummary: delivery.summary, generatedAttachments, deliveryAttempts: delivery.attempts }),
+            message: delivery.summary || result.summaryText || null,
         }, { merge: true });
-        await appendRunLog(runRef, status === 'failed' ? 'error' : 'info', result.summaryText || 'Shortcut run completed.', serializeHandlerResult(result));
+        await appendRunLog(runRef, status === 'failed' ? 'error' : 'info', result.summaryText || 'Shortcut run completed.', Object.assign(Object.assign({}, serializedResult), { generatedAttachments, deliveryAttempts: delivery.attempts }));
         await shortcutRef.update({
             lastRunAt: firestore_1.FieldValue.serverTimestamp(),
             nextRunAt: nextRunAt ? firestore_1.Timestamp.fromDate(nextRunAt) : null,

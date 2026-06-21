@@ -6,6 +6,7 @@ import { logger } from 'firebase-functions';
 import * as functions from 'firebase-functions';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { shortcutHandlers, type ShortcutContext, type ShortcutResult } from './shortcuts/handlers';
+import { deliverShortcutResult } from './shortcuts/delivery';
 
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
@@ -204,13 +205,36 @@ async function executeShortcutRun(shortcutRef: FirebaseFirestore.DocumentReferen
     const nextRunAt = trigger === 'scheduled' ? computeNextRunAt(locked.schedule, completedAt) : toDate(locked.nextRunAt);
     const status = result.status || 'success';
 
+    const delivery = await deliverShortcutResult({
+      shortcut: locked,
+      runRef,
+      result,
+    });
+    const serializedResult = serializeHandlerResult(result);
+    const generatedAttachments = delivery.attachments.map(({ name, contentType, storagePath, publicUrl, sizeBytes }) => ({
+      name,
+      contentType,
+      path: storagePath,
+      url: publicUrl,
+      sizeBytes,
+    }));
+
     await runRef.set({
       status,
       completedAt: FieldValue.serverTimestamp(),
-      result: serializeHandlerResult(result),
-      message: result.summaryText || null,
+      result: {
+        ...serializedResult,
+        deliverySummary: delivery.summary,
+        generatedAttachments,
+        deliveryAttempts: delivery.attempts,
+      },
+      message: delivery.summary || result.summaryText || null,
     }, { merge: true });
-    await appendRunLog(runRef, status === 'failed' ? 'error' : 'info', result.summaryText || 'Shortcut run completed.', serializeHandlerResult(result));
+    await appendRunLog(runRef, status === 'failed' ? 'error' : 'info', result.summaryText || 'Shortcut run completed.', {
+      ...serializedResult,
+      generatedAttachments,
+      deliveryAttempts: delivery.attempts,
+    });
     await shortcutRef.update({
       lastRunAt: FieldValue.serverTimestamp(),
       nextRunAt: nextRunAt ? Timestamp.fromDate(nextRunAt) : null,
