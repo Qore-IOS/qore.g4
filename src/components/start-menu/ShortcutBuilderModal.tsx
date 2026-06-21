@@ -18,6 +18,7 @@ const FILTER_OPTIONS = [
   'Depo',
   'Marka',
   'Ürün grubu',
+  'Ürün kodu / marka',
   'Tarih aralığı',
   'Eşik değeri',
   'Alıcılar',

@@ -7,6 +7,7 @@ export type ShortcutParamKey =
   | 'depo'
   | 'marka'
   | 'urunGrubu'
+  | 'urunKoduMarka'
   | 'tarihAraligi'
   | 'esikDegeri'
   | 'esikGunSayisi'
@@ -45,6 +46,7 @@ const PARAMS = {
   depo: { key: 'depo', label: 'Depo', type: 'string[]' },
   marka: { key: 'marka', label: 'Marka', type: 'string[]' },
   urunGrubu: { key: 'urunGrubu', label: 'Ürün grubu', type: 'string[]' },
+  urunKoduMarka: { key: 'urunKoduMarka', label: 'Ürün kodu / marka', type: 'string[]' },
   tarihAraligi: { key: 'tarihAraligi', label: 'Tarih aralığı', type: 'date-range' },
   esikDegeri: { key: 'esikDegeri', label: 'Eşik değeri', type: 'number' },
   esikGunSayisi: { key: 'esikGunSayisi', label: 'Eşik gün sayısı', type: 'number' },
@@ -161,6 +163,46 @@ export const SHORTCUT_CATALOG: ShortcutPanelCatalogItem[] = [
       navigationAction('urun-talep', 'Ürün talebi oluştur', '/urun-talep', 'Ürün talep ekranını aç.'),
       navigationAction('tuketim-istatistikleri', 'Tüketim istatistikleri', '/tuketim-istatistikleri', 'Ürün kullanım istatistiklerini aç.'),
       navigationAction('kullanim-dogrulama', 'Kullanım doğrulama', '/kullanim-dogrulama', 'Kullanım doğrulama kuyruğunu aç.'),
+      {
+        key: 'urun-kullanim.gunluk-tuketim-ozeti',
+        label: 'Günlük tüketim özeti',
+        description: 'Seçilen laboratuvar, tarih aralığı, ürün kodu/marka, eşik miktar ve alıcı grubuna göre günlük tüketim özetini PDF, Excel ve kısa mesaj özeti olarak üret.',
+        kind: 'report',
+        params: [PARAMS.lab, PARAMS.tarihAraligi, PARAMS.urunKoduMarka, PARAMS.esikDegeri, PARAMS.alicilar, PARAMS.ciktiFormati],
+        handlerKey: 'urun-kullanim.daily-consumption-summary',
+      },
+      {
+        key: 'urun-kullanim.haftalik-lab-tuketim-raporu',
+        label: 'Haftalık lab tüketim raporu',
+        description: 'Laboratuvar bazlı haftalık tüketim raporunu filtrelere göre PDF, Excel ve kısa mesaj özeti olarak hazırla.',
+        kind: 'report',
+        params: [PARAMS.lab, PARAMS.tarihAraligi, PARAMS.urunKoduMarka, PARAMS.esikDegeri, PARAMS.alicilar, PARAMS.ciktiFormati],
+        handlerKey: 'urun-kullanim.weekly-lab-consumption-report',
+      },
+      {
+        key: 'urun-kullanim.fefo-disi-kullanim-listesi',
+        label: 'FEFO dışı kullanım listesi',
+        description: 'Miad önceliğine uymayan kullanımları seçili filtrelerle listeleyip PDF, Excel ve kısa mesaj özeti olarak üret.',
+        kind: 'report',
+        params: [PARAMS.lab, PARAMS.tarihAraligi, PARAMS.urunKoduMarka, PARAMS.esikDegeri, PARAMS.alicilar, PARAMS.ciktiFormati],
+        handlerKey: 'urun-kullanim.non-fefo-usage-list',
+      },
+      {
+        key: 'urun-kullanim.seri-lot-tekrar-kullanim-suphesi',
+        label: 'Seri/lot tekrar kullanım şüphesi',
+        description: 'Aynı seri/lot için tekrar kullanım şüphesi oluşturan kayıtları PDF, Excel ve kısa mesaj özetiyle raporla.',
+        kind: 'report',
+        params: [PARAMS.lab, PARAMS.tarihAraligi, PARAMS.urunKoduMarka, PARAMS.esikDegeri, PARAMS.alicilar, PARAMS.ciktiFormati],
+        handlerKey: 'urun-kullanim.serial-lot-reuse-suspicions',
+      },
+      {
+        key: 'urun-kullanim.cihaz-lab-bazli-sarf-kirilimi',
+        label: 'Cihaz/lab bazlı sarf kırılımı',
+        description: 'Cihaz ve laboratuvar bazında sarf tüketim kırılımını PDF, Excel ve kısa mesaj özeti olarak üret.',
+        kind: 'report',
+        params: [PARAMS.lab, PARAMS.tarihAraligi, PARAMS.urunKoduMarka, PARAMS.esikDegeri, PARAMS.alicilar, PARAMS.ciktiFormati],
+        handlerKey: 'urun-kullanim.device-lab-consumable-breakdown',
+      },
     ],
   },
   {
