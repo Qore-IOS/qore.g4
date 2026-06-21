@@ -23,6 +23,7 @@ import { useStartMenu } from '@/contexts/start-menu-context';
 
 import { VIEWS } from '@/lib/constants';
 import { getShortcutActionsForViews } from '@/lib/shortcuts/catalog';
+import { ShortcutBuilderModal } from './ShortcutBuilderModal';
 import {
   TONE_CHIP,
   toneForKey,
@@ -71,6 +72,7 @@ export function StartMenu() {
   const [query, setQuery] = useState('');
   const [showAllPins, setShowAllPins] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [isShortcutBuilderOpen, setIsShortcutBuilderOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Avoid hydration mismatch for the theme switch.
@@ -147,6 +149,10 @@ export function StartMenu() {
     if (!q) return;
     openAI(q);
     close();
+  };
+
+  const openShortcutBuilder = () => {
+    setIsShortcutBuilderOpen(true);
   };
 
   const onSearchKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -399,6 +405,19 @@ export function StartMenu() {
                       </span>
                     </div>
                     <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-2">
+                      <button
+                        type="button"
+                        onClick={openShortcutBuilder}
+                        className={cn(
+                          'inline-flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-xl text-[13px] font-semibold text-white transition hover:-translate-y-0.5 shadow-[0_9px_18px_-8px_rgba(240,111,44,.8)]',
+                          BRAND,
+                        )}
+                      >
+                        <span className="grid place-items-center h-6 w-6 rounded-lg bg-white/20">
+                          <Plus className="h-3.5 w-3.5" />
+                        </span>
+                        Kestirme oluştur
+                      </button>
                       {shortcutActions.map((action) => (
                         <button
                           key={action.key}
@@ -565,6 +584,11 @@ export function StartMenu() {
               </div>
             </motion.div>
           </div>
+          <ShortcutBuilderModal
+            open={isShortcutBuilderOpen}
+            onOpenChange={setIsShortcutBuilderOpen}
+            accessibleViews={accessibleViews}
+          />
         </>
       )}
     </AnimatePresence>
