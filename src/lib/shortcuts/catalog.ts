@@ -6,12 +6,15 @@ export type ShortcutParamKey =
   | 'lab'
   | 'depo'
   | 'marka'
+  | 'urunGrubu'
   | 'tarihAraligi'
   | 'esikDegeri'
+  | 'esikGunSayisi'
   | 'alicilar'
-  | 'ciktiFormati';
+  | 'ciktiFormati'
+  | 'gonderimKanali';
 
-export type ShortcutParamType = 'string' | 'string[]' | 'date-range' | 'number' | 'output-format';
+export type ShortcutParamType = 'string' | 'string[]' | 'date-range' | 'number' | 'output-format' | 'delivery-channel';
 
 export interface ShortcutParamSchemaItem {
   key: ShortcutParamKey;
@@ -41,10 +44,13 @@ const PARAMS = {
   lab: { key: 'lab', label: 'Laboratuvar', type: 'string[]' },
   depo: { key: 'depo', label: 'Depo', type: 'string[]' },
   marka: { key: 'marka', label: 'Marka', type: 'string[]' },
+  urunGrubu: { key: 'urunGrubu', label: 'Ürün grubu', type: 'string[]' },
   tarihAraligi: { key: 'tarihAraligi', label: 'Tarih aralığı', type: 'date-range' },
   esikDegeri: { key: 'esikDegeri', label: 'Eşik değeri', type: 'number' },
+  esikGunSayisi: { key: 'esikGunSayisi', label: 'Eşik gün sayısı', type: 'number' },
   alicilar: { key: 'alicilar', label: 'Alıcılar', type: 'string[]' },
   ciktiFormati: { key: 'ciktiFormati', label: 'Çıktı formatı', type: 'output-format' },
+  gonderimKanali: { key: 'gonderimKanali', label: 'Gönderim kanalı', type: 'delivery-channel' },
 } as const satisfies Record<ShortcutParamKey, ShortcutParamSchemaItem>;
 
 const panelLabel = (key: string, fallback: string) =>
@@ -183,6 +189,15 @@ export const SHORTCUT_CATALOG: ShortcutPanelCatalogItem[] = [
       navigationAction('hareketsiz-stok', 'Hareketsiz stok raporu', '/raporlama/hareketsiz-stok-raporu'),
       navigationAction('minmax-grafik', 'Min-Max grafik', '/raporlama/minmax-urun-grafik'),
       navigationAction('gecmis-stok', 'Geçmiş stok raporu', '/raporlama/gecmis-stok-raporu'),
+      {
+        key: 'raporlama.stock-risk-report',
+        label: 'Stok risk raporu otomasyonu',
+        description: 'Riskli stok, miad yaklaşımı, hareketsiz stok, kritik depo özeti ve fazla stok raporlarını filtre, çıktı ve gönderim parametreleriyle üret.',
+        kind: 'report',
+        params: [PARAMS.depo, PARAMS.lab, PARAMS.urunGrubu, PARAMS.marka, PARAMS.esikGunSayisi, PARAMS.ciktiFormati, PARAMS.gonderimKanali],
+        handlerKey: 'shortcuts.raporlama.stockRiskReport',
+        href: '/raporlama/stock-risk-report',
+      },
       {
         key: 'raporlama.planli-rapor',
         label: 'Planlı rapor oluştur',
