@@ -39,22 +39,10 @@ const admin = __importStar(require("firebase-admin"));
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firebase_functions_1 = require("firebase-functions");
 const firestore_1 = require("firebase-admin/firestore");
+const handlers_1 = require("./shortcuts/handlers");
 if (!admin.apps.length)
     admin.initializeApp();
 const db = admin.firestore();
-const shortcutHandlers = {
-    async noop(shortcut, context) {
-        return {
-            status: 'success',
-            message: 'Shortcut noop handler completed.',
-            data: {
-                shortcutId: context.shortcutId,
-                panelKey: shortcut.panelKey || null,
-                actionKey: shortcut.actionKey || null,
-            },
-        };
-    },
-};
 function toDate(value) {
     if (!value)
         return null;
@@ -118,7 +106,17 @@ async function verifyShortcutPermissions(shortcut) {
 }
 function resolveHandler(shortcut) {
     const actionKey = String(shortcut.actionKey || '').trim();
-    return (actionKey && shortcutHandlers[actionKey]) || null;
+    return (actionKey && handlers_1.shortcutHandlers[actionKey]) || null;
+}
+function serializeHandlerResult(result) {
+    return {
+        summaryText: result.summaryText,
+        rows: result.rows || [],
+        metrics: result.metrics || {},
+        attachments: result.attachments || [],
+        warnings: result.warnings || [],
+        deepLink: result.deepLink || null,
+    };
 }
 function computeNextRunAt(schedule, from) {
     if (!schedule)
@@ -184,17 +182,24 @@ async function processShortcut(shortcutRef, now) {
         const handler = resolveHandler(locked);
         if (!handler)
             throw new Error(`No shortcut handler registered for actionKey: ${locked.actionKey || '(empty)'}`);
-        const result = await handler(locked, { shortcutId: shortcutRef.id, runId: runRef.id });
+        const result = await handler.handle(locked.params || {}, {
+            shortcutId: shortcutRef.id,
+            runId: runRef.id,
+            companyId: locked.companyId || null,
+            createdByUid: locked.createdByUid || null,
+            createdByName: locked.createdByName || null,
+            now: new Date(),
+        });
         const completedAt = new Date();
         const nextRunAt = computeNextRunAt(locked.schedule, completedAt);
         const status = result.status || 'success';
         await runRef.set({
             status,
             completedAt: firestore_1.FieldValue.serverTimestamp(),
-            result: result.data || null,
-            message: result.message || null,
+            result: serializeHandlerResult(result),
+            message: result.summaryText || null,
         }, { merge: true });
-        await appendRunLog(runRef, status === 'failed' ? 'error' : 'info', result.message || 'Shortcut run completed.', result.data || {});
+        await appendRunLog(runRef, status === 'failed' ? 'error' : 'info', result.summaryText || 'Shortcut run completed.', serializeHandlerResult(result));
         await shortcutRef.update({
             lastRunAt: firestore_1.FieldValue.serverTimestamp(),
             nextRunAt: nextRunAt ? firestore_1.Timestamp.fromDate(nextRunAt) : null,
