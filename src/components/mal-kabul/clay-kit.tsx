@@ -56,6 +56,16 @@ export function MkClayStyles() {
       @keyframes mkSpin { to { transform: rotate(360deg); } }
       @keyframes mkPopIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
       @keyframes mkFadeIn { from { opacity: 0; } to { opacity: 1; } }
+      @keyframes mkValueFlash {
+        0% { transform: scale(1); }
+        30% { transform: scale(1.07); text-shadow: 0 0 16px rgba(201,138,87,0.55); }
+        100% { transform: scale(1); text-shadow: none; }
+      }
+      @keyframes mkRise { from { opacity: 0; transform: translateY(14px) scale(0.97); } to { opacity: 1; transform: none; } }
+      @keyframes mkPeakPop { 0% { opacity: 0; transform: translateY(6px) scale(0.6); } 60% { transform: translateY(0) scale(1.12); } 100% { opacity: 1; transform: scale(1); } }
+      @media (prefers-reduced-motion: reduce) {
+        .clay-shell *, .mk-shell * { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+      }
       .mk-shell { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; background: linear-gradient(120deg, #F6F2EA 0%, transparent 55%), linear-gradient(225deg, #E8E1D2 0%, transparent 55%), #EFEAE0; color: #3D382F; min-height: 100vh; -webkit-font-smoothing: antialiased; }
       .mk-grid-kpi { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.15fr); gap: 14px; }
       @media (max-width: 1079px) { .mk-grid-kpi { grid-template-columns: 1fr; } }

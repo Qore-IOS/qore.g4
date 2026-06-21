@@ -8,8 +8,8 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/com
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { TrendingUp, ChevronLeft, ChevronRight, UserPlus2, TimerReset, ActivitySquare, AlertTriangle, CalendarCheck, Banknote, RefreshCw, ArrowUpRight, Bell, Maximize2, Check, X as XIcon, Search } from 'lucide-react';
 import {
-  HOME_C, fmtInt, fmtTL, useCountUp, ClayLineChart, Ring,
-  Card as ClayCard, CardHead, Pill, Tag, ClayIconBtn, Segmented, ClayBar,
+  HOME_C, fmtInt, fmtTL, useCountUpFlash, ClayLineChart, Ring,
+  Card as ClayCard, CardHead, Pill, Tag, ClayIconBtn, Segmented, ClayBar, DeltaBadge,
 } from '@/components/dashboard-v2/clay-home';
 import { ClayShell } from '@/components/mal-kabul/clay-kit';
 import {
@@ -51,18 +51,19 @@ const motionProps = {
 };
 
 // ── clay dashboard sub-components (count-up animated) ─────────────────────────
+// Flash key bumps on every value change → number pulses to grab attention.
 function CountText({ value, format = fmtInt, style }: { value: number; format?: (n: number) => string; style?: React.CSSProperties }) {
-  const v = useCountUp(value, 1000);
-  return <span style={style}>{format(v)}</span>;
+  const { value: v, flash } = useCountUpFlash(value, 1000);
+  return <span key={flash} style={{ display: 'inline-block', animation: flash ? `mkValueFlash 600ms ${HOME_C.ease}` : undefined, ...style }}>{format(v)}</span>;
 }
 
 function MiniKpi({ s, i }: { s: { value: number; tone: string; bg: string; icon: any; label: string; href: string }; i: number }) {
-  const v = useCountUp(s.value, 1000);
+  const { value: v, flash } = useCountUpFlash(s.value, 1000);
   const Icon = s.icon;
   return (
     <Link href={s.href} style={{ textDecoration: 'none', padding: '14px 10px', borderRadius: HOME_C.radiusSm, background: HOME_C.surfaceHi, boxShadow: HOME_C.clayFlat, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7, textAlign: 'center', animation: `mkPopIn ${320 + i * 120}ms ${HOME_C.ease}` }}>
       <span style={{ width: 38, height: 38, borderRadius: 12, display: 'grid', placeItems: 'center', color: s.tone, background: s.bg, boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.7)' }}><Icon size={19} /></span>
-      <span style={{ fontSize: 28, fontWeight: 800, color: HOME_C.ink1, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{fmtInt(v)}</span>
+      <span key={flash} style={{ display: 'inline-block', fontSize: 28, fontWeight: 800, color: HOME_C.ink1, lineHeight: 1, fontVariantNumeric: 'tabular-nums', animation: flash ? `mkValueFlash 600ms ${HOME_C.ease}` : undefined }}>{fmtInt(v)}</span>
       <span style={{ fontSize: 12, fontWeight: 600, color: HOME_C.ink2, lineHeight: 1.2 }}>{s.label}</span>
     </Link>
   );
@@ -838,6 +839,17 @@ export default function DashboardV2({
   const trendLabels = stockConsumptionTrend.map((d: any) => String(d.date ?? ''));
   const trendTotal = trendSpark.reduce((a, b) => a + b, 0);
 
+  // Momentum: dönemin ikinci yarısı vs ilk yarısı — ivme yüzdesi
+  const trendDelta = (() => {
+    const half = Math.floor(trendSpark.length / 2);
+    if (half < 1) return 0;
+    const first = trendSpark.slice(0, half).reduce((a: number, b: number) => a + b, 0);
+    const second = trendSpark.slice(half).reduce((a: number, b: number) => a + b, 0);
+    if (first === 0) return second > 0 ? 100 : 0;
+    return Math.round(((second - first) / first) * 100);
+  })();
+  const trendPeak = trendSpark.length ? Math.max(...trendSpark) : 0;
+
   // Fault total (atama+müdahale)
   const faultTotal = faultKpis.atamaBekleyen + faultKpis.mudahaleBekleyen + faultKpis.mudahaleEdilen;
 
@@ -873,7 +885,7 @@ export default function DashboardV2({
         <div style={{ maxWidth: 1480, margin: '0 auto', display: 'flex', flexDirection: 'column', gap }}>
 
           {/* Header */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 12 : 16, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 12 : 16, flexWrap: 'wrap', animation: `mkRise 520ms ${HOME_C.ease} both` }}>
             <div style={{ width: isMobile ? 44 : 50, height: isMobile ? 44 : 50, borderRadius: 16, flexShrink: 0, display: 'grid', placeItems: 'center', color: '#fff', background: `radial-gradient(circle at 32% 28%, ${HOME_C.accent2}, ${HOME_C.accent})`, boxShadow: `inset 0 1px 1px rgba(255,255,255,0.4), 0 10px 20px -8px ${HOME_C.accentGlow}`, fontSize: isMobile ? 17 : 20, fontWeight: 800 }}>{initials}</div>
             <div style={{ minWidth: 0 }}>
               <h1 style={{ margin: 0, fontSize: isMobile ? 21 : 26, fontWeight: 800, letterSpacing: '-0.02em', color: HOME_C.ink1 }}>{userName}</h1>
@@ -886,7 +898,7 @@ export default function DashboardV2({
           </div>
 
           {/* KPI row */}
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : tablet ? '1fr 1fr' : 'minmax(0,1.1fr) minmax(0,1fr) minmax(0,1fr)', gap, alignItems: 'stretch' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : tablet ? '1fr 1fr' : 'minmax(0,1.1fr) minmax(0,1fr) minmax(0,1fr)', gap, alignItems: 'stretch', animation: `mkRise 560ms ${HOME_C.ease} 60ms both` }}>
             {/* Cihaz Atama Durumu */}
             <div style={{ gridColumn: tablet ? '1 / -1' : 'auto' }}>
               <ClayCard>
@@ -935,7 +947,7 @@ export default function DashboardV2({
           </div>
 
           {/* Trend + Today */}
-          <div style={{ display: 'grid', gridTemplateColumns: wide ? 'minmax(0,1.55fr) minmax(0,1fr)' : '1fr', gap }}>
+          <div style={{ display: 'grid', gridTemplateColumns: wide ? 'minmax(0,1.55fr) minmax(0,1fr)' : '1fr', gap, animation: `mkRise 560ms ${HOME_C.ease} 150ms both` }}>
             {/* Tüketim Trendi */}
             <ClayCard onClick={() => setIsConsumptionModalOpen(true)} hover>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 6, flexWrap: 'wrap' }}>
@@ -947,8 +959,14 @@ export default function DashboardV2({
               </div>
               <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12 }}>
                 <div style={{ minWidth: 0 }}>
-                  <CountText value={trendTotal} style={{ fontSize: isMobile ? 32 : 40, fontWeight: 800, color: HOME_C.ink1, lineHeight: 1, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', display: 'block' }} />
-                  <div style={{ fontSize: 13, fontWeight: 600, color: HOME_C.ink2, marginTop: 6 }}>{trendTitle}</div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+                    <CountText value={trendTotal} style={{ fontSize: isMobile ? 32 : 40, fontWeight: 800, color: HOME_C.ink1, lineHeight: 1, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }} />
+                    {trendTotal > 0 && <DeltaBadge value={trendDelta} neutralLabel="sabit" />}
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: HOME_C.ink2, marginTop: 6, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span>{trendTitle}</span>
+                    {trendPeak > 0 && <span style={{ color: HOME_C.ink3 }}>· zirve {fmtInt(trendPeak)}</span>}
+                  </div>
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
                   <ClayIconBtn round onClick={() => handleTrendNav('prev')}><ChevronLeft size={16} /></ClayIconBtn>
@@ -984,12 +1002,14 @@ export default function DashboardV2({
           </div>
 
           {/* Sık Kullanılanlar — kahve kart / krem butonlar */}
+          <div style={{ animation: `mkRise 560ms ${HOME_C.ease} 240ms both` }}>
           <ClayCard tone="brown" pad={isMobile ? 14 : 18}>
             <CardHead ico={<Search size={19} />} title="Sık Kullanılanlar" onLight right={<Pill onLight>{visiblePanels.length}</Pill>} />
             <div style={{ display: 'grid', gridTemplateColumns: `repeat(${isMobile ? 3 : tablet ? 5 : 7}, 1fr)`, gap: isMobile ? 10 : 12, marginTop: 16 }}>
               {visiblePanels.map((panel, i) => <ShortcutTile key={panel.key} panel={panel} i={i} />)}
             </div>
           </ClayCard>
+          </div>
 
         </div>
       </ClayShell>
