@@ -97,7 +97,7 @@ export default function NotificationsBell({
       onMouseLeave={() => setOpen(false)}
       className={cn(
         triggerClassName ??
-          'relative cursor-default dock-item-wrapper hover:scale-150 hover:-translate-y-2 transition'
+          'relative cursor-default dock-item-wrapper transition-colors'
       )}
     >
       {customIcon ? (
