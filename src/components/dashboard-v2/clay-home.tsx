@@ -25,14 +25,31 @@ export const fmtInt = (n: number) => Math.round(n).toLocaleString('tr-TR');
 export const fmtTL = (n: number) =>
   new Intl.NumberFormat('tr-TR', { style: 'currency', currency: 'TRY', maximumFractionDigits: 0 }).format(n);
 
+// ── respect prefers-reduced-motion (a11y — HIGH) ──────────────────────────────
+export function prefersReducedMotion(): boolean {
+  if (typeof window === 'undefined' || !window.matchMedia) return false;
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
 // ── count-up hook — animates from the previous value to the new target ────────
+// Returns the live value plus a monotonically increasing `flash` token that
+// bumps whenever the target changes, so KPIs can pulse to draw the eye.
 export function useCountUp(target: number, duration = 1000): number {
+  return useCountUpFlash(target, duration).value;
+}
+
+export function useCountUpFlash(target: number, duration = 1000): { value: number; flash: number } {
   const [val, setVal] = useState(0);
+  const [flash, setFlash] = useState(0);
   const fromRef = useRef(0);
+  const firstRef = useRef(true);
   useEffect(() => {
     const start = fromRef.current;
     const delta = target - start;
+    if (!firstRef.current && delta !== 0) setFlash(f => f + 1);
+    firstRef.current = false;
     if (delta === 0) { setVal(target); return; }
+    if (prefersReducedMotion()) { setVal(target); fromRef.current = target; return; }
     const t0 = performance.now();
     let raf = 0;
     const tick = (t: number) => {
@@ -45,7 +62,7 @@ export function useCountUp(target: number, duration = 1000): number {
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [target, duration]);
-  return val;
+  return { value: val, flash };
 }
 
 // ── smooth catmull-rom → bezier path ──────────────────────────────────────────
@@ -68,16 +85,21 @@ function smoothPath(pts: { x: number; y: number }[]): string {
 // ── animated line chart ───────────────────────────────────────────────────────
 export function ClayLineChart({
   data, labels, height = 200, big = false, yTicks = false, animKey, accent = C.accent, accent2 = C.accent2,
+  showPeak = true, showAvg = true,
 }: {
   data: number[]; labels: string[]; height?: number; big?: boolean; yTicks?: boolean;
-  animKey?: string; accent?: string; accent2?: string;
+  animKey?: string; accent?: string; accent2?: string; showPeak?: boolean; showAvg?: boolean;
 }) {
   const W = 800, H = height;
-  const padL = yTicks ? 46 : 16, padR = 16, padT = 18, padB = 30;
+  const padL = yTicks ? 46 : 16, padR = 16, padT = 22, padB = 30;
   const maxV = Math.max(...data, 1);
-  const niceMax = big ? Math.max(150, Math.ceil(maxV / 150) * 150) : maxV * 1.14;
+  const niceMax = big ? Math.max(150, Math.ceil(maxV / 150) * 150) : maxV * 1.18;
   const innerW = W - padL - padR, innerH = H - padT - padB;
   const n = data.length;
+  const sum = data.reduce((a, b) => a + b, 0);
+  const avg = n ? sum / n : 0;
+  const peakIdx = data.reduce((best, v, i) => (v > data[best] ? i : best), 0);
+  const hasSignal = sum > 0 && n > 1;
   const pts = data.map((v, i) => ({
     x: padL + (n === 1 ? innerW / 2 : (i / (n - 1)) * innerW),
     y: padT + innerH - (v / niceMax) * innerH,
@@ -87,6 +109,7 @@ export function ClayLineChart({
   const area = pts.length
     ? `${line} L ${pts[pts.length - 1].x} ${padT + innerH} L ${pts[0].x} ${padT + innerH} Z`
     : '';
+  const avgY = padT + innerH - (avg / niceMax) * innerH;
 
   const pathRef = useRef<SVGPathElement>(null);
   const [len, setLen] = useState(0);
@@ -97,6 +120,7 @@ export function ClayLineChart({
     if (!pathRef.current) return;
     const l = pathRef.current.getTotalLength();
     setLen(l); setDrawn(false);
+    if (prefersReducedMotion()) { setDrawn(true); return; }
     const r = requestAnimationFrame(() => requestAnimationFrame(() => setDrawn(true)));
     return () => cancelAnimationFrame(r);
   }, [animKey, line]);
@@ -116,6 +140,8 @@ export function ClayLineChart({
     setHover(best);
   };
 
+  const peak = pts[peakIdx];
+
   return (
     <div style={{ position: 'relative', width: '100%' }}>
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none"
@@ -123,17 +149,21 @@ export function ClayLineChart({
         onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
         <defs>
           <linearGradient id={gid} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0" stopColor={accent} stopOpacity="0.34" />
-            <stop offset="0.6" stopColor={accent2} stopOpacity="0.12" />
+            <stop offset="0" stopColor={accent} stopOpacity="0.42" />
+            <stop offset="0.55" stopColor={accent2} stopOpacity="0.16" />
             <stop offset="1" stopColor={accent2} stopOpacity="0" />
           </linearGradient>
           <linearGradient id={gid + '-s'} x1="0" x2="1" y1="0" y2="0">
             <stop offset="0" stopColor={accent2} />
-            <stop offset="1" stopColor={accent} />
+            <stop offset="0.5" stopColor={accent} />
+            <stop offset="1" stopColor={HOME_C.violetDeep} />
           </linearGradient>
-          <filter id={gid + '-g'} x="-20%" y="-40%" width="140%" height="180%">
-            <feGaussianBlur stdDeviation="3" result="b" />
+          <filter id={gid + '-g'} x="-20%" y="-60%" width="140%" height="220%">
+            <feGaussianBlur stdDeviation="3.4" result="b" />
             <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+          </filter>
+          <filter id={gid + '-soft'} x="-50%" y="-50%" width="200%" height="200%">
+            <feGaussianBlur stdDeviation="6" />
           </filter>
         </defs>
 
@@ -146,14 +176,22 @@ export function ClayLineChart({
             fontSize="13" fontWeight="600" fill={C.ink3}>{Math.round(niceMax * t)}</text>
         ))}
 
+        {/* average reference line */}
+        {showAvg && hasSignal && (
+          <g opacity={drawn ? 1 : 0} style={{ transition: `opacity 700ms 700ms ${HOME_C.ease}` }}>
+            <line x1={padL} x2={W - padR} y1={avgY} y2={avgY} stroke={accent} strokeWidth="1.4" strokeDasharray="5 6" opacity="0.42" />
+            <text x={W - padR} y={avgY - 7} textAnchor="end" fontSize="11.5" fontWeight="700" fill={accent} opacity="0.8">ort {fmtInt(avg)}</text>
+          </g>
+        )}
+
         {area && (
           <path d={area} fill={`url(#${gid})`} opacity={drawn ? 1 : 0}
             style={{ transition: `opacity 900ms 250ms ${HOME_C.ease}` }} />
         )}
 
-        <path ref={pathRef} d={line} fill="none" stroke={`url(#${gid}-s)`} strokeWidth={big ? 3.5 : 3}
+        <path ref={pathRef} d={line} fill="none" stroke={`url(#${gid}-s)`} strokeWidth={big ? 3.5 : 3.2}
           strokeLinecap="round" strokeLinejoin="round" filter={`url(#${gid}-g)`}
-          style={{ strokeDasharray: len, strokeDashoffset: drawn ? 0 : len, transition: `stroke-dashoffset 1300ms ${HOME_C.ease}` }} />
+          style={{ strokeDasharray: len, strokeDashoffset: drawn ? 0 : len, transition: `stroke-dashoffset 1400ms ${HOME_C.ease}` }} />
 
         {pts.map((p, i) => (
           <circle key={i} cx={p.x} cy={p.y} r={hover === i ? 6 : 4}
@@ -161,9 +199,22 @@ export function ClayLineChart({
             style={{ transition: `opacity 400ms ${300 + i * 60}ms ${HOME_C.ease}, r 180ms ${HOME_C.ease}` }} />
         ))}
 
+        {/* peak marker — eye-catching glow + badge */}
+        {showPeak && hasSignal && peak && drawn && peakIdx !== hover && (
+          <g style={{ animation: `mkPeakPop 520ms ${HOME_C.ease} both` }}>
+            <circle cx={peak.x} cy={peak.y} r="11" fill={accent} opacity="0.22" filter={`url(#${gid}-soft)`} />
+            <circle cx={peak.x} cy={peak.y} r="5.5" fill={accent2} stroke={C.surfaceHi} strokeWidth="3" />
+            <g transform={`translate(${Math.min(Math.max(peak.x, padL + 26), W - padR - 26)}, ${Math.max(peak.y - 18, padT + 4)})`}>
+              <rect x="-26" y="-13" width="52" height="20" rx="10" fill={accent} />
+              <text x="0" y="1.5" textAnchor="middle" dominantBaseline="middle" fontSize="11.5" fontWeight="800" fill="#fff">▲ {fmtInt(peak.v)}</text>
+            </g>
+          </g>
+        )}
+
         {hover != null && pts[hover] && (
           <g>
             <line x1={pts[hover].x} x2={pts[hover].x} y1={padT} y2={padT + innerH} stroke={accent} strokeWidth="1.4" strokeDasharray="3 4" opacity="0.5" />
+            <circle cx={pts[hover].x} cy={pts[hover].y} r="12" fill={accent} opacity="0.18" filter={`url(#${gid}-soft)`} />
             <circle cx={pts[hover].x} cy={pts[hover].y} r="7" fill={accent} stroke={C.surfaceHi} strokeWidth="3" />
           </g>
         )}
@@ -172,7 +223,7 @@ export function ClayLineChart({
           if (!showLabel(i)) return null;
           const x = padL + (labels.length === 1 ? innerW / 2 : (i / (labels.length - 1)) * innerW);
           return <text key={i} x={x} y={H - 8} textAnchor={i === 0 ? 'start' : i === labels.length - 1 ? 'end' : 'middle'}
-            fontSize={big ? 14 : 12} fontWeight="600" fill={hover === i ? accent : C.ink2}
+            fontSize={big ? 14 : 12} fontWeight={hover === i ? 800 : 600} fill={hover === i ? accent : C.ink2}
             style={{ transition: 'fill 180ms' }}>{lb}</text>;
         })}
       </svg>
@@ -191,6 +242,46 @@ export function ClayLineChart({
   );
 }
 
+// ── trend delta badge — up/down vs comparison, bold & color-coded ─────────────
+export function DeltaBadge({ value, suffix = '%', neutralLabel }: { value: number; suffix?: string; neutralLabel?: string }) {
+  const up = value > 0, down = value < 0;
+  const col = up ? C.waterDeep : down ? C.danger : C.ink2;
+  const bg = up ? 'rgba(111,181,133,0.16)' : down ? 'rgba(192,121,106,0.14)' : C.surface2;
+  const arrow = up ? '▲' : down ? '▼' : '–';
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: C.radiusPill, background: bg, color: col, fontSize: 12.5, fontWeight: 800, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+      <span style={{ fontSize: 10 }}>{arrow}</span>
+      {value === 0 && neutralLabel ? neutralLabel : `${Math.abs(value)}${suffix}`}
+    </span>
+  );
+}
+
+// ── mini inline sparkline — tiny bold area chart for KPI tiles ────────────────
+export function Sparkline({ data, color = C.accent, width = 92, height = 30 }: {
+  data: number[]; color?: string; width?: number; height?: number;
+}) {
+  const uid = useRef('sp-' + Math.random().toString(36).slice(2, 8)).current;
+  if (data.length < 2) return null;
+  const max = Math.max(...data, 1), min = Math.min(...data, 0);
+  const span = max - min || 1;
+  const pts = data.map((v, i) => ({ x: (i / (data.length - 1)) * width, y: height - 3 - ((v - min) / span) * (height - 6) }));
+  const line = smoothPath(pts);
+  const area = `${line} L ${width} ${height} L 0 ${height} Z`;
+  return (
+    <svg width={width} height={height} style={{ display: 'block', overflow: 'visible' }}>
+      <defs>
+        <linearGradient id={uid} x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0" stopColor={color} stopOpacity="0.30" />
+          <stop offset="1" stopColor={color} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      <path d={area} fill={`url(#${uid})`} />
+      <path d={line} fill="none" stroke={color} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+      <circle cx={pts[pts.length - 1].x} cy={pts[pts.length - 1].y} r="3" fill={color} />
+    </svg>
+  );
+}
+
 // ── animated progress ring ────────────────────────────────────────────────────
 export function Ring({ pct, size = 86, stroke = 10, color, track, children, delay = 0 }: {
   pct: number; size?: number; stroke?: number; color: string; track?: string; children?: React.ReactNode; delay?: number;
@@ -198,7 +289,10 @@ export function Ring({ pct, size = 86, stroke = 10, color, track, children, dela
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   const [show, setShow] = useState(false);
-  useEffect(() => { const t = setTimeout(() => setShow(true), delay + 60); return () => clearTimeout(t); }, [pct, delay]);
+  useEffect(() => {
+    if (prefersReducedMotion()) { setShow(true); return; }
+    const t = setTimeout(() => setShow(true), delay + 60); return () => clearTimeout(t);
+  }, [pct, delay]);
   return (
     <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
       <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
@@ -302,7 +396,10 @@ export function Segmented<T extends string>({ value, onChange, options }: {
 // ── animated progress bar ─────────────────────────────────────────────────────
 export function ClayBar({ pct, tone = C.waterSolid, height = 8 }: { pct: number; tone?: string; height?: number }) {
   const [w, setW] = useState(0);
-  useEffect(() => { const t = setTimeout(() => setW(pct), 80); return () => clearTimeout(t); }, [pct]);
+  useEffect(() => {
+    if (prefersReducedMotion()) { setW(pct); return; }
+    const t = setTimeout(() => setW(pct), 80); return () => clearTimeout(t);
+  }, [pct]);
   return (
     <div style={{ height, borderRadius: 99, background: C.surface2, boxShadow: C.clayInset, overflow: 'hidden' }}>
       <div style={{ height: '100%', width: `${Math.max(0, Math.min(100, w))}%`, borderRadius: 99, background: `linear-gradient(90deg, ${tone}, #8FD3A6)`, transition: `width 1000ms ${HOME_C.ease}` }} />
