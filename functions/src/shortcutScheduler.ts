@@ -4,6 +4,7 @@ import * as admin from 'firebase-admin';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { logger } from 'firebase-functions';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import { shortcutHandlers, type ShortcutContext, type ShortcutResult } from './shortcuts/handlers';
 
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
@@ -37,27 +38,6 @@ export type ShortcutDoc = {
   processingStartedAt?: Timestamp | Date | null;
 };
 
-type ShortcutHandlerResult = {
-  status?: 'success' | 'skipped' | 'failed';
-  message?: string;
-  data?: Record<string, unknown>;
-};
-
-type ShortcutHandler = (shortcut: ShortcutDoc, context: { shortcutId: string; runId: string }) => Promise<ShortcutHandlerResult>;
-
-const shortcutHandlers: Record<string, ShortcutHandler> = {
-  async noop(shortcut, context) {
-    return {
-      status: 'success',
-      message: 'Shortcut noop handler completed.',
-      data: {
-        shortcutId: context.shortcutId,
-        panelKey: shortcut.panelKey || null,
-        actionKey: shortcut.actionKey || null,
-      },
-    };
-  },
-};
 
 function toDate(value: unknown): Date | null {
   if (!value) return null;
@@ -121,9 +101,20 @@ async function verifyShortcutPermissions(shortcut: ShortcutDoc): Promise<{ ok: b
   return { ok: true };
 }
 
-function resolveHandler(shortcut: ShortcutDoc): ShortcutHandler | null {
+function resolveHandler(shortcut: ShortcutDoc) {
   const actionKey = String(shortcut.actionKey || '').trim();
-  return (actionKey && shortcutHandlers[actionKey]) || null;
+  return (actionKey && shortcutHandlers[actionKey as keyof typeof shortcutHandlers]) || null;
+}
+
+function serializeHandlerResult(result: ShortcutResult): Record<string, unknown> {
+  return {
+    summaryText: result.summaryText,
+    rows: result.rows || [],
+    metrics: result.metrics || {},
+    attachments: result.attachments || [],
+    warnings: result.warnings || [],
+    deepLink: result.deepLink || null,
+  };
 }
 
 function computeNextRunAt(schedule: ShortcutDoc['schedule'], from: Date): Date | null {
@@ -192,7 +183,14 @@ async function processShortcut(shortcutRef: FirebaseFirestore.DocumentReference,
     const handler = resolveHandler(locked);
     if (!handler) throw new Error(`No shortcut handler registered for actionKey: ${locked.actionKey || '(empty)'}`);
 
-    const result = await handler(locked, { shortcutId: shortcutRef.id, runId: runRef.id });
+    const result = await handler.handle(locked.params || {}, {
+      shortcutId: shortcutRef.id,
+      runId: runRef.id,
+      companyId: locked.companyId || null,
+      createdByUid: locked.createdByUid || null,
+      createdByName: locked.createdByName || null,
+      now: new Date(),
+    } satisfies ShortcutContext);
     const completedAt = new Date();
     const nextRunAt = computeNextRunAt(locked.schedule, completedAt);
     const status = result.status || 'success';
@@ -200,10 +198,10 @@ async function processShortcut(shortcutRef: FirebaseFirestore.DocumentReference,
     await runRef.set({
       status,
       completedAt: FieldValue.serverTimestamp(),
-      result: result.data || null,
-      message: result.message || null,
+      result: serializeHandlerResult(result),
+      message: result.summaryText || null,
     }, { merge: true });
-    await appendRunLog(runRef, status === 'failed' ? 'error' : 'info', result.message || 'Shortcut run completed.', result.data || {});
+    await appendRunLog(runRef, status === 'failed' ? 'error' : 'info', result.summaryText || 'Shortcut run completed.', serializeHandlerResult(result));
     await shortcutRef.update({
       lastRunAt: FieldValue.serverTimestamp(),
       nextRunAt: nextRunAt ? Timestamp.fromDate(nextRunAt) : null,
