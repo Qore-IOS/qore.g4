@@ -2000,7 +2000,7 @@ export default function AnaPanel(props: AnaPanelProps) {
       <ScanCommitProbe controller={scanPerformanceController} />
 
       {/* ── TOP CONTEXT BAR: stepper + depo + geçmiş + bekleyen ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 18, padding: '16px 22px', borderRadius: MK_C.radius, background: `linear-gradient(180deg, ${MK_C.surface} 0%, ${MK_C.surface2} 100%)`, boxShadow: MK_C.clay, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 18, padding: '16px 22px', borderRadius: MK_C.radius, background: `linear-gradient(180deg, ${MK_C.surface} 0%, ${MK_C.surface2} 100%)`, boxShadow: MK_C.clay, flexWrap: 'wrap', animation: 'mkRise 420ms cubic-bezier(0.34,1.56,0.64,1) both' }}>
         <MkTopStepper active={topStepperActive} />
         <div style={{ width: 1, height: 38, background: MK_C.line }} className="hidden sm:block" />
         <div style={{ minWidth: 230 }} className="flex-1 sm:flex-none">
@@ -2026,7 +2026,7 @@ export default function AnaPanel(props: AnaPanelProps) {
       </div>
 
       {/* ── KPI ROW: readiness + add panel ── */}
-      <div className="mk-grid-kpi">
+      <div className="mk-grid-kpi" style={{ animation: 'mkRise 460ms cubic-bezier(0.34,1.56,0.64,1) 60ms both' }}>
         <MkReadinessCard
           stage={readinessStage}
           ready={systemReady}
@@ -2087,7 +2087,7 @@ export default function AnaPanel(props: AnaPanelProps) {
       )}
 
       {/* ── STEP 3: Okutulan Ürünler Tablosu ── */}
-      <div style={{ borderRadius: MK_C.radiusLg, background: `linear-gradient(180deg, ${MK_C.surface} 0%, ${MK_C.surface2} 100%)`, boxShadow: MK_C.clay, overflow: 'hidden', minHeight: 460, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ borderRadius: MK_C.radiusLg, background: `linear-gradient(180deg, ${MK_C.surface} 0%, ${MK_C.surface2} 100%)`, boxShadow: MK_C.clay, overflow: 'hidden', minHeight: 460, display: 'flex', flexDirection: 'column', animation: 'mkRise 500ms cubic-bezier(0.34,1.56,0.64,1) 130ms both' }}>
         {/* ── Selection mode sticky bar ── */}
         {isSelectionMode && (
           <div className="sticky top-0 z-10 flex items-center gap-2 sm:gap-3 px-4 py-2.5 text-white" style={{ background: `linear-gradient(180deg, ${MK_C.accent2}, ${MK_C.accent})` }}>
@@ -2185,9 +2185,9 @@ export default function AnaPanel(props: AnaPanelProps) {
 
         {/* ── Table header (desktop) ── */}
         {scannedItems.length > 0 && (
-          <div className="hidden sm:grid grid-cols-[40px_2fr_1fr_1fr_1fr_1fr_80px_90px_40px] gap-1 px-4 sm:px-6 py-3" style={{ borderBottom: `1px solid ${MK_C.line}` }}>
-            {['', 'Ürün', 'Lot', 'Miad', 'Adres', 'İrsaliye', 'Adet', 'Birim', ''].map((h, i) => (
-              <span key={i} style={{ fontSize: 11, fontWeight: 700, color: MK_C.ink3, letterSpacing: '0.06em', textTransform: 'uppercase', textAlign: i === 6 ? 'right' : i === 7 ? 'center' : 'left' }}>{h}</span>
+          <div className="hidden sm:grid grid-cols-[40px_46px_2fr_1fr_1fr_1fr_1fr_80px_90px_40px] gap-1 px-4 sm:px-6 py-3" style={{ borderBottom: `1px solid ${MK_C.line}` }}>
+            {['', '', 'Ürün', 'Lot', 'Miad', 'Adres', 'İrsaliye', 'Adet', 'Birim', ''].map((h, i) => (
+              <span key={i} style={{ fontSize: 11, fontWeight: 700, color: MK_C.ink3, letterSpacing: '0.06em', textTransform: 'uppercase', textAlign: i === 7 ? 'right' : i === 8 ? 'center' : 'left' }}>{h}</span>
             ))}
           </div>
         )}
@@ -2248,8 +2248,16 @@ export default function AnaPanel(props: AnaPanelProps) {
                   <div style={{ paddingBottom: 10, animation: 'mkPopIn 280ms ease' }}>
                     <div style={{ borderRadius: MK_C.radius, background: MK_C.surfaceHi, boxShadow: group.isSelected ? `${MK_C.clayFlat}, 0 0 0 1.5px ${MK_C.accent}66` : MK_C.clayFlat, overflow: 'hidden' }}>
                       {/* Desktop row */}
-                      <div className="hidden sm:grid grid-cols-[40px_2fr_1fr_1fr_1fr_1fr_80px_90px_40px] gap-1 items-center" style={{ padding: '13px 18px' }}>
+                      <div className="hidden sm:grid grid-cols-[40px_46px_2fr_1fr_1fr_1fr_1fr_80px_90px_40px] gap-1 items-center" style={{ padding: '13px 18px' }}>
                         <div>{checkbox}</div>
+                        <div style={{
+                          width: 40, height: 40, borderRadius: 13, flexShrink: 0, display: 'grid', placeItems: 'center',
+                          background: 'radial-gradient(120% 120% at 30% 24%, #FFFFFF 0%, #ECE4D4 82%)',
+                          boxShadow: 'inset 0 2px 3px rgba(255,255,255,0.9), inset 0 -4px 7px rgba(178,160,128,0.22), 0 4px 10px -5px rgba(150,128,96,0.28)',
+                          color: MK_C.accent,
+                        }}>
+                          <Package className="h-4.5 w-4.5" style={{ width: 18, height: 18 }} />
+                        </div>
                         <div style={{ minWidth: 0 }}>
                           <div style={{ fontSize: 14.5, fontWeight: 700, color: MK_C.ink1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{group.stokAdi}</div>
                           <div className="flex items-center gap-1.5" style={{ marginTop: 2 }}>
@@ -2331,14 +2339,23 @@ export default function AnaPanel(props: AnaPanelProps) {
 
         {/* ── Footer summary ── */}
         {scannedItems.length > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 18, padding: '15px 26px', borderTop: `1px solid ${MK_C.line}` }}>
-            <div style={{ fontSize: 14, color: MK_C.ink2, fontWeight: 600 }}>Kalem <strong style={{ color: MK_C.ink1, fontSize: 16 }}>{groupedScannedItems.length}</strong></div>
-            <div style={{ fontSize: 14, color: MK_C.ink2, fontWeight: 600 }}>Lot <strong style={{ color: MK_C.ink1, fontSize: 16 }}>{distinctLotCount}</strong></div>
-            <div style={{ fontSize: 14, color: MK_C.ink2, fontWeight: 600 }}>Toplam <strong style={{ color: MK_C.ink1, fontSize: 16 }}>{totalScannedQuantity}</strong></div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 26px', borderTop: `1px solid ${MK_C.line}` }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '6px 14px', borderRadius: MK_C.radiusPill, background: MK_C.surface2, boxShadow: MK_C.clayInset, fontSize: 13, fontWeight: 700, color: MK_C.ink1 }}>
+              <span style={{ fontSize: 10.5, color: MK_C.ink3, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Kalem</span>
+              <strong>{groupedScannedItems.length}</strong>
+            </span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '6px 14px', borderRadius: MK_C.radiusPill, background: MK_C.surface2, boxShadow: MK_C.clayInset, fontSize: 13, fontWeight: 700, color: MK_C.ink1 }}>
+              <span style={{ fontSize: 10.5, color: MK_C.ink3, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Lot</span>
+              <strong>{distinctLotCount}</strong>
+            </span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '6px 14px', borderRadius: MK_C.radiusPill, background: MK_C.surface2, boxShadow: MK_C.clayInset, fontSize: 13, fontWeight: 700, color: MK_C.ink1 }}>
+              <span style={{ fontSize: 10.5, color: MK_C.ink3, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Toplam</span>
+              <strong style={{ color: MK_C.accent }}>{totalScannedQuantity}</strong>
+            </span>
             {scannedItems.some(i => !i.isProcessed && (!i.rafAdresi || !i.irsaliyeNumarasi)) && (
-              <div style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 13, fontWeight: 700, color: '#9A6F1E' }}>
+              <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 7, padding: '6px 14px', borderRadius: MK_C.radiusPill, background: MK_C.amberSoft, fontSize: 13, fontWeight: 700, color: '#9A6F1E' }}>
                 <AlertTriangle className="h-3.5 w-3.5" /> Bazı ürünlerde adres / irsaliye eksik
-              </div>
+              </span>
             )}
           </div>
         )}

@@ -378,8 +378,7 @@ export default function SiparisOlusturPage() {
         @keyframes olusturIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
       `}</style>
 
-      {/* Full-bleed cream backdrop — ekranı tek krem tonla sarar. */}
-      <div aria-hidden style={{ position: 'fixed', inset: 0, background: C.surface2, zIndex: 0 }} />
+      <div aria-hidden style={{ position: 'fixed', inset: 0, background: 'linear-gradient(120deg, #F6F2EA 0%, transparent 55%), linear-gradient(225deg, #E8E1D2 0%, transparent 55%), #EFEAE0', zIndex: 0 }} />
 
       <div style={{ position: 'relative', zIndex: 1, maxWidth: 860, margin: '0 auto', padding: '24px 16px 100px', minHeight: '100vh' }}>
 
@@ -412,36 +411,44 @@ export default function SiparisOlusturPage() {
         {/* ── Stepper ── */}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          gap: 0, marginBottom: 28,
+          gap: 0, marginBottom: 30,
+          padding: '18px 24px', borderRadius: C.r,
+          background: `linear-gradient(180deg, ${C.surface} 0%, ${C.surface2} 100%)`,
+          boxShadow: C.clay,
         }}>
           {[
-            { label: 'Lab Seç', done: stepperState.hasLab, num: 1 },
-            { label: 'Ürün Ekle', done: stepperState.hasItems, num: 2 },
-            { label: 'Oluştur', done: false, num: 3 },
+            { label: 'Lab Seç', done: stepperState.hasLab, active: !stepperState.hasLab, num: 1 },
+            { label: 'Ürün Ekle', done: stepperState.hasItems, active: stepperState.hasLab && !stepperState.hasItems, num: 2 },
+            { label: 'Oluştur', done: false, active: stepperState.hasItems, num: 3 },
           ].map((step, i) => (
             <React.Fragment key={step.num}>
               {i > 0 && (
                 <div style={{
-                  flex: 1, maxWidth: 80, height: 2,
-                  background: (i === 1 && stepperState.hasLab) || step.done ? C.accent : C.line,
-                  transition: `background 400ms ${C.ease}`,
+                  flex: 1, maxWidth: 72, height: 3, borderRadius: 99,
+                  background: (i === 1 && stepperState.hasLab) || step.done ? `linear-gradient(90deg, ${C.accentLight}, ${C.accent})` : C.surface2,
+                  boxShadow: (i === 1 && stepperState.hasLab) || step.done ? `0 2px 8px -3px ${C.accentGlow}` : C.clayInset,
+                  transition: `all 450ms ${C.ease}`,
                 }} />
               )}
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
                 <div style={{
-                  width: 36, height: 36, borderRadius: '50%',
+                  width: 40, height: 40, borderRadius: '50%',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 13, fontWeight: 800,
+                  fontSize: 14, fontWeight: 800,
                   background: step.done
                     ? `linear-gradient(180deg, ${C.accentLight}, ${C.accent})`
-                    : C.surface2,
-                  boxShadow: step.done ? `0 6px 14px -4px ${C.accentGlow}` : C.clayInset,
-                  color: step.done ? '#fff' : C.ink3,
-                  transition: `all 300ms ${C.ease}`,
+                    : step.active
+                      ? `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`
+                      : C.surface2,
+                  boxShadow: step.done
+                    ? `inset 0 1px 0 rgba(255,255,255,0.4), 0 8px 18px -6px ${C.accentGlow}`
+                    : step.active ? C.clay : C.clayInset,
+                  color: step.done ? '#fff' : step.active ? C.accent : C.ink3,
+                  transition: `all 380ms ${C.ease}`,
                 }}>
-                  {step.done ? <Check style={{ width: 15, height: 15 }} /> : step.num}
+                  {step.done ? <Check style={{ width: 17, height: 17 }} /> : step.num}
                 </div>
-                <span style={{ fontSize: 10, fontWeight: 700, color: C.ink3, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: step.active ? C.accent : step.done ? C.ink2 : C.ink3, textTransform: 'uppercase', letterSpacing: '0.06em', transition: `color 380ms ${C.ease}` }}>
                   {step.label}
                 </span>
               </div>

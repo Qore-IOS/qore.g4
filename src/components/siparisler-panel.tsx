@@ -20,7 +20,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { format as formatDate } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import {
-  Loader2, Plus, ArrowRight, Trash2, MoreHorizontal,
+  Loader2, Plus, ArrowRight, Trash2, MoreHorizontal, ChevronRight,
   ClipboardPlus, Undo, FileSpreadsheet, ShoppingCart,
   Package, CheckCircle2, Search, X, Filter,
 } from 'lucide-react';
@@ -44,6 +44,10 @@ const C = {
   waterSolid: '#6FB585',
   waterDeep: '#4E9E6B',
   amber: '#E0A33E',
+  danger: '#C0796A',
+  violet: '#9B86D6',
+  violetLight: '#C5B8EE',
+  violetGlow: 'rgba(155,134,214,0.30)',
   clay: 'inset 0 1px 1px rgba(255,255,255,0.9), inset 0 -3px 7px rgba(178,160,128,0.14), 0 10px 24px -12px rgba(150,128,96,0.34), 0 2px 6px -2px rgba(150,128,96,0.16)',
   clayInset: 'inset 0 2px 5px rgba(178,160,128,0.30), inset 0 -1px 0 rgba(255,255,255,0.55)',
   clayFlat: 'inset 0 1px 1px rgba(255,255,255,0.85), 0 4px 12px -7px rgba(150,128,96,0.28)',
@@ -85,6 +89,13 @@ function StatusBadge({ status, label, tone }: { status: string; label: string; t
   );
 }
 
+// Returns theme-consistent gradient pair + glow for any clay button color.
+function clayGrad(color: string): { top: string; glow: string; pressedShadow: string } {
+  if (color === C.violet) return { top: C.violetLight, glow: C.violetGlow, pressedShadow: 'inset 0 3px 7px rgba(80,50,130,0.26)' };
+  if (color === C.waterSolid) return { top: '#8FD3A6', glow: 'rgba(111,181,133,0.34)', pressedShadow: 'inset 0 3px 7px rgba(30,100,60,0.26)' };
+  return { top: C.accentLight, glow: C.accentGlow, pressedShadow: 'inset 0 3px 7px rgba(120,80,30,0.28)' };
+}
+
 function PrimaryBtn({
   onClick, disabled, loading, children, color = C.accent,
 }: {
@@ -92,6 +103,7 @@ function PrimaryBtn({
   children: React.ReactNode; color?: string;
 }) {
   const [pressed, setPressed] = useState(false);
+  const grad = clayGrad(color);
   return (
     <button
       onClick={onClick}
@@ -105,19 +117,19 @@ function PrimaryBtn({
         width: '100%', height: 52, borderRadius: C.rsm,
         background: disabled
           ? C.surface2
-          : `linear-gradient(180deg, ${color === C.accent ? C.accentLight : '#8FD3A6'} 0%, ${color} 100%)`,
+          : `linear-gradient(180deg, ${grad.top} 0%, ${color} 100%)`,
         boxShadow: disabled
           ? C.clayInset
           : pressed
-            ? 'inset 0 3px 7px rgba(120,80,30,0.28)'
-            : `inset 0 1px 0 rgba(255,255,255,0.4), 0 12px 22px -10px ${C.accentGlow}`,
+            ? grad.pressedShadow
+            : `inset 0 1px 0 rgba(255,255,255,0.4), 0 12px 22px -10px ${grad.glow}`,
         color: disabled ? C.ink3 : '#fff',
         fontWeight: 800, fontSize: 14.5,
         transition: `all 240ms ${C.ease}`,
         transform: pressed ? 'translateY(1px)' : 'none',
       }}
     >
-      {loading ? <Loader2 style={{ width: 16, height: 16, animation: 'spin 1s linear infinite' }} /> : children}
+      {loading ? <Loader2 style={{ width: 16, height: 16, animation: 'sipSpin 1s linear infinite' }} /> : children}
     </button>
   );
 }
@@ -187,15 +199,20 @@ function OrderCard({
   // so we don't show a bar — just show remaining items)
   const isKismi = variant === 'kismi';
 
+  const [hovered, setHovered] = useState(false);
   return (
-    <article style={{
-      borderRadius: C.r,
-      background: `linear-gradient(180deg, ${C.surface} 0%, ${C.surface2} 100%)`,
-      boxShadow: C.clay,
-      padding: '20px 22px',
-      display: 'flex', flexDirection: 'column', gap: 14,
-      animation: 'sipPopIn 280ms var(--sip-ease, cubic-bezier(.22,1,.36,1))',
-    }}>
+    <article
+      onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)}
+      style={{
+        borderRadius: C.r,
+        background: `linear-gradient(180deg, ${C.surface} 0%, ${C.surface2} 100%)`,
+        boxShadow: hovered ? `inset 0 1px 1px rgba(255,255,255,0.9), inset 0 -3px 7px rgba(178,160,128,0.14), 0 18px 36px -14px rgba(150,128,96,0.42), 0 4px 10px -3px rgba(150,128,96,0.22), 0 0 0 1px rgba(201,138,87,0.12)` : C.clay,
+        padding: '22px 24px',
+        display: 'flex', flexDirection: 'column', gap: 14,
+        animation: 'sipPopIn 320ms var(--sip-ease, cubic-bezier(.22,1,.36,1))',
+        transition: `box-shadow 280ms ${C.ease}, transform 280ms ${C.ease}`,
+        transform: hovered ? 'translateY(-2px)' : 'none',
+      }}>
       {/* Header row */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -585,13 +602,12 @@ export default function SiparislerPanel() {
   return (
     <>
       <style>{`
-        @keyframes sipPopIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+        @keyframes sipPopIn { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: none; } }
         @keyframes sipSpin { to { transform: rotate(360deg); } }
+        @keyframes sipHeaderIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
       `}</style>
 
-      {/* Full-bleed cream backdrop — paneli toplama ekranıyla aynı krem tonla
-          baştan başa sarar, arkadaki gri tema zemini görünmez. */}
-      <div aria-hidden style={{ position: 'fixed', inset: 0, background: C.surface2, zIndex: 0 }} />
+      <div aria-hidden style={{ position: 'fixed', inset: 0, background: 'linear-gradient(120deg, #F6F2EA 0%, transparent 55%), linear-gradient(225deg, #E8E1D2 0%, transparent 55%), #EFEAE0', zIndex: 0 }} />
 
       <div className="sp-shell" style={{
         position: 'relative', zIndex: 1,
@@ -896,13 +912,16 @@ export default function SiparislerPanel() {
                   style={{
                     all: 'unset', cursor: 'pointer',
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                    height: 48, borderRadius: C.rsm,
+                    height: 50, borderRadius: C.rsm,
                     background: `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`,
-                    boxShadow: C.clayFlat, color: C.ink2,
-                    fontSize: 14, fontWeight: 700,
+                    boxShadow: C.clay, color: C.accent,
+                    fontSize: 14, fontWeight: 800,
+                    letterSpacing: '0.01em',
                   }}
                 >
-                  {tamamlananLoading ? <Loader2 style={{ width: 16, height: 16, animation: 'sipSpin 1s linear infinite' }} /> : 'Daha Fazla Yükle'}
+                  {tamamlananLoading
+                    ? <Loader2 style={{ width: 16, height: 16, animation: 'sipSpin 1s linear infinite', color: C.ink3 }} />
+                    : <><ChevronRight style={{ width: 16, height: 16 }} /> Daha Fazla Yükle</>}
                 </button>
               )}
             </>
