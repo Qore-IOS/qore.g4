@@ -20,7 +20,10 @@ const FILTER_OPTIONS = [
   'Marka',
   'Ürün grubu',
   'Ürün kodu / marka',
+  'Sorumlu kullanıcı',
+  'Durum',
   'Tarih aralığı',
+  'Öncelik',
   'Eşik değeri',
   'Alıcılar',
 ];

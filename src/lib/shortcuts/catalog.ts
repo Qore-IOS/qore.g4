@@ -9,6 +9,9 @@ export type ShortcutParamKey =
   | 'urunGrubu'
   | 'urunKoduMarka'
   | 'tarihAraligi'
+  | 'sorumluKullanici'
+  | 'durum'
+  | 'oncelik'
   | 'esikDegeri'
   | 'esikGunSayisi'
   | 'alicilar'
@@ -48,6 +51,9 @@ const PARAMS = {
   urunGrubu: { key: 'urunGrubu', label: 'Ürün grubu', type: 'string[]' },
   urunKoduMarka: { key: 'urunKoduMarka', label: 'Ürün kodu / marka', type: 'string[]' },
   tarihAraligi: { key: 'tarihAraligi', label: 'Tarih aralığı', type: 'date-range' },
+  sorumluKullanici: { key: 'sorumluKullanici', label: 'Sorumlu kullanıcı', type: 'string[]' },
+  durum: { key: 'durum', label: 'Durum', type: 'string[]' },
+  oncelik: { key: 'oncelik', label: 'Öncelik', type: 'string[]' },
   esikDegeri: { key: 'esikDegeri', label: 'Eşik değeri', type: 'number' },
   esikGunSayisi: { key: 'esikGunSayisi', label: 'Eşik gün sayısı', type: 'number' },
   alicilar: { key: 'alicilar', label: 'Alıcılar', type: 'string[]' },
@@ -73,62 +79,31 @@ const navigationAction = (
   href,
 });
 
-const FAULT_OPERATIONS_SHORTCUT_ACTIONS: ShortcutAction[] = [
-  {
-    key: 'ariza-yonetimi.acik-ariza-yaslandirma-raporu',
-    label: 'Açık arıza yaşlandırma raporu',
-    description: 'Açık arızaları bekleme süresine göre sıralayıp yeni shortcut scheduler ile raporla.',
-    kind: 'report',
-    params: [PARAMS.lab, PARAMS.esikDegeri, PARAMS.alicilar, PARAMS.ciktiFormati],
-    handlerKey: 'fault-open-aging-report',
-    href: '/ariza-yonetimi',
-  },
-  {
-    key: 'ariza-yonetimi.sla-asimi-uyarisi',
-    label: 'SLA aşımı uyarısı',
-    description: 'Müdahale veya çözüm SLA eşiğini aşan açık arızaları shortcut scheduler üzerinden bildir.',
-    kind: 'notification',
-    params: [PARAMS.lab, PARAMS.esikDegeri, PARAMS.alicilar, PARAMS.gonderimKanali],
-    handlerKey: 'fault-sla-breach-alert',
-    href: '/ariza-yonetimi?status=mudahale_bekliyor',
-  },
-  {
-    key: 'ariza-yonetimi.parca-bekleyen-islemler',
-    label: 'Parça bekleyen işlemler',
-    description: 'Parça beklediği işaretlenen veya açıklamasında parça bekleme bilgisi olan açık arıza işlemlerini listele.',
-    kind: 'report',
-    params: [PARAMS.lab, PARAMS.alicilar, PARAMS.ciktiFormati],
-    handlerKey: 'fault-pending-parts-operations',
-    href: '/ariza-yonetimi',
-  },
-  {
-    key: 'ariza-yonetimi.teknisyen-haftalik-is-ozeti',
-    label: 'Teknisyen bazlı haftalık iş özeti',
-    description: 'Son 7 gündeki atanan, açık ve kapanan arızaları teknisyen bazında özetle.',
-    kind: 'report',
-    params: [PARAMS.tarihAraligi, PARAMS.alicilar, PARAMS.ciktiFormati],
-    handlerKey: 'technician-weekly-work-summary',
-    href: '/cihaz-yonetimi-ana',
-  },
-  {
-    key: 'ariza-yonetimi.kapanmis-ariza-kalite-kontrol',
-    label: 'Kapanmış arıza kalite kontrol raporu',
-    description: 'Kapanmış arızalarda açıklama ve çözüm süresi gibi kalite kontrol sinyallerini raporla.',
-    kind: 'report',
-    params: [PARAMS.tarihAraligi, PARAMS.lab, PARAMS.alicilar, PARAMS.ciktiFormati],
-    handlerKey: 'closed-fault-quality-control-report',
-    href: '/ariza-yonetimi?status=cozuldu',
-  },
-  {
-    key: 'cihaz-yonetimi.bakim-yaklasan-tarih-bildirimi',
-    label: 'Cihaz bakım yaklaşan tarih bildirimi',
-    description: 'Scheduled bakım hatırlatıcılarıyla aynı bakım planı verisini kullanarak yaklaşan bakım tarihlerini bildir.',
-    kind: 'notification',
-    params: [PARAMS.lab, PARAMS.esikGunSayisi, PARAMS.alicilar, PARAMS.gonderimKanali],
-    handlerKey: 'device-maintenance-upcoming-date-notification',
-    href: '/cihaz-tanimlamalari/periyodik-bakim-yonetimi',
-  },
+const OPERATIONAL_FILTER_PARAMS = [
+  PARAMS.depo,
+  PARAMS.lab,
+  PARAMS.sorumluKullanici,
+  PARAMS.durum,
+  PARAMS.tarihAraligi,
+  PARAMS.oncelik,
 ];
+
+const reportAction = (
+  panelKey: string,
+  actionKey: string,
+  label: string,
+  description: string,
+  handlerKey = `${panelKey}.${actionKey}`,
+  href?: string,
+): ShortcutAction => ({
+  key: `${panelKey}.${actionKey}`,
+  label,
+  description,
+  kind: 'report',
+  params: OPERATIONAL_FILTER_PARAMS,
+  handlerKey,
+  href,
+});
 
 export const SHORTCUT_CATALOG: ShortcutPanelCatalogItem[] = [
   {
@@ -150,6 +125,9 @@ export const SHORTCUT_CATALOG: ShortcutPanelCatalogItem[] = [
     actions: [
       navigationAction('mal-kabul', 'Mal kabul başlat', '/mal-kabul', 'Yeni mal kabul akışını aç.'),
       navigationAction('mal-kabul-gecmis', 'Mal kabul geçmişi', '/mal-kabul/gecmis', 'Geçmiş mal kabul kayıtlarını listele.'),
+      reportAction('mal-kabul', 'bekleyen-irsaliyeler', 'Bekleyen irsaliyeler', 'Seçilen filtrelere göre bekleyen irsaliyeleri listele.', undefined, '/mal-kabul'),
+      reportAction('mal-kabul', 'eksik-fazla-kabul-uyarisi', 'Eksik/fazla kabul uyarısı', 'Eksik veya fazla kabul riski taşıyan irsaliyeler için uyarı raporu hazırla.', undefined, '/mal-kabul/gecmis'),
+      reportAction('mal-kabul', 'gunluk-kabul-ozeti', 'Günlük kabul özeti', 'Günlük mal kabul hareketlerini depo, laboratuvar ve sorumlu bazında özetle.', undefined, '/mal-kabul/gecmis'),
     ],
   },
   {
@@ -160,13 +138,21 @@ export const SHORTCUT_CATALOG: ShortcutPanelCatalogItem[] = [
       navigationAction('siparisler', 'Siparişleri aç', '/siparisler'),
       navigationAction('siparis-gecmis', 'Sipariş geçmişi', '/siparisler?tab=tamamlanan', 'Tamamlanan siparişleri göster.'),
       navigationAction('direkt-transfer', 'Direkt transfer oluştur', '/direkt-transfer', 'Depolar arası direkt transfer ekranını aç.'),
+      reportAction('siparisler', 'onay-bekleyen-siparisler', 'Onay bekleyen siparişler', 'Onay bekleyen siparişleri seçilen operasyonel filtrelere göre listele.', undefined, '/siparisler'),
+      reportAction('siparisler', 'geciken-siparisler', 'Geciken siparişler', 'Geciken siparişleri depo, laboratuvar, durum, tarih ve öncelik kırılımlarıyla raporla.', undefined, '/siparisler'),
+      reportAction('siparisler', 'haftalik-siparis-ozeti', 'Haftalık sipariş özeti', 'Haftalık sipariş hacmini ve durum dağılımını sorumlu kullanıcı bazında özetle.', undefined, '/siparisler'),
     ],
   },
   {
     panelKey: 'direkt-transfer',
     panelLabel: panelLabel('direkt-transfer', 'Direkt Transfer'),
     requiredView: 'direkt-transfer',
-    actions: [navigationAction('direkt-transfer', 'Direkt transfer aç', '/direkt-transfer')],
+    actions: [
+      navigationAction('direkt-transfer', 'Direkt transfer aç', '/direkt-transfer'),
+      reportAction('direkt-transfer', 'acik-transfer-talepleri', 'Açık transfer talepleri', 'Açık transfer taleplerini seçilen filtrelere göre listele.', undefined, '/direkt-transfer'),
+      reportAction('direkt-transfer', 'geciken-transferler', 'Geciken transferler', 'Geciken transfer taleplerini depo, sorumlu kullanıcı, durum ve öncelik kırılımlarıyla raporla.', undefined, '/direkt-transfer'),
+      reportAction('direkt-transfer', 'kullanici-depo-bazli-transfer-ozeti', 'Kullanıcı/depo bazlı transfer özeti', 'Transfer hareketlerini kullanıcı ve depo bazında özetle.', undefined, '/direkt-transfer'),
+    ],
   },
   {
     panelKey: 'route-planlayici',
@@ -393,7 +379,12 @@ export const SHORTCUT_CATALOG: ShortcutPanelCatalogItem[] = [
     panelKey: 'satin-alma',
     panelLabel: panelLabel('satin-alma', 'Planlama Birimi'),
     requiredView: 'satin-alma',
-    actions: [navigationAction('satin-alma', 'Planlama birimini aç', '/satin-alma')],
+    actions: [
+      navigationAction('satin-alma', 'Planlama birimini aç', '/satin-alma'),
+      reportAction('satin-alma', 'gorev-gecikmeleri', 'Görev gecikmeleri', 'Planlama ve satın alma görev gecikmelerini operasyonel filtrelerle raporla.', undefined, '/satin-alma'),
+      reportAction('satin-alma', 'workflow-bekleyenleri', 'Workflow bekleyenleri', 'Workflow adımlarında bekleyen satın alma işlerini listele.', undefined, '/satin-alma'),
+      reportAction('satin-alma', 'haftalik-planlama-ozeti', 'Haftalık planlama özeti', 'Haftalık planlama işlerini durum, öncelik ve sorumlu kullanıcı kırılımlarıyla özetle.', undefined, '/satin-alma'),
+    ],
   },
   {
     panelKey: 'kullanici-talepleri',
