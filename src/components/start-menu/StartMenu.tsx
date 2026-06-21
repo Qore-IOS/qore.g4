@@ -22,6 +22,7 @@ import { useAI } from '@/contexts/ai-context';
 import { useStartMenu } from '@/contexts/start-menu-context';
 
 import { VIEWS } from '@/lib/constants';
+import { getShortcutActionsForViews } from '@/lib/shortcuts/catalog';
 import {
   TONE_CHIP,
   toneForKey,
@@ -105,6 +106,11 @@ export function StartMenu() {
   }, [q, navViews]);
 
   const pins = showAllPins ? navViews : navViews.slice(0, 10);
+
+  const shortcutActions = useMemo(
+    () => getShortcutActionsForViews(accessibleViews).slice(0, 8),
+    [accessibleViews],
+  );
 
   // ⌘K / Ctrl+K toggles the launcher anywhere; Esc closes it.
   useEffect(() => {
@@ -384,36 +390,50 @@ export function StartMenu() {
                     </div>
                   </section>
 
-                  {/* Kestirmeler (placeholder area — content defined later) */}
+                  {/* Kestirmeler — kullanıcının erişebildiği panellerden kataloglanır. */}
                   <section>
                     <div className="flex items-baseline justify-between px-1">
                       <h3 className={SECTION_LABEL}>Kestirmeler</h3>
+                      <span className="text-[11px] font-medium text-muted-foreground/70">
+                        Yetkili paneller
+                      </span>
                     </div>
                     <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-2">
-                      <button
-                        type="button"
-                        title="Yakında"
-                        className={cn(
-                          'inline-flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-xl text-[13px] font-semibold text-foreground transition hover:-translate-y-0.5',
-                          TILE,
-                        )}
-                      >
-                        <span
+                      {shortcutActions.map((action) => (
+                        <button
+                          key={action.key}
+                          type="button"
+                          onClick={() => {
+                            if (action.href) go(action.href, action.label);
+                            else openAI(`${action.panelLabel}: ${action.label}`);
+                          }}
+                          title={action.description}
                           className={cn(
-                            'grid place-items-center h-6 w-6 rounded-lg text-white',
-                            BRAND,
+                            'inline-flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-xl text-[13px] font-semibold text-foreground transition hover:-translate-y-0.5',
+                            TILE,
                           )}
                         >
-                          <Plus className="h-3.5 w-3.5" />
+                          <span
+                            className={cn(
+                              'grid place-items-center h-6 w-6 rounded-lg',
+                              TONE_CHIP[toneForKey(String(action.panelKey))],
+                            )}
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                          </span>
+                          {action.label}
+                          {action.kind !== 'navigation' && (
+                            <span className="ml-0.5 text-[9.5px] font-bold uppercase tracking-wide text-orange-600/80 dark:text-orange-400/80 bg-orange-500/10 rounded px-1.5 py-0.5">
+                              {action.kind}
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                      {shortcutActions.length === 0 && (
+                        <span className="text-[12px] text-muted-foreground">
+                          Kullanıcının erişebildiği panellere ait kestirme bulunamadı.
                         </span>
-                        Kestirme oluştur
-                        <span className="ml-0.5 text-[9.5px] font-bold uppercase tracking-wide text-orange-600/80 dark:text-orange-400/80 bg-orange-500/10 rounded px-1.5 py-0.5">
-                          Yakında
-                        </span>
-                      </button>
-                      <span className="text-[12px] text-muted-foreground">
-                        Sık tekrarladığın işlemleri tek tıkla çalıştır.
-                      </span>
+                      )}
                     </div>
                   </section>
 
