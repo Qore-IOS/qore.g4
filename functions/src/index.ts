@@ -27,6 +27,7 @@ export {
   backfillCompanyStats,
 } from './companyStatsAggregation';
 export { onBankTransactionWritten } from './cariReconciliation';
+export { shortcutScheduler } from './shortcutScheduler';
 
 function chunk<T>(arr: T[], size = 500): T[][] {
   const out: T[][] = [];
