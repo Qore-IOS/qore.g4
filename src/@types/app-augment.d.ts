@@ -17,8 +17,7 @@ declare module "@/lib/types" {
     | "sarf-dagitim"
     | "tuketim-istatistikleri"
     | "cihaz-yonetimi-ana"
-    | "cihaz-ustu-ekle"
-    | "cihaz-ustu-gecmisi"
+    | "cihaz-ustu-hesaplama"
     | "direkt-transfer"
     | "urun-talep"
     | "verimlilik-hesaplama"
@@ -26,7 +25,6 @@ declare module "@/lib/types" {
     | "teknik-servis"
     | "transfer-gecmis"
     | "siparis-gecmis"
-    | "kumulatif-gecmis"
     | "kumulatif-hesaplama"
     | "arama"
     | "cihaz-ariza-gecmis"
@@ -766,6 +764,7 @@ declare module "@/lib/types" {
     sutKodu: string;
     sutTestAdi: string;
     linkedStokKodlari: string[];
+    counterValue?: number;
     hakEdisMiktari: number;
     currency?: 'EUR' | 'USD' | 'TRY';
     aktif: boolean;

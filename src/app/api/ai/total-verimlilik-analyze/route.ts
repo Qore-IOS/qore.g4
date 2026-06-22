@@ -12,12 +12,14 @@ export async function POST(request: NextRequest) {
       systemPrompt,
       prompt,
       temperature = 0.2,
-      maxOutputTokens = 1200,
+      maxOutputTokens = 2048,
+      thinkingBudget,
     } = body as {
       systemPrompt?: string;
       prompt?: string;
       temperature?: number;
       maxOutputTokens?: number;
+      thinkingBudget?: number;
     };
 
     if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
@@ -32,6 +34,7 @@ export async function POST(request: NextRequest) {
       messages: [{ role: 'user', content: prompt }],
       temperature,
       maxOutputTokens,
+      thinkingBudget,
     });
 
     return NextResponse.json({ text: result.text, model: result.model });

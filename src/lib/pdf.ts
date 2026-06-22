@@ -13,7 +13,7 @@ let pdfJsPromise: Promise<any> | null = null;
  * Lazily loads PDF.js only when needed (not on every page load)
  * This eliminates the preload warning and reduces initial bundle size
  */
-async function getPdfJs() {
+export async function getPdfJs() {
   if (typeof window === 'undefined') {
     throw new Error("PDF.js can only be used in browser environment");
   }

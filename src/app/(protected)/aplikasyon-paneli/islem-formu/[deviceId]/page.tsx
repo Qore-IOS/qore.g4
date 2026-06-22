@@ -2003,6 +2003,45 @@ export default function AplikasyonIslemFormuPage() {
 
             const partChanges = deviceSpecificActions.filter(a => a.type === 'part_change');
             for (const partChange of partChanges) {
+                let removedStockRefId: string | null = null;
+                const removedSerial = String(partChange.removedPartSerialNumber || '').trim();
+                const installedSerial = String(partChange.serialNumber || '').trim();
+                const removedStokKodu = partChange.removedPartStokKodu || partChange.stokKodu || '';
+
+                if (removedSerial && removedSerial !== installedSerial) {
+                    const duplicateRemovedPartSnap = await getDocs(query(
+                        collection(db, 'yedekParcaDepoStok'),
+                        where('stokKodu', '==', removedStokKodu),
+                        where('serialNumber', '==', removedSerial)
+                    ));
+
+                    if (duplicateRemovedPartSnap.empty) {
+                        const removedStockRef = doc(collection(db, 'yedekParcaDepoStok'));
+                        removedStockRefId = removedStockRef.id;
+                        batch.set(removedStockRef, withCompanyScope({
+                            productCodeId: partChange.productCodeId || '',
+                            stokKodu: removedStokKodu,
+                            stokAdi: partChange.removedPartStokAdi || partChange.stokAdi || '',
+                            anaBirim: partChange.anaBirim || 'Adet',
+                            serialNumber: removedSerial,
+                            imageUrl: partChange.removedPartImageUrl || null,
+                            address: '',
+                            quantity: 1,
+                            partCondition: 'cihazdan_cikan',
+                            partConditionNote: `Cihazdan çıkan parça: ${currentDevice.cihazAdi || currentDevice.model || currentDevice.id || ''}`.trim(),
+                            sourceType: 'device_removed',
+                            sourceDeviceId: currentDevice.id,
+                            sourceDeviceName: currentDevice.cihazAdi || currentDevice.model || '',
+                            sourceFormId: formRef.id,
+                            sourceFormType: 'aplikasyon',
+                            createdAt: Timestamp.fromDate(now),
+                            createdByUid: currentUserProfile?.uid || '',
+                            createdByName: currentUserProfile?.name || '',
+                            replacedPartId: partChange.personalStockId || partChange.poolStockId || null,
+                        }, currentCompanyId));
+                    }
+                }
+
                 if (partChange.personalStockId) {
                     const stockRef = doc(db, 'personalStock', partChange.personalStockId);
                     batch.update(stockRef, {
@@ -2012,6 +2051,7 @@ export default function AplikasyonIslemFormuPage() {
                       usedOnDeviceName: currentDevice.cihazAdi || currentDevice.model || '',
                       usedOnFormId: formRef.id,
                       usedOnFormType: 'aplikasyon',
+                      replacedPartId: removedStockRefId,
                     });
 
                     const useLogRef = doc(collection(db, 'sparePartTransferLogs'));

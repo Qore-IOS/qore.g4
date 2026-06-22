@@ -33,6 +33,7 @@ import {
   LogOut,
   Wrench,
   ShieldAlert,
+  AlertTriangle,
   ShoppingBag,
   Truck,
   Building,
@@ -215,44 +216,22 @@ const subItemMap: Record<string, DockSubItem[]> = {
       href: "/raporlama/gecmis-stok-raporu",
     },
     {
-      key: "kumulatif-islemleri",
-      label: "Kümülatif İşlemleri",
-      icon: Archive,
-      href: "/kumulatif-hesaplama",
-      subItems: [
-        {
-          key: "kumulatif-hesaplama",
-          label: "Kümülatif Hesaplama",
-          icon: Calculator,
-          href: "/kumulatif-hesaplama",
-        },
-        {
-          key: "kumulatif-gecmis",
-          label: "Kümülatif Geçmişi",
-          icon: History,
-          href: "/kumulatif-gecmis",
-        },
-      ],
+      key: "stock-risk-report",
+      label: "Stok Risk Raporu",
+      icon: AlertTriangle,
+      href: "/raporlama/stock-risk-report",
     },
     {
-      key: "cihaz-ustu-islemleri",
-      label: "Cihaz Üstü İşlemleri",
+      key: "kumulatif-hesaplama",
+      label: "Kümülatif Hesaplama",
+      icon: Calculator,
+      href: "/kumulatif-hesaplama",
+    },
+    {
+      key: "cihaz-ustu-hesaplama",
+      label: "Cihaz Üstü Hesaplama",
       icon: Activity,
-      href: "/raporlama/cihaz-ustu-ekle",
-      subItems: [
-        {
-          key: "cihaz-ustu-ekle",
-          label: "Cihaz Üstü Ekle",
-          icon: PlusCircle,
-          href: "/raporlama/cihaz-ustu-ekle",
-        },
-        {
-          key: "cihaz-ustu-gecmisi",
-          label: "Cihaz Üstü Geçmişi",
-          icon: History,
-          href: "/raporlama/cihaz-ustu-gecmisi",
-        },
-      ],
+      href: "/cihaz-ustu-hesaplama",
     },
   ],
   "urun-kullanim": [
@@ -615,6 +594,12 @@ export function useDock() {
               icon: Boxes,
               href: ownStockHref,
             },
+            {
+              key: 'kumulatif-hesaplama-field',
+              label: 'Kümülatif Hesapla',
+              icon: Calculator,
+              href: '/kumulatif-hesaplama',
+            },
           ];
         }
 
@@ -652,6 +637,14 @@ export function useDock() {
             type: 'nav',
             href: stockHref,
             onClick: () => router.push(stockHref),
+          },
+          {
+            key: 'kumulatif-hesaplama-field-mobile',
+            label: 'Kümülatif Hesapla',
+            icon: Calculator,
+            type: 'nav',
+            href: '/kumulatif-hesaplama',
+            onClick: () => router.push('/kumulatif-hesaplama'),
           }
         );
       }

@@ -14,14 +14,25 @@ import {
   Sun,
   Moon,
   AppWindow,
+  Clock3,
+  Repeat2,
+  Play,
+  Pencil,
+  Ban,
+  FileClock,
 } from 'lucide-react';
 import { useTheme } from 'next-themes';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { useAI } from '@/contexts/ai-context';
 import { useStartMenu } from '@/contexts/start-menu-context';
+import { addDoc, collection, limit, onSnapshot, orderBy, query as firestoreQuery, serverTimestamp, updateDoc, doc, where, getDocs } from 'firebase/firestore';
+import { toast } from 'sonner';
+import { db } from '@/lib/firebase';
 
 import { VIEWS } from '@/lib/constants';
+import { ShortcutBuilderModal } from './ShortcutBuilderModal';
+import { createShortcutDraft, type ShortcutDraft } from '@/lib/shortcuts/draft';
 import {
   TONE_CHIP,
   toneForKey,
@@ -45,6 +56,24 @@ const ROW =
 /** On-brand orange gradient — the app's primary identity (hue ~35). */
 const BRAND = 'bg-gradient-to-br from-[#f99a52] to-[#f06f2c]';
 
+
+type ShortcutRunMode = 'manual' | 'scheduled' | 'manual_and_scheduled';
+
+type SavedShortcut = {
+  id: string;
+  title?: string;
+  description?: string;
+  panelLabel?: string;
+  actionHref?: string;
+  runMode?: ShortcutRunMode;
+  scheduleLabel?: string;
+  enabled?: boolean;
+  lastRunAt?: { toDate?: () => Date } | Date | null;
+};
+
+const isManualShortcut = (shortcut: SavedShortcut) => (shortcut.runMode || 'manual') === 'manual' || shortcut.runMode === 'manual_and_scheduled';
+const isScheduledShortcut = (shortcut: SavedShortcut) => shortcut.runMode === 'scheduled' || shortcut.runMode === 'manual_and_scheduled';
+
 /** Render **bold** segments of the daily-summary copy in the accent colour. */
 function renderEmphasis(text: string) {
   return text.split(/(\*\*[^*]+\*\*)/g).map((seg, i) => {
@@ -61,7 +90,7 @@ function renderEmphasis(text: string) {
 
 export function StartMenu() {
   const { isOpen, close, toggle } = useStartMenu();
-  const { currentUser, currentUserProfile, logout, setUserTheme } = useAuth();
+  const { currentUser, currentUserProfile, logout, setUserTheme, currentCompanyId } = useAuth();
   const { openAI } = useAI();
 
   const { theme, resolvedTheme } = useTheme();
@@ -70,6 +99,9 @@ export function StartMenu() {
   const [query, setQuery] = useState('');
   const [showAllPins, setShowAllPins] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [isShortcutBuilderOpen, setIsShortcutBuilderOpen] = useState(false);
+  const [savedShortcuts, setSavedShortcuts] = useState<SavedShortcut[]>([]);
+  const [shortcutDraft, setShortcutDraft] = useState<ShortcutDraft | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Avoid hydration mismatch for the theme switch.
@@ -105,6 +137,80 @@ export function StartMenu() {
   }, [q, navViews]);
 
   const pins = showAllPins ? navViews : navViews.slice(0, 10);
+
+
+  useEffect(() => {
+    if (!currentUser?.uid) {
+      setSavedShortcuts([]);
+      return;
+    }
+    const shortcutsQuery = firestoreQuery(
+      collection(db, 'shortcuts'),
+      where('createdByUid', '==', currentUser.uid),
+      orderBy('createdAt', 'desc'),
+      limit(12),
+    );
+    return onSnapshot(shortcutsQuery, (snapshot) => {
+      setSavedShortcuts(snapshot.docs.map((item) => ({ id: item.id, ...(item.data() as Omit<SavedShortcut, 'id'>) })));
+    });
+  }, [currentUser?.uid]);
+
+  const saveShortcut = async (payload: any) => {
+    if (!currentUser?.uid) return;
+    const firstRunAt = payload.runMode === 'manual' ? null : new Date();
+    await addDoc(collection(db, 'shortcuts'), {
+      ...payload,
+      title: payload.actionLabel,
+      description: payload.actionDescription,
+      actionHref: payload.actionHref || null,
+      companyId: currentCompanyId || null,
+      createdByUid: currentUser.uid,
+      createdByName: currentUserProfile?.name || currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Kullanıcı',
+      enabled: true,
+      nextRunAt: firstRunAt,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Etc/UTC',
+      permissionSnapshot: {
+        uid: currentUser.uid,
+        companyId: currentCompanyId || null,
+        role: currentUserProfile?.role || null,
+        accessibleViews,
+        permissions: accessibleViews,
+        assignedLaboratories: currentUserProfile?.assignedLaboratories || [],
+        assignedDepots: currentUserProfile?.assignedDepots || [],
+      },
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+    toast.success('Kestirme kaydedildi.');
+  };
+
+  const requestShortcutRun = async (shortcut: SavedShortcut) => {
+    if (!currentUser?.uid) return;
+    await addDoc(collection(db, 'shortcutRunRequests'), {
+      shortcutId: shortcut.id,
+      requestedByUid: currentUser.uid,
+      companyId: currentCompanyId || null,
+      status: 'queued',
+      createdAt: serverTimestamp(),
+    });
+    toast.success('Çalıştırma isteği oluşturuldu.');
+  };
+
+  const disableShortcut = async (shortcut: SavedShortcut) => {
+    await updateDoc(doc(db, 'shortcuts', shortcut.id), { enabled: false, updatedAt: serverTimestamp() });
+    toast.success('Kestirme pasifleştirildi.');
+  };
+
+  const showLastRunLog = async (shortcut: SavedShortcut) => {
+    const runsQuery = firestoreQuery(collection(db, 'shortcutRuns'), where('shortcutId', '==', shortcut.id), orderBy('createdAt', 'desc'), limit(1));
+    const runs = await getDocs(runsQuery);
+    if (runs.empty) {
+      toast.info('Bu kestirme için çalışma logu yok.');
+      return;
+    }
+    const run = runs.docs[0].data() as any;
+    toast.info(run.message || run.error || `Son durum: ${run.status || 'bilinmiyor'}`);
+  };
 
   // ⌘K / Ctrl+K toggles the launcher anywhere; Esc closes it.
   useEffect(() => {
@@ -143,9 +249,23 @@ export function StartMenu() {
     close();
   };
 
+  const openShortcutBuilder = (draft: ShortcutDraft | null = null) => {
+    setShortcutDraft(draft);
+    setIsShortcutBuilderOpen(true);
+  };
+
+  const openShortcutDraftFromQuery = () => {
+    const draft = createShortcutDraft({ text: q, accessibleViews });
+    if (!draft) return false;
+    openShortcutBuilder(draft);
+    toast.success('Kestirme taslağı hazırlandı.');
+    return true;
+  };
+
   const onSearchKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault();
+      if (openShortcutDraftFromQuery()) return;
       if (results.length > 0) go(results[0].href);
       else askAI();
     }
@@ -241,6 +361,19 @@ export function StartMenu() {
               {q ? (
                 /* ---- search results ---- */
                 <div className="flex flex-col gap-1">
+                  {createShortcutDraft({ text: q, accessibleViews }) && (
+                    <button type="button" onClick={openShortcutDraftFromQuery} className={ROW}>
+                      <span className={cn('grid place-items-center h-9 w-9 rounded-xl text-white shrink-0', BRAND)}>
+                        <Plus className="h-[18px] w-[18px]" />
+                      </span>
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-[14px] font-semibold text-foreground">Kestirme taslağı oluştur</span>
+                        <span className="block text-[12.5px] text-muted-foreground truncate">“{q}”</span>
+                      </span>
+                      <CornerDownLeft className="h-4 w-4 text-muted-foreground/60 shrink-0" />
+                    </button>
+                  )}
+
                   <button type="button" onClick={askAI} className={ROW}>
                     <span
                       className={cn(
@@ -384,36 +517,66 @@ export function StartMenu() {
                     </div>
                   </section>
 
-                  {/* Kestirmeler (placeholder area — content defined later) */}
+                  {/* Kestirmeler — kullanıcının erişebildiği panellerden kataloglanır. */}
                   <section>
                     <div className="flex items-baseline justify-between px-1">
                       <h3 className={SECTION_LABEL}>Kestirmeler</h3>
+                      <span className="text-[11px] font-medium text-muted-foreground/70">
+                        Yetkili paneller
+                      </span>
                     </div>
                     <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-2">
                       <button
                         type="button"
-                        title="Yakında"
+                        onClick={() => openShortcutBuilder()}
                         className={cn(
-                          'inline-flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-xl text-[13px] font-semibold text-foreground transition hover:-translate-y-0.5',
-                          TILE,
+                          'inline-flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-xl text-[13px] font-semibold text-white transition hover:-translate-y-0.5 shadow-[0_9px_18px_-8px_rgba(240,111,44,.8)]',
+                          BRAND,
                         )}
                       >
-                        <span
-                          className={cn(
-                            'grid place-items-center h-6 w-6 rounded-lg text-white',
-                            BRAND,
-                          )}
-                        >
+                        <span className="grid place-items-center h-6 w-6 rounded-lg bg-white/20">
                           <Plus className="h-3.5 w-3.5" />
                         </span>
                         Kestirme oluştur
-                        <span className="ml-0.5 text-[9.5px] font-bold uppercase tracking-wide text-orange-600/80 dark:text-orange-400/80 bg-orange-500/10 rounded px-1.5 py-0.5">
-                          Yakında
-                        </span>
                       </button>
-                      <span className="text-[12px] text-muted-foreground">
-                        Sık tekrarladığın işlemleri tek tıkla çalıştır.
-                      </span>
+                      <button
+                        type="button"
+                        onClick={() => go('/kestirmeler')}
+                        className="inline-flex items-center gap-2 rounded-xl border border-black/[0.05] bg-white px-3 py-1.5 text-[13px] font-semibold text-foreground transition hover:-translate-y-0.5 hover:bg-black/[0.03] dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.08]"
+                      >
+                        <FileClock className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                        Çalışma geçmişi
+                      </button>
+                      <div className="grid w-full gap-2 sm:grid-cols-2">
+                        {savedShortcuts.filter(isManualShortcut).map((shortcut) => (
+                          <div key={shortcut.id} className={cn('rounded-2xl p-3', TILE, shortcut.enabled === false && 'opacity-60')}>
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="truncate text-[13px] font-bold text-foreground">{shortcut.title || 'Kestirme'}</span>
+                                  {isScheduledShortcut(shortcut) && (
+                                    <span className="inline-flex items-center gap-1 rounded-full bg-orange-500/10 px-1.5 py-0.5 text-[10px] font-bold text-orange-600 dark:text-orange-400" title={shortcut.scheduleLabel}>
+                                      <Clock3 className="h-3 w-3" /> <Repeat2 className="h-3 w-3" />
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="mt-0.5 truncate text-[11.5px] text-muted-foreground">{shortcut.panelLabel || shortcut.description || 'Manuel kestirme'}</p>
+                              </div>
+                            </div>
+                            <div className="mt-2 grid grid-cols-2 gap-1.5">
+                              <ShortcutActionButton label="Şimdi çalıştır" icon={Play} onClick={() => requestShortcutRun(shortcut)} disabled={shortcut.enabled === false} />
+                              <ShortcutActionButton label="Düzenle" icon={Pencil} onClick={() => openShortcutBuilder()} />
+                              <ShortcutActionButton label="Pasifleştir" icon={Ban} onClick={() => disableShortcut(shortcut)} disabled={shortcut.enabled === false} />
+                              <ShortcutActionButton label="Son çalışma logu" icon={FileClock} onClick={() => showLastRunLog(shortcut)} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      {savedShortcuts.filter(isManualShortcut).length === 0 && (
+                        <span className="text-[12px] text-muted-foreground">
+                          Henüz manuel kestirme yok. Katalogdan bir kestirme oluşturabilirsiniz.
+                        </span>
+                      )}
                     </div>
                   </section>
 
@@ -545,9 +708,33 @@ export function StartMenu() {
               </div>
             </motion.div>
           </div>
+          <ShortcutBuilderModal
+            open={isShortcutBuilderOpen}
+            onOpenChange={(open) => {
+              setIsShortcutBuilderOpen(open);
+              if (!open) setShortcutDraft(null);
+            }}
+            accessibleViews={accessibleViews}
+            initialDraft={shortcutDraft}
+            onSave={saveShortcut}
+          />
         </>
       )}
     </AnimatePresence>
+  );
+}
+
+function ShortcutActionButton({ label, icon: Icon, onClick, disabled }: { label: string; icon: React.ElementType; onClick: () => void; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="inline-flex items-center justify-center gap-1 rounded-lg bg-black/[0.04] px-2 py-1.5 text-[11px] font-semibold text-foreground transition hover:bg-black/[0.07] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white/[0.06] dark:hover:bg-white/[0.1]"
+    >
+      <Icon className="h-3.5 w-3.5" />
+      {label}
+    </button>
   );
 }
 

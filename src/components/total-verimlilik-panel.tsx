@@ -31,15 +31,18 @@
  * - Focus management for modal dialogs
  *
  * @calculations
- * - Column 9: Total Ay Başı Stok = (Kutu × Ambalaj) + Cihaz Üstü Test
- * - Column 14: Sevkiyatlar Sonrası Total = ((10+11+12+13) × Ambalaj) + 9
- * - Column 18: Dönem Sonu Toplam = (Kutu × Ambalaj) + Cihaz Üstü Test
- * - Column 20: Stok Doğruluk Fark = (14-18) - 15, Sapma % = Fark/15 × 100
- * - Column 21: Kit Verimlilik Fark = 15 - 19, Sapma % = Fark/15 × 100
- * - Column 22: Kutu Kayıp = Fark / Ambalaj
- * - Column 23: Sarfiyat Maliyeti = (14-18) × (Maliyet/Ambalaj)
- * - Column 24: Hak Ediş Karşılığı = HakEdişTL × TestSayısı(19)
- * - Column 25: Kâr = Sütun 24 - Sütun 23
+ * - Column 8:  Total Ay Başı Stok = (Baş.Stok Kutu × Ambalaj) + Ay Üstü Cihaz Test
+ * - Column 10: Ay Başı Sevkiyat (Test) = Ay Başı Sevkiyat (Kutu) × Ambalaj
+ * - Column 14: Sevkiyatlar Sonrası Total = ((Sevk.Kutuları) × Ambalaj) + Total Ay Başı
+ * - Column 18: Dönem Sonu Toplam = (D.Sonu Stok Kutu × Ambalaj) + D.Sonu Cihaz Test
+ * - Column 20: Beklenen Test = Sevkiyatlar Sonrası (14) − D.Sonu Toplam (18)
+ * - Column 22: Stok Doğruluk Fark = Beklenen Test (20) − Kümülatif (15)
+ *              (eksik: Fark>0 / fark yok: Fark=0 / fazla: Fark<0)
+ * - Column 23: Kutu Kayıp = Stok Doğruluk Fark / Ambalaj
+ * - Column 24: Kit Verimlilik Fark = Kümülatif (15) − Hak Ediş (21)  [Maliyet grubu]
+ * - Column 25: Sarfiyat Maliyeti = StokFark × (Maliyet/Ambalaj)
+ * - Column 26: Hak Ediş Karşılığı = HakEdişTL × Beklenen Test (20)
+ * - Column 27: Kâr = Hak Ediş Karşılığı (26) − Sarfiyat Maliyeti (25)
  */
 
 'use client';
@@ -77,14 +80,17 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { LabSelector } from '@/components/common/LabSelector';
 import { Label } from '@/components/ui/label';
-import { collection, getDocs, query, orderBy, doc, setDoc, getDoc, Timestamp, where, collectionGroup } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, doc, getDoc, Timestamp, where, collectionGroup } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { getScopedDocs, scopedQuery } from '@/lib/firestore-helpers';
+import { withCompanyScope } from '@/lib/company-scope';
 import { totalVerimlilikLogger } from '@/lib/logger';
 import { cn, exportDataToExcel } from '@/lib/utils';
+import { TOTAL_VERIMLILIK_AI_MASTER_PROMPT } from '@/lib/ai/totalVerimlilikMasterPrompt';
 import { getExchangeRates } from '@/lib/exchange-rates';
+import { loadTotalEfficiencyRows, saveTotalEfficiencyRecord } from '@/lib/total-efficiency-record-storage';
 import Link from 'next/link';
 
 interface TotalVerimlilikPanelProps {
@@ -107,8 +113,9 @@ interface TableRow {
   ayBasiCihazUstuTest: number;
   // Hesaplanan alan (Sütun 9)
   totalAyBasiStok: number;
-  // Phase 2 - Sütunlar 10-14
-  ayBasiSevkiyatKutu: number; // Sütun 10 - Ay Başı Sevkiyat (Kutu)
+  // Phase 2 - Sütunlar 9-14
+  ayBasiSevkiyatKutu: number; // Sütun 9 - Ay Başı Sevkiyat (Kutu)
+  ayBasiSevkiyatTest: number; // Sütun 10 - Ay Başı Sevkiyat (Test) = Kutu × Ambalaj (hesaplanan)
   goztepeSevkiyat: number; // Sütun 11 - Göztepe Sevkiyat (Kutu)
   kurumlarArasiSevk: number; // Sütun 12 - Kurumlar Arası Sevk (Kutu)
   kurumlarArasiSevkKaynakLabId?: string; // Sütun 12 için kaynak lab
@@ -118,17 +125,17 @@ interface TableRow {
   kumulatifTotal: number; // Sütun 15 - Kümülatif Total (Test)
   donemSonuStokKutu: number; // Sütun 16 - Dönem Sonu Stok (Kutu)
   donemSonuCihazUstuTest: number; // Sütun 17 - Dönem Sonu Cihaz Üstü (Test)
-  donemSonuToplamTest: number; // Sütun 17 - Hesaplanan: (16 * ambalaj) + 17
-  // YENİ - Sütun 18: Cihazdan çıkan kit (ejectedKitRecords) test toplamı (otomatik, salt-okunur)
+  donemSonuToplamTest: number; // Sütun 18 - Hesaplanan: (16 * ambalaj) + 17
+  // Sütun 19: Cihazdan çıkan kit (ejectedKitRecords) test toplamı (otomatik, salt-okunur, bilgi amaçlı)
   arizaliKitTest: number;
-  // YENİ - Sütun 19: Beklenen Test Sayısı = sevkiyatlarSonrasiTotalTest - arizaliKitTest (hesaplanan)
+  // Sütun 20: Beklenen Test = sevkiyatlarSonrasiTotalTest − donemSonuToplamTest (hesaplanan)
   beklenenTestSayisi: number;
-  hakEdis: number; // Sütun 20 - Hak Ediş (Test)
-  // Phase 4 - Sütunlar 20-21
-  stokDogrulukFark: number; // Sütun 20 - (14-18) - 15 = Fark (Test)
-  stokDogrulukYuzde: number; // Sütun 20 - Fark/15 * 100 = Sapma %
-  kitVerimlilikFark: number; // Sütun 21 - 15 - 19 = Fark (Test)
-  kitVerimlilikYuzde: number; // Sütun 21 - Fark/15 * 100 = Sapma %
+  hakEdis: number; // Sütun 21 - Hak Ediş (Test)
+  // Phase 4 - Sütunlar 22 / 24
+  stokDogrulukFark: number; // Sütun 22 - Beklenen Test (20) − Kümülatif (15) = Fark (Test)
+  stokDogrulukYuzde: number; // Sütun 22 - Fark/Kümülatif * 100 = Sapma %
+  kitVerimlilikFark: number; // Sütun 24 - Kümülatif (15) − Hak Ediş (21) = Fark (Test) [Maliyet grubu]
+  kitVerimlilikYuzde: number; // Sütun 24 - Fark/Kümülatif * 100 = Sapma %
 }
 
 type EditableField = 'baslangicStokuKutu' | 'ayBasiCihazUstuTest' | 'ayBasiSevkiyatKutu' | 'goztepeSevkiyat' | 'kurumlarArasiSevk' | 'lojistikAraTransfer' | 'kumulatifTotal' | 'donemSonuStokKutu' | 'donemSonuCihazUstuTest' | 'hakEdis';
@@ -348,28 +355,40 @@ const COLS: ColDef[] = [
   { id: 'ayBasiCihazUstuTest',       num: 7,  label: 'Ay Üstü',             sub: '(Test)',   w: 66,  type: 'manual' },
   { id: 'totalAyBasiStok',           num: 8,  label: 'Total Ay Başı',       sub: '(Test)',   w: 80,  type: 'calc' },
   { id: 'ayBasiSevkiyatKutu',        num: 9,  label: 'Ay Başı Sevk.',       sub: '(Kutu)',   w: 80,  type: 'manual' },
-  { id: 'goztepeSevkiyat',           num: 10, label: 'Göztepe Sevk.',       sub: '(Kutu)',   w: 80,  type: 'manual' },
-  { id: 'kurumlarArasiSevk',         num: 11, label: 'K.Arası Sevk',        sub: '(Kutu)',   w: 80,  type: 'manual' },
-  { id: 'lojistikAraTransfer',       num: 12, label: 'Loj. Transfer',       sub: '(Kutu)',   w: 80,  type: 'manual' },
-  { id: 'sevkiyatlarSonrasiTotalTest', num: 13, label: 'Sevk. Sonrası',     sub: '(Test)',   w: 84,  type: 'calc' },
-  { id: 'kumulatifTotal',            num: 14, label: 'Küm. Total',          sub: '(Test)',   w: 78,  type: 'manual' },
-  { id: 'donemSonuStokKutu',         num: 15, label: 'D.Sonu Stok',         sub: '(Kutu)',   w: 78,  type: 'manual' },
-  { id: 'donemSonuCihazUstuTest',    num: 16, label: 'D.Sonu Cihaz',        sub: '(Test)',   w: 82,  type: 'manual' },
-  { id: 'donemSonuToplamTest',       num: 17, label: 'D.Sonu Toplam',       sub: '(Test)',   w: 82,  type: 'calc' },
-  { id: 'arizaliKitTest',            num: 18, label: 'Arızalı Kitler',      sub: '(Test)',   w: 90,  type: 'calc' },
-  { id: 'beklenenTestSayisi',        num: 19, label: 'Beklenen Test',       sub: '(Test)',   w: 90,  type: 'calc' },
-  { id: 'hakEdis',                   num: 20, label: 'Hak Ediş',            sub: '(Test)',   w: 74,  type: 'manual' },
-  { id: 'stokDogrulukFark',          num: 21, label: 'Stok Doğruluk',                        w: 124, type: 'result' },
-  { id: 'kitVerimlilikFark',         num: 22, label: 'Kit Verimlilik',                       w: 124, type: 'result' },
-  { id: 'kutuKayip',                 num: 23, label: 'Kutu Kayıp',                           w: 96,  type: 'result' },
-  { id: 'sarfiyatMaliyeti',          num: 24, label: 'Sarfiyat Maliyeti',                    w: 110, type: 'result', cost: true },
-  { id: 'hakEdisKarsiligi',          num: 25, label: 'Hak Ediş Karş.',                       w: 110, type: 'result', cost: true },
-  { id: 'kar',                       num: 26, label: 'Kâr',                                  w: 96,  type: 'result', cost: true },
-  { id: 'zararMaliyeti',             num: 27, label: 'Zarar Maliyeti',                       w: 110, type: 'result' },
-  { id: 'merkezeGonderilen',         num: 28, label: 'Merkeze Gön.',        sub: '(Test)',   w: 96,  type: 'result', centerOnly: true },
+  { id: 'ayBasiSevkiyatTest',        num: 10, label: 'Ay Başı Sevk.',       sub: '(Test)',   w: 84,  type: 'calc' },
+  { id: 'goztepeSevkiyat',           num: 11, label: 'Göztepe Sevk.',       sub: '(Kutu)',   w: 80,  type: 'manual' },
+  { id: 'kurumlarArasiSevk',         num: 12, label: 'K.Arası Sevk',        sub: '(Kutu)',   w: 80,  type: 'manual' },
+  { id: 'lojistikAraTransfer',       num: 13, label: 'Loj. Transfer',       sub: '(Kutu)',   w: 80,  type: 'manual' },
+  { id: 'sevkiyatlarSonrasiTotalTest', num: 14, label: 'Sevk. Sonrası',     sub: '(Test)',   w: 84,  type: 'calc' },
+  { id: 'kumulatifTotal',            num: 15, label: 'Küm. Total',          sub: '(Test)',   w: 78,  type: 'manual' },
+  { id: 'donemSonuStokKutu',         num: 16, label: 'D.Sonu Stok',         sub: '(Kutu)',   w: 78,  type: 'manual' },
+  { id: 'donemSonuCihazUstuTest',    num: 17, label: 'D.Sonu Cihaz',        sub: '(Test)',   w: 82,  type: 'manual' },
+  { id: 'donemSonuToplamTest',       num: 18, label: 'D.Sonu Toplam',       sub: '(Test)',   w: 82,  type: 'calc' },
+  { id: 'arizaliKitTest',            num: 19, label: 'Arızalı Kitler',      sub: '(Test)',   w: 90,  type: 'calc' },
+  { id: 'beklenenTestSayisi',        num: 20, label: 'Beklenen Test',       sub: '(Test)',   w: 90,  type: 'calc' },
+  { id: 'hakEdis',                   num: 21, label: 'Hak Ediş',            sub: '(Test)',   w: 74,  type: 'manual' },
+  { id: 'stokDogrulukFark',          num: 22, label: 'Stok Doğruluk',                        w: 124, type: 'result' },
+  { id: 'kutuKayip',                 num: 23, label: 'Kutu Kayıp',                           w: 116, type: 'result' },
+  { id: 'kitVerimlilikFark',         num: 24, label: 'Kit Verimlilik',                       w: 124, type: 'result', cost: true },
+  { id: 'sarfiyatMaliyeti',          num: 25, label: 'Sarfiyat Maliyeti',                    w: 110, type: 'result', cost: true },
+  { id: 'hakEdisKarsiligi',          num: 26, label: 'Hak Ediş Karş.',                       w: 110, type: 'result', cost: true },
+  { id: 'kar',                       num: 27, label: 'Kâr',                                  w: 96,  type: 'result', cost: true },
+  { id: 'zararMaliyeti',             num: 28, label: 'Zarar Maliyeti',                       w: 110, type: 'result' },
+  { id: 'merkezeGonderilen',         num: 29, label: 'Merkeze Gön.',        sub: '(Test)',   w: 96,  type: 'result', centerOnly: true },
 ];
 
 const COLS_BY_ID: Record<string, ColDef> = COLS.reduce((m, c) => { m[c.id] = c; return m; }, {} as Record<string, ColDef>);
+
+// ─── RENK / DURUM FİLTRESİ ────────────────────────────────────────────────
+// Stok Doğruluk ve Kutu Kayıp sütunları renge (duruma) göre filtrelenebilir.
+// Badge renkleriyle birebir: Eksik=kırmızı, Fark Yok=yeşil, Fazla=sarı.
+const COLOR_FILTER_COL_IDS = new Set(['stokDogrulukFark', 'kutuKayip']);
+const STOK_DURUM_ORDER = ['Eksik', 'Fark Yok', 'Fazla'];
+const STOK_DURUM_COLORS: Record<string, string> = {
+  'Eksik': '#dc2626',     // kırmızı
+  'Fark Yok': '#16a34a',  // yeşil
+  'Fazla': '#ca8a04',     // sarı
+};
 
 // ─── FORMAT PALETTES ──────────────────────────────────────────────────────
 // Palettes ordered by hue (warm → cool) so visual flow is predictable
@@ -515,14 +534,42 @@ const DebouncedInput = memo(function DebouncedInput({
   );
 });
 
+// Kenarlıklı (shadcn) görünümü koruyan debounced metin girişi. Gelişmiş filtre
+// değeri her tuşta state'i değiştirmesin diye lokal state + debounce kullanır;
+// böylece yazarken tablo yeniden render'ı tetiklenmez (akıcı INP).
+const DebouncedTextInput = memo(function DebouncedTextInput({
+  value,
+  onChange,
+  debounceMs = 250,
+  className,
+  ...props
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  debounceMs?: number;
+} & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'onChange' | 'value'>) {
+  const [localValue, setLocalValue] = useState(value);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => { setLocalValue(value); }, [value]);
+  const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = e.target.value;
+    setLocalValue(v);
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => onChange(v), debounceMs);
+  }, [onChange, debounceMs]);
+  useEffect(() => () => { if (timeoutRef.current) clearTimeout(timeoutRef.current); }, []);
+  return <Input {...props} className={className} value={localValue} onChange={handleChange} />;
+});
+
 // ─── COLUMN FILTER POPOVER (Excel-like value picker) ─────────────────
-function ColFilterPopover({ col, x, y, allValues, activeFilter, sortCol, sortDir, onSort, onClearSort, onHide, onApply, onClose }: {
+function ColFilterPopover({ col, x, y, allValues, activeFilter, sortCol, sortDir, valueColors, onSort, onClearSort, onHide, onApply, onClose }: {
   col: ColDef;
   x: number; y: number;
   allValues: (string | number)[];
   activeFilter: string[] | null;
   sortCol: string | null;
   sortDir: 'asc' | 'desc';
+  valueColors?: Record<string, string>;
   onSort: (dir: 'asc' | 'desc') => void;
   onClearSort: () => void;
   onHide: () => void;
@@ -566,7 +613,7 @@ function ColFilterPopover({ col, x, y, allValues, activeFilter, sortCol, sortDir
         )}
         <div className="h-px bg-zinc-200 dark:bg-zinc-700 my-1" />
         {/* Value list */}
-        <div className="px-2 pb-1 text-[9px] uppercase font-bold text-zinc-400">Değere Göre Filtrele</div>
+        <div className="px-2 pb-1 text-[9px] uppercase font-bold text-zinc-400">{valueColors ? 'Renge / Duruma Göre Filtrele' : 'Değere Göre Filtrele'}</div>
         <div className="px-2">
           <div className="flex items-center gap-1 px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800 mb-1">
             <Search className="h-3 w-3 text-zinc-400" />
@@ -584,6 +631,7 @@ function ColFilterPopover({ col, x, y, allValues, activeFilter, sortCol, sortDir
             return (
               <button key={k} onClick={() => toggleVal(v)} className="w-full flex items-center gap-2 px-2 py-1 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded">
                 <div className={`w-3 h-3 rounded-sm border ${checked ? 'bg-blue-600 border-blue-600 text-white flex items-center justify-center text-[7px]' : 'border-zinc-300'}`}>{checked && '✓'}</div>
+                {valueColors?.[k] && <span className="w-2.5 h-2.5 rounded-full flex-shrink-0 border border-black/10" style={{ background: valueColors[k] }} />}
                 <span className={`text-[11.5px] truncate ${typeof v === 'number' ? 'font-mono' : ''}`}>{k === '' ? '(Boş)' : k}</span>
               </button>
             );
@@ -705,10 +753,10 @@ export default function TotalVerimlilikPanel({
   // Phase 6 - Sonuç Odaklı Görünüm
   const [showResultsOnly, setShowResultsOnly] = useState(false);
 
-  // Sütun 22 - Kutu Kayıp Görünüm Modu
+  // Sütun 23 - Kutu Kayıp Görünüm Modu
   const [column22Mode, setColumn22Mode] = useState<'kumulatif' | 'hakedis'>('kumulatif');
 
-  // Sütun 23-25 Maliyet Sütunları Göster/Gizle (default: kapalı)
+  // Maliyet sütunları (Kit Verimlilik dahil 24-27) Göster/Gizle (default: kapalı)
   const [showCostColumns, setShowCostColumns] = useState(false);
 
   // Sütun 23 - Maliyet Hesabı için Para Birimi ve Döviz Kurları
@@ -1155,6 +1203,7 @@ export default function TotalVerimlilikPanel({
               totalAyBasiStok: 0,
               // Phase 2 alanları
               ayBasiSevkiyatKutu: 0,
+              ayBasiSevkiyatTest: 0,
               goztepeSevkiyat: 0,
               kurumlarArasiSevk: 0,
               lojistikAraTransfer: 0,
@@ -1216,13 +1265,13 @@ export default function TotalVerimlilikPanel({
 
           if (prevDocSnap.exists()) {
             // Ay sonu kaydı var → oradan devret
-            const prevRows = (prevDocSnap.data().rows as TableRow[]) || [];
+            const prevRows = await loadTotalEfficiencyRows<TableRow>(prevDocId, prevDocSnap.data());
             applyCarryover(prevRows, 'döneminden');
           } else {
             // Ay sonu kaydı yok → ara kayıt var mı kontrol et
             const prevAraKayitSnap = await getDoc(doc(db, 'totalEfficiencyRecords', prevAraKayitDocId));
             if (prevAraKayitSnap.exists()) {
-              const prevRows = (prevAraKayitSnap.data().rows as TableRow[]) || [];
+              const prevRows = await loadTotalEfficiencyRows<TableRow>(prevAraKayitDocId, prevAraKayitSnap.data());
               applyCarryover(prevRows, 'ara kaydından');
             }
           }
@@ -1239,14 +1288,14 @@ export default function TotalVerimlilikPanel({
         // Hesaplanan alanları güncelle
         const computedRows = newRows.map(row => {
           const totalAyBasiStok = (row.baslangicStokuKutu * row.ambalajDegeri) + row.ayBasiCihazUstuTest;
+          const ayBasiSevkiyatTest = row.ayBasiSevkiyatKutu * row.ambalajDegeri;
           const sevkiyatlarKutuToplam = row.ayBasiSevkiyatKutu + row.goztepeSevkiyat + row.kurumlarArasiSevk + row.lojistikAraTransfer;
           const sevkiyatlarSonrasiTotalTest = (sevkiyatlarKutuToplam * row.ambalajDegeri) + totalAyBasiStok;
           const donemSonuToplamTest = (row.donemSonuStokKutu * row.ambalajDegeri) + row.donemSonuCihazUstuTest;
 
-          // Phase 4 hesaplamaları (Beklenen Test = Sevk.Sonrası - Arızalı Kit)
-          const beklenenTestSayisi = sevkiyatlarSonrasiTotalTest - (row.arizaliKitTest || 0);
-          const beklenenTuketim = beklenenTestSayisi - donemSonuToplamTest;
-          const stokDogrulukFark = beklenenTuketim - row.kumulatifTotal;
+          // Beklenen Test = Sevk.Sonrası − D.Sonu Toplam ; Stok Doğruluk = Beklenen − Kümülatif
+          const beklenenTestSayisi = sevkiyatlarSonrasiTotalTest - donemSonuToplamTest;
+          const stokDogrulukFark = beklenenTestSayisi - row.kumulatifTotal;
           const stokDogrulukYuzde = row.kumulatifTotal !== 0 ? (stokDogrulukFark / row.kumulatifTotal) * 100 : 0;
           const kitVerimlilikFark = row.kumulatifTotal - row.hakEdis;
           const kitVerimlilikYuzde = row.kumulatifTotal !== 0 ? (kitVerimlilikFark / row.kumulatifTotal) * 100 : 0;
@@ -1254,6 +1303,7 @@ export default function TotalVerimlilikPanel({
           return {
             ...row,
             totalAyBasiStok,
+            ayBasiSevkiyatTest,
             sevkiyatlarSonrasiTotalTest,
             donemSonuToplamTest,
             beklenenTestSayisi,
@@ -1270,7 +1320,7 @@ export default function TotalVerimlilikPanel({
           const araKayitSnap = await getDoc(doc(db, 'totalEfficiencyRecords', araKayitDocId));
           if (araKayitSnap.exists()) {
             const araKayitData = araKayitSnap.data();
-            const araKayitRows = araKayitData.rows as TableRow[] || [];
+            const araKayitRows = await loadTotalEfficiencyRows<TableRow>(araKayitDocId, araKayitData);
 
             // Ara kayıttaki değerleri mevcut row'lara uygula
             const mergedRows = computedRows.map(row => {
@@ -1297,12 +1347,12 @@ export default function TotalVerimlilikPanel({
             // Hesaplanan alanları yeniden hesapla
             const recomputedRows = mergedRows.map(row => {
               const totalAyBasiStok = (row.baslangicStokuKutu * row.ambalajDegeri) + row.ayBasiCihazUstuTest;
+              const ayBasiSevkiyatTest = row.ayBasiSevkiyatKutu * row.ambalajDegeri;
               const sevkiyatlarKutuToplam = row.ayBasiSevkiyatKutu + row.goztepeSevkiyat + row.kurumlarArasiSevk + row.lojistikAraTransfer;
               const sevkiyatlarSonrasiTotalTest = (sevkiyatlarKutuToplam * row.ambalajDegeri) + totalAyBasiStok;
               const donemSonuToplamTest = (row.donemSonuStokKutu * row.ambalajDegeri) + row.donemSonuCihazUstuTest;
-              const beklenenTestSayisi = sevkiyatlarSonrasiTotalTest - (row.arizaliKitTest || 0);
-              const beklenenTuketim = beklenenTestSayisi - donemSonuToplamTest;
-              const stokDogrulukFark = beklenenTuketim - row.kumulatifTotal;
+              const beklenenTestSayisi = sevkiyatlarSonrasiTotalTest - donemSonuToplamTest;
+              const stokDogrulukFark = beklenenTestSayisi - row.kumulatifTotal;
               const stokDogrulukYuzde = row.kumulatifTotal !== 0 ? (stokDogrulukFark / row.kumulatifTotal) * 100 : 0;
               const kitVerimlilikFark = row.kumulatifTotal - row.hakEdis;
               const kitVerimlilikYuzde = row.kumulatifTotal !== 0 ? (kitVerimlilikFark / row.kumulatifTotal) * 100 : 0;
@@ -1310,6 +1360,7 @@ export default function TotalVerimlilikPanel({
               return {
                 ...row,
                 totalAyBasiStok,
+                ayBasiSevkiyatTest,
                 sevkiyatlarSonrasiTotalTest,
                 donemSonuToplamTest,
                 beklenenTestSayisi,
@@ -1388,25 +1439,24 @@ export default function TotalVerimlilikPanel({
       }
     }
 
-    // Sütun 17: Dönem Sonu Toplam Test
+    // Sütun 10: Ay Başı Sevkiyat (Test) = Ay Başı Sevkiyat (Kutu) × Ambalaj
+    const ayBasiSevkiyatTest = row.ayBasiSevkiyatKutu * row.ambalajDegeri;
+
+    // Sütun 18: Dönem Sonu Toplam Test
     // Formül: (Dönem Sonu Stok Kutu * Ambalaj) + Dönem Sonu Cihaz Üstü Test
     const donemSonuToplamTest = (row.donemSonuStokKutu * row.ambalajDegeri) + row.donemSonuCihazUstuTest;
 
-    // Sütun 19: Beklenen Test Sayısı = Sevkiyatlar Sonrası - Arızalı Kit (Sütun 18).
-    // Arızalı kit 0 iken sevkiyatlarSonrasiTotalTest'e eşittir → mevcut algoritmayla
-    // birebir aynı sonuç. Sonraki tüm hesaplar bunun üzerinden yürür.
-    const arizaliKitTest = row.arizaliKitTest || 0;
-    const beklenenTestSayisi = sevkiyatlarSonrasiTotalTest - arizaliKitTest;
+    // Sütun 20: Beklenen Test = Sevkiyatlar Sonrası Total (14) − D.Sonu Toplam (18)
+    // (Laboratuvara gönderilen ve sonuç vermesi beklenen test miktarı.)
+    const beklenenTestSayisi = sevkiyatlarSonrasiTotalTest - donemSonuToplamTest;
 
-    // Sütun 21: Stok Doğruluk
-    // Beklenen tüketim: Beklenen Test - D.Sonu Toplam
-    // Fark: Beklenen tüketim - Kümülatif
-    const beklenenTuketim = beklenenTestSayisi - donemSonuToplamTest;
-    const stokDogrulukFark = beklenenTuketim - row.kumulatifTotal;
+    // Sütun 22: Stok Doğruluk Fark = Beklenen Test (20) − Kümülatif (15)
+    // Fark>0 → eksik (fire), Fark=0 → fark yok, Fark<0 → fazla
+    const stokDogrulukFark = beklenenTestSayisi - row.kumulatifTotal;
     // Sapma yüzdesi: Fark / Kümülatif * 100 (kümülatif 0 ise 0)
     const stokDogrulukYuzde = row.kumulatifTotal !== 0 ? (stokDogrulukFark / row.kumulatifTotal) * 100 : 0;
 
-    // Sütun 22: Kit Verimlilik
+    // Sütun 24: Kit Verimlilik
     // Fark: Kümülatif - Hak Ediş
     const kitVerimlilikFark = row.kumulatifTotal - row.hakEdis;
     // Sapma yüzdesi: Fark / Kümülatif * 100 (kümülatif 0 ise 0)
@@ -1415,6 +1465,7 @@ export default function TotalVerimlilikPanel({
     return {
       ...row,
       totalAyBasiStok,
+      ayBasiSevkiyatTest,
       sevkiyatlarSonrasiTotalTest,
       donemSonuToplamTest,
       beklenenTestSayisi,
@@ -1703,6 +1754,91 @@ export default function TotalVerimlilikPanel({
     return hospitals.filter(h => poolLabIds.includes(h.id));
   }, [hospitals, poolLabIds]);
 
+
+  const handleImportDeviceCalculationHistory = useCallback(async () => {
+    if (!rows.length) {
+      toast({ title: 'Veri yok', description: 'Önce Total Verimlilik satırlarını oluşturun.', variant: 'destructive' });
+      return;
+    }
+
+    const period = `${String(selectedMonth + 1).padStart(2, '0')}-${selectedYear}`;
+
+    const toMillis = (value: any): number => {
+      const date = value?.toDate ? value.toDate() : value instanceof Date ? value : null;
+      return date ? date.getTime() : 0;
+    };
+
+    try {
+      const [kumulatifDocs, cihazDocs] = await Promise.all([
+        getScopedDocs('kumulatifHesaplamaGecmisi', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc')),
+        getScopedDocs('cihazUstuGecmisi', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc')),
+      ]);
+
+      const cumulativeByLabProduct = new Map<string, number>();
+      const deviceByLabProduct = new Map<string, number>();
+
+      const putLatestValue = (target: Map<string, number>, key: string, value: number) => {
+        if (!target.has(key)) target.set(key, value);
+      };
+
+      kumulatifDocs
+        .map((docSnap) => docSnap.data() as any)
+        .filter((record) => String(record.period || '') === period)
+        .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt))
+        .forEach((record) => {
+          const labId = String(record.hospitalId || '').trim();
+          if (!labId) return;
+          (Array.isArray(record.items) ? record.items : []).forEach((item: any) => {
+            const productId = String(item.productId || '').trim();
+            if (!productId) return;
+            putLatestValue(cumulativeByLabProduct, `${labId}|${productId}`, Number(item.total || 0));
+          });
+        });
+
+      cihazDocs
+        .map((docSnap) => docSnap.data() as any)
+        .filter((record) => String(record.period || '') === period)
+        .sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt))
+        .forEach((record) => {
+          const labId = String(record.hospitalId || '').trim();
+          if (!labId) return;
+          (Array.isArray(record.items) ? record.items : []).forEach((item: any) => {
+            const productId = String(item.productId || '').trim();
+            if (!productId) return;
+            putLatestValue(deviceByLabProduct, `${labId}|${productId}`, Number(item.value || 0));
+          });
+        });
+
+      let cumulativeMatches = 0;
+      let deviceMatches = 0;
+
+      setRows((prevRows) => {
+        const updatedRows = prevRows.map((row) => {
+          const key = `${row.labId}|${row.stokKodu}`;
+          const cumulativeValue = cumulativeByLabProduct.get(key);
+          const deviceValue = deviceByLabProduct.get(key);
+          if (cumulativeValue === undefined && deviceValue === undefined) return row;
+          if (cumulativeValue !== undefined) cumulativeMatches += 1;
+          if (deviceValue !== undefined) deviceMatches += 1;
+          return {
+            ...row,
+            ...(cumulativeValue !== undefined ? { kumulatifTotal: cumulativeValue } : {}),
+            ...(deviceValue !== undefined ? { donemSonuCihazUstuTest: deviceValue } : {}),
+          };
+        });
+        return recomputeAllRows(updatedRows, interLabTransfers);
+      });
+
+      toast({
+        title: 'Cihaz bilgileri alındı',
+        description: `${period} dönemi için ${cumulativeMatches} kümülatif ve ${deviceMatches} cihaz üstü satırı güncellendi.`,
+      });
+    } catch (error: any) {
+      totalVerimlilikLogger.error('Cihaz bilgileri geçmişten alınırken hata oluştu', error);
+      toast({ title: 'Veri alınamadı', description: error?.message || 'Kümülatif/cihaz üstü geçmişi okunamadı.', variant: 'destructive' });
+    }
+  }, [rows.length, selectedMonth, selectedYear, currentCompanyId, isSuperAdmin, recomputeAllRows, interLabTransfers, toast]);
+
   // Excel export
   const handleExportExcel = useCallback(() => {
     if (rows.length === 0) return;
@@ -1719,13 +1855,15 @@ export default function TotalVerimlilikPanel({
         })
       : rows;
     const dataToExport = rowsToExport.map(r => {
-      // Fark değerlerini paneldeki gibi ters işaretle göster
-      // Pozitif fark (kayıp) -> negatif olarak göster
-      // Negatif fark (kazanç) -> pozitif olarak göster
+      // Stok Doğruluk Fark paneldeki gibi ters işaretle gösterilir
+      // (eksik = negatif, fazla = pozitif).
       const stokFarkExcel = r.stokDogrulukFark !== 0 ? -r.stokDogrulukFark : 0;
       const kitFarkExcel = r.kitVerimlilikFark !== 0 ? -r.kitVerimlilikFark : 0;
-      // Kutu Fark = Stok Doğruluk Fark / Ambalaj (aynı işaret mantığıyla)
-      const kutuFark = r.ambalajDegeri > 0 ? stokFarkExcel / r.ambalajDegeri : 0;
+      // Kutu Kayıp: arayüzdeki işaretin AYNISI (eksik → +, fazla → −).
+      // Stok Doğruluk Fark / Ambalaj — negatiflenmez ki Excel ile arayüz uyuşsun.
+      const kutuKayip = r.ambalajDegeri > 0 ? r.stokDogrulukFark / r.ambalajDegeri : 0;
+      // Stok Doğruluk durum etiketi (arayüzdeki badge ile birebir)
+      const stokDurum = r.stokDogrulukFark > 0 ? 'Eksik' : (r.stokDogrulukFark < 0 ? 'Fazla' : 'Fark Yok');
 
       return {
         'Laboratuvar': r.labName,
@@ -1739,6 +1877,7 @@ export default function TotalVerimlilikPanel({
         'Ay Başı Cihaz Üstü (Test)': r.ayBasiCihazUstuTest,
         'Total Ay Başı Stok (Test)': r.totalAyBasiStok,
         'Ay Başı Sevkiyat (Kutu)': r.ayBasiSevkiyatKutu,
+        'Ay Başı Sevkiyat (Test)': r.ayBasiSevkiyatTest,
         'Göztepe Sevkiyat (Kutu)': r.goztepeSevkiyat,
         'Kurumlar Arası Sevk (Kutu)': r.kurumlarArasiSevk,
         'Kaynak Lab': interLabTransfers[r.id]?.sourceLabName || '',
@@ -1749,12 +1888,15 @@ export default function TotalVerimlilikPanel({
         'Dönem Sonu Stok (Kutu)': r.donemSonuStokKutu,
         'Dönem Sonu Cihaz Üstü (Test)': r.donemSonuCihazUstuTest,
         'Dönem Sonu Toplam Test': r.donemSonuToplamTest,
+        'Arızalı Kitler (Test)': r.arizaliKitTest,
+        'Beklenen Test (Test)': r.beklenenTestSayisi,
         'Hak Ediş (Test)': r.hakEdis,
-        // Phase 4 - Fark değerleri paneldeki işaretle (kayıp = negatif)
+        // Phase 4 — Stok Doğruluk ve Kutu Kayıp yan yana (panel sırasıyla aynı)
         'Stok Doğruluk Fark (Test)': stokFarkExcel,
-        'Kutu Fark': Number(kutuFark.toFixed(1)),
-        'Stok Doğruluk Sapma (%)': Number(r.stokDogrulukYuzde.toFixed(2)),
+        'Stok Doğruluk Durum': stokDurum,
+        'Kutu Kayıp': Number(kutuKayip.toFixed(1)),
         'Kit Verimlilik Fark (Test)': kitFarkExcel,
+        'Stok Doğruluk Sapma (%)': Number(r.stokDogrulukYuzde.toFixed(2)),
         'Kit Verimlilik Sapma (%)': Number(r.kitVerimlilikYuzde.toFixed(2)),
       };
     });
@@ -1762,44 +1904,6 @@ export default function TotalVerimlilikPanel({
     const fileName = `Total_Verimlilik_${selectedPool?.name || 'Rapor'}_${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}`;
     exportDataToExcel(dataToExport, fileName, 'Veriler', toast);
   }, [rows, selectedPoolId, efficiencyPools, selectedYear, selectedMonth, toast, interLabTransfers, selectedBrand, selectedUrunGrubu, productCodes]);
-
-  // Phase 5 - Excel Şablon İndir
-  const handleDownloadTemplate = useCallback(() => {
-    if (rows.length === 0) return;
-
-    const selectedPool = efficiencyPools.find(p => p.id === selectedPoolId);
-
-    // Şablonda sadece veri girilebilir alanlar olacak (11 ve 12 hariç)
-    // Değerler 0 yerine boş olacak
-    const templateData = rows.map(r => ({
-      'Laboratuvar': r.labName,
-      'Lab Kodu': r.labKod,
-      'Stok Kodu': r.stokKodu,
-      'Ürün Adı': r.stokAdi,
-      'Test Adı': r.testAdi,
-      'Ambalaj Miktarı': r.ambalajDegeri,
-      '7. Başlangıç Stoğu (Kutu)': r.baslangicStokuKutu || '', // 0 yerine boş
-      '8. Ay Başı Cihaz Üstü (Test)': r.ayBasiCihazUstuTest || '',
-      '10. Ay Başı Sevkiyat (Kutu)': r.ayBasiSevkiyatKutu || '',
-      '13. Lojistik Ara Transfer (Kutu)': r.lojistikAraTransfer || '',
-      '15. Kümülatif Total (Test)': r.kumulatifTotal || '',
-      '16. Dönem Sonu Stok (Kutu)': r.donemSonuStokKutu || '',
-      '17. Dönem Sonu Cihaz Üstü (Test)': r.donemSonuCihazUstuTest || '',
-      '19. Hak Ediş (Test)': r.hakEdis || '',
-    }));
-
-    // XLSX worksheet oluştur
-    const ws = XLSX.utils.json_to_sheet(templateData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Şablon');
-
-    // Dosyayı indir
-    const fileName = `Verimlilik_Sablon_${selectedPool?.name || 'Havuz'}_${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}.xlsx`;
-    XLSX.writeFile(wb, fileName);
-
-    toast({ title: 'Şablon İndirildi', description: 'Excel şablonu indirildi. Verileri girdikten sonra yükleyebilirsiniz.' });
-    setShowExcelImportModal(false);
-  }, [rows, selectedPoolId, efficiencyPools, selectedYear, selectedMonth, toast]);
 
   // Phase 5 - Excel Dosyası Yükle ve Verileri Aktar
   const handleExcelImport = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1910,7 +2014,7 @@ export default function TotalVerimlilikPanel({
       const kitVerimlilikSkoru = Math.max(0, Math.min(100, 100 - Math.abs(kitSapmaYuzde)));
       const genelVerimlilik = (stokDogrulukSkoru + kitVerimlilikSkoru) / 2;
 
-      const dataToSave = {
+      const dataToSave = withCompanyScope({
         poolId: selectedPoolId,
         poolName: selectedPool?.name || '',
         month: selectedMonth,
@@ -1931,9 +2035,9 @@ export default function TotalVerimlilikPanel({
         createdByUid: currentUser?.uid || '',
         createdByName: currentUser?.name || currentUser?.email || '',
         updatedAt: Timestamp.now(),
-      };
+      }, currentCompanyId);
 
-      await setDoc(doc(db, 'totalEfficiencyRecords', docId), dataToSave, { merge: true });
+      await saveTotalEfficiencyRecord<TableRow>(docId, dataToSave);
       toast({ title: 'Kaydedildi', description: `Total verimlilik verileri kaydedildi. Genel Verimlilik: %${genelVerimlilik.toFixed(1)}` });
     } catch (error) {
       totalVerimlilikLogger.error('Total verimlilik kaydedilirken hata oluştu', error, {
@@ -1946,7 +2050,7 @@ export default function TotalVerimlilikPanel({
     } finally {
       setIsSaving(false);
     }
-  }, [selectedPoolId, rows, selectedYear, selectedMonth, currentUser, efficiencyPools, toast]);
+  }, [selectedPoolId, rows, selectedYear, selectedMonth, currentUser, currentCompanyId, efficiencyPools, toast]);
 
   // Ara Kayıt (Checkpoint) Kaydetme
   const handleAraKayitSave = useCallback(async () => {
@@ -1957,7 +2061,7 @@ export default function TotalVerimlilikPanel({
       const selectedPool = efficiencyPools.find(p => p.id === selectedPoolId);
       const araKayitDocId = `araKayit-${selectedPoolId}-${selectedYear}-${selectedMonth}`;
 
-      const dataToSave = {
+      const dataToSave = withCompanyScope({
         poolId: selectedPoolId,
         poolName: selectedPool?.name || '',
         month: selectedMonth,
@@ -1969,9 +2073,9 @@ export default function TotalVerimlilikPanel({
         createdByUid: currentUser?.uid || '',
         createdByName: currentUser?.name || currentUser?.email || '',
         updatedAt: Timestamp.now(),
-      };
+      }, currentCompanyId);
 
-      await setDoc(doc(db, 'totalEfficiencyRecords', araKayitDocId), dataToSave, { merge: true });
+      await saveTotalEfficiencyRecord<TableRow>(araKayitDocId, dataToSave);
 
       setAraKayitInfo({
         exists: true,
@@ -1989,7 +2093,7 @@ export default function TotalVerimlilikPanel({
     } finally {
       setIsSavingAraKayit(false);
     }
-  }, [selectedPoolId, rows, selectedYear, selectedMonth, currentUser, efficiencyPools, interLabTransfers, araKayitInfo, toast]);
+  }, [selectedPoolId, rows, selectedYear, selectedMonth, currentUser, currentCompanyId, efficiencyPools, interLabTransfers, araKayitInfo, toast]);
 
   // Laboratuvar gruplarını hesapla (aynı laboratuvarın satırlarını gruplamak için)
   const labGroups = useMemo(() => {
@@ -2828,7 +2932,7 @@ export default function TotalVerimlilikPanel({
 
   // ─── REDESIGNED UI: HELPERS ──────────────────────────────────────────
   const COLUMN_GROUPS: Record<string, string[]> = {
-    sevkiyat: ['ayBasiSevkiyatKutu', 'goztepeSevkiyat', 'kurumlarArasiSevk', 'lojistikAraTransfer'],
+    sevkiyat: ['ayBasiSevkiyatKutu', 'ayBasiSevkiyatTest', 'goztepeSevkiyat', 'kurumlarArasiSevk', 'lojistikAraTransfer'],
   };
   const EDITABLE_FIELDS = new Set<EditableField>(['baslangicStokuKutu', 'ayBasiCihazUstuTest', 'ayBasiSevkiyatKutu', 'goztepeSevkiyat', 'kurumlarArasiSevk', 'lojistikAraTransfer', 'kumulatifTotal', 'donemSonuStokKutu', 'donemSonuCihazUstuTest', 'hakEdis']);
   const dynamicFormulaCols = useMemo<ColDef[]>(() => formulaCols.map((f, idx) => ({
@@ -2927,11 +3031,33 @@ export default function TotalVerimlilikPanel({
     formulaCols,
   ]);
 
+  // Stok Doğruluk / Kutu Kayıp için renge (duruma) göre filtre etiketi.
+  // Badge mantığıyla birebir: Eksik (Fark>0) / Fark Yok / Fazla (Fark<0).
+  const getColorStatus = useCallback((row: TableRow, colId: string): string => {
+    if (colId === 'stokDogrulukFark') {
+      const f = row.stokDogrulukFark;
+      return f > 0 ? 'Eksik' : f < 0 ? 'Fazla' : 'Fark Yok';
+    }
+    if (colId === 'kutuKayip') {
+      const kutuFark = Number(resolveFilterValue(row, 'kutuKayip') || 0);
+      if (Math.abs(kutuFark) < 1) return 'Fark Yok';
+      return kutuFark > 0 ? 'Eksik' : 'Fazla';
+    }
+    return '';
+  }, [resolveFilterValue]);
+
+  // Gelişmiş/sütun filtrelerini DEFER et: panel etkileşimleri (buton/seçim/yazma)
+  // acil öncelikte kalır; ağır groupedRows yeniden hesabı + tablo render'ı düşük
+  // öncelikte (kesintiye uğrayabilir) çalışır → her tuş/buslışta takılma olmaz.
+  const deferredAdvFilters = useDeferredValue(advFilters);
+  const deferredAdvMode = useDeferredValue(advMode);
+  const deferredColValFilters = useDeferredValue(colValFilters);
+
   // Group rows by lab (after primary filtering)
   const groupedRows = useMemo(() => {
     // Apply advanced filters on top of existing deferredRows (which already has search+colFilters+sort)
     let result = deferredRows;
-    if (advFilters.length > 0) {
+    if (deferredAdvFilters.length > 0) {
       const metricCache = new Map<string, number[]>();
       const getMetricValues = (colId: string) => {
         if (metricCache.has(colId)) return metricCache.get(colId)!;
@@ -2943,7 +3069,7 @@ export default function TotalVerimlilikPanel({
         return vals;
       };
       result = result.filter(r => {
-        const matches = advFilters.map(f => {
+        const matches = deferredAdvFilters.map(f => {
           const raw = resolveFilterValue(r, f.col);
           if (f.op === 'between') {
             const [a, b] = f.val.split(/[;,]/).map(v => parseFloat(v.trim()));
@@ -2972,14 +3098,17 @@ export default function TotalVerimlilikPanel({
           }
           return evalAdvFilterRaw(raw, f);
         });
-        return advMode === 'AND' ? matches.every(Boolean) : matches.some(Boolean);
+        return deferredAdvMode === 'AND' ? matches.every(Boolean) : matches.some(Boolean);
       });
     }
     // Apply per-column value filters (header dropdown filter)
-    const valEntries = Object.entries(colValFilters).filter(([, v]) => v && v.length > 0);
+    const valEntries = Object.entries(deferredColValFilters).filter(([, v]) => v && v.length > 0);
     if (valEntries.length > 0) {
       result = result.filter(r => valEntries.every(([cid, vals]) => {
-        const v = String(resolveFilterValue(r, cid) ?? '');
+        // Renk/durum filtresi olan sütunlar için badge durumuna göre eşleştir.
+        const v = COLOR_FILTER_COL_IDS.has(cid)
+          ? getColorStatus(r, cid)
+          : String(resolveFilterValue(r, cid) ?? '');
         return (vals as string[]).includes(v);
       }));
     }
@@ -2996,10 +3125,50 @@ export default function TotalVerimlilikPanel({
       g.rows.push(r);
     });
     return groups;
-  }, [deferredRows, advFilters, advMode, colValFilters, resolveFilterValue]);
+  }, [deferredRows, deferredAdvFilters, deferredAdvMode, deferredColValFilters, resolveFilterValue, getColorStatus]);
 
   const totalVisibleRows = useMemo(() => groupedRows.reduce((s, g) => s + g.rows.length, 0), [groupedRows]);
   const flatVisibleRows = useMemo(() => groupedRows.flatMap(g => g.rows), [groupedRows]);
+
+  // Excel veri giriş şablonu, panelde o anda görünen satırları esas alır.
+  // Böylece marka/ürün grubu, laboratuvar, arama, sütun ve gelişmiş filtreler
+  // şablon indirilirken kaybolmaz.
+  const handleDownloadTemplate = useCallback(() => {
+    if (flatVisibleRows.length === 0) return;
+
+    const selectedPool = efficiencyPools.find(p => p.id === selectedPoolId);
+    const templateData = flatVisibleRows.map(r => ({
+      'Laboratuvar': r.labName,
+      'Lab Kodu': r.labKod,
+      'Stok Kodu': r.stokKodu,
+      'Ürün Adı': r.stokAdi,
+      'Test Adı': r.testAdi,
+      'Ambalaj Miktarı': r.ambalajDegeri,
+      '7. Başlangıç Stoğu (Kutu)': r.baslangicStokuKutu || '',
+      '8. Ay Başı Cihaz Üstü (Test)': r.ayBasiCihazUstuTest || '',
+      '10. Ay Başı Sevkiyat (Kutu)': r.ayBasiSevkiyatKutu || '',
+      'Ay Başı Sevkiyat (Test) [Hesaplanan]': r.ayBasiSevkiyatTest || '',
+      '13. Lojistik Ara Transfer (Kutu)': r.lojistikAraTransfer || '',
+      '15. Kümülatif Total (Test)': r.kumulatifTotal || '',
+      '16. Dönem Sonu Stok (Kutu)': r.donemSonuStokKutu || '',
+      '17. Dönem Sonu Cihaz Üstü (Test)': r.donemSonuCihazUstuTest || '',
+      '19. Hak Ediş (Test)': r.hakEdis || '',
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(templateData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Şablon');
+
+    const fileName = `Verimlilik_Sablon_${selectedPool?.name || 'Havuz'}_${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+
+    toast({
+      title: 'Şablon İndirildi',
+      description: `${templateData.length} filtrelenmiş satır içeren Excel şablonu indirildi.`,
+    });
+    setShowExcelImportModal(false);
+  }, [flatVisibleRows, selectedPoolId, efficiencyPools, selectedYear, selectedMonth, toast]);
+
   const footerAgg = useMemo(() => {
     const nums = (colId: string) => flatVisibleRows.map(r => Number(resolveFilterValue(r, colId))).filter(v => Number.isFinite(v));
     const sum = (list: number[]) => list.reduce((s, n) => s + n, 0);
@@ -3043,43 +3212,54 @@ export default function TotalVerimlilikPanel({
     try {
       setAiAnalyzing(true);
       setAiAnalysisOpen(true);
-      const subset = flatVisibleRows.slice(0, 300).map(r => ({
+      // Satır kanıt paketi — master prompt'un atıfta bulunduğu normalize alanlar
+      // ve panelin güncel sınıflandırması (eksik / fark yok / fazla).
+      const stokDurumOf = (f: number) => (f > 0 ? 'eksik' : f < 0 ? 'fazla' : 'fark yok');
+      const buildEvidence = (r: TableRow) => ({
         lab: r.labName,
+        labKod: r.labKod,
         stok: r.stokAdi,
         stokKodu: r.stokKodu,
+        testAdi: r.testAdi,
+        cihazGrubu: r.cihazGrubu,
+        ambalaj: r.ambalajDegeri,
+        ayBasiSevkiyatKutu: r.ayBasiSevkiyatKutu,
+        ayBasiSevkiyatTest: r.ayBasiSevkiyatTest,
+        sevkiyatlarSonrasiTotalTest: r.sevkiyatlarSonrasiTotalTest,
+        donemSonuToplamTest: r.donemSonuToplamTest,
+        beklenenTest: r.beklenenTestSayisi,
+        kumulatifTotal: r.kumulatifTotal,
+        hakEdis: r.hakEdis,
+        hakEdisVar: Number(r.hakEdis || 0) > 0,
+        arizaliKitTest: r.arizaliKitTest,
         stokDogrulukFark: r.stokDogrulukFark,
-        kitVerimlilikFark: r.kitVerimlilikFark,
+        stokDurum: stokDurumOf(r.stokDogrulukFark),
         kutuKayip: Number(resolveFilterValue(r, 'kutuKayip') || 0),
-        sarfiyatMaliyeti: Number(resolveFilterValue(r, 'sarfiyatMaliyeti') || 0),
-      }));
+        kitVerimlilikFark: r.kitVerimlilikFark,
+      });
+      const donem = { yil: selectedYear, ay: selectedMonth + 1, etiket: `${MONTHS[selectedMonth]?.label || ''} ${selectedYear}`.trim() };
+      const subset = flatVisibleRows.slice(0, 300).map(buildEvidence);
       const targetRow = payload?.rowId ? flatVisibleRows.find(r => r.id === payload.rowId) : null;
       const targetCol = payload?.colId || '';
-      const cellTargetValue = targetRow ? (targetRow as unknown as Record<string, unknown>)[targetCol] : undefined;
-      const cellSummary = targetRow ? {
-        lab: targetRow.labName,
-        stok: targetRow.stokAdi,
-        stokKodu: targetRow.stokKodu,
-        sutun: targetCol,
-        deger: cellTargetValue,
-        stokDogrulukFark: targetRow.stokDogrulukFark,
-        kitVerimlilikFark: targetRow.kitVerimlilikFark,
-        kutuKayip: Number(resolveFilterValue(targetRow, 'kutuKayip') || 0),
-        sarfiyatMaliyeti: Number(resolveFilterValue(targetRow, 'sarfiyatMaliyeti') || 0),
-      } : null;
+      const colLabel = COLS_BY_ID[targetCol]?.label || targetCol;
+      const cellSummary = targetRow ? { ...buildEvidence(targetRow), sutun: targetCol } : null;
       const prompt = mode === 'table'
-        ? `Aşağıdaki total verimlilik verisini analiz et. Smart alertler, auto insights, anomaly detection ve gelecek ay tahmini verimlilik üret. Kısa ve madde madde yaz.\nVeri:${JSON.stringify(subset)}`
+        ? `Mod: TABLO GENELİ. Dönem: ${donem.etiket} (ay ${donem.ay}/12, yıl ${donem.yil}). Aşağıdaki satırların STOK DOĞRULUK ve KİT VERİMLİLİK verisini değerlendir; en kritik fire/anomali satırlarını öne çıkar, ortak kök neden örüntülerini ve aksiyon önceliğini ver. Master prompttaki bölüm formatına uy.\nVeri(JSON):${JSON.stringify(subset)}`
         : mode === 'column'
-          ? `Sadece ${targetCol} sütununu analiz et. Düşük performans, anomali, trend ve aksiyon önerisi ver.\nVeri:${JSON.stringify(subset.map(r => ({ lab: r.lab, stok: r.stok, value: (r as Record<string, unknown>)[targetCol] })))}`
-          : `Tek hücre analizi yap. ${targetCol} sütunundaki bu değeri anomali açısından değerlendir ve kısa, maddeli öneri ver.\nVeri:${JSON.stringify(cellSummary)}`;
-      setAiTargetLabel(mode === 'table' ? 'Tablo Geneli' : mode === 'column' ? `Sütun: ${targetCol}` : `Hücre: ${targetCol}`);
+          ? `Mod: SÜTUN ANALİZİ — "${colLabel}" (${targetCol}). Dönem: ${donem.etiket}. Bu sütunun tüm satırlardaki dağılımını değerlendir: en yüksek fire/anomali satırları, ortak kök neden örüntüleri, trend ve aksiyon önerileri. Master prompttaki bölüm formatına uy.\nVeri(JSON):${JSON.stringify(subset.map(r => ({ lab: r.lab, stok: r.stok, stokKodu: r.stokKodu, stokDurum: r.stokDurum, stokDogrulukFark: r.stokDogrulukFark, kutuKayip: r.kutuKayip, kitVerimlilikFark: r.kitVerimlilikFark, hakEdisVar: r.hakEdisVar })))}`
+          : `Mod: SATIR (HÜCRE) ANALİZİ — "${colLabel}" (${targetCol}). Dönem: ${donem.etiket}. Bu tek satır için master prompttaki kurallara göre fire/anomali neden-aksiyon analizi üret. Master prompttaki bölüm formatına uy.\nSatır kanıt paketi(JSON):${JSON.stringify(cellSummary)}`;
+      setAiTargetLabel(mode === 'table' ? 'Tablo Geneli' : mode === 'column' ? `Sütun: ${colLabel}` : `Hücre: ${colLabel}`);
       const res = await fetch('/api/ai/total-verimlilik-analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          systemPrompt: 'Sen sağlık operasyon verimlilik danışmanısın. Cevabı Türkçe, kısa, maddeli ve aksiyon odaklı ver.',
+          systemPrompt: TOTAL_VERIMLILIK_AI_MASTER_PROMPT,
           prompt,
           temperature: 0.2,
-          maxOutputTokens: 1200,
+          // Düşünmeyi kapat (thinkingBudget:0) → token bütçesi + süre gerçek yanıta
+          // gider; böylece çıktı kesilmez/yüzeysel kalmaz ve 504 riski oluşmaz.
+          maxOutputTokens: 2048,
+          thinkingBudget: 0,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -3092,7 +3272,7 @@ export default function TotalVerimlilikPanel({
     } finally {
       setAiAnalyzing(false);
     }
-  }, [flatVisibleRows, resolveFilterValue]);
+  }, [flatVisibleRows, resolveFilterValue, selectedYear, selectedMonth]);
   // Flat ordered row IDs across visible (expanded) groups - used for shift-range selection
   const visibleRowIds = useMemo(() => {
     const ids: string[] = [];
@@ -3302,6 +3482,8 @@ export default function TotalVerimlilikPanel({
     switch (colId) {
       case 'totalAyBasiStok':
         return `(Baş.Stoğu ${f(row.baslangicStokuKutu)} × Ambalaj ${f(row.ambalajDegeri)}) + Ay Üstü ${f(row.ayBasiCihazUstuTest)} = ${f(row.totalAyBasiStok)}`;
+      case 'ayBasiSevkiyatTest':
+        return `Ay Başı Sevkiyat ${f(row.ayBasiSevkiyatKutu)} kutu × Ambalaj ${f(row.ambalajDegeri)} = ${f(row.ayBasiSevkiyatTest)}`;
       case 'sevkiyatlarSonrasiTotalTest':
         return `((AyBaşıSevk ${f(row.ayBasiSevkiyatKutu)} + Göztepe ${f(row.goztepeSevkiyat)} + K.Arası ${f(row.kurumlarArasiSevk)} + Loj ${f(row.lojistikAraTransfer)}) × Ambalaj ${f(row.ambalajDegeri)}) + TotalAyBaşı ${f(row.totalAyBasiStok)} = ${f(row.sevkiyatlarSonrasiTotalTest)}`;
       case 'donemSonuToplamTest':
@@ -3309,9 +3491,9 @@ export default function TotalVerimlilikPanel({
       case 'arizaliKitTest':
         return `Cihazdan çıkan kit (dönem içi) test toplamı = ${f(row.arizaliKitTest)}`;
       case 'beklenenTestSayisi':
-        return `Sevk.Sonrası ${f(row.sevkiyatlarSonrasiTotalTest)} − Arızalı Kit ${f(row.arizaliKitTest)} = ${f(row.beklenenTestSayisi)}`;
+        return `Sevk.Sonrası ${f(row.sevkiyatlarSonrasiTotalTest)} − D.Sonu Toplam ${f(row.donemSonuToplamTest)} = ${f(row.beklenenTestSayisi)}`;
       case 'stokDogrulukFark':
-        return `(Beklenen Test ${f(row.beklenenTestSayisi)} − D.Sonu Toplam ${f(row.donemSonuToplamTest)}) − Kümülatif ${f(row.kumulatifTotal)} = ${f(row.stokDogrulukFark)}   ·   Sapma %${f(row.stokDogrulukYuzde)}`;
+        return `Beklenen Test ${f(row.beklenenTestSayisi)} − Kümülatif ${f(row.kumulatifTotal)} = ${f(row.stokDogrulukFark)}`;
       case 'kitVerimlilikFark':
         return `Kümülatif ${f(row.kumulatifTotal)} − Hak Ediş ${f(row.hakEdis)} = ${f(row.kitVerimlilikFark)}   ·   Sapma %${f(row.kitVerimlilikYuzde)}`;
       case 'kutuKayip':
@@ -3380,19 +3562,27 @@ export default function TotalVerimlilikPanel({
           </>
         );
       case 'totalAyBasiStok': return <span title="(Baş. Stoğu × Ambalaj) + Ay Üstü" className="font-mono text-[11px] font-semibold underline decoration-dotted cursor-help">{fmtN(row.totalAyBasiStok)}</span>;
+      case 'ayBasiSevkiyatTest': return <span title="Ay Başı Sevkiyat (Kutu) × Ambalaj" className="font-mono text-[11px] font-semibold underline decoration-dotted cursor-help">{fmtN(row.ayBasiSevkiyatTest || 0)}</span>;
       case 'sevkiyatlarSonrasiTotalTest': return <span className="font-mono text-[11px] font-semibold">{fmtN(row.sevkiyatlarSonrasiTotalTest)}</span>;
       case 'donemSonuToplamTest': return <span className="font-mono text-[11px] font-semibold">{fmtN(row.donemSonuToplamTest)}</span>;
       case 'arizaliKitTest': return <span title="Cihazdan çıkan kit (dönem içi) test toplamı" className={cn("font-mono text-[11px] font-semibold", row.arizaliKitTest > 0 ? "text-amber-600" : "text-muted-foreground")}>{fmtN(row.arizaliKitTest)}</span>;
-      case 'beklenenTestSayisi': return <span title="Sevkiyatlar Sonrası − Arızalı Kit" className="font-mono text-[11px] font-semibold underline decoration-dotted cursor-help">{fmtN(row.beklenenTestSayisi)}</span>;
+      case 'beklenenTestSayisi': return <span title="Sevkiyatlar Sonrası − D.Sonu Toplam" className="font-mono text-[11px] font-semibold underline decoration-dotted cursor-help">{fmtN(row.beklenenTestSayisi)}</span>;
       case 'stokDogrulukFark': {
-        const sign = row.stokDogrulukFark > 0 ? '-' : (row.stokDogrulukFark < 0 ? '+' : '');
-        const cls = row.stokDogrulukFark > 0 ? 'bg-red-100 text-red-700 border-red-200'
-                  : row.stokDogrulukFark < 0 ? 'bg-green-100 text-green-700 border-green-200'
-                  : 'bg-muted text-muted-foreground border-muted';
+        // Beklenen Test − Kümülatif:
+        //   Fark > 0 → "eksik" (fire/kayıp, kırmızı) — beklenen test > kümülatif
+        //   Fark = 0 → "fark yok" (yeşil) — beklenen test = kümülatif
+        //   Fark < 0 → "fazla" (anlamsız fazla sonuç, sarı) — beklenen test < kümülatif
+        const fark = row.stokDogrulukFark;
+        const sign = fark > 0 ? '-' : (fark < 0 ? '+' : '');
+        const label = fark > 0 ? 'eksik' : (fark < 0 ? 'fazla' : 'fark yok');
+        const cls = fark > 0 ? 'bg-red-100 text-red-700 border-red-200'
+                  : fark < 0 ? 'bg-yellow-100 text-yellow-700 border-yellow-200'
+                  : 'bg-green-100 text-green-700 border-green-200';
         return (
           <div className="flex items-center gap-1">
             <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold border ${cls}`}>
-              {sign}{Math.abs(row.stokDogrulukFark).toLocaleString('tr-TR')} · %{Math.abs(row.stokDogrulukYuzde).toFixed(1)}
+              {sign}{Math.abs(fark).toLocaleString('tr-TR')}
+              <span className="font-sans uppercase tracking-wide text-[9px] font-bold opacity-80">{label}</span>
             </span>
             <button onClick={() => runAiAnalysis('cell', { rowId: row.id, colId: 'stokDogrulukFark' })} className="text-indigo-500 hover:text-indigo-700"><Bot className="h-3 w-3" /></button>
           </div>
@@ -3419,9 +3609,28 @@ export default function TotalVerimlilikPanel({
         const ambalaj = row.ambalajDegeri || 1;
         const kutuFark = testFark / ambalaj;
         const abs = Math.abs(kutuFark);
-        if (abs < 1) return <span className="text-muted-foreground text-[11px]">0 kutu</span>;
-        const cls = abs >= 2 ? 'text-red-600 font-bold' : 'text-yellow-600 font-semibold';
-        return <div className="flex items-center gap-1"><span className={`font-mono text-[11px] ${cls}`}>{kutuFark > 0 ? '+' : '-'}{abs.toLocaleString('tr-TR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} kutu</span><button onClick={() => runAiAnalysis('cell', { rowId: row.id, colId: 'kutuKayip' })} className="text-indigo-500 hover:text-indigo-700"><Bot className="h-3 w-3" /></button></div>;
+        // Kutu kayıp 0 (1 kutudan az) → yeşil "fark yok"
+        if (abs < 1) {
+          return (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold border bg-green-100 text-green-700 border-green-200">
+              0 kutu
+              <span className="uppercase tracking-wide text-[9px] font-bold opacity-80">fark yok</span>
+            </span>
+          );
+        }
+        // ≥1 kutu: eksik (Fark>0, kırmızı) veya fazla (Fark<0, sarı)
+        const isEksik = testFark > 0;
+        const label = isEksik ? 'eksik' : 'fazla';
+        const cls = isEksik ? 'bg-red-100 text-red-700 border-red-200' : 'bg-yellow-100 text-yellow-700 border-yellow-200';
+        return (
+          <div className="flex items-center gap-1">
+            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold border ${cls}`}>
+              {kutuFark > 0 ? '+' : '-'}{abs.toLocaleString('tr-TR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} kutu
+              <span className="font-sans uppercase tracking-wide text-[9px] font-bold opacity-80">{label}</span>
+            </span>
+            <button onClick={() => runAiAnalysis('cell', { rowId: row.id, colId: 'kutuKayip' })} className="text-indigo-500 hover:text-indigo-700"><Bot className="h-3 w-3" /></button>
+          </div>
+        );
       }
       case 'sarfiyatMaliyeti': {
         const { cost, hasData } = calculateRowCost(row);
@@ -3500,6 +3709,14 @@ export default function TotalVerimlilikPanel({
     if (colFilterOpen?.col.id === col.id) { setColFilterOpen(null); return; }
     const rect = (e.currentTarget as HTMLElement).closest('th')?.getBoundingClientRect();
     if (!rect) return;
+    // Renk/durum filtreli sütunlar (Stok Doğruluk, Kutu Kayıp): ham sayı yerine
+    // mevcut durum etiketlerini (Eksik/Fark Yok/Fazla) sabit sırayla sun.
+    if (COLOR_FILTER_COL_IDS.has(col.id)) {
+      const present = new Set(rows.map(r => getColorStatus(r, col.id)));
+      const statusVals = STOK_DURUM_ORDER.filter(s => present.has(s));
+      setColFilterOpen({ col, x: rect.left, y: rect.bottom + 2, allValues: statusVals });
+      return;
+    }
     // gather unique values across all rows
     const seen = new Set<string>();
     const vals: (string | number)[] = [];
@@ -3564,11 +3781,15 @@ export default function TotalVerimlilikPanel({
             disabled={rows.length === 0}
             className="flex items-center gap-1 px-2 h-7 rounded text-[11px] font-medium border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-50"
           >
-            <FileSpreadsheet className="h-3 w-3" />Excel
+            <FileSpreadsheet className="h-3 w-3" />Veri
             <ChevronDown className="h-3 w-3" />
           </button>
           {openDrop === 'excel' && (
             <div className="absolute top-full left-0 mt-1 bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-md shadow-lg min-w-[200px] z-50 p-1">
+              <button onClick={() => { void handleImportDeviceCalculationHistory(); setOpenDrop(null); }} className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[11.5px] hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded">
+                <Download className="h-3 w-3" />Cihaz Bilgilerini Al
+              </button>
+              <div className="h-px bg-zinc-200 dark:bg-zinc-700 my-1" />
               <button onClick={() => { handleExportExcel(); setOpenDrop(null); }} className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[11.5px] hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded">
                 <Download className="h-3 w-3" />Excel'e Aktar
               </button>
@@ -4081,6 +4302,7 @@ export default function TotalVerimlilikPanel({
           activeFilter={colValFilters[colFilterOpen.col.id] || null}
           sortCol={sortConfig.column}
           sortDir={sortConfig.direction}
+          valueColors={COLOR_FILTER_COL_IDS.has(colFilterOpen.col.id) ? STOK_DURUM_COLORS : undefined}
           onSort={(dir) => { setSort(colFilterOpen.col.id, dir); setColFilterOpen(null); }}
           onClearSort={() => { setSort(null, 'asc'); setColFilterOpen(null); }}
           onHide={() => { toggleHidden(colFilterOpen.col.id); setColFilterOpen(null); }}
@@ -4142,9 +4364,9 @@ export default function TotalVerimlilikPanel({
                       {ADV_OPS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
                     </SelectContent>
                   </Select>
-                  <Input
+                  <DebouncedTextInput
                     value={f.val}
-                    onChange={e => updateAdvFilter(f.id, { val: e.target.value })}
+                    onChange={v => updateAdvFilter(f.id, { val: v })}
                     placeholder={f.op === 'between' ? 'min,max' : f.op === 'topPct' ? '10' : f.op === 'topN' ? '5' : (f.op === 'aboveAvg' || f.op === 'belowAvg') ? '—' : 'değer'}
                     disabled={f.op === 'aboveAvg' || f.op === 'belowAvg'}
                     className="h-8 w-24 text-[11.5px]"
@@ -4246,6 +4468,8 @@ export default function TotalVerimlilikPanel({
               onValuesChange={(ids) => setSelectedLabsForSevkiyat(new Set(ids))}
               placeholder="Laboratuvar seçin"
               showChips
+              popoverModal
+              contentClassName="z-[10000]"
             />
           </div>
           <DialogFooter>
@@ -4334,7 +4558,7 @@ export default function TotalVerimlilikPanel({
                 variant="outline"
                 className="h-20 flex flex-col gap-2"
                 onClick={handleDownloadTemplate}
-                disabled={rows.length === 0}
+                disabled={totalVisibleRows === 0}
               >
                 <Download className="h-6 w-6" />
                 <span>Şablon İndir</span>

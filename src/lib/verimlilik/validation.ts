@@ -297,6 +297,7 @@ export const TotalEfficiencyRowSchema = z.object({
   ayBasiCihazUstuTest: z.number().min(0).max(10000000),
   totalAyBasiStok: z.number().min(0).max(10000000),
   ayBasiSevkiyatKutu: z.number().min(0).max(10000000),
+  ayBasiSevkiyatTest: z.number().min(0).max(10000000).optional().default(0),
   goztepeSevkiyat: z.number().min(0).max(10000000),
   kurumlarArasiSevk: z.number().min(0).max(10000000),
   kurumlarArasiSevkKaynakLabId: z.string().max(50).optional(),
