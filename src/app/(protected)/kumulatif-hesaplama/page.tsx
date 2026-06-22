@@ -8,8 +8,9 @@ import React, {
   useState,
   useRef,
   ChangeEvent,
+  Suspense,
 } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Card,
   CardHeader,
@@ -43,6 +44,7 @@ import {
   Upload,
   Loader2,
   Download,
+  ChevronLeft,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
@@ -65,7 +67,6 @@ import type {
   MinMaxRule,
 } from '@/lib/types';
 import { exportDataToExcel, readExcelData } from '@/lib/utils';
-import BackButton from '@/components/BackButton';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -111,8 +112,10 @@ function parseLocaleInt(val: any): number {
 
 // --- COMPONENT ---
 
-export default function KumulatifHesaplamaPage() {
+function KumulatifHesaplamaContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const fromPath = searchParams.get('from') || '/raporlama';
   const { toast } = useToast();
   const { currentCompanyId, isSuperAdmin } = useAuth();
 
@@ -524,7 +527,14 @@ export default function KumulatifHesaplamaPage() {
 
   return (
     <div className="p-4 md:p-6 space-y-6">
-      <BackButton fallback="/raporlama" />
+      <Button
+        variant="ghost"
+        className="qore-local-back-button flex items-center gap-2 text-sm text-muted-foreground hover:text-primary pl-1"
+        onClick={() => router.push(fromPath)}
+      >
+        <ChevronLeft size={18} />
+        Geri Dön
+      </Button>
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -790,4 +800,10 @@ export default function KumulatifHesaplamaPage() {
   );
 }
 
-    
+export default function KumulatifHesaplamaPage() {
+  return (
+    <Suspense fallback={null}>
+      <KumulatifHesaplamaContent />
+    </Suspense>
+  );
+}
