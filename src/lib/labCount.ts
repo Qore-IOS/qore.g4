@@ -39,6 +39,11 @@ export type LabCountSession = {
   createdById: string;
   createdByName: string;
   items: LabCountItem[];
+  period?: string;
+  month?: number;
+  year?: number;
+  cihazUstuUploaded?: boolean;
+  kumulatifUploaded?: boolean;
 };
 
 /**
@@ -106,6 +111,11 @@ export async function saveLabCountSession(opts: {
   // Option B: or pass stock + scanned serials to compute items
   stockItemsForLab?: DepoStokItem[];
   scannedSerials?: string[] | Set<string>;
+  period?: string;
+  month?: number;
+  year?: number;
+  cihazUstuUploaded?: boolean;
+  kumulatifUploaded?: boolean;
 }): Promise<string> {
   const {
     laboratoryId,
@@ -116,6 +126,11 @@ export async function saveLabCountSession(opts: {
     items,
     stockItemsForLab,
     scannedSerials,
+    period,
+    month,
+    year,
+    cihazUstuUploaded,
+    kumulatifUploaded,
   } = opts;
 
   if (!laboratoryId) throw new Error('laboratoryId is required');
@@ -141,6 +156,11 @@ export async function saveLabCountSession(opts: {
     createdById: user.id,
     createdByName: user.name || '—',
     items: finalItems,
+    period,
+    month,
+    year,
+    cihazUstuUploaded: cihazUstuUploaded ?? false,
+    kumulatifUploaded: kumulatifUploaded ?? false,
   };
 
   // Create a version of the payload with Firestore Timestamps, safely handling nulls
