@@ -63,13 +63,53 @@ type SavedShortcut = {
   id: string;
   title?: string;
   description?: string;
+  panelKey?: string;
   panelLabel?: string;
+  actionKey?: string;
+  actionLabel?: string;
+  actionDescription?: string;
   actionHref?: string;
   runMode?: ShortcutRunMode;
   scheduleLabel?: string;
+  schedule?: { type: 'once' | 'interval'; intervalDays?: number } | string | null;
+  outputs?: string[];
+  filters?: string[];
+  recipients?: string[];
+  deliveryChannels?: string[];
+  outputFormats?: string[];
   enabled?: boolean;
   lastRunAt?: { toDate?: () => Date } | Date | null;
 };
+
+const OUTPUT_TO_DELIVERY_CHANNEL: Record<string, string> = {
+  app: 'inApp',
+  inApp: 'inApp',
+  email: 'email',
+  whatsapp: 'whatsapp',
+  pdf: 'pdf',
+  excel: 'excel',
+};
+
+const DELIVERY_TO_OUTPUT: Record<string, string> = {
+  inApp: 'app',
+  app: 'app',
+  email: 'email',
+  whatsapp: 'whatsapp',
+  pdf: 'pdf',
+  excel: 'excel',
+};
+
+function uniqueStrings(values: unknown[]): string[] {
+  return Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean)));
+}
+
+function normalizePhoneForWhatsApp(value?: string | null): string | null {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (!digits) return null;
+  const withCountryCode = digits.length === 10 ? `90${digits}` : digits.startsWith('0') && digits.length === 11 ? `9${digits}` : digits;
+  return withCountryCode.length >= 11 ? `${withCountryCode}@c.us` : null;
+}
+
 
 const isManualShortcut = (shortcut: SavedShortcut) => (shortcut.runMode || 'manual') === 'manual' || shortcut.runMode === 'manual_and_scheduled';
 const isScheduledShortcut = (shortcut: SavedShortcut) => shortcut.runMode === 'scheduled' || shortcut.runMode === 'manual_and_scheduled';
@@ -102,6 +142,7 @@ export function StartMenu() {
   const [isShortcutBuilderOpen, setIsShortcutBuilderOpen] = useState(false);
   const [savedShortcuts, setSavedShortcuts] = useState<SavedShortcut[]>([]);
   const [shortcutDraft, setShortcutDraft] = useState<ShortcutDraft | null>(null);
+  const [editingShortcutId, setEditingShortcutId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Avoid hydration mismatch for the theme switch.
@@ -158,17 +199,44 @@ export function StartMenu() {
   const saveShortcut = async (payload: any) => {
     if (!currentUser?.uid) return;
     const firstRunAt = payload.runMode === 'manual' ? null : new Date();
-    await addDoc(collection(db, 'shortcuts'), {
+    const outputs = uniqueStrings(Array.isArray(payload.outputs) ? payload.outputs : []);
+    const deliveryChannels = uniqueStrings(outputs.map((output) => OUTPUT_TO_DELIVERY_CHANNEL[output] || output));
+    const outputFormats = uniqueStrings(outputs.filter((output) => output === 'pdf' || output === 'excel'));
+    const profileEmail = currentUserProfile?.email || currentUser?.email || null;
+    const profilePhone = normalizePhoneForWhatsApp(currentUserProfile?.phoneNumber);
+    const recipients = uniqueStrings([
+      ...(Array.isArray(payload.recipients) ? payload.recipients : []),
+      ...(deliveryChannels.includes('email') && profileEmail ? [profileEmail] : []),
+      ...(deliveryChannels.includes('whatsapp') && profilePhone ? [profilePhone] : []),
+    ]);
+    const shortcutPayload = {
       ...payload,
+      outputs,
+      deliveryChannels: deliveryChannels.length ? deliveryChannels : ['inApp'],
+      outputFormats,
+      recipients,
+      channel: deliveryChannels[0] || 'inApp',
       title: payload.actionLabel,
       description: payload.actionDescription,
       actionHref: payload.actionHref || null,
       companyId: currentCompanyId || null,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Etc/UTC',
+      updatedAt: serverTimestamp(),
+    };
+
+    if (editingShortcutId) {
+      await updateDoc(doc(db, 'shortcuts', editingShortcutId), shortcutPayload);
+      toast.success('Kestirme güncellendi.');
+      setEditingShortcutId(null);
+      return;
+    }
+
+    await addDoc(collection(db, 'shortcuts'), {
+      ...shortcutPayload,
       createdByUid: currentUser.uid,
       createdByName: currentUserProfile?.name || currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Kullanıcı',
       enabled: true,
       nextRunAt: firstRunAt,
-      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Etc/UTC',
       permissionSnapshot: {
         uid: currentUser.uid,
         companyId: currentCompanyId || null,
@@ -179,7 +247,6 @@ export function StartMenu() {
         assignedDepots: currentUserProfile?.assignedDepots || [],
       },
       createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
     });
     toast.success('Kestirme kaydedildi.');
   };
@@ -250,7 +317,33 @@ export function StartMenu() {
   };
 
   const openShortcutBuilder = (draft: ShortcutDraft | null = null) => {
+    setEditingShortcutId(null);
     setShortcutDraft(draft);
+    setIsShortcutBuilderOpen(true);
+  };
+
+  const editShortcut = (shortcut: SavedShortcut) => {
+    const outputs = uniqueStrings([
+      ...(Array.isArray(shortcut.outputs) ? shortcut.outputs : []),
+      ...(Array.isArray(shortcut.deliveryChannels) ? shortcut.deliveryChannels.map((channel) => DELIVERY_TO_OUTPUT[channel] || channel) : []),
+      ...(Array.isArray(shortcut.outputFormats) ? shortcut.outputFormats : []),
+    ]);
+    setEditingShortcutId(shortcut.id);
+    setShortcutDraft({
+      sourceText: shortcut.title || shortcut.actionLabel || 'Kayıtlı kestirme',
+      panelKey: shortcut.panelKey,
+      panelLabel: shortcut.panelLabel,
+      actionKey: shortcut.actionKey,
+      actionLabel: shortcut.actionLabel || shortcut.title,
+      actionDescription: shortcut.actionDescription || shortcut.description,
+      actionHref: shortcut.actionHref,
+      filters: shortcut.filters || [],
+      scheduleLabel: shortcut.scheduleLabel || 'Manuel',
+      schedule: shortcut.schedule || null,
+      channel: outputs[0] || 'app',
+      outputs: outputs.length ? outputs : ['app'],
+      recipients: shortcut.recipients || [],
+    });
     setIsShortcutBuilderOpen(true);
   };
 
@@ -565,7 +658,7 @@ export function StartMenu() {
                             </div>
                             <div className="mt-2 grid grid-cols-2 gap-1.5">
                               <ShortcutActionButton label="Şimdi çalıştır" icon={Play} onClick={() => requestShortcutRun(shortcut)} disabled={shortcut.enabled === false} />
-                              <ShortcutActionButton label="Düzenle" icon={Pencil} onClick={() => openShortcutBuilder()} />
+                              <ShortcutActionButton label="Düzenle" icon={Pencil} onClick={() => editShortcut(shortcut)} />
                               <ShortcutActionButton label="Pasifleştir" icon={Ban} onClick={() => disableShortcut(shortcut)} disabled={shortcut.enabled === false} />
                               <ShortcutActionButton label="Son çalışma logu" icon={FileClock} onClick={() => showLastRunLog(shortcut)} />
                             </div>
@@ -712,7 +805,10 @@ export function StartMenu() {
             open={isShortcutBuilderOpen}
             onOpenChange={(open) => {
               setIsShortcutBuilderOpen(open);
-              if (!open) setShortcutDraft(null);
+              if (!open) {
+                setShortcutDraft(null);
+                setEditingShortcutId(null);
+              }
             }}
             accessibleViews={accessibleViews}
             initialDraft={shortcutDraft}
