@@ -168,9 +168,13 @@ export function StartMenu() {
       nextRunAt: firstRunAt,
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Etc/UTC',
       permissionSnapshot: {
+        uid: currentUser.uid,
         companyId: currentCompanyId || null,
         role: currentUserProfile?.role || null,
+        accessibleViews,
         permissions: accessibleViews,
+        assignedLaboratories: currentUserProfile?.assignedLaboratories || [],
+        assignedDepots: currentUserProfile?.assignedDepots || [],
       },
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
