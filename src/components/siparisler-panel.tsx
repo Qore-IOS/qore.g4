@@ -611,8 +611,8 @@ export default function SiparislerPanel() {
 
       <div className="sp-shell" style={{
         position: 'relative', zIndex: 1,
-        maxWidth: 860, margin: '0 auto',
-        padding: '28px 20px 90px',
+        width: '100%',
+        padding: '28px clamp(16px, 3vw, 36px) 90px',
         minHeight: '100vh',
       }}>
 
@@ -875,18 +875,20 @@ export default function SiparislerPanel() {
         )}
 
         {/* ── Order list ── */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 400px), 1fr))', gap: 14 }}>
           {activeTab === 'tamamlanan' && tamamlananLoading && tamamlananOrders.length === 0 ? (
-            <div style={{ padding: '40px', textAlign: 'center', color: C.ink3 }}>
+            <div style={{ gridColumn: '1 / -1', padding: '40px', textAlign: 'center', color: C.ink3 }}>
               <Loader2 style={{ width: 28, height: 28, margin: '0 auto 8px', animation: 'sipSpin 1s linear infinite' }} />
             </div>
           ) : currentList.length === 0 ? (
-            <EmptyState label={
-              activeTab === 'acik' ? 'Açık sipariş yok' :
-              activeTab === 'kismi' ? 'Kısmi tamamlanan sipariş yok' :
-              (searchQuery || activeFilterCount > 0) ? 'Filtreyle eşleşen sipariş yok' :
-              'Tamamlanan sipariş bulunamadı'
-            } />
+            <div style={{ gridColumn: '1 / -1' }}>
+              <EmptyState label={
+                activeTab === 'acik' ? 'Açık sipariş yok' :
+                activeTab === 'kismi' ? 'Kısmi tamamlanan sipariş yok' :
+                (searchQuery || activeFilterCount > 0) ? 'Filtreyle eşleşen sipariş yok' :
+                'Tamamlanan sipariş bulunamadı'
+              } />
+            </div>
           ) : (
             <>
               {currentList.map(order => (
@@ -910,7 +912,7 @@ export default function SiparislerPanel() {
                   onClick={() => loadTamamlanan(false)}
                   disabled={tamamlananLoading}
                   style={{
-                    all: 'unset', cursor: 'pointer',
+                    all: 'unset', cursor: 'pointer', gridColumn: '1 / -1',
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
                     height: 50, borderRadius: C.rsm,
                     background: `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`,
