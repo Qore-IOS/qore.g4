@@ -27,6 +27,7 @@ interface TransferLog {
   stokKodu: string;
   stokAdi: string;
   serialNumber?: string;
+  quantity: number;
   deviceId?: string;
   deviceName?: string;
   createdByUid: string;
@@ -51,6 +52,7 @@ interface ChangeHistoryEntry {
   personnelUid?: string;
   personnelName: string;
   serialNumber?: string;
+  quantity: number;
   formType?: string;
 }
 
@@ -160,7 +162,9 @@ export default function YedekParcaAnaliziPage() {
           const data = d.data();
           return {
             id: d.id, action: data.action, stokKodu: data.stokKodu || '', stokAdi: data.stokAdi || '',
-            serialNumber: data.serialNumber, deviceId: data.deviceId, deviceName: data.deviceName,
+            serialNumber: data.serialNumber,
+            quantity: Math.max(1, Number(data.quantity) || 1),
+            deviceId: data.deviceId, deviceName: data.deviceName,
             createdByUid: data.createdByUid || '', createdByName: data.createdByName || 'Bilinmiyor',
             createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : new Date(data.createdAt),
             formType: data.formType,
@@ -210,10 +214,10 @@ export default function YedekParcaAnaliziPage() {
       if (!log.stokKodu) continue;
       const existing = map.get(log.stokKodu);
       if (existing) {
-        existing.usageCount++;
+        existing.usageCount += log.quantity;
         if (!existing.lastUsedAt || log.createdAt > existing.lastUsedAt) existing.lastUsedAt = log.createdAt;
       } else {
-        map.set(log.stokKodu, { stokKodu: log.stokKodu, stokAdi: log.stokAdi, usageCount: 1, lastUsedAt: log.createdAt });
+        map.set(log.stokKodu, { stokKodu: log.stokKodu, stokAdi: log.stokAdi, usageCount: log.quantity, lastUsedAt: log.createdAt });
       }
     }
     return Array.from(map.values()).sort((a, b) => b.usageCount - a.usageCount);
@@ -248,21 +252,21 @@ export default function YedekParcaAnaliziPage() {
         const existing = deviceMap.get(log.deviceId);
         const labInfo = deviceLabMap.get(log.deviceId);
         const labName = labInfo?.labName || 'Bilinmiyor';
-        if (existing) existing.count++;
-        else deviceMap.set(log.deviceId, { deviceId: log.deviceId, deviceName: log.deviceName || 'Bilinmiyor', labId: labInfo?.labId, labName, count: 1 });
+        if (existing) existing.count += log.quantity;
+        else deviceMap.set(log.deviceId, { deviceId: log.deviceId, deviceName: log.deviceName || 'Bilinmiyor', labId: labInfo?.labId, labName, count: log.quantity });
       }
 
       const personnelMap = new Map<string, { uid: string; name: string; count: number }>();
       for (const log of usageLogs) {
         if (!log.createdByUid) continue;
         const existing = personnelMap.get(log.createdByUid);
-        if (existing) existing.count++;
-        else personnelMap.set(log.createdByUid, { uid: log.createdByUid, name: log.createdByName, count: 1 });
+        if (existing) existing.count += log.quantity;
+        else personnelMap.set(log.createdByUid, { uid: log.createdByUid, name: log.createdByName, count: log.quantity });
       }
 
       const changeHistory: ChangeHistoryEntry[] = usageLogs.map((log) => {
         const labInfo = deviceLabMap.get(log.deviceId || '');
-        return { id: log.id, date: log.createdAt, deviceName: log.deviceName || 'Bilinmiyor', labId: labInfo?.labId, labName: labInfo?.labName || 'Bilinmiyor', personnelUid: log.createdByUid, personnelName: log.createdByName, serialNumber: log.serialNumber, formType: log.formType };
+        return { id: log.id, date: log.createdAt, deviceName: log.deviceName || 'Bilinmiyor', labId: labInfo?.labId, labName: labInfo?.labName || 'Bilinmiyor', personnelUid: log.createdByUid, personnelName: log.createdByName, serialNumber: log.serialNumber, quantity: log.quantity, formType: log.formType };
       }).sort((a, b) => b.date.getTime() - a.date.getTime());
 
       const [depoDocs, personalDocs] = await Promise.all([
@@ -291,7 +295,7 @@ export default function YedekParcaAnaliziPage() {
       }
 
       setPartDetail({
-        totalUsageCount: usageLogs.length, lastUsedAt,
+        totalUsageCount: usageLogs.reduce((sum, l) => sum + l.quantity, 0), lastUsedAt,
         devices: Array.from(deviceMap.values()).sort((a, b) => b.count - a.count),
         personnel: Array.from(personnelMap.values()).sort((a, b) => b.count - a.count),
         depoStokCount, personnelStokCount: totalPersonnelStok,
@@ -350,8 +354,8 @@ export default function YedekParcaAnaliziPage() {
     for (const entry of filteredChangeHistory) {
       const uid = entry.personnelUid || entry.personnelName;
       const existing = personnelMap.get(uid);
-      if (existing) existing.count += 1;
-      else personnelMap.set(uid, { uid, name: entry.personnelName || 'Bilinmiyor', count: 1 });
+      if (existing) existing.count += entry.quantity;
+      else personnelMap.set(uid, { uid, name: entry.personnelName || 'Bilinmiyor', count: entry.quantity });
     }
 
     let lastUsedAt: Date | null = null;
@@ -361,7 +365,7 @@ export default function YedekParcaAnaliziPage() {
 
     return {
       ...partDetail,
-      totalUsageCount: filteredChangeHistory.length,
+      totalUsageCount: filteredChangeHistory.reduce((sum, e) => sum + e.quantity, 0),
       lastUsedAt,
       devices: filteredDevices,
       personnel: Array.from(personnelMap.values()).sort((a, b) => b.count - a.count),
@@ -481,7 +485,7 @@ export default function YedekParcaAnaliziPage() {
               <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Clock className="h-4 w-4" />Değişim Ekstresi ({detailView.changeHistory.length})</CardTitle></CardHeader>
               <CardContent>
                 <Table>
-                  <TableHeader><TableRow><TableHead>Tarih</TableHead><TableHead>Cihaz</TableHead><TableHead>Laboratuvar</TableHead><TableHead>Personel</TableHead><TableHead>Seri No</TableHead><TableHead className="text-center">Tip</TableHead></TableRow></TableHeader>
+                  <TableHeader><TableRow><TableHead>Tarih</TableHead><TableHead>Cihaz</TableHead><TableHead>Laboratuvar</TableHead><TableHead>Personel</TableHead><TableHead>Seri No</TableHead><TableHead className="text-center">Adet</TableHead><TableHead className="text-center">Tip</TableHead></TableRow></TableHeader>
                   <TableBody>
                     {detailView.changeHistory.map((entry) => (
                       <TableRow key={entry.id}>
@@ -490,6 +494,7 @@ export default function YedekParcaAnaliziPage() {
                         <TableCell className="text-sm"><span className="flex items-center gap-1"><Building2 className="h-3 w-3 text-muted-foreground shrink-0" />{entry.labName}</span></TableCell>
                         <TableCell className="text-sm">{entry.personnelName}</TableCell>
                         <TableCell className="font-mono text-xs">{entry.serialNumber || '-'}</TableCell>
+                        <TableCell className="text-center text-sm font-semibold">{entry.quantity}</TableCell>
                         <TableCell className="text-center">
                           {entry.formType === 'teknik_servis' ? <Badge className="bg-blue-500/20 text-blue-400 text-xs">Teknik</Badge>
                             : entry.formType === 'aplikasyon' ? <Badge className="bg-green-500/20 text-green-400 text-xs">App</Badge>
@@ -497,7 +502,7 @@ export default function YedekParcaAnaliziPage() {
                         </TableCell>
                       </TableRow>
                     ))}
-                    {detailView.changeHistory.length === 0 && <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-4">Değişim kaydı bulunamadı</TableCell></TableRow>}
+                    {detailView.changeHistory.length === 0 && <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-4">Değişim kaydı bulunamadı</TableCell></TableRow>}
                   </TableBody>
                 </Table>
               </CardContent>
