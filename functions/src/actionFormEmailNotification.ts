@@ -10,6 +10,21 @@ import { sendWhatsAppDocument } from './lib/whatsapp';
 
 const db = admin.firestore();
 
+function normalizePhoneForWhatsApp(value: unknown): string | null {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (!digits) return null;
+  const withCountryCode = digits.length === 10 ? `90${digits}` : digits.startsWith('0') && digits.length === 11 ? `9${digits}` : digits;
+  return withCountryCode.length >= 11 ? `${withCountryCode}@c.us` : null;
+}
+
+async function whatsappRecipientForUser(uid: unknown): Promise<string | null> {
+  const userId = String(uid || '').trim();
+  if (!userId) return null;
+  const snap = await db.collection('users').doc(userId).get();
+  const user = snap.exists ? snap.data() || {} : {};
+  return normalizePhoneForWhatsApp(user.phoneNumber);
+}
+
 // --- Turkish -> ASCII transliteration for PDF (font does not support TR glyphs) ---
 const TR_ASCII_MAP: Record<string, string> = {
   'ç': 'c', 'Ç': 'C',
@@ -586,12 +601,13 @@ async function handleActionFormCreated(
       hasConfig: !!waConfig,
       hasInstanceId: !!waConfig?.instance_id,
       hasToken: !!waConfig?.token,
-      hasGroupId: !!waConfig?.group_id
+      hasCreatorPhone: !!data.createdByUid
     });
 
-    if (waConfig && waConfig.instance_id && waConfig.token && waConfig.group_id) {
+    const whatsappRecipient = await whatsappRecipientForUser(data.createdByUid);
+    if (waConfig && waConfig.instance_id && waConfig.token && whatsappRecipient) {
       logEntry.steps.push('WhatsApp gönderimi: başladı');
-      logger.info(`[WhatsApp] Attempting to send to: ${waConfig.group_id}`);
+      logger.info(`[WhatsApp] Attempting to send to form creator: ${whatsappRecipient}`);
       
       const labName = data.labName || 'Bilinmeyen Laboratuvar';
       const cihazAdi = data.cihazAdi || 'Bilinmeyen Cihaz';
@@ -641,7 +657,7 @@ async function handleActionFormCreated(
           publicUrl,
           waFileName,
           caption,
-          waConfig.group_id,
+          whatsappRecipient,
           waConfig.instance_id,
           waConfig.token
         );
@@ -654,39 +670,15 @@ async function handleActionFormCreated(
           logEntry.steps.push(`WhatsApp gönderimi: BAŞARISIZ - ${waResult.error}`);
         }
 
-        // --- 4.3 Send to parts group too if form contains part changes ---
-        const hasPartChanges = Array.isArray(data.actions) && data.actions.some((a: any) => a?.type === 'part_change');
-        const partsGroupId: string | undefined = waConfig.parts_group_id || '905362835871-1624522639@g.us';
-        if (hasPartChanges && partsGroupId) {
-          logger.info(`[WhatsApp] Form has part changes; also sending to parts group: ${partsGroupId}`);
-          try {
-            const partsResult = await sendWhatsAppDocument(
-              publicUrl,
-              waFileName,
-              caption,
-              partsGroupId,
-              waConfig.instance_id,
-              waConfig.token
-            );
-            logger.info(`[WhatsApp] Parts group result: ${JSON.stringify(partsResult)}`);
-            if (partsResult.success) {
-              logEntry.steps.push(`WhatsApp (parça grubu) gönderimi: OK (MsgID: ${partsResult.messageId})`);
-            } else {
-              logEntry.steps.push(`WhatsApp (parça grubu) gönderimi: BAŞARISIZ - ${partsResult.error}`);
-            }
-          } catch (partsErr: any) {
-            logger.error('[WhatsApp] Parts group send error', partsErr);
-            logEntry.steps.push(`WhatsApp (parça grubu) gönderimi: HATA - ${partsErr?.message || partsErr}`);
-          }
-        }
       } catch (waErr: any) {
         logger.error('[WhatsApp] Fatal error in notification flow:', waErr);
         logEntry.whatsappError = waErr.message || String(waErr);
         logEntry.steps.push(`WhatsApp gönderimi: HATA - ${waErr.message}`);
       }
     } else {
-      logger.warn('[WhatsApp] Skipping: Configuration is incomplete.');
-      logEntry.steps.push('WhatsApp gönderimi: ATLADI (Yapılandırma eksik)');
+      const reason = !waConfig?.instance_id || !waConfig?.token ? 'yapılandırma eksik' : 'formu oluşturan kullanıcının telefon numarası yok';
+      logger.warn(`[WhatsApp] Skipping WhatsApp send: ${reason}`);
+      logEntry.steps.push(`WhatsApp gönderimi: ATLANDI - ${reason}`);
     }
 
     // 5. Compose email (only if email is enabled)
