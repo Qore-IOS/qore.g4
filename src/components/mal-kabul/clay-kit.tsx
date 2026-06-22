@@ -56,6 +56,16 @@ export function MkClayStyles() {
       @keyframes mkSpin { to { transform: rotate(360deg); } }
       @keyframes mkPopIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
       @keyframes mkFadeIn { from { opacity: 0; } to { opacity: 1; } }
+      @keyframes mkValueFlash {
+        0% { transform: scale(1); }
+        30% { transform: scale(1.07); text-shadow: 0 0 16px rgba(201,138,87,0.55); }
+        100% { transform: scale(1); text-shadow: none; }
+      }
+      @keyframes mkRise { from { opacity: 0; transform: translateY(14px) scale(0.97); } to { opacity: 1; transform: none; } }
+      @keyframes mkPeakPop { 0% { opacity: 0; transform: translateY(6px) scale(0.6); } 60% { transform: translateY(0) scale(1.12); } 100% { opacity: 1; transform: scale(1); } }
+      @media (prefers-reduced-motion: reduce) {
+        .clay-shell *, .mk-shell * { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
+      }
       .mk-shell { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; background: linear-gradient(120deg, #F6F2EA 0%, transparent 55%), linear-gradient(225deg, #E8E1D2 0%, transparent 55%), #EFEAE0; color: #3D382F; min-height: 100vh; -webkit-font-smoothing: antialiased; }
       .mk-grid-kpi { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.15fr); gap: 14px; }
       @media (max-width: 1079px) { .mk-grid-kpi { grid-template-columns: 1fr; } }
@@ -100,22 +110,31 @@ const C = MK_C;
 export function MkTopStepper({ active }: { active: number }) {
   const steps = ['Depo', 'Okut', 'Kabul'];
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
       {steps.map((label, i) => {
         const cur = active === i;
         const done = active > i;
         return (
           <React.Fragment key={label}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
               <span style={{
-                width: 28, height: 28, borderRadius: '50%', display: 'grid', placeItems: 'center', fontSize: 12.5, fontWeight: 800,
+                width: 30, height: 30, borderRadius: '50%', display: 'grid', placeItems: 'center', fontSize: 13, fontWeight: 800, flexShrink: 0,
                 background: done ? 'linear-gradient(180deg, #8FD3A6, #6FB585)' : cur ? `linear-gradient(180deg, ${C.accent2}, ${C.accent})` : C.surface2,
-                boxShadow: (done || cur) ? '0 5px 11px -4px rgba(150,128,96,0.4)' : C.clayInset,
-                color: (done || cur) ? '#fff' : C.ink3, transition: 'all 320ms ease',
+                boxShadow: done
+                  ? '0 5px 14px -5px rgba(111,181,133,0.55), inset 0 1px 0 rgba(255,255,255,0.35)'
+                  : cur
+                  ? `0 5px 14px -5px ${C.accentGlow}, inset 0 1px 0 rgba(255,255,255,0.35)`
+                  : C.clayInset,
+                color: (done || cur) ? '#fff' : C.ink3, transition: 'all 320ms cubic-bezier(0.34,1.56,0.64,1)',
+                transform: cur ? 'scale(1.08)' : 'scale(1)',
               }}>{done ? <Check size={14} /> : i + 1}</span>
-              <span style={{ fontSize: 13, fontWeight: 700, color: cur ? C.ink1 : C.ink3, whiteSpace: 'nowrap' }}>{label}</span>
+              <span style={{ fontSize: 13.5, fontWeight: cur ? 800 : 600, color: cur ? C.ink1 : done ? C.waterDeep : C.ink3, whiteSpace: 'nowrap', transition: 'color 320ms ease' }}>{label}</span>
             </div>
-            {i < 2 && <span style={{ width: 28, height: 2.5, borderRadius: 2, background: active > i ? C.waterSolid : C.ink3, opacity: active > i ? 1 : 0.3, transition: 'all 320ms ease' }} />}
+            {i < 2 && (
+              <div style={{ width: 32, height: 3, borderRadius: 2, overflow: 'hidden', background: C.surface2, boxShadow: C.clayInset }}>
+                <div style={{ height: '100%', width: active > i ? '100%' : '0%', background: `linear-gradient(90deg, ${C.waterSolid}, ${C.waterDeep})`, borderRadius: 2, transition: 'width 400ms ease' }} />
+              </div>
+            )}
           </React.Fragment>
         );
       })}
@@ -389,13 +408,28 @@ export function MkAcceptBtn({ count, onClick, disabled, loading, label }: { coun
   return (
     <button onClick={on && !loading ? onClick : undefined} onPointerDown={() => on && setP(true)} onPointerUp={() => setP(false)} onPointerLeave={() => setP(false)}
       style={{
-        all: 'unset', cursor: (on && !loading) ? 'pointer' : 'not-allowed', display: 'inline-flex', alignItems: 'center', gap: 10, height: 48, padding: '0 22px',
-        borderRadius: C.radiusSm, background: on ? 'linear-gradient(180deg, #8FD3A6, #6FB585)' : C.surface2,
-        boxShadow: on ? (p ? 'inset 0 3px 7px rgba(60,120,80,0.3)' : 'inset 0 1px 0 rgba(255,255,255,0.4), 0 12px 22px -10px rgba(111,181,133,0.6)') : C.clayInset,
-        color: on ? '#fff' : C.ink3, fontWeight: 800, fontSize: 14.5, transition: 'all 240ms ease', transform: p ? 'translateY(1px) scale(0.99)' : 'none',
+        all: 'unset', cursor: (on && !loading) ? 'pointer' : 'not-allowed', display: 'inline-flex', alignItems: 'center', gap: 10, height: 50, padding: '0 26px',
+        borderRadius: C.radiusSm,
+        background: on ? 'linear-gradient(180deg, #8FD3A6 0%, #6FB585 100%)' : C.surface2,
+        boxShadow: on
+          ? (p
+              ? 'inset 0 3px 8px rgba(40,110,70,0.35), 0 2px 6px -4px rgba(111,181,133,0.3)'
+              : 'inset 0 1px 0 rgba(255,255,255,0.45), 0 14px 26px -10px rgba(111,181,133,0.65), 0 4px 10px -6px rgba(111,181,133,0.4)')
+          : C.clayInset,
+        color: on ? '#fff' : C.ink3, fontWeight: 800, fontSize: 14.5,
+        transition: 'transform 200ms cubic-bezier(0.34,1.56,0.64,1), box-shadow 200ms ease',
+        transform: p ? 'translateY(2px) scale(0.98)' : on ? 'translateY(-1px)' : 'none',
+        letterSpacing: '-0.01em',
       }}>
-      {loading ? <span style={{ display: 'inline-flex', animation: 'mkSpin 1s linear infinite' }}><RefreshCw size={18} /></span> : <Box size={18} />}
+      {loading
+        ? <span style={{ display: 'inline-flex', animation: 'mkSpin 1s linear infinite' }}><RefreshCw size={18} /></span>
+        : <span style={{ display: 'inline-flex', color: on ? 'rgba(255,255,255,0.9)' : C.ink3 }}><Box size={18} /></span>}
       <span style={{ whiteSpace: 'nowrap' }}>{label ?? `Kabul Et ve Stoğa Ekle (${count})`}</span>
+      {on && !loading && !p && (
+        <span style={{ display: 'inline-flex', opacity: 0.8, marginLeft: 2 }}>
+          <ArrowRight size={16} />
+        </span>
+      )}
     </button>
   );
 }

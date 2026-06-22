@@ -1029,6 +1029,20 @@ export const TOOL_SCHEMAS: GeminiFunctionDeclaration[] = [
 
   /* ===== TEKNİK SERVİS BİLGİ TABANI ===================================== */
   {
+    name: 'create_shortcut_draft',
+    description:
+      'Kullanıcının doğal dille söylediği otomasyon/kestirme isteğini ShortcutBuilderModal için TASLAĞA çevir. Gerçek kayıt oluşturmaz. Panel, action, filtreler, schedule, kanal ve alıcıları döndürür. Örn: “Her pazartesi riskli stokları WhatsApp’a gönder”, “Her sabah açık arızaları mail at”, “Ay sonunda maliyet raporu oluştur”, “Haftalık ürün kullanım özetini lab sorumlularına gönder”.',
+    parameters: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', description: 'Kullanıcının kestirme/otomasyon isteği.' },
+        accessibleViews: { type: 'array', items: { type: 'string' }, description: 'Varsa kullanıcının erişebildiği view key listesi.' },
+      },
+      required: ['text'],
+    },
+  },
+
+  {
     name: 'search_knowledge_base',
     description:
       'Roche Cobas teknik servis dökümanından (teknik_doc.txt) arama yap. Cihaz hata kodları, parça değişim prosedürü, sarf saklama, alarm açıklaması, periyodik bakım gibi konularda KISA alıntı döner. AI-üretimli içerik DEĞİL — orijinal döküman kayıtlı bilgi tabanı.',

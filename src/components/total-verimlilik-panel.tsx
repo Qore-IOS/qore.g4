@@ -80,7 +80,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { LabSelector } from '@/components/common/LabSelector';
 import { Label } from '@/components/ui/label';
-import { collection, getDocs, query, orderBy, doc, setDoc, getDoc, Timestamp, where, collectionGroup } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, doc, getDoc, Timestamp, where, collectionGroup } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
@@ -90,6 +90,7 @@ import { totalVerimlilikLogger } from '@/lib/logger';
 import { cn, exportDataToExcel } from '@/lib/utils';
 import { TOTAL_VERIMLILIK_AI_MASTER_PROMPT } from '@/lib/ai/totalVerimlilikMasterPrompt';
 import { getExchangeRates } from '@/lib/exchange-rates';
+import { loadTotalEfficiencyRows, saveTotalEfficiencyRecord } from '@/lib/total-efficiency-record-storage';
 import Link from 'next/link';
 
 interface TotalVerimlilikPanelProps {
@@ -1264,13 +1265,13 @@ export default function TotalVerimlilikPanel({
 
           if (prevDocSnap.exists()) {
             // Ay sonu kaydı var → oradan devret
-            const prevRows = (prevDocSnap.data().rows as TableRow[]) || [];
+            const prevRows = await loadTotalEfficiencyRows<TableRow>(prevDocId, prevDocSnap.data());
             applyCarryover(prevRows, 'döneminden');
           } else {
             // Ay sonu kaydı yok → ara kayıt var mı kontrol et
             const prevAraKayitSnap = await getDoc(doc(db, 'totalEfficiencyRecords', prevAraKayitDocId));
             if (prevAraKayitSnap.exists()) {
-              const prevRows = (prevAraKayitSnap.data().rows as TableRow[]) || [];
+              const prevRows = await loadTotalEfficiencyRows<TableRow>(prevAraKayitDocId, prevAraKayitSnap.data());
               applyCarryover(prevRows, 'ara kaydından');
             }
           }
@@ -1319,7 +1320,7 @@ export default function TotalVerimlilikPanel({
           const araKayitSnap = await getDoc(doc(db, 'totalEfficiencyRecords', araKayitDocId));
           if (araKayitSnap.exists()) {
             const araKayitData = araKayitSnap.data();
-            const araKayitRows = araKayitData.rows as TableRow[] || [];
+            const araKayitRows = await loadTotalEfficiencyRows<TableRow>(araKayitDocId, araKayitData);
 
             // Ara kayıttaki değerleri mevcut row'lara uygula
             const mergedRows = computedRows.map(row => {
@@ -2036,7 +2037,7 @@ export default function TotalVerimlilikPanel({
         updatedAt: Timestamp.now(),
       }, currentCompanyId);
 
-      await setDoc(doc(db, 'totalEfficiencyRecords', docId), dataToSave, { merge: true });
+      await saveTotalEfficiencyRecord<TableRow>(docId, dataToSave);
       toast({ title: 'Kaydedildi', description: `Total verimlilik verileri kaydedildi. Genel Verimlilik: %${genelVerimlilik.toFixed(1)}` });
     } catch (error) {
       totalVerimlilikLogger.error('Total verimlilik kaydedilirken hata oluştu', error, {
@@ -2074,7 +2075,7 @@ export default function TotalVerimlilikPanel({
         updatedAt: Timestamp.now(),
       }, currentCompanyId);
 
-      await setDoc(doc(db, 'totalEfficiencyRecords', araKayitDocId), dataToSave, { merge: true });
+      await saveTotalEfficiencyRecord<TableRow>(araKayitDocId, dataToSave);
 
       setAraKayitInfo({
         exists: true,

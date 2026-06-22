@@ -14,6 +14,7 @@ import {
 import {
   FileSpreadsheet,
   FileJson,
+  FileText,
   Loader2,
   CalendarClock,
   Activity,
@@ -27,6 +28,7 @@ import {
   ChevronRight,
   Download,
   DatabaseZap,
+  AlertTriangle,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -127,11 +129,12 @@ export default function RaporlamaPage() {
   };
 
   const modules = [
+    { icon: FileText, title: 'Oluşturulan Raporlar', desc: 'Kestirmelerden üretilen PDF/Excel raporları ve teslimat durumlarını görüntüleyin.', onClick: () => router.push('/raporlama/olusturulan-raporlar') },
     { icon: FolderOpen, title: 'Dosya Yönetimi', desc: 'İrsaliye PDF ve Excel dosyalarını yükleyin ve yönetin.', onClick: () => router.push('/dosya-yonetimi') },
     { icon: TrendingUp, title: 'Tüketim İstatistikleri', desc: 'Laboratuvar bazlı ürün tüketim verilerini analiz edin.', onClick: () => router.push('/tuketim-istatistikleri') },
     { icon: Archive, title: 'Kümülatif', desc: "'Cumulative Operation List' PDF/TXT dosyalarından test sayılarını hesaplayın.", onClick: () => router.push('/kumulatif-hesaplama') },
     { icon: Activity, title: 'Cihaz Üstü', desc: "'Reagent Status' PDF/TXT dosyalarından kullanılabilir test sayılarını hesaplayın.", onClick: () => router.push('/cihaz-ustu-hesaplama') },
-    { icon: Package, title: 'Stok İşlemleri', desc: 'Transfer, imha, hareketsiz stok ve min-max raporları.', onClick: () => setIsStokIslemleriModalOpen(true) },
+    { icon: Package, title: 'Stok İşlemleri', desc: 'Transfer, imha, stok risk, hareketsiz stok ve min-max raporları.', onClick: () => setIsStokIslemleriModalOpen(true) },
     { icon: Barcode, title: 'Seri No Format Tanımla', desc: 'Barkod seri numarası format kurallarını belirleyin.', onClick: () => router.push('/raporlama/seri-no-format') },
   ];
 
@@ -264,6 +267,12 @@ export default function RaporlamaPage() {
               title="Min-Max Ürün Grafiği"
               description="Ürün bazında tanımlı sınırlar ve mevcut seviyeleri karşılaştırın."
               onClick={() => handleStokIslemleriNavigation('/raporlama/minmax-urun-grafik')}
+            />
+            <ActionCard
+              icon={AlertTriangle}
+              title="Stok Risk Raporu"
+              description="Min-max altı, miad yaklaşımı, hareketsiz, kritik depo ve fazla stok otomasyonlarını tanımlayın."
+              onClick={() => handleStokIslemleriNavigation('/raporlama/stock-risk-report')}
             />
           </div>
         </DialogContent>
