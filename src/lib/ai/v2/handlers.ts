@@ -15,6 +15,8 @@ import {
   canSeeDepot,
   canSeeLab,
 } from './permissions';
+import { createShortcutDraft } from '@/lib/shortcuts/draft';
+import { SHORTCUT_CATALOG } from '@/lib/shortcuts/catalog';
 import {
   getHospitalById,
   getProductByCode,
@@ -23,6 +25,28 @@ import {
   resolveHospitals,
   resolveProducts,
 } from './resolver';
+
+
+export async function createShortcutDraftTool(
+  args: { text?: string; accessibleViews?: string[] },
+  _ctx: PermissionContext,
+): Promise<ToolCallResult> {
+  const text = String(args.text || '').trim();
+  if (!text) return { ok: false, label: 'create_shortcut_draft', data: null, notice: 'Taslak için metin gerekli.' };
+  const accessibleViews = Array.isArray(args.accessibleViews) && args.accessibleViews.length > 0
+    ? args.accessibleViews
+    : SHORTCUT_CATALOG.map((panel) => String(panel.requiredView));
+  const draft = createShortcutDraft({ text, accessibleViews });
+  if (!draft) {
+    return { ok: true, label: 'create_shortcut_draft', data: null, notice: 'Bu ifade desteklenen bir kestirme taslağına eşlenemedi.' };
+  }
+  return {
+    ok: true,
+    label: 'create_shortcut_draft',
+    data: draft,
+    notice: 'Sadece taslak döndürüldü; gerçek kestirme kaydı oluşturulmadı.',
+  };
+}
 
 function tsToISO(value: unknown): string | undefined {
   if (!value) return undefined;
@@ -3414,6 +3438,8 @@ export async function runTool(
     // ===== Teknik servis bilgi tabanı =====
     case 'search_knowledge_base':
       return searchKnowledgeBase(args as Parameters<typeof searchKnowledgeBase>[0], ctx);
+    case 'create_shortcut_draft':
+      return createShortcutDraftTool(args as Parameters<typeof createShortcutDraftTool>[0], ctx);
 
     default:
       return { ok: false, label: name, data: null, notice: `Bilinmeyen tool: ${name}` };
