@@ -83,7 +83,11 @@ async function recipientList(shortcut: ShortcutDeliveryShortcut): Promise<string
 }
 
 function whatsappRecipients(recipients: string[]): string[] {
-  return recipients.filter((recipient) => recipient.endsWith('@c.us') || recipient.endsWith('@g.us'));
+  return recipients.filter((recipient) => recipient.endsWith('@c.us'));
+}
+
+function emailRecipients(recipients: string[]): string[] {
+  return recipients.filter((recipient) => recipient.includes('@') && !whatsappRecipients([recipient]).length);
 }
 
 function emailRecipients(recipients: string[]): string[] {
@@ -286,8 +290,7 @@ async function sendWhatsapp(recipients: string[], summary: string, attachments: 
     return { channel: 'whatsapp', status: 'skipped', message: 'WhatsApp yapılandırması eksik.' };
   }
   const to = whatsappRecipients(recipients);
-  if (!to.length && waConfig.group_id) to.push(waConfig.group_id);
-  if (!to.length) return { channel: 'whatsapp', status: 'skipped', message: 'WhatsApp alıcısı bulunamadı.' };
+  if (!to.length) return { channel: 'whatsapp', status: 'skipped', message: 'Raporu oluşturan kullanıcı için WhatsApp telefon alıcısı bulunamadı.' };
 
   const pdf = attachments.find((attachment) => attachment.contentType === 'application/pdf');
   const results = [];
