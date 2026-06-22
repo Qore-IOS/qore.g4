@@ -27,6 +27,7 @@ import {
   Truck,
   ListChecks,
   Trash2,
+  Calculator,
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
@@ -294,6 +295,7 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
         { label: 'İşlem Formları', icon: ClipboardList, href: actionFormsHref },
         { label: 'Form Oluşturma', icon: primaryPanel.icon, href: primaryPanel.href },
         { label: 'Yedek Parça', icon: Package, href: '/direkt-transfer/yedek-parca-transfer' },
+        { label: 'Kümülatif Hesaplama', icon: Calculator, href: `/kumulatif-hesaplama?from=${encodeURIComponent(primaryPanel.href)}` },
       ],
     },
     navItems[2], // Tüm Arızalar
