@@ -764,6 +764,7 @@ declare module "@/lib/types" {
     sutKodu: string;
     sutTestAdi: string;
     linkedStokKodlari: string[];
+    counterValue?: number;
     hakEdisMiktari: number;
     currency?: 'EUR' | 'USD' | 'TRY';
     aktif: boolean;

@@ -587,6 +587,12 @@ export function useDock() {
               icon: Boxes,
               href: ownStockHref,
             },
+            {
+              key: 'kumulatif-hesaplama-field',
+              label: 'Kümülatif Hesapla',
+              icon: Calculator,
+              href: '/kumulatif-hesaplama',
+            },
           ];
         }
 
@@ -624,6 +630,14 @@ export function useDock() {
             type: 'nav',
             href: stockHref,
             onClick: () => router.push(stockHref),
+          },
+          {
+            key: 'kumulatif-hesaplama-field-mobile',
+            label: 'Kümülatif Hesapla',
+            icon: Calculator,
+            type: 'nav',
+            href: '/kumulatif-hesaplama',
+            onClick: () => router.push('/kumulatif-hesaplama'),
           }
         );
       }
