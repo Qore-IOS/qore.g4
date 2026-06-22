@@ -74,6 +74,7 @@ export interface Hospital {
   perifer?: boolean; // Perifer laboratuvar statüsü - ofis tarafından yönetilen, lojistik paneli açan siparişler
   defaultDepotId?: string; // Varsayılan depo ID'si (otomatik yönlendirme için)
   defaultDepotName?: string; // Varsayılan depo adı
+  orderLimitEnabled?: boolean; // Manuel ürün talebinde max stok üstü siparişi engeller
   ceomedCariKodu?: string; // Ceomed ERP'deki cari kodu (örn. M51001) - irsaliye eşlemesi için
   mahalKodu?: string; // Hastane Sarf kategorisindeki lablar için mahal kodu (örn. 152.06.A.001) — QR teslimat doğrulamasında kullanılır
   ekHizmetLabIds?: string[]; // Bu ana laboratuvara bağlı ek hizmet laboratuvarlarının id'leri
@@ -147,6 +148,7 @@ export interface Depot {
   ceomedEnabled?: boolean; // true ise bu depo Ceomed ERP'den senkronize edilir
   ceomedDepoKodu?: string; // Ceomed'deki depo kodu (örn. "77") — selectMerkezDepoListesi'ndeki DEPO{kod} alanını okur
   ceomedCariKodu?: string; // Ceomed cari kodu (örn. M51001) — Ceomed irsaliye eşleştirmesi için
+  orderLimitEnabled?: boolean; // Manuel depo talebinde max stok üstü siparişi engeller
   [k: string]: any;
 }
 

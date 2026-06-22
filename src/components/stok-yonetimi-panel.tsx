@@ -32,7 +32,7 @@ import {
   ChevronLeft, ChevronRight, MoreHorizontal, Eye,
   FileDown, ListChecks, BarChart3, ChevronsUpDown, FileText,
   AlertTriangle, FlaskConical, ShieldCheck, TrendingUp, ArrowRight,
-  CheckCircle2, XCircle, Send,
+  CheckCircle2, XCircle, Send, ClipboardPlus, History,
 } from 'lucide-react';
 import { exportDataToExcel } from '@/lib/utils';
 import { differenceInDays, parse, isValid, compareAsc } from 'date-fns';
@@ -1664,6 +1664,24 @@ export default function StokYonetimiPanel() {
             </DropdownMenuContent>
           </DropdownMenu>
 
+
+          {/* Ürün Talep - quick action */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button className="cihaz-tool-item flex items-center justify-center gap-1.5 px-3 h-9 sm:h-10 text-xs font-medium text-[var(--dashboard-muted)]" disabled={!selectedDepotId}>
+                <ClipboardPlus className="h-4 w-4" /> <span className="hidden sm:inline">Ürün Talep</span>
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuItem onSelect={() => router.push(`/urun-talep/depo/${selectedDepotId}`)} disabled={!selectedDepotId}>
+                <ClipboardPlus className="h-4 w-4 mr-2" /> Talep Oluştur
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => router.push(`/urun-talep/depo/${selectedDepotId}/gecmis`)} disabled={!selectedDepotId}>
+                <History className="h-4 w-4 mr-2" /> Talep Geçmişi
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           {/* İşlemler menu - grouped */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -1696,6 +1714,9 @@ export default function StokYonetimiPanel() {
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-[var(--dashboard-muted)]">Operasyon / Sayım</DropdownMenuLabel>
+              <DropdownMenuItem onSelect={() => router.push(`/urun-talep/depo/${selectedDepotId}`)} disabled={!selectedDepotId}>
+                <ClipboardPlus className="h-4 w-4 mr-2" /> Ürün Talep
+              </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => router.push('/depo-sayim')}>
                 <ListChecks className="h-4 w-4 mr-2" /> Marka Sayımı Başlat
               </DropdownMenuItem>

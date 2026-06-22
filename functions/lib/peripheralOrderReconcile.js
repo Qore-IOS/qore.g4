@@ -4,8 +4,8 @@
  *
  * Listens for new stock arrivals at a lab (depoStok docs created with
  * `isShipped == true` and a `hedefKurumId` set — Excel import, PDF irsaliye OCR,
- * Ceomed irsaliye, depot transfer all funnel through this collection) and
- * credits each unit against the oldest active peripheral order for that lab
+ * Ceomed irsaliye, depot transfer all funnel through this collection) or at a
+ * depot (`isShipped == false` + `depotId`) and credits each unit against the oldest active peripheral/depot order for that location
  * whose `peripheralFulfillment.items[]` still has remaining demand for the
  * arriving stokKodu.
  *
@@ -82,29 +82,37 @@ exports.onDepoStokAccepted = functions
     .onCreate(async (snap, context) => {
     const data = snap.data();
     const stokId = context.params.stokId;
-    // Gate: only react when this stock entry is destined for a lab (perifer flow
-    // and depot→lab transfers both flag isShipped+hedefKurumId).
-    if (!(data === null || data === void 0 ? void 0 : data.isShipped))
+    const isLabArrival = (data === null || data === void 0 ? void 0 : data.isShipped) === true && !!(data === null || data === void 0 ? void 0 : data.hedefKurumId);
+    const isDepotArrival = (data === null || data === void 0 ? void 0 : data.isShipped) === false && !!(data === null || data === void 0 ? void 0 : data.depotId);
+    if (!isLabArrival && !isDepotArrival)
         return;
-    const hedefKurumId = data === null || data === void 0 ? void 0 : data.hedefKurumId;
-    if (!hedefKurumId)
-        return;
+    const locationId = (isDepotArrival ? data.depotId : data.hedefKurumId).toString();
+    const locationKind = isDepotArrival ? 'depot' : 'lab';
+    const fulfillmentField = isDepotArrival ? 'depotFulfillment' : 'peripheralFulfillment';
     const stokKodu = ((data === null || data === void 0 ? void 0 : data.stokKodu) || '').toString().trim();
     if (!stokKodu)
         return;
     const arrivedAdet = Math.max(1, Number(data === null || data === void 0 ? void 0 : data.adet) || 1);
-    // Find active peripheral orders for this lab.
+    // Find active product requests for this lab/depot.
     let ordersSnap;
     try {
-        ordersSnap = await db
-            .collection('orders')
-            .where('isPeripheral', '==', true)
-            .where('labId', '==', hedefKurumId)
-            .where('status', 'in', ['toplaniyor', 'eksik'])
-            .get();
+        let orderQuery = db.collection('orders');
+        if (isDepotArrival) {
+            orderQuery = orderQuery
+                .where('isDepotRequest', '==', true)
+                .where('depotId', '==', locationId)
+                .where('status', 'in', ['pending', 'eksik']);
+        }
+        else {
+            orderQuery = orderQuery
+                .where('isPeripheral', '==', true)
+                .where('labId', '==', locationId)
+                .where('status', 'in', ['toplaniyor', 'eksik']);
+        }
+        ordersSnap = await orderQuery.get();
     }
     catch (e) {
-        firebase_functions_1.logger.warn(`[peripheralReconcile] order query failed for lab ${hedefKurumId}:`, (e === null || e === void 0 ? void 0 : e.message) || e);
+        firebase_functions_1.logger.warn(`[peripheralReconcile] order query failed for ${locationKind} ${locationId}:`, (e === null || e === void 0 ? void 0 : e.message) || e);
         return;
     }
     if (ordersSnap.empty)
@@ -122,11 +130,24 @@ exports.onDepoStokAccepted = functions
             break;
         try {
             const applied = await db.runTransaction(async (tx) => {
+                var _a, _b;
                 const fresh = await tx.get(orderRef.ref);
                 if (!fresh.exists)
                     return 0;
                 const order = fresh.data();
-                const fulfillment = order === null || order === void 0 ? void 0 : order.peripheralFulfillment;
+                const rawFulfillment = order === null || order === void 0 ? void 0 : order[fulfillmentField];
+                const fallbackItems = isDepotArrival && Array.isArray(order === null || order === void 0 ? void 0 : order.items)
+                    ? order.items.map((it) => ({
+                        itemId: (it === null || it === void 0 ? void 0 : it.id) || (it === null || it === void 0 ? void 0 : it.stokKodu) || '',
+                        stokKodu: ((it === null || it === void 0 ? void 0 : it.stokKodu) || '').toString(),
+                        requestedAdet: Number(it === null || it === void 0 ? void 0 : it.adet) || 0,
+                        sentAdet: Number(it === null || it === void 0 ? void 0 : it.adet) || 0,
+                        deliveredAdet: 0,
+                        missingAdet: Number(it === null || it === void 0 ? void 0 : it.adet) || 0,
+                        fulfilled: false,
+                    }))
+                    : [];
+                const fulfillment = rawFulfillment || (isDepotArrival ? { items: fallbackItems, appliedDepoStokIds: [], partialDeliveries: [] } : null);
                 const items = Array.isArray(fulfillment === null || fulfillment === void 0 ? void 0 : fulfillment.items) ? fulfillment.items : [];
                 if (items.length === 0)
                     return 0;
@@ -137,18 +158,19 @@ exports.onDepoStokAccepted = functions
                     return 0;
                 // Find the first matching item with remaining need.
                 const idx = items.findIndex((it) => {
+                    var _a;
                     if (((it === null || it === void 0 ? void 0 : it.stokKodu) || '').toString().trim() !== stokKodu)
                         return false;
-                    const sent = Number(it === null || it === void 0 ? void 0 : it.sentAdet) || 0;
+                    const target = Number((_a = it === null || it === void 0 ? void 0 : it.sentAdet) !== null && _a !== void 0 ? _a : it === null || it === void 0 ? void 0 : it.requestedAdet) || 0;
                     const delivered = Number(it === null || it === void 0 ? void 0 : it.deliveredAdet) || 0;
-                    return sent > delivered;
+                    return target > delivered;
                 });
                 if (idx < 0)
                     return 0;
                 const item = items[idx];
-                const sent = Number(item.sentAdet) || 0;
+                const targetAdet = Number((_a = item.sentAdet) !== null && _a !== void 0 ? _a : item.requestedAdet) || 0;
                 const prevDelivered = Number(item.deliveredAdet) || 0;
-                const need = Math.max(0, sent - prevDelivered);
+                const need = Math.max(0, targetAdet - prevDelivered);
                 if (need <= 0)
                     return 0;
                 const credit = Math.min(need, remainingAdet);
@@ -156,14 +178,16 @@ exports.onDepoStokAccepted = functions
                     return 0;
                 const newDelivered = prevDelivered + credit;
                 const newItems = items.slice();
-                newItems[idx] = Object.assign(Object.assign({}, item), { deliveredAdet: newDelivered, missingAdet: Math.max(0, sent - newDelivered), fulfilled: newDelivered >= sent && sent > 0 });
+                newItems[idx] = Object.assign(Object.assign({}, item), { deliveredAdet: newDelivered, sentAdet: Number((_b = item.sentAdet) !== null && _b !== void 0 ? _b : item.requestedAdet) || 0, missingAdet: Math.max(0, targetAdet - newDelivered), fulfilled: newDelivered >= targetAdet && targetAdet > 0 });
                 const allFulfilled = newItems.every((m) => {
-                    const s = Number(m.sentAdet) || 0;
+                    var _a;
+                    const s = Number((_a = m.sentAdet) !== null && _a !== void 0 ? _a : m.requestedAdet) || 0;
                     const d = Number(m.deliveredAdet) || 0;
                     return s > 0 && d >= s;
                 });
                 const anyMissing = newItems.some((m) => {
-                    const s = Number(m.sentAdet) || 0;
+                    var _a;
+                    const s = Number((_a = m.sentAdet) !== null && _a !== void 0 ? _a : m.requestedAdet) || 0;
                     const d = Number(m.deliveredAdet) || 0;
                     return s > d;
                 });
@@ -174,18 +198,18 @@ exports.onDepoStokAccepted = functions
                     at: admin.firestore.Timestamp.now(),
                     source: 'depoStok',
                     depoStokId: stokId,
-                    depoStokDocPath: orderRef.ref.path,
+                    depoStokDocPath: snap.ref.path,
                     actorUid: (data === null || data === void 0 ? void 0 : data.lastEditedById) || (data === null || data === void 0 ? void 0 : data.createdById) || null,
                     actorName: (data === null || data === void 0 ? void 0 : data.lastEditedBy) || (data === null || data === void 0 ? void 0 : data.createdBy) || null,
-                    items: [{ stokKodu, deliveredAdet: credit, missingAdet: Math.max(0, sent - newDelivered) }],
+                    items: [{ stokKodu, deliveredAdet: credit, missingAdet: Math.max(0, targetAdet - newDelivered) }],
                 });
                 const update = {
-                    peripheralFulfillment: Object.assign(Object.assign({}, fulfillment), { items: newItems, appliedDepoStokIds: [...appliedIds, stokId], partialDeliveries, updatedAt: admin.firestore.FieldValue.serverTimestamp() }),
+                    [fulfillmentField]: Object.assign(Object.assign({}, fulfillment), { items: newItems, appliedDepoStokIds: [...appliedIds, stokId], partialDeliveries, updatedAt: admin.firestore.FieldValue.serverTimestamp() }),
                 };
                 if (allFulfilled) {
                     update.status = 'completed';
                     update.transferredAt = admin.firestore.FieldValue.serverTimestamp();
-                    update.transferredBy = 'Otomatik (Stok Girişi)';
+                    update.transferredBy = isDepotArrival ? 'Otomatik (Depo Mal Kabul)' : 'Otomatik (Stok Girişi)';
                 }
                 else if (anyMissing) {
                     update.status = 'eksik';
@@ -195,7 +219,7 @@ exports.onDepoStokAccepted = functions
             });
             if (applied > 0) {
                 remainingAdet -= applied;
-                firebase_functions_1.logger.info(`[peripheralReconcile] credited ${applied} of ${stokKodu} to order ${orderRef.id} (depoStok=${stokId}, lab=${hedefKurumId})`);
+                firebase_functions_1.logger.info(`[peripheralReconcile] credited ${applied} of ${stokKodu} to order ${orderRef.id} (depoStok=${stokId}, ${locationKind}=${locationId})`);
             }
         }
         catch (e) {

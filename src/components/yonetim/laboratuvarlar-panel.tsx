@@ -237,6 +237,7 @@ export default function LaboratuvarPanel() {
         acilStatusu: (currentHospital as any).acilStatusu ?? false,
         calismaSaatleri: (currentHospital as any).acilStatusu ? null : ((currentHospital as any).calismaSaatleri || null),
         autoTutanak: (currentHospital as any).autoTutanak ?? false,
+        orderLimitEnabled: currentHospital.orderLimitEnabled ?? false,
         sorumluEmails: responsibleEmails,
         sorumluEmail: responsibleEmails[0] || '',
         updatedAt: new Date(),
@@ -962,6 +963,20 @@ export default function LaboratuvarPanel() {
                         Perifer Laboratuvar
                         <p className="text-xs text-muted-foreground">
                             Aktifse, bu laboratuvardan açılan siparişler depo toplama yerine ofis lojistik panelinde (Siparişi Gör) yönetilir.
+                        </p>
+                    </Label>
+                </div>
+
+                <div className="flex items-center space-x-2 rounded-md border p-3">
+                    <Switch
+                        id="order-limit-switch"
+                        checked={currentHospital.orderLimitEnabled ?? false}
+                        onCheckedChange={(checked) => setCurrentHospital({ ...currentHospital, orderLimitEnabled: checked })}
+                    />
+                    <Label htmlFor="order-limit-switch">
+                        Sipariş Kısıtlaması
+                        <p className="text-xs text-muted-foreground">
+                            Aktifse manuel ürün talebinde, mevcut laboratuvar stoğu + talep adedi tanımlı max adedi aşamaz.
                         </p>
                     </Label>
                 </div>

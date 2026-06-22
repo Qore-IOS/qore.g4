@@ -2,20 +2,18 @@
 "use client";
 
 /**
- * Masaüstü dock — Apple Liquid Glass.
+ * Masaüstü dock — sade, performanslı kart yüzeyi.
  *
  * Kabuk, mobil dock ile birebir aynı prensiple kurulur: framer-motion'sız
  * düz bir div. Bunun nedeni kozmetik değil, işlevsel: motion.div'in opacity
  * animasyonu sırasında eklediği will-change, Chromium'da elemanı backdrop
- * root yapıp içerideki LiquidGlassSurface'ın sayfayı örneklemesini (gerçek
- * kırılmayı) engelliyordu. Görünürlük artık saf CSS transition ile yönetilir;
- * kabukta grup oluşturucu hiçbir özellik (filter/opacity sarmalayıcı/
- * will-change) bulunmaz. Framer-motion yalnızca yaprak öğelerde (seçici,
- * alt menüler, butonlar) kullanılır.
+ * root/compositor maliyetini büyütüyordu. Görünürlük saf CSS transition ile yönetilir;
+ * kabukta pahalı backdrop/canvas/filter katmanı bulunmaz. Framer-motion yalnızca
+ * alt menüler ve tıklama geri bildirimi gibi hafif yaprak öğelerde kullanılır.
  */
 
 import React, { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
-import { motion, AnimatePresence, useSpring } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
@@ -28,7 +26,6 @@ import { useRouter } from 'next/navigation';
 import { CalendarDockPanel } from '@/components/dock/CalendarDockPanel';
 import Image from 'next/image';
 import { useIconMappings, getIconSrc } from '@/hooks/useIconMappings';
-import { LiquidGlassSurface } from '@/components/ui/liquid-glass';
 
 // Apple-like colorful icon colors - applied directly to the icon SVG via CSS gradient text
 // Each icon gets a unique vibrant color pair for a 3D gradient feel
@@ -99,164 +96,6 @@ interface DockProps {
   setTheme: (theme: string) => void;
   isVisible: boolean;
 }
-
-// Liquid Glass Selector — imleci takip eden, hareketle deforme olan cam pill
-const LiquidGlassSelector = ({
-  x,
-  width,
-  height,
-  isVisible,
-  activeLabel,
-}: {
-  x: number;
-  width: number;
-  height: number;
-  isVisible: boolean;
-  activeLabel?: string;
-}) => {
-  // Spring configs for different properties
-  const positionSpring = { damping: 18, stiffness: 150, mass: 0.8 };
-  const morphSpring = { damping: 12, stiffness: 200, mass: 0.5 };
-
-  const springX = useSpring(x, positionSpring);
-  const springWidth = useSpring(width, positionSpring);
-
-  // Track movement for liquid deformation
-  const [isMoving, setIsMoving] = useState(false);
-  const prevXRef = useRef(x);
-  const velocityTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Sıvı squash & stretch deformasyonu. CSS transform'ların SVG backdrop
-  // kırılmasıyla uyumlu olduğu headless Chromium yeniden üretimiyle
-  // kanıtlandı (gerçek sorun mix-blend-mode'lu sheen katmanıydı).
-  const scaleX = useSpring(1, morphSpring);
-  const scaleY = useSpring(1, morphSpring);
-  const skewX = useSpring(0, morphSpring);
-
-  useEffect(() => {
-    const deltaX = x - prevXRef.current;
-
-    if (Math.abs(deltaX) > 2) {
-      setIsMoving(true);
-
-      // Calculate deformation based on movement direction and speed
-      const deformAmount = Math.min(Math.abs(deltaX) / 30, 0.25);
-      const direction = deltaX > 0 ? 1 : -1;
-
-      // Stretch horizontally, compress vertically (liquid squash & stretch)
-      scaleX.set(1 + deformAmount * 0.8);
-      scaleY.set(1 - deformAmount * 0.3);
-      skewX.set(direction * deformAmount * 8);
-
-      if (velocityTimeoutRef.current) {
-        clearTimeout(velocityTimeoutRef.current);
-      }
-
-      // Bounce back to original shape
-      velocityTimeoutRef.current = setTimeout(() => {
-        scaleX.set(1);
-        scaleY.set(1);
-        skewX.set(0);
-        setIsMoving(false);
-      }, 80);
-    }
-
-    prevXRef.current = x;
-    springX.set(x);
-    springWidth.set(width);
-
-    return () => {
-      if (velocityTimeoutRef.current) {
-        clearTimeout(velocityTimeoutRef.current);
-      }
-    };
-  }, [x, width, springX, springWidth, scaleX, scaleY, skewX]);
-
-  if (!isVisible) return null;
-
-  return (
-    <motion.div
-      className="absolute pointer-events-none"
-      style={{
-        left: springX,
-        width: springWidth,
-        height: height,
-        top: '50%',
-        marginTop: -height / 2,
-        zIndex: 5,
-        scaleX,
-        scaleY,
-        skewX,
-        willChange: 'auto', // framer'ın will-change:opacity eklemesini engelle (backdrop root)
-      }}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.1, ease: "easeOut" }}
-    >
-      {/* Shadow layer - soft, colored shadow */}
-      <div
-        className="absolute inset-0"
-        style={{
-          borderRadius: '9999px',
-          transform: 'translateY(6px) scaleX(0.92) scaleY(0.6)',
-          background: 'radial-gradient(ellipse at center, rgba(0, 30, 60, 0.25) 0%, transparent 70%)',
-          filter: 'blur(8px)',
-        }}
-      />
-
-      {/* Main Glass Container — gerçek kırılma + dispersiyon LiquidGlassSurface'tan.
-          drop-shadow yerine box-shadow: ata üzerindeki filter, backdrop-filter'ın
-          arkadaki sahneyi örneklemesini engellerdi (backdrop root). */}
-      <div
-        className="relative w-full h-full"
-        style={{
-          borderRadius: '9999px',
-          boxShadow: '0 6px 18px rgba(0,0,0,0.14), 0 1px 4px rgba(0,0,0,0.08)',
-        }}
-      >
-        <LiquidGlassSurface
-          radius={height / 2}
-          strength={isMoving ? 88 : 68}
-          dispersion={0.55}
-          blur={1.2}
-          bezel={Math.max(14, height * 0.45)}
-          zoom={0.3}
-          fallbackBlur={20}
-        />
-
-        {/* Hareket halindeyken güçlenen spekülar sweep (sıvı parlaması) */}
-        <div
-          className="absolute top-[8%] left-[6%] w-[26%] h-[44%] pointer-events-none"
-          style={{
-            background: 'radial-gradient(ellipse at 30% 30%, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.35) 40%, transparent 70%)',
-            borderRadius: '50%',
-            filter: 'blur(1px)',
-            opacity: isMoving ? 1 : 0.75,
-            transition: 'opacity 0.15s ease',
-          }}
-        />
-      </div>
-
-      {/* Active label below selector */}
-      <AnimatePresence>
-        {activeLabel && (
-          <motion.div
-            initial={{ opacity: 0, y: -4, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -4, scale: 0.95 }}
-            transition={{ duration: 0.12, ease: "easeOut" }}
-            className="absolute -bottom-6 left-1/2 -translate-x-1/2 whitespace-nowrap"
-          >
-            <span className="text-xs font-medium text-foreground bg-background/95 backdrop-blur-md px-2.5 py-0.5 rounded-full shadow-md border border-border/50">
-              {activeLabel}
-            </span>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </motion.div>
-  );
-};
 
 const DockItem = ({
   item,
@@ -428,11 +267,8 @@ const DockItem = ({
     filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.15))',
   } as React.CSSProperties;
 
-  // Alt menü kabuğu: arka plan LiquidGlassSurface'tan gelir, burada yalnız gölge.
-  const submenuSurface = "shadow-[0_16px_44px_rgba(0,0,0,0.16),0_3px_10px_rgba(0,0,0,0.07)] dark:shadow-[0_16px_48px_rgba(0,0,0,0.55)]";
-  const submenuGlass = (
-    <LiquidGlassSurface radius={12} strength={26} dispersion={0.35} blur={4} bezel={14} zoom={0.12} fallbackBlur={26} shine={false} />
-  );
+  // Alt menü kabuğu: ürün kullanım KPI kartlarıyla aynı prensipte sade yüzey; backdrop/canvas yok.
+  const submenuSurface = "qdock-menu-surface";
 
   // Fast spring for snappy animations
   const fastSpring = { type: 'spring' as const, stiffness: 600, damping: 25 };
@@ -464,7 +300,6 @@ const DockItem = ({
                 willChange: 'auto',
               } as React.CSSProperties}
             >
-              {submenuGlass}
               {/* Invisible bridge to prevent gap between submenu and icon */}
               <div className="absolute -bottom-2 left-0 right-0 h-3" />
               {item.subItems!.map(sub => {
@@ -500,8 +335,7 @@ const DockItem = ({
                             willChange: 'auto',
                           } as React.CSSProperties}
                         >
-                          {submenuGlass}
-                          {/* Invisible bridge for nested menu */}
+                                      {/* Invisible bridge for nested menu */}
                           <div className="absolute -left-2 top-0 bottom-0 w-3" />
                           {sub.subItems.map(nestedSub => {
                             const nestedColors = ICON_COLORS[nestedSub.key] || ['#6b7280', '#4b5563'];
@@ -531,7 +365,7 @@ const DockItem = ({
           <TooltipTrigger asChild>
             <motion.div
               ref={(el) => { if (onRefSet) onRefSet(el); (iconRef as React.MutableRefObject<HTMLDivElement | null>).current = el; }}
-              animate={!isLiquidMode && isHovered ? { scale: 1.55 } : { scale: 1 }}
+              animate={{ scale: 1 }}
               className={cn(
                 'dock-item-wrapper flex items-center justify-center cursor-pointer',
                 isActive && item.type === 'nav' && 'active',
@@ -574,7 +408,7 @@ const DockItem = ({
       onMouseLeave={handleMouseLeave}
     >
       <motion.div
-        animate={!isLiquidMode && isHovered ? { scale: 1.55, y: -8 } : { scale: 1, y: 0 }}
+        animate={{ scale: 1, y: 0 }}
         className={cn(
           'dock-item-wrapper flex items-center justify-center cursor-pointer',
           isActive && item.type === 'nav' && 'active',
@@ -645,8 +479,7 @@ const DockLogo = () => {
     <Tooltip open={isOpen ? false : tooltipOpen} onOpenChange={setTooltipOpen}>
       <TooltipTrigger asChild>
         <motion.button
-          whileHover={{ scale: 1.08, y: -3 }}
-          whileTap={{ scale: 0.94 }}
+          whileTap={{ scale: 0.98 }}
           transition={{ type: 'spring', stiffness: 600, damping: 25 }}
           onClick={toggle}
           aria-label="Başlat"
@@ -684,7 +517,6 @@ const CalendarDockButton = ({ open, onToggle, customIcon }: { open: boolean; onT
     <Tooltip open={open ? false : tooltipOpen} onOpenChange={setTooltipOpen}>
       <TooltipTrigger asChild>
         <motion.div
-          whileHover={{ scale: 1.55, y: -8 }}
           transition={{ type: 'spring', stiffness: 600, damping: 25 }}
           className={cn('dock-item-wrapper flex items-center justify-center cursor-pointer', open && 'active')}
           onClick={onToggle}
@@ -708,8 +540,9 @@ const CalendarDockButton = ({ open, onToggle, customIcon }: { open: boolean; onT
 };
 
 export function Dock({ items, currentView, className, setTheme, isVisible }: DockProps) {
-  const { dockStyle, currentUserProfile } = useAuth();
-  const isLiquidMode = dockStyle === 'liquid';
+  const { currentUserProfile } = useAuth();
+  // Dock her zaman performanslı/sade modda çalışır; mouse takibi ve cam kırılması kapalı.
+  const isLiquidMode = false;
   const iconData = useIconMappings();
   const dockIcons = iconData?.mappings?.dock || {};
 
@@ -717,11 +550,6 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
   const itemRefs = useRef<Map<string, HTMLDivElement | null>>(new Map());
   const dockRef = useRef<HTMLDivElement>(null);
   const dockContentRef = useRef<HTMLDivElement>(null);
-
-  // Liquid mode state
-  const [isMouseInDock, setIsMouseInDock] = useState(false);
-  const [activeItemKey, setActiveItemKey] = useState<string | null>(null);
-  const [selectorPosition, setSelectorPosition] = useState({ x: 0, width: 48 });
 
   // Calendar shortcut (right zone). Close it when navigating to another view.
   const [calendarOpen, setCalendarOpen] = useState(false);
@@ -739,56 +567,6 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
     const next = natural > avail ? Math.max(0.5, avail / natural) : 1;
     setFitScale((prev) => (Math.abs(prev - next) > 0.005 ? next : prev));
   }, []);
-
-  // Track mouse position for liquid selector
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    if (!isLiquidMode || !dockContentRef.current) return;
-
-    const contentRect = dockContentRef.current.getBoundingClientRect();
-    const mouseX = e.clientX - contentRect.left;
-
-    // Find the closest item to the mouse
-    let closestItem: { key: string; centerX: number; width: number } | null = null;
-    let closestDistance = Infinity;
-
-    itemRefs.current.forEach((ref, key) => {
-      if (ref) {
-        const rect = ref.getBoundingClientRect();
-        const itemCenterX = rect.left + rect.width / 2 - contentRect.left;
-        const distance = Math.abs(mouseX - itemCenterX);
-
-        if (distance < closestDistance) {
-          closestDistance = distance;
-          closestItem = {
-            key,
-            centerX: itemCenterX,
-            width: rect.width,
-          };
-        }
-      }
-    });
-
-    if (closestItem) {
-      const selectorWidth = closestItem.width + 12; // Add padding
-      const selectorX = closestItem.centerX - selectorWidth / 2; // Center on icon
-
-      setActiveItemKey(closestItem.key);
-      setSelectorPosition({ x: selectorX, width: selectorWidth });
-    }
-  }, [isLiquidMode]);
-
-  const handleMouseEnter = useCallback(() => {
-    if (isLiquidMode) {
-      setIsMouseInDock(true);
-    }
-  }, [isLiquidMode]);
-
-  const handleMouseLeave = useCallback(() => {
-    if (isLiquidMode) {
-      setIsMouseInDock(false);
-      setActiveItemKey(null);
-    }
-  }, [isLiquidMode]);
 
   // Get ref setter for each item
   const setItemRef = useCallback((key: string, el: HTMLDivElement | null) => {
@@ -811,8 +589,6 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
     return () => window.removeEventListener('resize', recomputeFit);
   }, [recomputeFit]);
 
-  const activeItem = items.find(item => item.key === activeItemKey);
-
   return (
     <div className={cn(className)}>
       <TooltipProvider delayDuration={150}>
@@ -824,36 +600,13 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
           className={cn(
             "relative flex h-[72px] items-center gap-1 px-3 py-2.5 rounded-full",
             "transition-opacity duration-300 ease-in-out",
-            "shadow-[0_12px_32px_rgba(0,0,0,0.16),0_3px_8px_rgba(0,0,0,0.08)]",
-            "dark:shadow-[0_12px_36px_rgba(0,0,0,0.5),0_3px_8px_rgba(0,0,0,0.3)]",
-            !isVisible && "opacity-0 pointer-events-none",
-            isLiquidMode && isMouseInDock && "[&_*]:!cursor-none !cursor-none"
+            "qdock-flat-shell",
+            !isVisible && "opacity-0 pointer-events-none"
           )}
           style={{ zoom: fitScale } as React.CSSProperties}
-          onMouseMove={handleMouseMove}
-          onMouseEnter={handleMouseEnter}
-          onMouseLeave={handleMouseLeave}
         >
-          {/* Apple Liquid Glass kabuk: arkadaki sahneyi canlı kıran cam yüzey */}
-          <LiquidGlassSurface radius={36} strength={40} dispersion={0.45} blur={2.5} bezel={22} zoom={0.2} fallbackBlur={22} />
-
           {/* Content wrapper for position reference */}
           <div ref={dockContentRef} className="relative flex items-center gap-1">
-            {/* Liquid Glass Selector */}
-            {isLiquidMode && (
-              <AnimatePresence>
-                {isMouseInDock && activeItemKey && (
-                  <LiquidGlassSelector
-                    x={selectorPosition.x}
-                    width={selectorPosition.width}
-                    height={52}
-                    isVisible={isMouseInDock}
-                    activeLabel={activeItem?.label}
-                  />
-                )}
-              </AnimatePresence>
-            )}
-
             <DockLogo />
             {mainItems.map((item) => (
               <DockItem
@@ -861,7 +614,7 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
                 item={item}
                 isActive={item.key === currentView && item.type === 'nav'}
                 isLiquidMode={isLiquidMode}
-                isLiquidHovered={isLiquidMode && activeItemKey === item.key}
+                isLiquidHovered={false}
                 onRefSet={(el) => setItemRef(item.key, el)}
                 customIcon={dockIcons[item.key]}
               />
@@ -875,7 +628,7 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
                 item={logoutItem}
                 isActive={false}
                 isLiquidMode={isLiquidMode}
-                isLiquidHovered={isLiquidMode && activeItemKey === logoutItem.key}
+                isLiquidHovered={false}
                 onRefSet={(el) => setItemRef(logoutItem.key, el)}
                 customIcon={dockIcons[logoutItem.key]}
               />

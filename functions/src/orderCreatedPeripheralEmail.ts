@@ -25,6 +25,8 @@ type OrderItem = {
 type OrderDoc = {
   id?: string;
   labId?: string;
+  depotId?: string;
+  depotName?: string;
   kurumAdi?: string;
   items?: OrderItem[];
   createdAt?: admin.firestore.Timestamp;
@@ -32,6 +34,8 @@ type OrderDoc = {
   createdById?: string;
   requestSource?: string;
   isPeripheral?: boolean;
+  isDepotRequest?: boolean;
+  requestedManagerEmails?: string[];
   urgency?: 'normal' | 'acil' | 'cok_acil';
   note?: string;
 };
@@ -68,7 +72,47 @@ const COLUMN_PALETTE: Array<{ header: string; body: string; text: string }> = [
   { header: 'FFF59E0B', body: 'FFFEF3C7', text: 'FF78350F' }, // 30 Günlük Max — amber
   { header: 'FFEF4444', body: 'FFFEE2E2', text: 'FF7F1D1D' }, // Yakın Miad — red
   { header: 'FF16A34A', body: 'FFDCFCE7', text: 'FF14532D' }, // Talep Adedi — green
+  { header: 'FF22C55E', body: 'FFDCFCE7', text: 'FF14532D' }, // Kutu / Ambalaj — green
 ];
+
+function parseMiadDate(value: any): Date | null {
+  if (!value) return null;
+  if (typeof value?.toDate === 'function') return value.toDate();
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  if (typeof value === 'object') {
+    const seconds = value.seconds ?? value._seconds;
+    if (typeof seconds === 'number') {
+      const date = new Date(seconds * 1000);
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    const turkishDate = trimmed.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+    if (turkishDate) {
+      const [, day, month, year] = turkishDate;
+      const date = new Date(Number(year), Number(month) - 1, Number(day));
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+    const date = new Date(trimmed);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  return null;
+}
+
+function daysUntilMiad(value: any): number | null {
+  const miadDate = parseMiadDate(value);
+  if (!miadDate) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const normalizedMiad = new Date(miadDate);
+  normalizedMiad.setHours(0, 0, 0, 0);
+  return Math.ceil((normalizedMiad.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function getStockQuantity(item: any): number {
+  return Math.max(1, Number(item?.adet) || 1);
+}
 
 function getTransporter() {
   const smtpHost = process.env.SMTP_HOST;
@@ -90,36 +134,52 @@ function getTransporter() {
 }
 
 async function buildExcelBuffer(orderId: string, order: OrderDoc, itemInfoMap?: Map<string, ProductInfo>): Promise<Buffer> {
+  const isDepotRequest = order.requestSource === 'depot_to_office' || order.isDepotRequest === true;
   const labId = order.labId;
+  const depotId = order.depotId;
+  const stockOwnerId = isDepotRequest ? depotId : labId;
+  const stockOwnerCollection = isDepotRequest ? 'depots' : 'hospitals';
+  const stockOwnerLabel = isDepotRequest ? 'depo' : 'lab';
 
-  // 1. Fetch minMaxRules (max amount per stokKodu)
+  // 1. Fetch minMaxRules (max amount per stokKodu). Depot-origin requests must
+  // use depots/{depotId}/minMaxRules so the "30 Günlük Max" column mirrors the
+  // selected depot's stock-management configuration.
   const rulesMap: Record<string, number> = {};
-  if (labId) {
+  if (stockOwnerId) {
     try {
-      const rulesSnap = await db.collection('hospitals').doc(labId).collection('minMaxRules').get();
+      const rulesSnap = await db.collection(stockOwnerCollection).doc(stockOwnerId).collection('minMaxRules').get();
       rulesSnap.forEach(doc => {
         const data = doc.data();
-        if (data.stokKodu && data.max !== undefined) {
-          rulesMap[data.stokKodu] = Number(data.max);
+        const stokKodu = data.stokKodu || doc.id;
+        if (stokKodu && data.max !== undefined) {
+          rulesMap[stokKodu] = Number(data.max);
         }
       });
     } catch (err) {
-      logger.error(`Error fetching minMaxRules for lab ${labId}:`, err);
+      logger.error(`Error fetching minMaxRules for ${stockOwnerLabel} ${stockOwnerId}:`, err);
     }
   }
 
-  // 2. Fetch depoStok for lab stock and closest miad lot count
-  const labStokMap: Record<string, number> = {};
+  // 2. Fetch depoStok for current stock and closest miad lot count. Lab requests
+  // continue to read shipped stock by hedefKurumId; depot requests read the
+  // unshipped stock physically in the selected depot.
+  const stockMap: Record<string, number> = {};
   const closestMiadLotMap: Record<string, number> = {};
 
-  if (labId) {
+  if (stockOwnerId) {
     try {
-      const depoStokSnap = await db
-        .collection('depoStok')
-        .where('isShipped', '==', true)
-        .where('hedefKurumId', '==', labId)
-        .get();
+      let depoStokQuery: FirebaseFirestore.Query = db.collection('depoStok');
+      if (isDepotRequest) {
+        depoStokQuery = depoStokQuery
+          .where('depotId', '==', stockOwnerId)
+          .where('isShipped', '==', false);
+      } else {
+        depoStokQuery = depoStokQuery
+          .where('isShipped', '==', true)
+          .where('hedefKurumId', '==', stockOwnerId);
+      }
 
+      const depoStokSnap = await depoStokQuery.get();
       const items = depoStokSnap.docs.map(d => d.data());
       const groupedByStok: Record<string, any[]> = {};
 
@@ -130,32 +190,24 @@ async function buildExcelBuffer(orderId: string, order: OrderDoc, itemInfoMap?: 
       });
 
       for (const [stokKodu, groupItems] of Object.entries(groupedByStok)) {
-        labStokMap[stokKodu] = groupItems.length;
+        let usableStock = 0;
+        let nearExpiryStock = 0;
 
-        const itemsWithMiad = groupItems.filter(i => i.miad);
-        if (itemsWithMiad.length > 0) {
-          itemsWithMiad.sort((a, b) => {
-            const miadA = a.miad?.toDate ? a.miad.toDate().getTime() : new Date(a.miad).getTime();
-            const miadB = b.miad?.toDate ? b.miad.toDate().getTime() : new Date(b.miad).getTime();
-            return miadA - miadB;
-          });
+        groupItems.forEach((stockItem) => {
+          const quantity = getStockQuantity(stockItem);
+          const miadDays = daysUntilMiad(stockItem.miad);
+          if (typeof miadDays === 'number' && miadDays < 30) {
+            nearExpiryStock += quantity;
+          } else {
+            usableStock += quantity;
+          }
+        });
 
-          const earliestTime = itemsWithMiad[0].miad?.toDate
-            ? itemsWithMiad[0].miad.toDate().getTime()
-            : new Date(itemsWithMiad[0].miad).getTime();
-
-          const count = itemsWithMiad.filter(i => {
-            const time = i.miad?.toDate ? i.miad.toDate().getTime() : new Date(i.miad).getTime();
-            return time === earliestTime;
-          }).length;
-
-          closestMiadLotMap[stokKodu] = count;
-        } else {
-          closestMiadLotMap[stokKodu] = 0;
-        }
+        stockMap[stokKodu] = usableStock;
+        closestMiadLotMap[stokKodu] = nearExpiryStock;
       }
     } catch (err) {
-      logger.error(`Error fetching depoStok for lab ${labId}:`, err);
+      logger.error(`Error fetching depoStok for ${stockOwnerLabel} ${stockOwnerId}:`, err);
     }
   }
 
@@ -164,14 +216,14 @@ async function buildExcelBuffer(orderId: string, order: OrderDoc, itemInfoMap?: 
   workbook.creator = 'INV-zen';
   workbook.created = new Date();
 
-  const sheet = workbook.addWorksheet('Perifer Talep', {
+  const sheet = workbook.addWorksheet(isDepotRequest ? 'Depo Talep' : 'Perifer Talep', {
     properties: { defaultRowHeight: 18 },
   });
 
   const createdAtText = order.createdAt?.toDate?.()
     ? order.createdAt.toDate().toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' })
     : new Date().toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' });
-  const labName = order.kurumAdi || '-';
+  const labName = order.kurumAdi || order.depotName || '-';
   const createdBy = order.createdBy || '-';
   const totalQty = (order.items || []).reduce((s, it) => s + Number(it.adet || 0), 0);
   const urgencyKey = (order.urgency && URGENCY_META[order.urgency] ? order.urgency : 'normal') as keyof typeof URGENCY_META;
@@ -179,9 +231,9 @@ async function buildExcelBuffer(orderId: string, order: OrderDoc, itemInfoMap?: 
   const noteText = (order.note || '').trim();
 
   // --- Title row (merged across columns) ---
-  sheet.mergeCells('A1:G1');
+  sheet.mergeCells('A1:H1');
   const titleCell = sheet.getCell('A1');
-  titleCell.value = 'PERİFER LABORATUVAR ÜRÜN TALEBİ';
+  titleCell.value = isDepotRequest ? 'DEPO ÜRÜN TALEBİ' : 'PERİFER LABORATUVAR ÜRÜN TALEBİ';
   titleCell.font = { bold: true, size: 16, color: { argb: 'FFFFFFFF' } };
   titleCell.alignment = { vertical: 'middle', horizontal: 'center' };
   titleCell.fill = {
@@ -204,8 +256,8 @@ async function buildExcelBuffer(orderId: string, order: OrderDoc, itemInfoMap?: 
   };
   const infoRows: InfoRow[] = [
     { label: 'Sipariş ID',     value: orderId,                 labelFill: 'FFE0F2FE', valueFill: 'FFFFFFFF' },
-    { label: 'Laboratuvar',    value: labName,                 labelFill: 'FFE0E7FF', valueFill: 'FFFFFFFF' },
-    { label: 'Laboratuvar ID', value: labId || '-',            labelFill: 'FFCCFBF1', valueFill: 'FFFFFFFF' },
+    { label: isDepotRequest ? 'Depo' : 'Laboratuvar', value: labName, labelFill: 'FFE0E7FF', valueFill: 'FFFFFFFF' },
+    { label: isDepotRequest ? 'Depo ID' : 'Laboratuvar ID', value: stockOwnerId || '-', labelFill: 'FFCCFBF1', valueFill: 'FFFFFFFF' },
     { label: 'Talep Eden',     value: createdBy,               labelFill: 'FFFEF3C7', valueFill: 'FFFFFFFF' },
     { label: 'Tarih',          value: createdAtText,           labelFill: 'FFFEE2E2', valueFill: 'FFFFFFFF' },
     {
@@ -240,7 +292,7 @@ async function buildExcelBuffer(orderId: string, order: OrderDoc, itemInfoMap?: 
     labelCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: info.labelFill } };
     labelCell.border = THIN_BORDER;
 
-    sheet.mergeCells(rowIdx, 2, rowIdx, 7);
+    sheet.mergeCells(rowIdx, 2, rowIdx, 8);
     const valueCell = row.getCell(2);
     valueCell.value = info.value;
     valueCell.font = {
@@ -261,7 +313,7 @@ async function buildExcelBuffer(orderId: string, order: OrderDoc, itemInfoMap?: 
   // --- Header row sits right after info rows ---
   const HEADER_ROW = 2 + infoRows.length;
   sheet.views = [{ state: 'frozen', ySplit: HEADER_ROW }];
-  const headers = ['#', 'Stok Kodu', 'Stok Adı', 'Lab Stok', '30 Günlük Max', 'Yakın Miad Lot Adedi', 'Talep Adedi'];
+  const headers = ['#', 'Stok Kodu', 'Stok Adı', isDepotRequest ? 'Depo Stok' : 'Lab Stok', '30 Günlük Max', '30 Gün Altı Miad Adedi', 'Talep Adedi', 'Kutu / Ambalaj'];
   const headerRow = sheet.getRow(HEADER_ROW);
   headerRow.height = 32;
 
@@ -282,7 +334,7 @@ async function buildExcelBuffer(orderId: string, order: OrderDoc, itemInfoMap?: 
   const items = order.items || [];
   items.forEach((item, idx) => {
     const sKodu = item.stokKodu || '-';
-    const labStok = labStokMap[sKodu] ?? 0;
+    const mevcutStok = stockMap[sKodu] ?? 0;
     const maxAdet = rulesMap[sKodu] ?? 0;
     const yakinMiad = closestMiadLotMap[sKodu] ?? 0;
     const talep = Number(item.adet || 0);
@@ -290,10 +342,10 @@ async function buildExcelBuffer(orderId: string, order: OrderDoc, itemInfoMap?: 
     const info = itemInfoMap?.get(sKodu);
     const anaBirim = (info?.anaBirim || '').trim();
     const ambalaj = info?.ambalajDegeri;
-    const talepCellValue: string | number =
+    const packagingText: string =
       typeof ambalaj === 'number' && ambalaj > 0
         ? `${talep}${anaBirim ? ` ${anaBirim}` : ''} (${talep * ambalaj} adet)`
-        : (anaBirim ? `${talep} ${anaBirim}` : talep);
+        : (anaBirim ? `${talep} ${anaBirim}` : '-');
 
     const row = sheet.getRow(HEADER_ROW + 1 + idx);
     row.height = 30;
@@ -302,10 +354,11 @@ async function buildExcelBuffer(orderId: string, order: OrderDoc, itemInfoMap?: 
       idx + 1,
       sKodu,
       item.stokAdi || '-',
-      labStok,
+      mevcutStok,
       maxAdet,
       yakinMiad,
-      talepCellValue,
+      talep,
+      packagingText,
     ];
 
     values.forEach((value, colIdx) => {
@@ -323,9 +376,12 @@ async function buildExcelBuffer(orderId: string, order: OrderDoc, itemInfoMap?: 
         indent: colIdx === 2 ? 1 : 0,
       };
 
-      // Talep Adedi (last column) — large, bold, vivid
+      // Talep Adedi and packaging columns — large, bold, vivid
       if (colIdx === 6) {
         cell.font = { bold: true, size: 18, color: { argb: COLUMN_PALETTE[6].text } };
+        cell.border = MEDIUM_BORDER;
+      } else if (colIdx === 7) {
+        cell.font = { bold: true, size: 14, color: { argb: COLUMN_PALETTE[7].text } };
         cell.border = MEDIUM_BORDER;
       } else if (colIdx === 0) {
         cell.font = { bold: true, size: 11, color: { argb: COLUMN_PALETTE[colIdx].text } };
@@ -355,14 +411,19 @@ async function buildExcelBuffer(orderId: string, order: OrderDoc, itemInfoMap?: 
   totalValueCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFBBF7D0' } };
   totalValueCell.border = MEDIUM_BORDER;
 
+  const totalPackagingCell = totalRow.getCell(8);
+  totalPackagingCell.value = '';
+  totalPackagingCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCFCE7' } };
+  totalPackagingCell.border = MEDIUM_BORDER;
+
   // --- Column widths (manually tuned for readability) ---
-  const widths = [6, 18, 42, 12, 16, 22, 16];
+  const widths = [6, 18, 42, 12, 16, 24, 14, 22];
   widths.forEach((w, i) => {
     sheet.getColumn(i + 1).width = w;
   });
 
   const buffer = await workbook.xlsx.writeBuffer();
-  return buffer as Buffer;
+  return buffer as unknown as Buffer;
 }
 
 async function resolveLogisticsRecipients(): Promise<{ emails: string[]; debug: Record<string, unknown> }> {
@@ -399,7 +460,8 @@ export const onPeripheralOrderCreatedSendMail = functions
     const order = snap.data() as OrderDoc;
 
     const isPeripheralRequest =
-      order?.isPeripheral === true || order?.requestSource === 'lab_to_office';
+      order?.isPeripheral === true || order?.requestSource === 'lab_to_office' || order?.requestSource === 'depot_to_office';
+    const isDepotRequest = order?.requestSource === 'depot_to_office' || order?.isDepotRequest === true;
 
     const logEntry: Record<string, unknown> = {
       type: 'peripheral_order_email',
@@ -407,6 +469,7 @@ export const onPeripheralOrderCreatedSendMail = functions
       labId: order?.labId || null,
       labName: order?.kurumAdi || null,
       isPeripheral: order?.isPeripheral ?? null,
+      isDepotRequest,
       requestSource: order?.requestSource ?? null,
       itemsCount: (order?.items || []).length,
       urgency: order?.urgency ?? null,
@@ -463,12 +526,22 @@ export const onPeripheralOrderCreatedSendMail = functions
 
       logEntry.orderGroups = Array.from(new Set(Array.from(itemGroupMap.values())));
 
-      // Build per-user filtered recipient list
-      const recipients = users.map((user) => {
-        const groupNames = resolveUserGroupNames(user, labGroupNamesById);
-        const filtered = filterItemsForUserGroups(orderItems, itemGroupMap, groupNames);
-        return { user, groupNames, filtered };
-      });
+      // Build per-user filtered recipient list. Depot-origin requests are sent
+      // only to the explicitly selected managers and include all request items.
+      const selectedEmails = Array.isArray((order as any).requestedManagerEmails)
+        ? ((order as any).requestedManagerEmails as unknown[]).map(e => String(e || '').trim().toLowerCase()).filter(Boolean)
+        : [];
+      const recipients = isDepotRequest && selectedEmails.length > 0
+        ? selectedEmails.map((email, index) => ({
+            user: { uid: `selected-${index}`, email, name: email, role: 'selected_manager', assignedLabGroups: [] } as any,
+            groupNames: new Set<string>(),
+            filtered: orderItems,
+          }))
+        : users.map((user) => {
+            const groupNames = resolveUserGroupNames(user, labGroupNamesById);
+            const filtered = filterItemsForUserGroups(orderItems, itemGroupMap, groupNames);
+            return { user, groupNames, filtered };
+          });
 
       const sendable = recipients.filter((r) => r.user.email && r.filtered.length > 0);
       logEntry.recipients = sendable.map((r) => r.user.email);
@@ -485,7 +558,7 @@ export const onPeripheralOrderCreatedSendMail = functions
       steps.push(`Alıcı sorgusu: OK (${sendable.length} alıcı eşleşti)`);
 
       const senderEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
-      const labName = order.kurumAdi || 'Bilinmeyen Laboratuvar';
+      const labName = order.kurumAdi || (isDepotRequest ? 'Bilinmeyen Depo' : 'Bilinmeyen Laboratuvar');
       const urgencyKey = (order.urgency && URGENCY_META[order.urgency] ? order.urgency : 'normal') as keyof typeof URGENCY_META;
       const urgencyMeta = URGENCY_META[urgencyKey];
       const noteText = (order.note || '').trim();
@@ -528,12 +601,12 @@ export const onPeripheralOrderCreatedSendMail = functions
           await transporter.sendMail({
             from: senderEmail,
             to: r.user.email!,
-            subject: `${subjectPrefix}[Perifer Talep] ${labName} — ${filteredTotalQty} adet (${urgencyMeta.label})`,
+            subject: `${subjectPrefix}[${isDepotRequest ? 'Depo Talep' : 'Perifer Talep'}] ${labName} — ${filteredTotalQty} adet (${urgencyMeta.label})`,
             text:
-              `Perifer laboratuvardan yeni sipariş talebi açıldı.\n` +
+              `${isDepotRequest ? 'Depodan' : 'Perifer laboratuvardan'} yeni sipariş talebi açıldı.\n` +
               `Aciliyet: ${urgencyMeta.label}\n` +
               `Sipariş ID: ${orderId}\n` +
-              `Laboratuvar: ${labName}\n` +
+              `${isDepotRequest ? 'Depo' : 'Laboratuvar'}: ${labName}\n` +
               `Talep Eden: ${order.createdBy || '-'}\n` +
               `Atanan Grup(lar): ${groupsLine}\n` +
               `Kalem Sayısı: ${filteredItemCount}\n` +
@@ -542,14 +615,14 @@ export const onPeripheralOrderCreatedSendMail = functions
               `\nDetaylar ekteki Excel dosyasındadır.`,
             html: `
               <div style="font-family: -apple-system, Segoe UI, Roboto, sans-serif; color:#0f172a;">
-                <h2 style="margin:0 0 8px 0; color:#1e293b;">Perifer Laboratuvar Ürün Talebi</h2>
+                <h2 style="margin:0 0 8px 0; color:#1e293b;">${isDepotRequest ? 'Depo Ürün Talebi' : 'Perifer Laboratuvar Ürün Talebi'}</h2>
                 <div style="display:inline-block; margin:0 0 14px 0; padding:6px 14px; border-radius:999px; background:${urgencyMeta.emailBg}; color:${urgencyMeta.emailText}; border:2px solid ${urgencyMeta.emailBadgeBorder}; font-weight:bold; font-size:13px; letter-spacing:0.5px;">
                   ACİLİYET: ${urgencyMeta.label.toLocaleUpperCase('tr-TR')}
                 </div>
-                <p style="margin:0 0 12px 0;">Aşağıdaki perifer laboratuvardan size atanan grup(lar)a ait yeni bir ürün talebi açıldı:</p>
+                <p style="margin:0 0 12px 0;">${isDepotRequest ? 'Aşağıdaki depodan size iletilen yeni bir ürün talebi açıldı:' : 'Aşağıdaki perifer laboratuvardan size atanan grup(lar)a ait yeni bir ürün talebi açıldı:'}</p>
                 <table style="border-collapse:collapse; font-size:14px;">
                   <tr><td style="padding:6px 12px; background:#e0f2fe; border:1px solid #94a3b8;"><b>Sipariş ID</b></td><td style="padding:6px 12px; border:1px solid #94a3b8;">${orderId}</td></tr>
-                  <tr><td style="padding:6px 12px; background:#e0e7ff; border:1px solid #94a3b8;"><b>Laboratuvar</b></td><td style="padding:6px 12px; border:1px solid #94a3b8;">${labName}</td></tr>
+                  <tr><td style="padding:6px 12px; background:#e0e7ff; border:1px solid #94a3b8;"><b>${isDepotRequest ? 'Depo' : 'Laboratuvar'}</b></td><td style="padding:6px 12px; border:1px solid #94a3b8;">${labName}</td></tr>
                   <tr><td style="padding:6px 12px; background:#fef3c7; border:1px solid #94a3b8;"><b>Talep Eden</b></td><td style="padding:6px 12px; border:1px solid #94a3b8;">${order.createdBy || '-'}</td></tr>
                   <tr><td style="padding:6px 12px; background:#ccfbf1; border:1px solid #94a3b8;"><b>Atanan Grup(lar)</b></td><td style="padding:6px 12px; border:1px solid #94a3b8;">${groupsLine}</td></tr>
                   <tr><td style="padding:6px 12px; background:${urgencyMeta.emailBg}; border:1px solid #94a3b8;"><b>Aciliyet</b></td><td style="padding:6px 12px; border:1px solid #94a3b8; color:${urgencyMeta.emailText}; font-weight:bold;">${urgencyMeta.label}</td></tr>
@@ -557,11 +630,11 @@ export const onPeripheralOrderCreatedSendMail = functions
                   <tr><td style="padding:6px 12px; background:#dcfce7; border:1px solid #94a3b8;"><b>Toplam Adet</b></td><td style="padding:6px 12px; border:1px solid #94a3b8; font-weight:bold; font-size:16px;">${filteredTotalQty}</td></tr>
                   ${noteHtml}
                 </table>
-                <p style="margin:16px 0 0 0;">Sipariş detayları (lab stok, max adet, talep adedi) ekteki Excel dosyasındadır.</p>
+                <p style="margin:16px 0 0 0;">Sipariş detayları (${isDepotRequest ? 'depo stok' : 'lab stok'}, max adet, talep adedi) ekteki Excel dosyasındadır.</p>
               </div>`,
             attachments: [
               {
-                filename: `perifer_siparis_${orderId}.xlsx`,
+                filename: `${isDepotRequest ? 'depo' : 'perifer'}_siparis_${orderId}.xlsx`,
                 content: excelBuffer,
                 contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
               },
