@@ -32,6 +32,7 @@ import { db } from '@/lib/firebase';
 
 import { VIEWS } from '@/lib/constants';
 import { ShortcutBuilderModal } from './ShortcutBuilderModal';
+import { createShortcutDraft, type ShortcutDraft } from '@/lib/shortcuts/draft';
 import {
   TONE_CHIP,
   toneForKey,
@@ -100,6 +101,7 @@ export function StartMenu() {
   const [mounted, setMounted] = useState(false);
   const [isShortcutBuilderOpen, setIsShortcutBuilderOpen] = useState(false);
   const [savedShortcuts, setSavedShortcuts] = useState<SavedShortcut[]>([]);
+  const [shortcutDraft, setShortcutDraft] = useState<ShortcutDraft | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Avoid hydration mismatch for the theme switch.
@@ -247,13 +249,23 @@ export function StartMenu() {
     close();
   };
 
-  const openShortcutBuilder = () => {
+  const openShortcutBuilder = (draft: ShortcutDraft | null = null) => {
+    setShortcutDraft(draft);
     setIsShortcutBuilderOpen(true);
+  };
+
+  const openShortcutDraftFromQuery = () => {
+    const draft = createShortcutDraft({ text: q, accessibleViews });
+    if (!draft) return false;
+    openShortcutBuilder(draft);
+    toast.success('Kestirme taslağı hazırlandı.');
+    return true;
   };
 
   const onSearchKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault();
+      if (openShortcutDraftFromQuery()) return;
       if (results.length > 0) go(results[0].href);
       else askAI();
     }
@@ -349,6 +361,19 @@ export function StartMenu() {
               {q ? (
                 /* ---- search results ---- */
                 <div className="flex flex-col gap-1">
+                  {createShortcutDraft({ text: q, accessibleViews }) && (
+                    <button type="button" onClick={openShortcutDraftFromQuery} className={ROW}>
+                      <span className={cn('grid place-items-center h-9 w-9 rounded-xl text-white shrink-0', BRAND)}>
+                        <Plus className="h-[18px] w-[18px]" />
+                      </span>
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-[14px] font-semibold text-foreground">Kestirme taslağı oluştur</span>
+                        <span className="block text-[12.5px] text-muted-foreground truncate">“{q}”</span>
+                      </span>
+                      <CornerDownLeft className="h-4 w-4 text-muted-foreground/60 shrink-0" />
+                    </button>
+                  )}
+
                   <button type="button" onClick={askAI} className={ROW}>
                     <span
                       className={cn(
@@ -503,7 +528,7 @@ export function StartMenu() {
                     <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-2">
                       <button
                         type="button"
-                        onClick={openShortcutBuilder}
+                        onClick={() => openShortcutBuilder()}
                         className={cn(
                           'inline-flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-xl text-[13px] font-semibold text-white transition hover:-translate-y-0.5 shadow-[0_9px_18px_-8px_rgba(240,111,44,.8)]',
                           BRAND,
@@ -540,7 +565,7 @@ export function StartMenu() {
                             </div>
                             <div className="mt-2 grid grid-cols-2 gap-1.5">
                               <ShortcutActionButton label="Şimdi çalıştır" icon={Play} onClick={() => requestShortcutRun(shortcut)} disabled={shortcut.enabled === false} />
-                              <ShortcutActionButton label="Düzenle" icon={Pencil} onClick={openShortcutBuilder} />
+                              <ShortcutActionButton label="Düzenle" icon={Pencil} onClick={() => openShortcutBuilder()} />
                               <ShortcutActionButton label="Pasifleştir" icon={Ban} onClick={() => disableShortcut(shortcut)} disabled={shortcut.enabled === false} />
                               <ShortcutActionButton label="Son çalışma logu" icon={FileClock} onClick={() => showLastRunLog(shortcut)} />
                             </div>
@@ -685,8 +710,12 @@ export function StartMenu() {
           </div>
           <ShortcutBuilderModal
             open={isShortcutBuilderOpen}
-            onOpenChange={setIsShortcutBuilderOpen}
+            onOpenChange={(open) => {
+              setIsShortcutBuilderOpen(open);
+              if (!open) setShortcutDraft(null);
+            }}
             accessibleViews={accessibleViews}
+            initialDraft={shortcutDraft}
             onSave={saveShortcut}
           />
         </>

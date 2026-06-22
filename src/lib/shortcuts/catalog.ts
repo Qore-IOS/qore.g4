@@ -366,7 +366,18 @@ export const SHORTCUT_CATALOG: ShortcutPanelCatalogItem[] = [
     panelKey: 'cost-dashboard',
     panelLabel: panelLabel('cost-dashboard', 'Maliyet Paneli'),
     requiredView: 'cost-dashboard',
-    actions: [navigationAction('cost-dashboard', 'Maliyet panelini aç', '/cost-dashboard')],
+    actions: [
+      navigationAction('cost-dashboard', 'Maliyet panelini aç', '/cost-dashboard'),
+      {
+        key: 'cost-dashboard.maliyet-raporu',
+        label: 'Maliyet raporu oluştur',
+        description: 'Laboratuvar ve tarih aralığına göre maliyet raporu taslağı hazırla.',
+        kind: 'report',
+        params: [PARAMS.lab, PARAMS.tarihAraligi, PARAMS.alicilar, PARAMS.ciktiFormati],
+        handlerKey: 'shortcuts.costDashboard.costReport',
+        href: '/cost-dashboard',
+      },
+    ],
   },
   {
     panelKey: 'kumulatif-hesaplama',
