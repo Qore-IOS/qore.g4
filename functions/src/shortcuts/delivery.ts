@@ -49,6 +49,7 @@ function normalizeChannels(value: unknown): ShortcutDeliveryChannel[] {
   const raw = Array.isArray(value) ? value : [];
   const channels = raw
     .map((channel) => String(channel).trim())
+    .map((channel) => channel === 'app' ? 'inApp' : channel)
     .filter((channel): channel is ShortcutDeliveryChannel => CHANNELS.has(channel as ShortcutDeliveryChannel));
   return Array.from(new Set(channels.length ? channels : ['inApp']));
 }
@@ -57,19 +58,36 @@ function stringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map((item) => String(item).trim()).filter(Boolean) : [];
 }
 
-function recipientList(shortcut: ShortcutDeliveryShortcut): string[] {
-  return Array.from(new Set([
-    ...stringArray(shortcut.recipients),
-    ...stringArray(shortcut.params?.alicilar),
-  ]));
+function normalizePhoneForWhatsApp(value: unknown): string | null {
+  const digits = String(value || '').replace(/\D/g, '');
+  if (!digits) return null;
+  const withCountryCode = digits.length === 10 ? `90${digits}` : digits.startsWith('0') && digits.length === 11 ? `9${digits}` : digits;
+  return withCountryCode.length >= 11 ? `${withCountryCode}@c.us` : null;
 }
 
-function emailRecipients(recipients: string[]): string[] {
-  return recipients.filter((recipient) => recipient.includes('@'));
+async function recipientList(shortcut: ShortcutDeliveryShortcut): Promise<string[]> {
+  const recipients = [
+    ...stringArray(shortcut.recipients),
+    ...stringArray(shortcut.params?.alicilar),
+  ];
+
+  if (shortcut.createdByUid) {
+    const userSnap = await db.collection('users').doc(shortcut.createdByUid).get();
+    const user = userSnap.exists ? userSnap.data() || {} : {};
+    if (typeof user.email === 'string' && user.email.trim()) recipients.push(user.email.trim());
+    const whatsappRecipient = normalizePhoneForWhatsApp(user.phoneNumber);
+    if (whatsappRecipient) recipients.push(whatsappRecipient);
+  }
+
+  return Array.from(new Set(recipients));
 }
 
 function whatsappRecipients(recipients: string[]): string[] {
   return recipients.filter((recipient) => recipient.endsWith('@c.us') || recipient.endsWith('@g.us'));
+}
+
+function emailRecipients(recipients: string[]): string[] {
+  return recipients.filter((recipient) => recipient.includes('@') && !whatsappRecipients([recipient]).length);
 }
 
 function textValue(value: unknown): string {
@@ -230,7 +248,7 @@ async function sendInApp(shortcut: ShortcutDeliveryShortcut, runId: string, summ
     type: 'custom',
     title: 'Shortcut raporu hazır',
     message: summary,
-    href: result.deepLink || `/shortcut-runs/${runId}`,
+    href: `/raporlama/olusturulan-raporlar?runId=${runId}`,
     createdAt: FieldValue.serverTimestamp(),
     targets,
     actor: { uid: shortcut.createdByUid || 'system', name: shortcut.createdByName || 'QORE System' },
@@ -293,7 +311,7 @@ export async function deliverShortcutResult(args: {
   result: ShortcutResult;
 }): Promise<{ summary: string; attachments: GeneratedAttachment[]; attempts: DeliveryAttempt[] }> {
   const channels = normalizeChannels(args.shortcut.deliveryChannels);
-  const recipients = recipientList(args.shortcut);
+  const recipients = await recipientList(args.shortcut);
   const summary = buildShortcutDeliverySummary(args.result, args.shortcut);
   await logDelivery(args.runRef, { channel: 'inApp', status: 'sent', message: 'Kısa özet üretildi.', meta: { summary } });
 

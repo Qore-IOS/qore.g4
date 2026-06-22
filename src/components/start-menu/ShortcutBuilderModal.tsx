@@ -13,7 +13,7 @@ interface ShortcutBuilderModalProps {
   onOpenChange: (open: boolean) => void;
   accessibleViews: readonly string[];
   initialDraft?: ShortcutDraft | null;
-  onSave?: (payload: { panelKey?: string; panelLabel?: string; actionKey?: string; actionLabel?: string; actionDescription?: string; actionHref?: string; runMode: 'manual' | 'scheduled' | 'manual_and_scheduled'; scheduleLabel: string; schedule?: { type: 'once' | 'interval'; intervalDays?: number } | string | null; outputs: string[]; filters: string[]; recipients?: string[]; channel?: string }) => Promise<void> | void;
+  onSave?: (payload: { panelKey?: string; panelLabel?: string; actionKey?: string; actionLabel?: string; actionDescription?: string; actionHref?: string; runMode: 'manual' | 'scheduled' | 'manual_and_scheduled'; scheduleLabel: string; schedule?: { type: 'once' | 'interval'; intervalDays?: number } | string | null; outputs: string[]; filters: string[]; recipients?: string[]; channel?: string; deliveryChannels?: string[]; outputFormats?: string[] }) => Promise<void> | void;
 }
 
 
@@ -81,7 +81,7 @@ export function ShortcutBuilderModal({ open, onOpenChange, accessibleViews, init
 
   const selectedPanel = panels.find((panel) => String(panel.panelKey) === selectedPanelKey) ?? panels[0];
   const actions = selectedPanel?.actions ?? [];
-  const selectedAction = actions.find((action) => action.key === selectedActionKey) ?? actions[0];
+  const selectedAction = actions.find((action) => action.key === selectedActionKey || action.handlerKey === selectedActionKey) ?? actions[0];
 
   const resetAndClose = (nextOpen: boolean) => {
     onOpenChange(nextOpen);

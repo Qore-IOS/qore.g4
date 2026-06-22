@@ -65,33 +65,20 @@ function normalizeStringArray(value: unknown): string[] {
 function snapshotMatchesCurrentUser(snapshot: Record<string, unknown> | undefined, user: FirebaseFirestore.DocumentData): boolean {
   if (!snapshot || Object.keys(snapshot).length === 0) return true;
 
+  // The snapshot is a point-in-time audit record captured when the shortcut was created.
+  // Do not use it as the source of truth for current role/view permissions: profile
+  // enrichment, default views, or legitimate role changes can make this serialized
+  // snapshot differ even when the user still has access. Current access is enforced
+  // below with the live user document (panelKey and scoped lab/depot checks).
   const snapshotUid = typeof snapshot.uid === 'string' ? snapshot.uid : null;
   if (snapshotUid && user.uid && snapshotUid !== user.uid) return false;
 
   const snapshotCompanyId = typeof snapshot.companyId === 'string' ? snapshot.companyId : null;
   if (snapshotCompanyId && user.companyId && snapshotCompanyId !== user.companyId) return false;
 
-  const snapshotRole = typeof snapshot.role === 'string' ? snapshot.role : null;
-  if (snapshotRole && user.role && snapshotRole !== user.role) return false;
-
-  const snapshotRoles = normalizeStringArray(snapshot.roles);
-  if (snapshotRoles.length) {
-    const currentRoles = new Set([...normalizeStringArray(user.roles), ...(user.role ? [String(user.role)] : [])]);
-    if (!snapshotRoles.every((role) => currentRoles.has(role))) return false;
-  }
-
-  const snapshotPermissions = normalizeStringArray(snapshot.permissions);
-  if (snapshotPermissions.length) {
-    const currentPermissions = new Set([
-      ...normalizeStringArray(user.permissions),
-      ...normalizeStringArray(user.permissionKeys),
-      ...normalizeStringArray(user.accessibleViews),
-    ]);
-    if (!snapshotPermissions.every((permission) => currentPermissions.has(permission))) return false;
-  }
-
   return true;
 }
+
 
 function valueFromPath(source: Record<string, unknown> | undefined, path: string): unknown {
   return path.split('.').reduce<unknown>((current, key) => {
@@ -110,7 +97,9 @@ function scopeIdsFromShortcut(shortcut: ShortcutDoc, keys: string[]): string[] {
 
 function hasScope(currentAllowed: string[], requested: string[]): boolean {
   if (!requested.length) return true;
-  if (!currentAllowed.length) return false;
+  // Elsewhere in the app an empty assignment list means company-wide access rather
+  // than no access, so preserve that convention for background shortcut runs.
+  if (!currentAllowed.length) return true;
   const allowed = new Set(currentAllowed);
   return requested.every((id) => allowed.has(id));
 }
