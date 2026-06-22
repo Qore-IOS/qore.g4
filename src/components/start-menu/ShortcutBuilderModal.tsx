@@ -1,18 +1,21 @@
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Bell, CalendarClock, Check, ChevronLeft, ChevronRight, FileSpreadsheet, FileText, Mail, MessageCircle, Save, Sparkles } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { getShortcutCatalogForViews, type ShortcutAction, type ShortcutPanelCatalogItem } from '@/lib/shortcuts/catalog';
+import type { ShortcutDraft } from '@/lib/shortcuts/draft';
 
 interface ShortcutBuilderModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   accessibleViews: readonly string[];
-  onSave?: (payload: { panelKey?: string; panelLabel?: string; actionKey?: string; actionLabel?: string; actionDescription?: string; actionHref?: string; runMode: 'manual' | 'scheduled' | 'manual_and_scheduled'; scheduleLabel: string; schedule?: { type: 'once' | 'interval'; intervalDays?: number } | string | null; outputs: string[]; filters: string[] }) => Promise<void> | void;
+  initialDraft?: ShortcutDraft | null;
+  onSave?: (payload: { panelKey?: string; panelLabel?: string; actionKey?: string; actionLabel?: string; actionDescription?: string; actionHref?: string; runMode: 'manual' | 'scheduled' | 'manual_and_scheduled'; scheduleLabel: string; schedule?: { type: 'once' | 'interval'; intervalDays?: number } | string | null; outputs: string[]; filters: string[]; recipients?: string[]; channel?: string }) => Promise<void> | void;
 }
+
 
 const FILTER_OPTIONS = [
   'Laboratuvar',
@@ -54,7 +57,7 @@ const actionKindLabel: Record<ShortcutAction['kind'], string> = {
   notification: 'Bildirim',
 };
 
-export function ShortcutBuilderModal({ open, onOpenChange, accessibleViews, onSave }: ShortcutBuilderModalProps) {
+export function ShortcutBuilderModal({ open, onOpenChange, accessibleViews, initialDraft, onSave }: ShortcutBuilderModalProps) {
   const panels = useMemo(() => getShortcutCatalogForViews(accessibleViews), [accessibleViews]);
   const [step, setStep] = useState(0);
   const [selectedPanelKey, setSelectedPanelKey] = useState<string>();
@@ -63,6 +66,18 @@ export function ShortcutBuilderModal({ open, onOpenChange, accessibleViews, onSa
   const [selectedOutputs, setSelectedOutputs] = useState<string[]>(['app']);
   const [schedule, setSchedule] = useState('Manuel');
   const [cron, setCron] = useState('0 9 * * 1');
+  const [draftRecipients, setDraftRecipients] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!open || !initialDraft) return;
+    setStep(5);
+    setSelectedPanelKey(initialDraft.panelKey);
+    setSelectedActionKey(initialDraft.actionKey);
+    setSelectedFilters(initialDraft.filters.length ? initialDraft.filters : ['Tarih aralığı']);
+    setSelectedOutputs(initialDraft.outputs.length ? initialDraft.outputs : ['app']);
+    setSchedule(initialDraft.scheduleLabel || 'Manuel');
+    setDraftRecipients(initialDraft.recipients);
+  }, [open, initialDraft]);
 
   const selectedPanel = panels.find((panel) => String(panel.panelKey) === selectedPanelKey) ?? panels[0];
   const actions = selectedPanel?.actions ?? [];
@@ -100,6 +115,8 @@ export function ShortcutBuilderModal({ open, onOpenChange, accessibleViews, onSa
       schedule: schedulePayload,
       outputs: selectedOutputs,
       filters: selectedFilters,
+      recipients: draftRecipients,
+      channel: selectedOutputs[0],
     });
     resetAndClose(false);
   };
@@ -199,6 +216,7 @@ export function ShortcutBuilderModal({ open, onOpenChange, accessibleViews, onSa
                     <SummaryRow label="Fonksiyon / rapor" value={selectedAction?.label} />
                     <SummaryRow label="Filtreler" value={selectedFilters.join(', ') || 'Filtre yok'} />
                     <SummaryRow label="Çıktı" value={outputLabels || 'Seçilmedi'} />
+                    <SummaryRow label="Alıcılar" value={draftRecipients.join(', ') || (selectedFilters.includes('Alıcılar') ? 'Seçilecek' : 'Belirtilmedi')} />
                     <SummaryRow label="Çalışma modu" value={runMode} />
                     <SummaryRow label="Zamanlama" value={schedule === 'Özel cron' ? `${schedule} · ${cron}` : schedule} />
                   </div>

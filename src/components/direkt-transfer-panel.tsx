@@ -510,7 +510,7 @@ function DTProductRow({ group, wide, available, meta, onQtyChange, onRemove, onR
   if (wide) {
     return (
       <div style={{ animation: 'dtPopIn 280ms ease' }}>
-        <div style={{
+        <div className="dt-prod-row" style={{
           display: 'grid', gridTemplateColumns: '52px minmax(0,1fr) 140px 92px 164px 44px', gap: 14, alignItems: 'center',
           padding: '14px 16px', borderRadius: C.radius, background: C.surfaceHi, boxShadow: C.clayFlat,
         }}>
@@ -541,7 +541,7 @@ function DTProductRow({ group, wide, available, meta, onQtyChange, onRemove, onR
   }
 
   return (
-    <div style={{ padding: '14px 16px', borderRadius: C.radius, background: C.surfaceHi, boxShadow: C.clayFlat, animation: 'dtPopIn 280ms ease' }}>
+    <div className="dt-prod-row" style={{ padding: '14px 16px', borderRadius: C.radius, background: C.surfaceHi, boxShadow: C.clayFlat, animation: 'dtPopIn 280ms ease' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
         <DTClayProd />
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -1762,14 +1762,24 @@ export default function DirektTransferPanel() {
           0%,100% { box-shadow: inset 0 1px 1px rgba(255,255,255,0.9), inset 0 -3px 7px rgba(178,160,128,0.14), 0 10px 24px -12px rgba(150,128,96,0.34), 0 2px 6px -2px rgba(150,128,96,0.16), 0 0 0 1.5px rgba(111,181,133,0.55), 0 0 16px -3px rgba(111,181,133,0.25); }
           50% { box-shadow: inset 0 1px 1px rgba(255,255,255,0.9), inset 0 -3px 7px rgba(178,160,128,0.14), 0 10px 24px -12px rgba(150,128,96,0.34), 0 2px 6px -2px rgba(150,128,96,0.16), 0 0 0 1.5px rgba(111,181,133,0.9), 0 0 26px 1px rgba(111,181,133,0.5); }
         }
+        @keyframes dtTransferGlow {
+          0%,100% { box-shadow: inset 0 1px 1px rgba(255,255,255,0.9), inset 0 -3px 7px rgba(178,160,128,0.14), 0 10px 24px -12px rgba(150,128,96,0.34), 0 2px 6px -2px rgba(150,128,96,0.16), 0 0 0 1.5px rgba(201,138,87,0.32), 0 0 22px -2px rgba(201,138,87,0.18); }
+          50% { box-shadow: inset 0 1px 1px rgba(255,255,255,0.9), inset 0 -3px 7px rgba(178,160,128,0.14), 0 10px 24px -12px rgba(150,128,96,0.34), 0 2px 6px -2px rgba(150,128,96,0.16), 0 0 0 1.5px rgba(201,138,87,0.65), 0 0 32px 2px rgba(201,138,87,0.28); }
+        }
         @keyframes dtLivePulse { 0%,100% { box-shadow: 0 0 0 0 rgba(111,181,133,0.55); } 70% { box-shadow: 0 0 0 7px rgba(111,181,133,0); } }
         @keyframes dtCountPop { 0% { transform: scale(0.55); opacity: 0; } 55% { transform: scale(1.18); } 100% { transform: scale(1); opacity: 1; } }
         @keyframes dtBob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
         @keyframes dtSpin { to { transform: rotate(360deg); } }
         @keyframes dtPopIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+        @keyframes dtRise { from { opacity: 0; transform: translateY(14px) scale(0.97); } to { opacity: 1; transform: none; } }
         .dt-shell { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; background: linear-gradient(120deg, #F6F2EA 0%, transparent 55%), linear-gradient(225deg, #E8E1D2 0%, transparent 55%), #EFEAE0; color: #3D382F; min-height: 100vh; padding: 14px 24px 22px; -webkit-font-smoothing: antialiased; }
         .dt-grid { display: grid; grid-template-columns: 320px minmax(0,1fr); gap: 18px; align-items: start; }
         @media (max-width: 1149px) { .dt-grid { grid-template-columns: 1fr; } }
+        .dt-prod-row:hover { transform: translateY(-1px); box-shadow: inset 0 1px 1px rgba(255,255,255,0.9), 0 8px 22px -8px rgba(150,128,96,0.28), 0 2px 6px -2px rgba(150,128,96,0.14); }
+        .dt-prod-row { transition: transform 200ms ease, box-shadow 200ms ease; }
+        @media (prefers-reduced-motion: reduce) {
+          .dt-prod-row:hover { transform: none; }
+        }
       `}</style>
 
       {/* Full-bleed cream backdrop — paneli çevreleyen gri tema zeminini örter */}
@@ -1778,13 +1788,25 @@ export default function DirektTransferPanel() {
       <div className="dt-shell" style={{ maxWidth: 1680, margin: '0 auto', position: 'relative', zIndex: 1 }}>
 
         {/* ══ TOP BAR ══ */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 12, flexWrap: 'wrap', animation: 'dtRise 420ms cubic-bezier(0.34,1.56,0.64,1) both' }}>
           <BackButton fallback="/siparisler" />
 
-          <span style={{ fontSize: 14.5, fontWeight: 700, color: C.ink2, whiteSpace: 'nowrap' }}>
-            {depotName || 'Depo seçin'}
-            {selectedLabName ? ` → ${selectedLabName}` : isBorcMode && selectedCompany ? ` → ${selectedCompany} (Borç)` : ''}
-          </span>
+          {/* Route breadcrumb pill */}
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6, padding: '7px 14px', borderRadius: C.radiusPill,
+            background: `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`, boxShadow: C.clayFlat,
+            fontSize: 13.5, fontWeight: 700,
+          }}>
+            <span style={{ color: depotName ? C.ink1 : C.ink3 }}>{depotName || 'Depo seçin'}</span>
+            {(selectedLabName || (isBorcMode && selectedCompany)) && (
+              <>
+                <span style={{ color: C.accent, fontSize: 16, lineHeight: 1 }}>→</span>
+                <span style={{ color: isBorcMode ? C.waterDeep : C.accent }}>
+                  {selectedLabName || `${selectedCompany} (Borç)`}
+                </span>
+              </>
+            )}
+          </div>
 
           <div style={{ flex: 1 }} />
 
@@ -1834,7 +1856,7 @@ export default function DirektTransferPanel() {
         <div className="dt-grid">
 
           {/* LEFT RAIL */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, animation: 'dtRise 460ms cubic-bezier(0.34,1.56,0.64,1) 60ms both' }}>
 
             <DTReadinessCard
               stage={readinessStage}
@@ -1991,17 +2013,25 @@ export default function DirektTransferPanel() {
           <div style={{
             borderRadius: C.radiusLg, minHeight: 'calc(100vh - 120px)',
             background: `linear-gradient(180deg, ${C.surface} 0%, ${C.surface2} 100%)`,
-            boxShadow: C.clay,
+            boxShadow: isTransferReady ? `${C.clay}, 0 0 0 1.5px rgba(201,138,87,0.32)` : C.clay,
+            animation: `dtRise 500ms cubic-bezier(0.34,1.56,0.64,1) 120ms both${isTransferReady ? ', dtTransferGlow 3s ease-in-out 1.5s infinite' : ''}`,
+            transition: 'box-shadow 600ms ease',
             display: 'flex', flexDirection: 'column', overflow: 'hidden',
           }}>
             {/* Header */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '22px 28px', borderBottom: `1px solid ${C.line}` }}>
               <div style={{ flex: 1 }}>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   <h1 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em', color: C.ink1, whiteSpace: 'nowrap' }}>Transfer Listesi</h1>
-                  <span style={{ fontSize: 18, fontWeight: 800, color: C.accent }}>({stepperState.totalKalem})</span>
+                  {stepperState.totalKalem > 0 && (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', padding: '3px 11px', borderRadius: C.radiusPill, background: `linear-gradient(180deg, ${C.accent2}, ${C.accent})`, boxShadow: `0 5px 12px -4px ${C.accentGlow}`, fontSize: 13.5, fontWeight: 800, color: '#fff' }}>
+                      {stepperState.totalKalem}
+                    </span>
+                  )}
                 </div>
-                <div style={{ fontSize: 13.5, color: C.ink2, fontWeight: 600, marginTop: 2 }}>{stepperState.totalAdet} adet ürün transfer edilecek</div>
+                <div style={{ fontSize: 13, color: C.ink2, fontWeight: 600, marginTop: 3 }}>
+                  {stepperState.totalAdet > 0 ? `${stepperState.totalAdet} adet ürün transfer edilecek` : 'Ürün listesi boş — taramaya başlayın'}
+                </div>
               </div>
               {directTransferItems.length > 0 && (
                 <>
@@ -2012,9 +2042,9 @@ export default function DirektTransferPanel() {
                   }}>
                     <Trash2 size={16} /> Temizle
                   </button>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 5 }}>
-                    <span style={{ fontSize: 26, fontWeight: 800, color: C.ink1, lineHeight: 1 }}>{stepperState.totalAdet}</span>
-                    <span style={{ fontSize: 13, color: C.ink3, fontWeight: 600 }}>adet</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '6px 16px', borderRadius: C.radiusSm, background: C.surface2, boxShadow: C.clayInset }}>
+                    <span key={stepperState.totalAdet} style={{ fontSize: 26, fontWeight: 800, color: C.ink1, lineHeight: 1, animation: 'dtCountPop 380ms ease' }}>{stepperState.totalAdet}</span>
+                    <span style={{ fontSize: 10.5, color: C.ink3, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', marginTop: 1 }}>Adet</span>
                   </div>
                 </>
               )}
@@ -2056,11 +2086,19 @@ export default function DirektTransferPanel() {
                     );
                   })}
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 18, padding: '16px 28px', borderTop: `1px solid ${C.line}` }}>
-                  <div style={{ fontSize: 14, color: C.ink2, fontWeight: 600 }}>Kalem <strong style={{ color: C.ink1, fontSize: 16 }}>{stepperState.totalKalem}</strong></div>
-                  <div style={{ fontSize: 14, color: C.ink2, fontWeight: 600 }}>Adet <strong style={{ color: C.ink1, fontSize: 16 }}>{stepperState.totalAdet}</strong></div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 28px', borderTop: `1px solid ${C.line}` }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '6px 14px', borderRadius: C.radiusPill, background: C.surface2, boxShadow: C.clayInset, fontSize: 13, fontWeight: 700, color: C.ink1 }}>
+                    <span style={{ fontSize: 11, color: C.ink3, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Kalem</span>
+                    <strong>{stepperState.totalKalem}</strong>
+                  </span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '6px 14px', borderRadius: C.radiusPill, background: C.surface2, boxShadow: C.clayInset, fontSize: 13, fontWeight: 700, color: C.ink1 }}>
+                    <span style={{ fontSize: 11, color: C.ink3, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Adet</span>
+                    <strong style={{ color: C.accent }}>{stepperState.totalAdet}</strong>
+                  </span>
                   {!isBorcMode && !selectedLabId && (
-                    <div style={{ marginLeft: 'auto', fontSize: 13, fontWeight: 700, color: C.amber }}>Transfer için hedef laboratuvar seçin</div>
+                    <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 7, padding: '6px 14px', borderRadius: C.radiusPill, background: C.amberSoft, fontSize: 13, fontWeight: 700, color: '#9A6F1E' }}>
+                      <AlertTriangle size={13} /> Hedef laboratuvar seçin
+                    </span>
                   )}
                 </div>
               </>
