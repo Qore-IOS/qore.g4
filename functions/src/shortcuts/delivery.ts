@@ -248,7 +248,7 @@ async function sendInApp(shortcut: ShortcutDeliveryShortcut, runId: string, summ
     type: 'custom',
     title: 'Shortcut raporu hazır',
     message: summary,
-    href: result.deepLink || `/shortcut-runs/${runId}`,
+    href: `/raporlama/olusturulan-raporlar?runId=${runId}`,
     createdAt: FieldValue.serverTimestamp(),
     targets,
     actor: { uid: shortcut.createdByUid || 'system', name: shortcut.createdByName || 'QORE System' },

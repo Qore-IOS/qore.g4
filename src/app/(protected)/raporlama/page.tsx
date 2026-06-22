@@ -14,6 +14,7 @@ import {
 import {
   FileSpreadsheet,
   FileJson,
+  FileText,
   Loader2,
   CalendarClock,
   Activity,
@@ -128,6 +129,7 @@ export default function RaporlamaPage() {
   };
 
   const modules = [
+    { icon: FileText, title: 'Oluşturulan Raporlar', desc: 'Kestirmelerden üretilen PDF/Excel raporları ve teslimat durumlarını görüntüleyin.', onClick: () => router.push('/raporlama/olusturulan-raporlar') },
     { icon: FolderOpen, title: 'Dosya Yönetimi', desc: 'İrsaliye PDF ve Excel dosyalarını yükleyin ve yönetin.', onClick: () => router.push('/dosya-yonetimi') },
     { icon: TrendingUp, title: 'Tüketim İstatistikleri', desc: 'Laboratuvar bazlı ürün tüketim verilerini analiz edin.', onClick: () => router.push('/tuketim-istatistikleri') },
     { icon: Archive, title: 'Kümülatif', desc: "'Cumulative Operation List' PDF/TXT dosyalarından test sayılarını hesaplayın.", onClick: () => router.push('/kumulatif-hesaplama') },
