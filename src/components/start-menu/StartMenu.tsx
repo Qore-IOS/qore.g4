@@ -510,6 +510,14 @@ export function StartMenu() {
                         </span>
                         Kestirme oluştur
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => go('/kestirmeler')}
+                        className="inline-flex items-center gap-2 rounded-xl border border-black/[0.05] bg-white px-3 py-1.5 text-[13px] font-semibold text-foreground transition hover:-translate-y-0.5 hover:bg-black/[0.03] dark:border-white/10 dark:bg-white/[0.04] dark:hover:bg-white/[0.08]"
+                      >
+                        <FileClock className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                        Çalışma geçmişi
+                      </button>
                       <div className="grid w-full gap-2 sm:grid-cols-2">
                         {savedShortcuts.filter(isManualShortcut).map((shortcut) => (
                           <div key={shortcut.id} className={cn('rounded-2xl p-3', TILE, shortcut.enabled === false && 'opacity-60')}>
