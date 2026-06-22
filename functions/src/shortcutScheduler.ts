@@ -7,6 +7,7 @@ import * as functions from 'firebase-functions';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { shortcutHandlers, type ShortcutContext, type ShortcutResult } from './shortcuts/handlers';
 import { deliverShortcutResult } from './shortcuts/delivery';
+import { createNotification } from './lib/notifications';
 
 if (!admin.apps.length) admin.initializeApp();
 const db = admin.firestore();
@@ -29,6 +30,7 @@ export type ShortcutDoc = {
   runMode?: ShortcutRunMode;
   panelKey?: string;
   actionKey?: string;
+  title?: string;
   params?: Record<string, unknown>;
   schedule?: ShortcutSchedule | string | null;
   timezone?: string;
@@ -37,6 +39,7 @@ export type ShortcutDoc = {
   deliveryChannels?: string[];
   recipients?: string[];
   permissionSnapshot?: Record<string, unknown>;
+  filters?: string[];
   createdAt?: Timestamp | Date | null;
   updatedAt?: Timestamp | Date | null;
   processingRunId?: string | null;
@@ -61,6 +64,9 @@ function normalizeStringArray(value: unknown): string[] {
 
 function snapshotMatchesCurrentUser(snapshot: Record<string, unknown> | undefined, user: FirebaseFirestore.DocumentData): boolean {
   if (!snapshot || Object.keys(snapshot).length === 0) return true;
+
+  const snapshotUid = typeof snapshot.uid === 'string' ? snapshot.uid : null;
+  if (snapshotUid && user.uid && snapshotUid !== user.uid) return false;
 
   const snapshotCompanyId = typeof snapshot.companyId === 'string' ? snapshot.companyId : null;
   if (snapshotCompanyId && user.companyId && snapshotCompanyId !== user.companyId) return false;
@@ -87,6 +93,42 @@ function snapshotMatchesCurrentUser(snapshot: Record<string, unknown> | undefine
   return true;
 }
 
+function valueFromPath(source: Record<string, unknown> | undefined, path: string): unknown {
+  return path.split('.').reduce<unknown>((current, key) => {
+    if (!current || typeof current !== 'object') return undefined;
+    return (current as Record<string, unknown>)[key];
+  }, source);
+}
+
+function scopeIdsFromShortcut(shortcut: ShortcutDoc, keys: string[]): string[] {
+  const values = keys.flatMap((key) => {
+    const direct = valueFromPath(shortcut.params, key) ?? valueFromPath(shortcut as Record<string, unknown>, key);
+    return Array.isArray(direct) ? direct : [direct];
+  });
+  return Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean).filter((value) => value !== 'all')));
+}
+
+function hasScope(currentAllowed: string[], requested: string[]): boolean {
+  if (!requested.length) return true;
+  if (!currentAllowed.length) return false;
+  const allowed = new Set(currentAllowed);
+  return requested.every((id) => allowed.has(id));
+}
+
+async function emitPermissionDeniedNotifications(shortcut: ShortcutDoc, runRef: FirebaseFirestore.DocumentReference, reason: string): Promise<void> {
+  if (!shortcut.createdByUid) return;
+  await createNotification({
+    type: 'custom',
+    title: 'Kestirme yetki nedeniyle atlandı',
+    message: `${shortcut.title || shortcut.actionKey || 'Kestirme'} çalıştırılmadı: ${reason}`,
+    href: `/shortcut-runs/${runRef.id}`,
+    actor: { uid: 'system', name: 'QORE System' },
+    targets: [`user:${shortcut.createdByUid}`, 'role:admin'],
+    audience: { userIds: [shortcut.createdByUid], roles: ['admin'] },
+    meta: { shortcutId: shortcut.id || null, runId: runRef.id, reason },
+  });
+}
+
 async function verifyShortcutPermissions(shortcut: ShortcutDoc): Promise<{ ok: boolean; reason?: string }> {
   const uid = String(shortcut.createdByUid || '').trim();
   if (!uid) return { ok: false, reason: 'createdByUid is missing' };
@@ -101,6 +143,20 @@ async function verifyShortcutPermissions(shortcut: ShortcutDoc): Promise<{ ok: b
   }
   if (!snapshotMatchesCurrentUser(shortcut.permissionSnapshot, user)) {
     return { ok: false, reason: 'permission snapshot no longer matches current user permissions' };
+  }
+
+  const accessibleViews = normalizeStringArray(user.accessibleViews);
+  if (shortcut.panelKey && !accessibleViews.includes(String(shortcut.panelKey))) {
+    return { ok: false, reason: 'panelKey is no longer accessible to the shortcut creator' };
+  }
+
+  const requestedLabIds = scopeIdsFromShortcut(shortcut, ['labId', 'labIds', 'laboratoryId', 'laboratoryIds', 'hospitalId', 'hospitalIds']);
+  const requestedDepotIds = scopeIdsFromShortcut(shortcut, ['depotId', 'depotIds']);
+  if (!hasScope(normalizeStringArray(user.assignedLaboratories), requestedLabIds)) {
+    return { ok: false, reason: 'lab filters are outside the creator current scope' };
+  }
+  if (!hasScope(normalizeStringArray(user.assignedDepots), requestedDepotIds)) {
+    return { ok: false, reason: 'depot filters are outside the creator current scope' };
   }
 
   return { ok: true };
@@ -188,7 +244,26 @@ async function executeShortcutRun(shortcutRef: FirebaseFirestore.DocumentReferen
     await appendRunLog(runRef, 'info', `Shortcut ${trigger} run started.`);
 
     const permission = await verifyShortcutPermissions(locked);
-    if (!permission.ok) throw new Error(permission.reason || 'Permission check failed');
+    if (!permission.ok) {
+      const message = permission.reason || 'Permission check failed';
+      const nextRunAt = trigger === 'scheduled' ? computeNextRunAt(locked.schedule, new Date()) : toDate(locked.nextRunAt);
+      await runRef.set({
+        status: 'skipped_permission_denied',
+        completedAt: FieldValue.serverTimestamp(),
+        message,
+      }, { merge: true });
+      await appendRunLog(runRef, 'warn', message, { status: 'skipped_permission_denied' });
+      await emitPermissionDeniedNotifications(locked, runRef, message);
+      await shortcutRef.update({
+        lastRunAt: FieldValue.serverTimestamp(),
+        nextRunAt: nextRunAt ? Timestamp.fromDate(nextRunAt) : null,
+        enabled: trigger === 'scheduled' && !nextRunAt ? false : locked.enabled,
+        processingRunId: FieldValue.delete(),
+        processingStartedAt: FieldValue.delete(),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      return;
+    }
 
     const handler = resolveHandler(locked);
     if (!handler) throw new Error(`No shortcut handler registered for actionKey: ${locked.actionKey || '(empty)'}`);
