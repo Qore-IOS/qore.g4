@@ -33,7 +33,12 @@ interface TransferLog {
   createdByUid: string;
   createdByName: string;
   createdAt: Date;
-  formType?: 'teknik_servis' | 'aplikasyon';
+  formType?: 'teknik_servis' | 'aplikasyon' | string;
+  companyId?: string;
+  personalStockId?: string;
+  poolStockId?: string;
+  borrowedPartId?: string;
+  sourceCollection?: string;
 }
 
 interface PartSummary {
@@ -115,9 +120,12 @@ export default function YedekParcaAnaliziPage() {
         // scopedQuery'nin server-side where('companyId', '==', X) filtresi bu
         // kayıtları dışarıda bırakıp panelde "sadece son birkaç" değişim
         // görünmesine yol açıyordu (eski form+arıza işlemleri görünmez kalıyordu).
-        const [useOnDeviceDocs, borrowedPartDocs, hospitalDocs, assignmentDocs, deviceDocs] = await Promise.all([
+        const [useOnDeviceDocs, borrowedPartDocs, useFromPoolDocs, usedPersonalStockDocs, usedPoolStockDocs, hospitalDocs, assignmentDocs, deviceDocs] = await Promise.all([
           getScopedDocs('sparePartTransferLogs', currentCompanyId, isSuperAdmin, where('action', '==', 'use_on_device')),
           getScopedDocs('sparePartTransferLogs', currentCompanyId, isSuperAdmin, where('action', '==', 'borrowed_part')),
+          getScopedDocs('sparePartTransferLogs', currentCompanyId, isSuperAdmin, where('action', '==', 'use_from_pool')),
+          getScopedDocs('personalStock', currentCompanyId, isSuperAdmin, where('status', '==', 'used')),
+          getScopedDocs('poolWarehouseStock', currentCompanyId, isSuperAdmin, where('status', '==', 'used')),
           getScopedDocs('hospitals', currentCompanyId, isSuperAdmin),
           getScopedDocs('hospitalDeviceAssignments', currentCompanyId, isSuperAdmin),
           getScopedDocs('devices', currentCompanyId, isSuperAdmin),
@@ -133,7 +141,7 @@ export default function YedekParcaAnaliziPage() {
 
         const dlMap = new Map<string, { labId: string; labName: string }>();
         filterByCompanyScope(
-          deviceDocs.map((d) => ({ id: d.id, ...d.data() })),
+          deviceDocs.map((d) => ({ id: d.id, ...d.data() } as any)),
           currentCompanyId,
           isSuperAdmin
         ).forEach((data) => {
@@ -144,7 +152,7 @@ export default function YedekParcaAnaliziPage() {
           }
         });
         filterByCompanyScope(
-          assignmentDocs.map((d) => ({ id: d.id, ...d.data() })),
+          assignmentDocs.map((d) => ({ id: d.id, ...d.data() } as any)),
           currentCompanyId,
           isSuperAdmin
         ).forEach((data) => {
@@ -170,8 +178,13 @@ export default function YedekParcaAnaliziPage() {
             formType: data.formType,
             companyId: data.companyId,
             borrowedPartId: data.borrowedPartId,
+            personalStockId: data.personalStockId,
+            poolStockId: data.poolStockId,
+            sourceCollection: 'sparePartTransferLogs',
           };
         };
+
+        const toDate = (value: any) => value instanceof Timestamp ? value.toDate() : value ? new Date(value) : new Date(0);
 
         // use_on_device: tüm onaylı parça değişimleri (form + arıza kaynaklı)
         const useOnDeviceLogs = useOnDeviceDocs.map(mapLog);
@@ -183,7 +196,64 @@ export default function YedekParcaAnaliziPage() {
           .map(mapLog)
           .filter(l => l.formType === 'ariza_yonetimi' && !approvedBorrowedIds.has(l.id));
 
-        const allLogs = [...useOnDeviceLogs, ...arizaBorrowedLogs];
+        const useFromPoolLogs = useFromPoolDocs.map(mapLog);
+
+        const loggedPersonalStockIds = new Set(useOnDeviceLogs.map(l => l.personalStockId).filter(Boolean));
+        const loggedPoolStockIds = new Set(useFromPoolLogs.map(l => l.poolStockId).filter(Boolean));
+
+        // Eski/kapanış sonrası kayıtlarda stok satırı 'used' yapılmış olsa bile
+        // sparePartTransferLogs'a kullanım logu yazılmamış olabiliyor. Analiz
+        // panelinde gerçek adet yerine sadece loglanmış birkaç satırın görünmesinin
+        // ana sebebi buydu. Bu nedenle logu olmayan kullanılmış stok satırlarını
+        // sentetik kullanım kaydı olarak ekliyoruz; logu olanları ise mükerrer
+        // saymamak için personalStockId/poolStockId ile eliyoruz.
+        const usedPersonalStockLogs: TransferLog[] = usedPersonalStockDocs
+          .map((d: any) => {
+            const data = d.data();
+            return {
+              id: `personalStock:${d.id}`,
+              action: 'used_personal_stock',
+              stokKodu: data.stokKodu || '',
+              stokAdi: data.stokAdi || '',
+              serialNumber: data.serialNumber,
+              quantity: Math.max(1, Number(data.quantity) || 1),
+              deviceId: data.usedOnDeviceId,
+              deviceName: data.usedOnDeviceName,
+              createdByUid: data.usedByUid || data.ownerUid || '',
+              createdByName: data.usedByName || data.ownerName || 'Bilinmiyor',
+              createdAt: toDate(data.usedAt || data.updatedAt || data.createdAt),
+              formType: data.usedOnFormType,
+              companyId: data.companyId,
+              personalStockId: d.id,
+              sourceCollection: 'personalStock',
+            };
+          })
+          .filter((l) => l.stokKodu && !loggedPersonalStockIds.has(l.personalStockId));
+
+        const usedPoolStockLogs: TransferLog[] = usedPoolStockDocs
+          .map((d: any) => {
+            const data = d.data();
+            return {
+              id: `poolWarehouseStock:${d.id}`,
+              action: 'used_pool_stock',
+              stokKodu: data.stokKodu || '',
+              stokAdi: data.stokAdi || '',
+              serialNumber: data.serialNumber,
+              quantity: Math.max(1, Number(data.quantity) || 1),
+              deviceId: data.usedOnDeviceId,
+              deviceName: data.usedOnDeviceName,
+              createdByUid: data.usedByUid || '',
+              createdByName: data.usedByName || 'Bilinmiyor',
+              createdAt: toDate(data.usedAt || data.updatedAt || data.createdAt),
+              formType: data.usedOnFormType,
+              companyId: data.companyId,
+              poolStockId: d.id,
+              sourceCollection: 'poolWarehouseStock',
+            };
+          })
+          .filter((l) => l.stokKodu && !loggedPoolStockIds.has(l.poolStockId));
+
+        const allLogs = [...useOnDeviceLogs, ...useFromPoolLogs, ...arizaBorrowedLogs, ...usedPersonalStockLogs, ...usedPoolStockLogs];
 
         // Transfer loglarını şirketin cihazlarına göre filtrele (eski kayıtlarda companyId olmayabilir)
         // companyId boş/__legacy__ kayıtlar getScopedDocs üzerinden geliyor; burada
@@ -276,7 +346,7 @@ export default function YedekParcaAnaliziPage() {
 
       let depoStokCount = 0;
       for (const doc of filterByCompanyScope(
-        depoDocs.map((d) => ({ id: d.id, ...d.data() })),
+        depoDocs.map((d) => ({ id: d.id, ...d.data() } as any)),
         currentCompanyId,
         isSuperAdmin
       )) { depoStokCount += doc.quantity || 1; }
@@ -284,7 +354,7 @@ export default function YedekParcaAnaliziPage() {
       const personnelStokMap = new Map<string, { uid: string; name: string; count: number }>();
       let totalPersonnelStok = 0;
       for (const data of filterByCompanyScope(
-        personalDocs.map((d) => ({ id: d.id, ...d.data() })),
+        personalDocs.map((d) => ({ id: d.id, ...d.data() } as any)),
         currentCompanyId,
         isSuperAdmin
       )) {
@@ -498,6 +568,7 @@ export default function YedekParcaAnaliziPage() {
                         <TableCell className="text-center">
                           {entry.formType === 'teknik_servis' ? <Badge className="bg-blue-500/20 text-blue-400 text-xs">Teknik</Badge>
                             : entry.formType === 'aplikasyon' ? <Badge className="bg-green-500/20 text-green-400 text-xs">App</Badge>
+                            : entry.formType === 'ariza_yonetimi' ? <Badge className="bg-orange-500/20 text-orange-400 text-xs">Arıza</Badge>
                             : <span className="text-xs text-muted-foreground">-</span>}
                         </TableCell>
                       </TableRow>
