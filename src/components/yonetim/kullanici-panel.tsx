@@ -376,13 +376,11 @@ export default function KullaniciPanel() {
                   onChange={handleNfcIdChange}
                   maxLength={8}
                 />
-                {(currentUser.role === 'teknik_servis' || currentUser.role === 'aplikasyon' || currentUser.role === 'teknisyen' || currentUser.role === 'lojistik_sorumlusu') && (
-                  <Input
-                    placeholder="Telefon Numarası (örn: +905xxxxxxxxx)"
-                    value={currentUser.phoneNumber || ''}
-                    onChange={(e) => setCurrentUser({ ...currentUser, phoneNumber: e.target.value })}
-                  />
-                )}
+                <Input
+                  placeholder="Telefon Numarası (örn: +905xxxxxxxxx)"
+                  value={currentUser.phoneNumber || ''}
+                  onChange={(e) => setCurrentUser({ ...currentUser, phoneNumber: e.target.value })}
+                />
                  <ScrollArea className="h-40 border rounded-md p-2">
                     <h4 className="font-medium text-sm mb-2">Atanan Markalar</h4>
                     {brands.map(b => (

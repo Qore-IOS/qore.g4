@@ -10,21 +10,6 @@ import { sendWhatsAppDocument } from './lib/whatsapp';
 
 const db = admin.firestore();
 
-function normalizePhoneForWhatsApp(value: unknown): string | null {
-  const digits = String(value || '').replace(/\D/g, '');
-  if (!digits) return null;
-  const withCountryCode = digits.length === 10 ? `90${digits}` : digits.startsWith('0') && digits.length === 11 ? `9${digits}` : digits;
-  return withCountryCode.length >= 11 ? `${withCountryCode}@c.us` : null;
-}
-
-async function whatsappRecipientForUser(uid: unknown): Promise<string | null> {
-  const userId = String(uid || '').trim();
-  if (!userId) return null;
-  const snap = await db.collection('users').doc(userId).get();
-  const user = snap.exists ? snap.data() || {} : {};
-  return normalizePhoneForWhatsApp(user.phoneNumber);
-}
-
 // --- Turkish -> ASCII transliteration (fonts available at runtime do not cover TR glyphs) ---
 const TR_ASCII_MAP: Record<string, string> = {
   'ç': 'c', 'Ç': 'C',
@@ -522,8 +507,7 @@ async function handleFaultResolved(reportId: string, after: any): Promise<void> 
 
     // --- WhatsApp ---
     const waConfig = functions.config().whatsapp;
-    const whatsappRecipient = await whatsappRecipientForUser(after.closedByUid);
-    if (waConfig && waConfig.instance_id && waConfig.token && whatsappRecipient) {
+    if (waConfig && waConfig.instance_id && waConfig.token && waConfig.group_id) {
       try {
         const bucket = admin.storage().bucket();
         const storagePath = `arizaRaporlariPDFs/${reportId}_${Date.now()}.pdf`;
@@ -554,7 +538,7 @@ async function handleFaultResolved(reportId: string, after: any): Promise<void> 
         const waFileName = `Ariza_Raporu_${reportId.substring(0, 8)}.pdf`;
         const waResult = await sendWhatsAppDocument(
           publicUrl, waFileName, caption,
-          whatsappRecipient, waConfig.instance_id, waConfig.token,
+          waConfig.group_id, waConfig.instance_id, waConfig.token,
         );
         logger.info(`[faultReport] WhatsApp result: ${JSON.stringify(waResult)}`);
         if (waResult.success) {
@@ -565,16 +549,34 @@ async function handleFaultResolved(reportId: string, after: any): Promise<void> 
           logEntry.steps.push(`WhatsApp BASARISIZ: ${waResult.error}`);
         }
 
+        // --- Also send to parts group if fault contains part changes ---
+        const partsGroupId: string | undefined = waConfig.parts_group_id || '905362835871-1624522639@g.us';
+        if (partChanges.length > 0 && partsGroupId) {
+          logger.info(`[faultReport] Fault has part changes; also sending to parts group: ${partsGroupId}`);
+          try {
+            const partsResult = await sendWhatsAppDocument(
+              publicUrl, waFileName, caption,
+              partsGroupId, waConfig.instance_id, waConfig.token,
+            );
+            logger.info(`[faultReport] Parts group result: ${JSON.stringify(partsResult)}`);
+            if (partsResult.success) {
+              logEntry.steps.push(`WhatsApp (parca grubu) gonderildi (msgId: ${partsResult.messageId})`);
+            } else {
+              logEntry.steps.push(`WhatsApp (parca grubu) BASARISIZ: ${partsResult.error}`);
+            }
+          } catch (partsErr: any) {
+            logger.error('[faultReport] Parts group send error', partsErr);
+            logEntry.steps.push(`WhatsApp (parca grubu) HATA: ${partsErr?.message || partsErr}`);
+          }
+        }
       } catch (waErr: any) {
         logger.error('[faultReport] WhatsApp fatal error', waErr);
         logEntry.whatsappError = waErr?.message || String(waErr);
         logEntry.steps.push(`WhatsApp HATA: ${waErr?.message || waErr}`);
       }
     } else {
-      const reason = !waConfig?.instance_id || !waConfig?.token ? 'yapılandırma eksik' : 'kaydı kapatan kullanıcının telefon numarası yok';
-      logEntry.whatsappError = reason;
-      logger.warn(`[faultReport] WhatsApp skipped: ${reason}`);
-      logEntry.steps.push(`WhatsApp ATLANDI: ${reason}`);
+      logger.warn('[faultReport] WhatsApp config incomplete, skipping');
+      logEntry.steps.push('WhatsApp ATLANDI (config eksik)');
     }
 
     // --- Email (only if hospital has sorumluEmail and SMTP is configured) ---
