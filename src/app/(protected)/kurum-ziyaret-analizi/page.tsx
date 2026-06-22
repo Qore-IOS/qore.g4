@@ -1,9 +1,6 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Label } from '@/components/ui/label';
@@ -13,8 +10,7 @@ import { DatePickerWithRange } from '@/components/ui/date-range-picker';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { collection, doc, getDoc, getDocs, orderBy, query, serverTimestamp, setDoc, Timestamp, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { Loader2, Building2, Users, Wrench, FlaskConical, Search, X, ChevronsUpDown, ArrowLeft, Settings2, CalendarDays } from 'lucide-react';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell } from 'recharts';
+import { Building2, Users, Search, X, ChevronsUpDown, Settings2, CalendarDays } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
@@ -26,6 +22,10 @@ import { scopedQuery } from '@/lib/firestore-helpers';
 import { useDateRangeFilter } from '@/hooks/useDateRangeFilter';
 import { DateRangeFilterBar } from '@/components/common/DateRangeFilterBar';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import {
+  ClayPage, PageHead, Card, CardHead, KpiTile, Pill, GhostBtn,
+  HBar, RoleChip, ClayLoader, C, PAL, useMode, fmtInt,
+} from '@/components/cihaz-yonetimi/clay-kit';
 
 interface ActionForm {
   id: string;
@@ -121,6 +121,8 @@ function logFirestoreIndexHint(error: unknown, context: string) {
 export default function KurumZiyaretAnaliziPage() {
   const router = useRouter();
   const { currentCompanyId, isSuperAdmin } = useAuth();
+  const mode = useMode();
+  const mobile = mode === 'mobile';
 
   // Ziyaret analizi penceresi — varsayılan son 365 gün.
   const dateFilter = useDateRangeFilter({
@@ -562,6 +564,14 @@ export default function KurumZiyaretAnaliziPage() {
     return 'bg-gray-500/20 text-gray-400';
   };
 
+  // role/visit-type → clay kit role key ('tech' | 'app' | 'admin')
+  const roleKey = (role: string): 'tech' | 'app' | 'admin' => {
+    if (role === 'teknik_servis' || role === 'teknisyen') return 'tech';
+    if (role === 'aplikasyon') return 'app';
+    return 'admin';
+  };
+  const roleColor = (role: string) => PAL[roleKey(role)];
+
   const selectedPersonnelVisitDetails = useMemo(() => {
     if (!selectedChartPersonnelUid) return [] as PersonnelVisitDetail[];
 
@@ -598,288 +608,273 @@ export default function KurumZiyaretAnaliziPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full min-h-[60vh]">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <span className="ml-3 text-muted-foreground">Veriler yükleniyor...</span>
-      </div>
+      <ClayPage>
+        <ClayLoader label="Veriler yükleniyor…" />
+      </ClayPage>
     );
   }
 
+  const totalVisits = analysis.totalTeknik + analysis.totalApp;
+  const labelW = mobile ? 92 : 130;
+
   return (
-    <div className="device-module-page container max-w-6xl mx-auto p-4 sm:p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="sm" onClick={() => router.push('/cihaz-yonetimi-ana')}>
-          <ArrowLeft className="h-4 w-4 mr-1" />
-          Geri
-        </Button>
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Building2 className="h-6 w-6 text-primary" />
-            Kurum Ziyaret Analizi
-          </h1>
-          <p className="text-sm text-muted-foreground">Teknik servis ve aplikasyon personellerinin kurum ziyaret analizi</p>
-        </div>
-      </div>
+    <ClayPage>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: mobile ? 12 : 16 }}>
+        <PageHead
+          ico="building"
+          title="Kurum Ziyaret Analizi"
+          sub="Teknik servis ve aplikasyon personellerinin kurum ziyaret analizi"
+          onBack={() => router.push('/cihaz-yonetimi-ana')}
+          mobile={mobile}
+        />
 
-      <DateRangeFilterBar
-        range={dateFilter.range}
-        setRange={dateFilter.setRange}
-        label="Analiz penceresi"
-      />
+        {/* Analiz penceresi */}
+        <Card pad={mobile ? 14 : 16}>
+          <DateRangeFilterBar
+            range={dateFilter.range}
+            setRange={dateFilter.setRange}
+            label="Analiz penceresi"
+          />
+        </Card>
 
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3">
-        <Popover open={labPopoverOpen} onOpenChange={setLabPopoverOpen}>
-          <PopoverTrigger asChild>
-            <Button variant="outline" className="gap-2 h-9">
-              <Building2 className="h-4 w-4" />
-              {selectedLabIds.size === 0 ? 'Tüm Kurumlar ve Gruplar' : `${selectedLabIds.size} Seçim`}
-              <ChevronsUpDown className="h-3.5 w-3.5 opacity-50" />
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-80 p-0" align="start">
-            <div className="p-2 border-b">
-              <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                <Input placeholder="Grup / kurum ara..." value={labSearchTerm} onChange={(e) => setLabSearchTerm(e.target.value)} className="pl-8 h-8 text-sm" />
-              </div>
-            </div>
-            <ScrollArea className="h-[250px]">
-              <div className="p-1">
-                {filteredLabOptions.map((opt) => (
-                  <div key={opt.id} className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent/50 cursor-pointer" onClick={() => toggleLab(opt.id)}>
-                    <Checkbox checked={selectedLabIds.has(opt.id)} />
-                    <span className="text-sm truncate">{opt.name}</span>
-                    <Badge variant="secondary" className="ml-auto text-xs shrink-0">
-                      {opt.type === 'group' ? `Grup · ${opt.memberIds.length} lab` : 'Tekli'}
-                    </Badge>
+        {/* Filters */}
+        <Card pad={mobile ? 14 : 16}>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            <Popover open={labPopoverOpen} onOpenChange={setLabPopoverOpen}>
+              <PopoverTrigger asChild>
+                <span>
+                  <GhostBtn active={selectedLabIds.size > 0}>
+                    <Building2 size={16} />
+                    {selectedLabIds.size === 0 ? 'Tüm Kurumlar ve Gruplar' : `${selectedLabIds.size} Seçim`}
+                    <ChevronsUpDown size={14} style={{ opacity: 0.5 }} />
+                  </GhostBtn>
+                </span>
+              </PopoverTrigger>
+              <PopoverContent className="w-80 p-0" align="start">
+                <div className="p-2 border-b">
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                    <Input placeholder="Grup / kurum ara..." value={labSearchTerm} onChange={(e) => setLabSearchTerm(e.target.value)} className="pl-8 h-8 text-sm" />
                   </div>
-                ))}
-                {filteredLabOptions.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">Sonuç bulunamadı</p>}
-              </div>
-            </ScrollArea>
-            {selectedLabIds.size > 0 && (
-              <div className="p-2 border-t">
-                <Button variant="ghost" size="sm" className="w-full text-xs" onClick={() => setSelectedLabIds(new Set())}>
-                  <X className="h-3 w-3 mr-1" /> Filtreyi Temizle
-                </Button>
-              </div>
-            )}
-          </PopoverContent>
-        </Popover>
-
-        <Popover open={personnelPopoverOpen} onOpenChange={setPersonnelPopoverOpen}>
-          <PopoverTrigger asChild>
-            <Button variant="outline" className="gap-2 h-9">
-              <Users className="h-4 w-4" />
-              {selectedPersonnelUids.size === 0 ? 'Tüm Personel' : `${selectedPersonnelUids.size} Personel`}
-              <ChevronsUpDown className="h-3.5 w-3.5 opacity-50" />
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-72 p-0" align="start">
-            <div className="p-2 border-b">
-              <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                <Input placeholder="Personel ara..." value={personnelSearchTerm} onChange={(e) => setPersonnelSearchTerm(e.target.value)} className="pl-8 h-8 text-sm" />
-              </div>
-            </div>
-            <ScrollArea className="h-[250px]">
-              <div className="p-1">
-                {filteredPersonnelOptions.map((p) => (
-                  <div key={p.uid} className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent/50 cursor-pointer" onClick={() => togglePersonnel(p.uid)}>
-                    <Checkbox checked={selectedPersonnelUids.has(p.uid)} />
-                    <span className="text-sm truncate">{p.name}</span>
-                    {usersMap.get(p.uid)?.role && (
-                      <Badge className={cn('ml-auto text-xs shrink-0', getRoleBadgeColor(usersMap.get(p.uid)!.role))}>{getRoleLabel(usersMap.get(p.uid)!.role)}</Badge>
-                    )}
-                  </div>
-                ))}
-                {filteredPersonnelOptions.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">Sonuç bulunamadı</p>}
-              </div>
-            </ScrollArea>
-            {selectedPersonnelUids.size > 0 && (
-              <div className="p-2 border-t">
-                <Button variant="ghost" size="sm" className="w-full text-xs" onClick={() => setSelectedPersonnelUids(new Set())}>
-                  <X className="h-3 w-3 mr-1" /> Filtreyi Temizle
-                </Button>
-              </div>
-            )}
-          </PopoverContent>
-        </Popover>
-
-        <DatePickerWithRange date={dateRange} setDate={setDateRange} className="w-[280px]" />
-
-        <Select value={shiftFilter} onValueChange={(value: 'all' | 'inside' | 'outside') => setShiftFilter(value)}>
-          <SelectTrigger className="w-[220px] h-9">
-            <SelectValue placeholder="Mesai filtresi" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Tüm Zamanlar</SelectItem>
-            <SelectItem value="inside">Mesai İçi</SelectItem>
-            <SelectItem value="outside">Mesai Dışı</SelectItem>
-          </SelectContent>
-        </Select>
-
-        <Button variant="outline" className="gap-2 h-9" onClick={() => setWorkSettingsOpen(true)}>
-          <Settings2 className="h-4 w-4" />
-          Mesai Ayarı
-        </Button>
-
-        {selectedLabIds.size > 0 && (
-          <div className="flex flex-wrap gap-1 items-center">
-            {Array.from(selectedLabIds).map((id) => {
-              const opt = labOptions.find((o) => o.id === id);
-              return (
-                <Badge key={id} variant="secondary" className="gap-1 text-xs">
-                  {opt?.name || id}
-                  <X className="h-3 w-3 cursor-pointer" onClick={() => toggleLab(id)} />
-                </Badge>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardContent className="pt-4 pb-3 px-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-blue-500/10"><Wrench className="h-5 w-5 text-blue-500" /></div>
-              <div>
-                <p className="text-xs text-muted-foreground">Teknik Servis Ziyaretleri</p>
-                <p className="text-2xl font-bold">{analysis.totalTeknik}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">{analysis.teknikFormCount} form + {analysis.teknikFaultVisitCount} arıza</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4 pb-3 px-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-green-500/10"><FlaskConical className="h-5 w-5 text-green-500" /></div>
-              <div>
-                <p className="text-xs text-muted-foreground">Aplikasyon Ziyaretleri</p>
-                <p className="text-2xl font-bold">{analysis.totalApp}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">{analysis.appFormCount} form + {analysis.appFaultVisitCount} arıza</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4 pb-3 px-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-purple-500/10"><Building2 className="h-5 w-5 text-purple-500" /></div>
-              <div>
-                <p className="text-xs text-muted-foreground">Toplam Kurum Ziyareti</p>
-                <p className="text-2xl font-bold">{analysis.totalTeknik + analysis.totalApp}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="pt-4 pb-3 px-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 rounded-lg bg-orange-500/10"><Users className="h-5 w-5 text-orange-500" /></div>
-              <div>
-                <p className="text-xs text-muted-foreground">Aktif Personel</p>
-                <p className="text-2xl font-bold">{analysis.personnelList.length}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Chart */}
-      {analysis.chartData.length > 0 && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Personel Bazlı Kurum Ziyaret Sayıları</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="h-[300px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={analysis.chartData} layout="vertical" margin={{ left: 10, right: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
-                  <XAxis type="number" />
-                  <YAxis dataKey="name" type="category" width={120} tick={{ fontSize: 12 }} />
-                  <Tooltip
-                    content={({ active, payload }) => {
-                      if (!active || !payload?.length) return null;
-                      const data = payload[0]?.payload;
-                      return (
-                        <div className="glass-card p-3 text-sm">
-                          <p className="font-semibold mb-1">{data?.fullName}</p>
-                          <Badge className={cn('text-xs mb-1', getRoleBadgeColor(data?.role || ''))}>{getRoleLabel(data?.role || '')}</Badge>
-                          <p className="font-semibold mt-1">Ziyaret: {data?.ziyaret}</p>
-                          <p className="text-xs text-muted-foreground">{data?.formVisitCount || 0} form + {data?.faultVisitCount || 0} arıza</p>
-                        </div>
-                      );
-                    }}
-                  />
-                  <Bar
-                    dataKey="ziyaret"
-                    fill="#8884d8"
-                    name="Ziyaret Sayısı"
-                    radius={[0, 4, 4, 0]}
-                    onClick={(barData) => {
-                      const payload = barData?.payload as { uid?: string } | undefined;
-                      if (payload?.uid) {
-                        setSelectedChartPersonnelUid(payload.uid);
-                      }
-                    }}
-                    className="cursor-pointer"
-                  >
-                    {analysis.chartData.map((entry, i) => (
-                      <Cell key={`cell-${i}`} fill={entry.role === 'teknik_servis' || entry.role === 'teknisyen' ? '#60a5fa' : entry.role === 'aplikasyon' ? '#34d399' : '#a78bfa'} />
+                </div>
+                <ScrollArea className="h-[250px]">
+                  <div className="p-1">
+                    {filteredLabOptions.map((opt) => (
+                      <div key={opt.id} className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent/50 cursor-pointer" onClick={() => toggleLab(opt.id)}>
+                        <Checkbox checked={selectedLabIds.has(opt.id)} />
+                        <span className="text-sm truncate">{opt.name}</span>
+                        <Badge variant="secondary" className="ml-auto text-xs shrink-0">
+                          {opt.type === 'group' ? `Grup · ${opt.memberIds.length} lab` : 'Tekli'}
+                        </Badge>
+                      </div>
                     ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+                    {filteredLabOptions.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">Sonuç bulunamadı</p>}
+                  </div>
+                </ScrollArea>
+                {selectedLabIds.size > 0 && (
+                  <div className="p-2 border-t">
+                    <button type="button" className="flex items-center justify-center gap-1 w-full text-xs py-1.5 rounded-md hover:bg-accent/50" onClick={() => setSelectedLabIds(new Set())}>
+                      <X className="h-3 w-3" /> Filtreyi Temizle
+                    </button>
+                  </div>
+                )}
+              </PopoverContent>
+            </Popover>
 
-      {/* Personnel Table */}
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">Personel Detay Tablosu</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-10">#</TableHead>
-                <TableHead>Personel</TableHead>
-                <TableHead className="text-center">Birim</TableHead>
-                <TableHead className="text-center">Ziyaret Sayısı</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {analysis.personnelList.map((p, i) => (
-                <TableRow key={p.uid}>
-                  <TableCell className="text-muted-foreground">{i + 1}</TableCell>
-                  <TableCell className="font-medium">{p.name}</TableCell>
-                  <TableCell className="text-center">
-                    <Badge className={cn('text-xs', getRoleBadgeColor(p.role))}>{getRoleLabel(p.role)}</Badge>
-                  </TableCell>
-                  <TableCell className="text-center font-semibold">
-                    {p.visitCount}
-                    <p className="text-xs text-muted-foreground font-normal">{p.formVisitCount} form + {p.faultVisitCount} arıza</p>
-                  </TableCell>
-                </TableRow>
+            <Popover open={personnelPopoverOpen} onOpenChange={setPersonnelPopoverOpen}>
+              <PopoverTrigger asChild>
+                <span>
+                  <GhostBtn active={selectedPersonnelUids.size > 0}>
+                    <Users size={16} />
+                    {selectedPersonnelUids.size === 0 ? 'Tüm Personel' : `${selectedPersonnelUids.size} Personel`}
+                    <ChevronsUpDown size={14} style={{ opacity: 0.5 }} />
+                  </GhostBtn>
+                </span>
+              </PopoverTrigger>
+              <PopoverContent className="w-72 p-0" align="start">
+                <div className="p-2 border-b">
+                  <div className="relative">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                    <Input placeholder="Personel ara..." value={personnelSearchTerm} onChange={(e) => setPersonnelSearchTerm(e.target.value)} className="pl-8 h-8 text-sm" />
+                  </div>
+                </div>
+                <ScrollArea className="h-[250px]">
+                  <div className="p-1">
+                    {filteredPersonnelOptions.map((p) => (
+                      <div key={p.uid} className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-accent/50 cursor-pointer" onClick={() => togglePersonnel(p.uid)}>
+                        <Checkbox checked={selectedPersonnelUids.has(p.uid)} />
+                        <span className="text-sm truncate">{p.name}</span>
+                        {usersMap.get(p.uid)?.role && (
+                          <Badge className={cn('ml-auto text-xs shrink-0', getRoleBadgeColor(usersMap.get(p.uid)!.role))}>{getRoleLabel(usersMap.get(p.uid)!.role)}</Badge>
+                        )}
+                      </div>
+                    ))}
+                    {filteredPersonnelOptions.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">Sonuç bulunamadı</p>}
+                  </div>
+                </ScrollArea>
+                {selectedPersonnelUids.size > 0 && (
+                  <div className="p-2 border-t">
+                    <button type="button" className="flex items-center justify-center gap-1 w-full text-xs py-1.5 rounded-md hover:bg-accent/50" onClick={() => setSelectedPersonnelUids(new Set())}>
+                      <X className="h-3 w-3" /> Filtreyi Temizle
+                    </button>
+                  </div>
+                )}
+              </PopoverContent>
+            </Popover>
+
+            <DatePickerWithRange date={dateRange} setDate={setDateRange} className={mobile ? 'w-full' : 'w-[280px]'} />
+
+            <Select value={shiftFilter} onValueChange={(value: 'all' | 'inside' | 'outside') => setShiftFilter(value)}>
+              <SelectTrigger className={mobile ? 'w-full h-9' : 'w-[200px] h-9'}>
+                <SelectValue placeholder="Mesai filtresi" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tüm Zamanlar</SelectItem>
+                <SelectItem value="inside">Mesai İçi</SelectItem>
+                <SelectItem value="outside">Mesai Dışı</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <GhostBtn onClick={() => setWorkSettingsOpen(true)}>
+              <Settings2 size={16} /> Mesai Ayarı
+            </GhostBtn>
+
+            {selectedLabIds.size > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+                {Array.from(selectedLabIds).map((id) => {
+                  const opt = labOptions.find((o) => o.id === id);
+                  return (
+                    <Pill key={id}>
+                      {opt?.name || id}
+                      <X size={12} style={{ cursor: 'pointer' }} onClick={() => toggleLab(id)} />
+                    </Pill>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </Card>
+
+        {/* Summary KPIs */}
+        <div style={{ display: 'grid', gridTemplateColumns: mobile ? '1fr 1fr' : 'repeat(4,1fr)', gap: mobile ? 12 : 16 }}>
+          <KpiTile
+            ico="wrench"
+            label="Teknik Servis Ziyaretleri"
+            value={analysis.totalTeknik}
+            tone="tech"
+            foot={<span>{fmtInt(analysis.teknikFormCount)} form + {fmtInt(analysis.teknikFaultVisitCount)} arıza</span>}
+          />
+          <KpiTile
+            ico="flask"
+            label="Aplikasyon Ziyaretleri"
+            value={analysis.totalApp}
+            tone="app"
+            foot={<span>{fmtInt(analysis.appFormCount)} form + {fmtInt(analysis.appFaultVisitCount)} arıza</span>}
+          />
+          <KpiTile
+            ico="building"
+            label="Toplam Kurum Ziyareti"
+            value={totalVisits}
+            tone="admin"
+            foot={<span>tüm personel</span>}
+          />
+          <KpiTile
+            ico="users"
+            label="Aktif Personel"
+            value={analysis.personnelList.length}
+            foot={<span>sahada aktif</span>}
+          />
+        </div>
+
+        {/* Personnel bar chart */}
+        {analysis.chartData.length > 0 && (
+          <Card pad={mobile ? 14 : 18}>
+            <CardHead
+              title="Personel Bazlı Kurum Ziyaret Sayıları"
+              right={!mobile ? (
+                <div style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: C.ink2 }}>
+                    <span style={{ width: 11, height: 11, borderRadius: 3, background: PAL.tech }} /> Teknik
+                  </span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: C.ink2 }}>
+                    <span style={{ width: 11, height: 11, borderRadius: 3, background: PAL.app }} /> Aplikasyon
+                  </span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: C.ink2 }}>
+                    <span style={{ width: 11, height: 11, borderRadius: 3, background: PAL.admin }} /> Admin
+                  </span>
+                </div>
+              ) : undefined}
+            />
+            <div style={{ marginTop: 14 }}>
+              {analysis.chartData.map((entry) => (
+                <div
+                  key={entry.uid}
+                  role="button"
+                  tabIndex={0}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => entry.uid && setSelectedChartPersonnelUid(entry.uid)}
+                  onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && entry.uid) setSelectedChartPersonnelUid(entry.uid); }}
+                >
+                  <HBar
+                    items={[{ label: entry.fullName, v: entry.ziyaret, color: roleColor(entry.role) }]}
+                    labelW={labelW}
+                    max={Math.max(1, ...analysis.chartData.map((c) => c.ziyaret))}
+                  />
+                </div>
               ))}
+            </div>
+          </Card>
+        )}
+
+        {/* Personnel detail table */}
+        <Card pad={mobile ? 14 : 18}>
+          <CardHead title="Personel Detay Tablosu" sub={`${analysis.personnelList.length} personel`} />
+          <div style={{ overflowX: 'auto', marginTop: 14 }}>
+            <div style={{ minWidth: 520 }}>
+              {/* header */}
+              <div style={{ display: 'grid', gridTemplateColumns: '40px 1fr 120px 150px', gap: 10, padding: '0 12px 10px', fontSize: 11, fontWeight: 700, color: C.ink3, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                <span>#</span>
+                <span>Personel</span>
+                <span style={{ textAlign: 'center' }}>Rol</span>
+                <span style={{ textAlign: 'right' }}>Ziyaret · Pay%</span>
+              </div>
+              {analysis.personnelList.map((p, i) => {
+                const pay = totalVisits > 0 ? Math.round((p.visitCount / totalVisits) * 100) : 0;
+                return (
+                  <div
+                    key={p.uid}
+                    role="button"
+                    tabIndex={0}
+                    className="cy-row-hover"
+                    onClick={() => setSelectedChartPersonnelUid(p.uid)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setSelectedChartPersonnelUid(p.uid); }}
+                    style={{
+                      display: 'grid', gridTemplateColumns: '40px 1fr 120px 150px', gap: 10, alignItems: 'center',
+                      padding: '11px 12px', borderRadius: C.radiusSm, cursor: 'pointer',
+                      background: i % 2 ? C.surfaceHi : 'transparent',
+                      animation: `cyPopIn 420ms cubic-bezier(.22,1,.36,1) ${Math.min(i, 12) * 40}ms both`,
+                    }}
+                  >
+                    <span style={{ fontSize: 13, fontWeight: 700, color: C.ink3, fontVariantNumeric: 'tabular-nums' }}>{i + 1}</span>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: C.ink1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</span>
+                    <span style={{ textAlign: 'center' }}><RoleChip role={roleKey(p.role)} /></span>
+                    <span style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
+                      <span style={{ fontSize: 15, fontWeight: 800, color: C.ink1, fontVariantNumeric: 'tabular-nums' }}>
+                        {fmtInt(p.visitCount)} <span style={{ fontSize: 12, fontWeight: 700, color: C.accent }}>· {pay}%</span>
+                      </span>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: C.ink3 }}>{fmtInt(p.formVisitCount)} form + {fmtInt(p.faultVisitCount)} arıza</span>
+                    </span>
+                  </div>
+                );
+              })}
               {analysis.personnelList.length === 0 && (
-                <TableRow>
-                  <TableCell colSpan={4} className="text-center text-muted-foreground py-8">Kurum ziyaret verisi bulunamadı</TableCell>
-                </TableRow>
+                <div style={{ textAlign: 'center', padding: '40px 0', fontSize: 13.5, fontWeight: 600, color: C.ink3 }}>
+                  Kurum ziyaret verisi bulunamadı
+                </div>
               )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+            </div>
+          </div>
+        </Card>
 
       <Dialog open={Boolean(selectedChartPersonnelUid)} onOpenChange={(open) => {
         if (!open) {
@@ -887,64 +882,56 @@ export default function KurumZiyaretAnaliziPage() {
           setSelectedVisitDetail(null);
         }
       }}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl" style={{ background: C.surface, borderColor: C.line }}>
           <DialogHeader>
-            <DialogTitle>
+            <DialogTitle style={{ color: C.ink1 }}>
               {selectedChartPersonnel?.name || 'Personel'} - Ziyaret Edilen Kurumlar
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription style={{ color: C.ink2 }}>
               Grafikte seçilen personelin kurum ziyaretlerinin kurum bazlı listesi.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="max-h-[420px] overflow-auto border rounded-md">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Kurum</TableHead>
-                  <TableHead className="text-center">Tür</TableHead>
-                  <TableHead className="text-center">Ziyaret</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {selectedPersonnelVisitDetails.map((detail) => (
-                  <TableRow key={`${detail.visitType}-${detail.institutionName}`}>
-                    <TableCell className="font-medium">{detail.institutionName}</TableCell>
-                    <TableCell className="text-center">
-                      <Badge className={cn('text-xs', getRoleBadgeColor(detail.visitType))}>{getRoleLabel(detail.visitType)}</Badge>
-                    </TableCell>
-                    <TableCell className="text-center font-semibold">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        className="h-auto p-0 font-semibold text-primary hover:text-primary"
-                        onClick={() => setSelectedVisitDetail(detail)}
-                      >
-                        {detail.visitCount}
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {selectedPersonnelVisitDetails.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={3} className="text-center text-muted-foreground py-6">
-                      Bu personel için kurum ziyareti bulunamadı.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
+          <div style={{ maxHeight: 420, overflow: 'auto', borderRadius: C.radiusSm, background: C.surface2, boxShadow: C.clayInset, padding: 6 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 130px 90px', gap: 10, padding: '6px 12px', fontSize: 11, fontWeight: 700, color: C.ink3, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+              <span>Kurum</span>
+              <span style={{ textAlign: 'center' }}>Tür</span>
+              <span style={{ textAlign: 'right' }}>Ziyaret</span>
+            </div>
+            {selectedPersonnelVisitDetails.map((detail) => (
+              <div
+                key={`${detail.visitType}-${detail.institutionName}`}
+                style={{ display: 'grid', gridTemplateColumns: '1fr 130px 90px', gap: 10, alignItems: 'center', padding: '10px 12px', borderRadius: C.radiusSm, background: C.surfaceHi, marginBottom: 4 }}
+              >
+                <span style={{ fontSize: 14, fontWeight: 700, color: C.ink1 }}>{detail.institutionName}</span>
+                <span style={{ textAlign: 'center' }}><RoleChip role={roleKey(detail.visitType)} /></span>
+                <span style={{ textAlign: 'right' }}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedVisitDetail(detail)}
+                    style={{ all: 'unset', cursor: 'pointer', fontSize: 15, fontWeight: 800, color: C.accent, fontVariantNumeric: 'tabular-nums' }}
+                  >
+                    {fmtInt(detail.visitCount)}
+                  </button>
+                </span>
+              </div>
+            ))}
+            {selectedPersonnelVisitDetails.length === 0 && (
+              <div style={{ textAlign: 'center', padding: '28px 0', fontSize: 13.5, fontWeight: 600, color: C.ink3 }}>
+                Bu personel için kurum ziyareti bulunamadı.
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>
 
       <Dialog open={workSettingsOpen} onOpenChange={setWorkSettingsOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md" style={{ background: C.surface, borderColor: C.line }}>
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
+            <DialogTitle className="flex items-center gap-2" style={{ color: C.ink1 }}>
               <CalendarDays className="h-4 w-4" /> Mesai Saatleri
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription style={{ color: C.ink2 }}>
               Mesai içi/dışı filtreleri bu başlangıç ve bitiş saatine göre çalışır.
             </DialogDescription>
           </DialogHeader>
@@ -959,7 +946,8 @@ export default function KurumZiyaretAnaliziPage() {
             </div>
           </div>
           <div className="flex justify-end">
-            <Button
+            <GhostBtn
+              active
               onClick={async () => {
                 try {
                   await setDoc(doc(db, 'appSettings', 'kurumZiyaretAnalizi'), {
@@ -975,55 +963,49 @@ export default function KurumZiyaretAnaliziPage() {
               }}
             >
               Kaydet
-            </Button>
+            </GhostBtn>
           </div>
         </DialogContent>
       </Dialog>
 
       <Dialog open={Boolean(selectedVisitDetail)} onOpenChange={(open) => !open && setSelectedVisitDetail(null)}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl" style={{ background: C.surface, borderColor: C.line }}>
           <DialogHeader>
-            <DialogTitle>
+            <DialogTitle style={{ color: C.ink1 }}>
               {selectedVisitDetail?.institutionName || 'Kurum'} - İşlem Detayları
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription style={{ color: C.ink2 }}>
               Seçilen ziyaret kaydına ait işlem tarihleri ve bitiş saatleri.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="max-h-[420px] overflow-auto border rounded-md">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-14">#</TableHead>
-                  <TableHead>Tür</TableHead>
-                  <TableHead>Kaynak</TableHead>
-                  <TableHead className="text-right">Tarih / Bitiş Saati</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {selectedVisitDetail?.records.map((record, index) => (
-                  <TableRow key={`${record.source}-${record.id}-${index}`}>
-                    <TableCell>{index + 1}</TableCell>
-                    <TableCell>
-                      <Badge className={cn('text-xs', getRoleBadgeColor(record.visitType))}>{getRoleLabel(record.visitType)}</Badge>
-                    </TableCell>
-                    <TableCell>{record.source === 'fault' ? 'Arıza / Karma Gün' : 'Form / Karma Gün'}</TableCell>
-                    <TableCell className="text-right font-medium">{formatDateTime(record.date)}</TableCell>
-                  </TableRow>
-                ))}
-                {!selectedVisitDetail?.records.length && (
-                  <TableRow>
-                    <TableCell colSpan={4} className="text-center text-muted-foreground py-6">
-                      Detay kayıt bulunamadı.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
+          <div style={{ maxHeight: 420, overflow: 'auto', borderRadius: C.radiusSm, background: C.surface2, boxShadow: C.clayInset, padding: 6 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '40px 130px 1fr auto', gap: 10, padding: '6px 12px', fontSize: 11, fontWeight: 700, color: C.ink3, letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+              <span>#</span>
+              <span>Tür</span>
+              <span>Kaynak</span>
+              <span style={{ textAlign: 'right' }}>Tarih / Bitiş Saati</span>
+            </div>
+            {selectedVisitDetail?.records.map((record, index) => (
+              <div
+                key={`${record.source}-${record.id}-${index}`}
+                style={{ display: 'grid', gridTemplateColumns: '40px 130px 1fr auto', gap: 10, alignItems: 'center', padding: '10px 12px', borderRadius: C.radiusSm, background: C.surfaceHi, marginBottom: 4 }}
+              >
+                <span style={{ fontSize: 13, fontWeight: 700, color: C.ink3 }}>{index + 1}</span>
+                <span><RoleChip role={roleKey(record.visitType)} /></span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: C.ink2 }}>{record.source === 'fault' ? 'Arıza / Karma Gün' : 'Form / Karma Gün'}</span>
+                <span style={{ textAlign: 'right', fontSize: 13, fontWeight: 700, color: C.ink1 }}>{formatDateTime(record.date)}</span>
+              </div>
+            ))}
+            {!selectedVisitDetail?.records.length && (
+              <div style={{ textAlign: 'center', padding: '28px 0', fontSize: 13.5, fontWeight: 600, color: C.ink3 }}>
+                Detay kayıt bulunamadı.
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>
-    </div>
+      </div>
+    </ClayPage>
   );
 }

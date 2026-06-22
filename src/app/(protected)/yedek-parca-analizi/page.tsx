@@ -1,18 +1,13 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
 import { where, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { Loader2, Package, Search, ArrowLeft, Monitor, Users, Warehouse, UserCheck, ChevronRight, Clock, CalendarClock, Building2, ChevronsUpDown, X } from 'lucide-react';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { Search, Building2, X } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Input } from '@/components/ui/input';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { useRouter } from 'next/navigation';
@@ -20,6 +15,10 @@ import type { Hospital } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { getScopedDocs } from '@/lib/firestore-helpers';
+import {
+  ClayPage, PageHead, Card, CardHead, KpiTile, MiniInfo, Pill, GhostBtn,
+  ClaySearch, HBar, ClayLoader, C, PAL, useMode, fmtInt,
+} from '@/components/cihaz-yonetimi/clay-kit';
 
 interface TransferLog {
   id: string;
@@ -92,6 +91,8 @@ function logFirestoreIndexHint(error: unknown, context: string) {
 
 export default function YedekParcaAnaliziPage() {
   const router = useRouter();
+  const mode = useMode();
+  const mobile = mode === 'mobile';
   const { currentCompanyId, isSuperAdmin } = useAuth();
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -371,63 +372,70 @@ export default function YedekParcaAnaliziPage() {
 
   const detailView = filteredPartDetail;
 
+  const chartItems = useMemo(
+    () => chartData.map((d) => ({ label: d.fullName, v: d.count })),
+    [chartData]
+  );
+
+  const labelW = mobile ? 110 : 200;
+
+  // ── table styles ──────────────────────────────────────────────────────────
+  const thStyle: React.CSSProperties = {
+    textAlign: 'left', fontSize: 11, fontWeight: 700, color: C.ink3,
+    letterSpacing: '0.04em', textTransform: 'uppercase', padding: '0 12px 10px',
+    whiteSpace: 'nowrap',
+  };
+  const tdStyle: React.CSSProperties = {
+    fontSize: 13, fontWeight: 600, color: C.ink1, padding: '11px 12px',
+    borderTop: `1px solid ${C.line}`, verticalAlign: 'middle',
+  };
+
+  const TipChip = ({ formType }: { formType?: string }) => {
+    if (formType === 'teknik_servis') {
+      return <span style={{ padding: '3px 10px', borderRadius: C.radiusPill, background: 'rgba(124,168,222,0.18)', color: PAL.sky, fontSize: 11.5, fontWeight: 700, whiteSpace: 'nowrap' }}>Teknik</span>;
+    }
+    if (formType === 'aplikasyon') {
+      return <span style={{ padding: '3px 10px', borderRadius: C.radiusPill, background: 'rgba(78,158,107,0.18)', color: C.waterDeep, fontSize: 11.5, fontWeight: 700, whiteSpace: 'nowrap' }}>App</span>;
+    }
+    return <span style={{ fontSize: 12, color: C.ink3 }}>-</span>;
+  };
+
+  // ── loading ───────────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full min-h-[60vh]">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <span className="ml-3 text-muted-foreground">Veriler yükleniyor...</span>
-      </div>
+      <ClayPage>
+        <ClayLoader label="Veriler yükleniyor…" />
+      </ClayPage>
     );
   }
 
-  return (
-    <div className="container max-w-6xl mx-auto p-4 sm:p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        {selectedPart ? (
-          <Button variant="ghost" size="sm" onClick={() => { setSelectedPart(null); setPartDetail(null); setSelectedDetailLabKeys(new Set()); setDetailLabSearchTerm(''); }}>
-            <ArrowLeft className="h-4 w-4 mr-1" /> Geri
-          </Button>
-        ) : (
-          <Button variant="ghost" size="sm" onClick={() => router.push('/cihaz-yonetimi-ana')}>
-            <ArrowLeft className="h-4 w-4 mr-1" /> Geri
-          </Button>
-        )}
-        <div>
-          {selectedPart ? (
-            <>
-              <h1 className="text-xl font-bold">{selectedPart.stokAdi}</h1>
-              <p className="text-sm text-muted-foreground font-mono">{selectedPart.stokKodu}</p>
-            </>
-          ) : (
-            <>
-              <h1 className="text-2xl font-bold flex items-center gap-2">
-                <Package className="h-6 w-6 text-primary" />
-                Yedek Parça Analizi
-              </h1>
-              <p className="text-sm text-muted-foreground">En çok değişen yedek parçalar ve detaylı parça ekstresi</p>
-            </>
-          )}
-        </div>
-      </div>
+  // ── DETAIL VIEW ───────────────────────────────────────────────────────────
+  if (selectedPart) {
+    return (
+      <ClayPage>
+        <PageHead
+          ico="box"
+          title={selectedPart.stokAdi}
+          sub={selectedPart.stokKodu}
+          mobile={mobile}
+          onBack={() => { setSelectedPart(null); setPartDetail(null); setSelectedDetailLabKeys(new Set()); setDetailLabSearchTerm(''); }}
+        />
 
-      {selectedPart ? (
-        /* DETAIL VIEW */
-        detailLoading ? (
-          <div className="flex items-center justify-center min-h-[40vh]">
-            <Loader2 className="h-8 w-8 animate-spin text-primary" />
-            <span className="ml-3 text-muted-foreground">Parça detayları yükleniyor...</span>
-          </div>
+        {detailLoading ? (
+          <ClayLoader label="Parça detayları yükleniyor…" />
         ) : detailView ? (
-          <>
-            <div className="flex flex-wrap gap-2">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: mobile ? 12 : 16 }}>
+            {/* Lab filter */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               <Popover open={detailLabFilterOpen} onOpenChange={setDetailLabFilterOpen}>
                 <PopoverTrigger asChild>
-                  <Button variant="outline" className="gap-2 h-9">
-                    <Building2 className="h-4 w-4" />
-                    {selectedDetailLabKeys.size === 0 ? 'Tüm Kurumlar' : `${selectedDetailLabKeys.size} Kurum`}
-                    <ChevronsUpDown className="h-3.5 w-3.5 opacity-50" />
-                  </Button>
+                  <span style={{ display: 'inline-flex' }}>
+                    <GhostBtn active={selectedDetailLabKeys.size > 0}>
+                      <Building2 size={16} />
+                      {selectedDetailLabKeys.size === 0 ? 'Tüm Kurumlar' : `${selectedDetailLabKeys.size} Kurum`}
+                      <span style={{ opacity: 0.5 }}>▾</span>
+                    </GhostBtn>
+                  </span>
                 </PopoverTrigger>
                 <PopoverContent className="w-80 p-0" align="start">
                   <div className="p-2 border-b">
@@ -458,167 +466,225 @@ export default function YedekParcaAnaliziPage() {
                   </ScrollArea>
                   {selectedDetailLabKeys.size > 0 && (
                     <div className="p-2 border-t">
-                      <Button variant="ghost" size="sm" className="w-full text-xs" onClick={() => setSelectedDetailLabKeys(new Set())}>
-                        <X className="h-3 w-3 mr-1" /> Filtreyi Temizle
-                      </Button>
+                      <button
+                        type="button"
+                        className="w-full text-xs flex items-center justify-center gap-1 py-1.5 rounded-md hover:bg-accent/50"
+                        onClick={() => setSelectedDetailLabKeys(new Set())}
+                      >
+                        <X className="h-3 w-3" /> Filtreyi Temizle
+                      </button>
                     </div>
                   )}
                 </PopoverContent>
               </Popover>
             </div>
 
-            {/* Summary Cards */}
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-              <Card><CardContent className="pt-3 pb-2 px-3"><div className="flex items-center gap-2"><Package className="h-4 w-4 text-primary" /><div><p className="text-xs text-muted-foreground">Toplam Kullanım</p><p className="text-xl font-bold">{detailView.totalUsageCount}</p></div></div></CardContent></Card>
-              <Card><CardContent className="pt-3 pb-2 px-3"><div className="flex items-center gap-2"><CalendarClock className="h-4 w-4 text-yellow-500" /><div><p className="text-xs text-muted-foreground">Son Değişim</p><p className="text-sm font-semibold">{formatDateShort(detailView.lastUsedAt)}</p></div></div></CardContent></Card>
-              <Card><CardContent className="pt-3 pb-2 px-3"><div className="flex items-center gap-2"><Monitor className="h-4 w-4 text-blue-500" /><div><p className="text-xs text-muted-foreground">Cihaz Sayısı</p><p className="text-xl font-bold">{detailView.devices.length}</p></div></div></CardContent></Card>
-              <Card><CardContent className="pt-3 pb-2 px-3"><div className="flex items-center gap-2"><Warehouse className="h-4 w-4 text-green-500" /><div><p className="text-xs text-muted-foreground">Depo Stok</p><p className="text-xl font-bold">{detailView.depoStokCount}</p></div></div></CardContent></Card>
-              <Card><CardContent className="pt-3 pb-2 px-3"><div className="flex items-center gap-2"><UserCheck className="h-4 w-4 text-orange-500" /><div><p className="text-xs text-muted-foreground">Personel Stok</p><p className="text-xl font-bold">{detailView.personnelStokCount}</p></div></div></CardContent></Card>
+            {/* Summary cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: mobile ? 'repeat(2, 1fr)' : 'repeat(5, 1fr)', gap: mobile ? 10 : 14 }}>
+              <KpiTile ico="box" label="Toplam Kullanım" value={detailView.totalUsageCount} delay={0} />
+              <MiniInfo ico="calendar" label="Son Değişim" text={formatDateShort(detailView.lastUsedAt)} delay={40} />
+              <KpiTile ico="monitor" label="Cihaz Sayısı" value={detailView.devices.length} tone="tech" delay={80} />
+              <KpiTile ico="warehouse" label="Depo Stok" value={detailView.depoStokCount} tone="ok" delay={120} />
+              <KpiTile ico="users" label="Personel Stok" value={detailView.personnelStokCount} tone="amber" delay={160} />
             </div>
 
-            {/* Change History */}
+            {/* Change history */}
             <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Clock className="h-4 w-4" />Değişim Ekstresi ({detailView.changeHistory.length})</CardTitle></CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader><TableRow><TableHead>Tarih</TableHead><TableHead>Cihaz</TableHead><TableHead>Laboratuvar</TableHead><TableHead>Personel</TableHead><TableHead>Seri No</TableHead><TableHead className="text-center">Tip</TableHead></TableRow></TableHeader>
-                  <TableBody>
-                    {detailView.changeHistory.map((entry) => (
-                      <TableRow key={entry.id}>
-                        <TableCell className="text-xs whitespace-nowrap">{formatDate(entry.date)}</TableCell>
-                        <TableCell className="font-medium text-sm">{entry.deviceName}</TableCell>
-                        <TableCell className="text-sm"><span className="flex items-center gap-1"><Building2 className="h-3 w-3 text-muted-foreground shrink-0" />{entry.labName}</span></TableCell>
-                        <TableCell className="text-sm">{entry.personnelName}</TableCell>
-                        <TableCell className="font-mono text-xs">{entry.serialNumber || '-'}</TableCell>
-                        <TableCell className="text-center">
-                          {entry.formType === 'teknik_servis' ? <Badge className="bg-blue-500/20 text-blue-400 text-xs">Teknik</Badge>
-                            : entry.formType === 'aplikasyon' ? <Badge className="bg-green-500/20 text-green-400 text-xs">App</Badge>
-                            : <span className="text-xs text-muted-foreground">-</span>}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {detailView.changeHistory.length === 0 && <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-4">Değişim kaydı bulunamadı</TableCell></TableRow>}
-                  </TableBody>
-                </Table>
-              </CardContent>
+              <CardHead ico="clock" title={`Değişim Ekstresi (${detailView.changeHistory.length})`} />
+              <div style={{ overflowX: 'auto', marginTop: 8 }}>
+                <div style={{ minWidth: 720 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr>
+                        <th style={thStyle}>Tarih</th>
+                        <th style={thStyle}>Cihaz</th>
+                        <th style={thStyle}>Laboratuvar</th>
+                        <th style={thStyle}>Personel</th>
+                        <th style={thStyle}>Seri No</th>
+                        <th style={{ ...thStyle, textAlign: 'center' }}>Tip</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detailView.changeHistory.map((entry) => (
+                        <tr key={entry.id}>
+                          <td style={{ ...tdStyle, whiteSpace: 'nowrap', fontSize: 12, color: C.ink2 }}>{formatDate(entry.date)}</td>
+                          <td style={{ ...tdStyle, fontWeight: 700 }}>{entry.deviceName}</td>
+                          <td style={tdStyle}>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                              <Building2 size={12} style={{ color: C.ink3, flexShrink: 0 }} />{entry.labName}
+                            </span>
+                          </td>
+                          <td style={tdStyle}>{entry.personnelName}</td>
+                          <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 12, color: C.ink2 }}>{entry.serialNumber || '-'}</td>
+                          <td style={{ ...tdStyle, textAlign: 'center' }}><TipChip formType={entry.formType} /></td>
+                        </tr>
+                      ))}
+                      {detailView.changeHistory.length === 0 && (
+                        <tr><td colSpan={6} style={{ ...tdStyle, textAlign: 'center', color: C.ink3, padding: '24px 12px' }}>Değişim kaydı bulunamadı</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </Card>
 
-            {/* Devices Table */}
+            {/* Devices */}
             <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Monitor className="h-4 w-4" />Kullanıldığı Cihazlar</CardTitle></CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader><TableRow><TableHead>Cihaz</TableHead><TableHead>Laboratuvar</TableHead><TableHead className="text-center">Kullanım Sayısı</TableHead></TableRow></TableHeader>
-                  <TableBody>
-                    {detailView.devices.map((d) => (
-                      <TableRow key={d.deviceId}>
-                        <TableCell className="font-medium">{d.deviceName}</TableCell>
-                        <TableCell><span className="flex items-center gap-1 text-sm"><Building2 className="h-3 w-3 text-muted-foreground shrink-0" />{d.labName}</span></TableCell>
-                        <TableCell className="text-center">{d.count}</TableCell>
-                      </TableRow>
-                    ))}
-                    {detailView.devices.length === 0 && <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground py-4">Cihaz verisi yok</TableCell></TableRow>}
-                  </TableBody>
-                </Table>
-              </CardContent>
+              <CardHead ico="monitor" title="Kullanıldığı Cihazlar" />
+              <div style={{ overflowX: 'auto', marginTop: 8 }}>
+                <div style={{ minWidth: 720 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr>
+                        <th style={thStyle}>Cihaz</th>
+                        <th style={thStyle}>Laboratuvar</th>
+                        <th style={{ ...thStyle, textAlign: 'center' }}>Kullanım Sayısı</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detailView.devices.map((d) => (
+                        <tr key={d.deviceId}>
+                          <td style={{ ...tdStyle, fontWeight: 700 }}>{d.deviceName}</td>
+                          <td style={tdStyle}>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                              <Building2 size={12} style={{ color: C.ink3, flexShrink: 0 }} />{d.labName}
+                            </span>
+                          </td>
+                          <td style={{ ...tdStyle, textAlign: 'center', fontWeight: 800 }}>{d.count}</td>
+                        </tr>
+                      ))}
+                      {detailView.devices.length === 0 && (
+                        <tr><td colSpan={3} style={{ ...tdStyle, textAlign: 'center', color: C.ink3, padding: '24px 12px' }}>Cihaz verisi yok</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </Card>
 
-            {/* Personnel Usage */}
+            {/* Personnel usage */}
             <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><Users className="h-4 w-4" />Personel Bazlı Kullanım</CardTitle></CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader><TableRow><TableHead>Personel</TableHead><TableHead className="text-center">Kullanım Sayısı</TableHead></TableRow></TableHeader>
-                  <TableBody>
-                    {detailView.personnel.map((p) => (<TableRow key={p.uid}><TableCell className="font-medium">{p.name}</TableCell><TableCell className="text-center">{p.count}</TableCell></TableRow>))}
-                    {detailView.personnel.length === 0 && <TableRow><TableCell colSpan={2} className="text-center text-muted-foreground py-4">Personel verisi yok</TableCell></TableRow>}
-                  </TableBody>
-                </Table>
-              </CardContent>
+              <CardHead ico="users" title="Personel Bazlı Kullanım" />
+              {detailView.personnel.length > 0 ? (
+                <div style={{ marginTop: 12 }}>
+                  <HBar
+                    items={detailView.personnel.map((p) => ({ label: p.name, v: p.count }))}
+                    color={PAL.tech}
+                    labelW={labelW}
+                  />
+                </div>
+              ) : (
+                <div style={{ fontSize: 13, color: C.ink3, padding: '14px 4px' }}>Personel verisi yok</div>
+              )}
             </Card>
 
-            {/* Personnel Stock */}
+            {/* Personnel stock distribution */}
             {detailView.personnelStokByPerson.length > 0 && (
               <Card>
-                <CardHeader className="pb-2"><CardTitle className="text-sm flex items-center gap-2"><UserCheck className="h-4 w-4" />Personel Stok Dağılımı</CardTitle></CardHeader>
-                <CardContent>
-                  <Table>
-                    <TableHeader><TableRow><TableHead>Personel</TableHead><TableHead className="text-center">Elindeki Adet</TableHead></TableRow></TableHeader>
-                    <TableBody>
-                      {detailView.personnelStokByPerson.map((p) => (<TableRow key={p.uid}><TableCell className="font-medium">{p.name}</TableCell><TableCell className="text-center">{p.count}</TableCell></TableRow>))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
+                <CardHead ico="users" title="Personel Stok Dağılımı" />
+                <div style={{ marginTop: 12 }}>
+                  <HBar
+                    items={detailView.personnelStokByPerson.map((p) => ({ label: p.name, v: p.count }))}
+                    color={PAL.amber}
+                    labelW={labelW}
+                  />
+                </div>
               </Card>
             )}
-          </>
-        ) : null
-      ) : (
-        /* LIST VIEW */
-        <>
-          {chartData.length > 0 && (
-            <Card>
-              <CardHeader className="pb-2"><CardTitle className="text-base">En Çok Değişen Yedek Parçalar (Top 15)</CardTitle></CardHeader>
-              <CardContent>
-                <div className="h-[300px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={chartData} layout="vertical" margin={{ left: 10, right: 20 }}>
-                      <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
-                      <XAxis type="number" />
-                      <YAxis dataKey="name" type="category" width={160} tick={{ fontSize: 11 }} />
-                      <Tooltip content={({ active, payload }) => {
-                        if (!active || !payload?.length) return null;
-                        const data = payload[0]?.payload;
-                        return (<div className="glass-card p-3 text-sm"><p className="font-semibold mb-1">{data?.fullName}</p><p className="text-muted-foreground text-xs">{data?.stokKodu}</p><p className="text-primary font-semibold mt-1">Kullanım: {data?.count}</p></div>);
-                      }} />
-                      <Bar dataKey="count" fill="#8884d8" name="Kullanım Sayısı" radius={[0, 4, 4, 0]} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </CardContent>
-            </Card>
+          </div>
+        ) : null}
+      </ClayPage>
+    );
+  }
+
+  // ── LIST VIEW ─────────────────────────────────────────────────────────────
+  return (
+    <ClayPage>
+      <PageHead
+        ico="box"
+        title="Yedek Parça Analizi"
+        sub="En çok değişen yedek parçalar ve detaylı parça ekstresi"
+        mobile={mobile}
+        onBack={() => router.push('/cihaz-yonetimi-ana')}
+      />
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: mobile ? 12 : 16 }}>
+        {chartItems.length > 0 && (
+          <Card>
+            <CardHead ico="chart" title="En Çok Değişen Yedek Parçalar (Top 15)" />
+            <div style={{ marginTop: 14 }}>
+              <HBar items={chartItems} color={PAL.admin} labelW={labelW} />
+            </div>
+          </Card>
+        )}
+
+        <Card>
+          <CardHead
+            ico="package"
+            title="Parça Listesi"
+            right={<Pill>{fmtInt(filteredParts.length)} parça</Pill>}
+          />
+          <div style={{ marginTop: 12 }}>
+            <ClaySearch value={searchTerm} onChange={setSearchTerm} placeholder="Stok kodu veya adı ile ara..." />
+          </div>
+
+          {/* Desktop header row */}
+          {!mobile && filteredParts.length > 0 && (
+            <div style={{ display: 'grid', gridTemplateColumns: '40px 150px 1fr 100px 130px 40px', gap: 10, alignItems: 'center', padding: '14px 14px 8px', ...{} }}>
+              {['#', 'Stok Kodu', 'Stok Adı', 'Kullanım', 'Son Değişim', ''].map((h, i) => (
+                <span key={i} style={{ fontSize: 11, fontWeight: 700, color: C.ink3, letterSpacing: '0.04em', textTransform: 'uppercase', textAlign: i >= 3 && i <= 4 ? 'center' : 'left' }}>{h}</span>
+              ))}
+            </div>
           )}
 
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Parça Listesi</CardTitle>
-              <div className="relative mt-2">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input placeholder="Stok kodu veya adı ile ara..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-9" />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: mobile ? 10 : 6, marginTop: mobile ? 12 : 0 }}>
+            {filteredParts.map((p, i) => (
+              mobile ? (
+                <button
+                  key={p.stokKodu}
+                  type="button"
+                  onClick={() => selectPart(p)}
+                  style={{
+                    all: 'unset', cursor: 'pointer', boxSizing: 'border-box', display: 'flex', alignItems: 'center', gap: 12,
+                    padding: 14, borderRadius: C.radiusSm, background: C.surface2, boxShadow: C.clayInset,
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: C.ink1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.stokAdi}</div>
+                    <div style={{ fontSize: 11.5, fontWeight: 600, color: C.ink3, marginTop: 3, fontFamily: 'monospace' }}>{p.stokKodu} · {formatDateShort(p.lastUsedAt)}</div>
+                  </div>
+                  <span style={{ padding: '5px 12px', borderRadius: C.radiusPill, background: C.accent + '16', color: C.accent, fontSize: 13, fontWeight: 800, whiteSpace: 'nowrap', flexShrink: 0 }}>{p.usageCount}</span>
+                </button>
+              ) : (
+                <div
+                  key={p.stokKodu}
+                  className="cy-row-hover"
+                  onClick={() => selectPart(p)}
+                  style={{
+                    display: 'grid', gridTemplateColumns: '40px 150px 1fr 100px 130px 40px', gap: 10, alignItems: 'center',
+                    padding: '12px 14px', borderRadius: C.radiusSm, cursor: 'pointer',
+                    borderTop: `1px solid ${C.line}`,
+                  }}
+                >
+                  <span style={{ fontSize: 13, fontWeight: 700, color: C.ink3 }}>{i + 1}</span>
+                  <span style={{ fontSize: 12, fontFamily: 'monospace', color: C.ink2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.stokKodu}</span>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: C.ink1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.stokAdi}</span>
+                  <span style={{ textAlign: 'center' }}>
+                    <span style={{ padding: '4px 12px', borderRadius: C.radiusPill, background: C.accent + '16', color: C.accent, fontSize: 13, fontWeight: 800 }}>{p.usageCount}</span>
+                  </span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: C.ink3, textAlign: 'center' }}>{formatDateShort(p.lastUsedAt)}</span>
+                  <span style={{ display: 'grid', placeItems: 'center', color: C.ink3 }}>›</span>
+                </div>
+              )
+            ))}
+            {filteredParts.length === 0 && (
+              <div style={{ textAlign: 'center', color: C.ink3, fontSize: 13.5, fontWeight: 600, padding: '40px 12px' }}>
+                {searchTerm ? 'Arama sonucu bulunamadı' : 'Yedek parça verisi bulunamadı'}
               </div>
-            </CardHeader>
-            <CardContent>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-10">#</TableHead>
-                    <TableHead>Stok Kodu</TableHead>
-                    <TableHead>Stok Adı</TableHead>
-                    <TableHead className="text-center">Kullanım</TableHead>
-                    <TableHead className="text-center">Son Değişim</TableHead>
-                    <TableHead className="w-10"></TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredParts.map((p, i) => (
-                    <TableRow key={p.stokKodu} className="cursor-pointer hover:bg-accent/50" onClick={() => selectPart(p)}>
-                      <TableCell className="text-muted-foreground">{i + 1}</TableCell>
-                      <TableCell className="font-mono text-xs">{p.stokKodu}</TableCell>
-                      <TableCell className="font-medium">{p.stokAdi}</TableCell>
-                      <TableCell className="text-center font-semibold">{p.usageCount}</TableCell>
-                      <TableCell className="text-center text-xs text-muted-foreground">{formatDateShort(p.lastUsedAt)}</TableCell>
-                      <TableCell><ChevronRight className="h-4 w-4 text-muted-foreground" /></TableCell>
-                    </TableRow>
-                  ))}
-                  {filteredParts.length === 0 && (
-                    <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">{searchTerm ? 'Arama sonucu bulunamadı' : 'Yedek parça verisi bulunamadı'}</TableCell></TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
-        </>
-      )}
-    </div>
+            )}
+          </div>
+        </Card>
+      </div>
+    </ClayPage>
   );
 }
