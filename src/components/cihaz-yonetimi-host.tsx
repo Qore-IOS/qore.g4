@@ -501,7 +501,7 @@ export default function CihazYonetimiHost() {
   ];
 
   return (
-    <ClayPage max={1280}>
+    <ClayPage>
       {/* Header — title + status / quick actions */}
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 18, flexWrap: 'wrap' }}>
         <span style={{ width: 46, height: 46, flexShrink: 0, borderRadius: 14, display: 'grid', placeItems: 'center', color: '#fff', background: `radial-gradient(circle at 32% 28%, ${AC.accent}, ${AC.primary})`, boxShadow: `inset 0 1px 1px rgba(255,255,255,0.4), 0 10px 20px -8px ${AC.glow}` }}>

@@ -113,7 +113,9 @@ export function CyStyles() {
 }
 
 // ── page wrapper: cream shell + centered, responsive inner column ──────────────
-export function ClayPage({ children, max = 1280 }: { children: React.ReactNode; max?: number }) {
+// `max` is intentionally wide (1480, matching the demo) so the content fills the
+// viewport on laptops/desktops without leaving large empty gutters on the sides.
+export function ClayPage({ children, max = 1480 }: { children: React.ReactNode; max?: number }) {
   return (
     <>
       <CyStyles />
@@ -124,7 +126,7 @@ export function ClayPage({ children, max = 1280 }: { children: React.ReactNode; 
             width: '100%',
             maxWidth: max,
             margin: '0 auto',
-            padding: '20px clamp(14px, 3vw, 32px) 80px',
+            padding: '20px clamp(12px, 2.4vw, 26px) 80px',
             boxSizing: 'border-box',
           }}
         >
