@@ -380,7 +380,7 @@ export default function SiparisOlusturPage() {
 
       <div aria-hidden style={{ position: 'fixed', inset: 0, background: 'linear-gradient(120deg, #F6F2EA 0%, transparent 55%), linear-gradient(225deg, #E8E1D2 0%, transparent 55%), #EFEAE0', zIndex: 0 }} />
 
-      <div style={{ position: 'relative', zIndex: 1, maxWidth: 860, margin: '0 auto', padding: '24px 16px 100px', minHeight: '100vh' }}>
+      <div style={{ position: 'relative', zIndex: 1, maxWidth: 1280, margin: '0 auto', padding: `24px clamp(16px, 3vw, 40px) 100px`, minHeight: '100vh' }}>
 
         {/* ── Back ── */}
         <button

@@ -611,8 +611,8 @@ export default function SiparislerPanel() {
 
       <div className="sp-shell" style={{
         position: 'relative', zIndex: 1,
-        maxWidth: 860, margin: '0 auto',
-        padding: '28px 20px 90px',
+        maxWidth: 1280, margin: '0 auto',
+        padding: '28px clamp(16px, 3vw, 40px) 90px',
         minHeight: '100vh',
       }}>
 
@@ -648,7 +648,7 @@ export default function SiparislerPanel() {
               ].map(item => (
                 <button key={item.href}
                   onClick={() => { router.push(item.href); setMoreMenuOpen(false); }}
-                  className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)] disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[#F5F1E8] disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {item.icon} {item.label}
                 </button>

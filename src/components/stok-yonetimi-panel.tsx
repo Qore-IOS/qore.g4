@@ -284,7 +284,7 @@ function ColumnFilterPopover({
               "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
               isActive
                 ? "bg-orange-500/15 border-orange-500/40 text-orange-600 hover:bg-orange-500/25"
-                : "bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] hover:bg-[var(--dashboard-surface)]",
+                : "bg-[#F5F1E8] border-[rgba(90,72,40,0.10)] text-[#BBB2A0] hover:text-[#3D382F] hover:bg-[#FCFAF5]",
             )}
           >
             <Filter className="h-3 w-3" />
@@ -298,7 +298,7 @@ function ColumnFilterPopover({
         ) : (
           <button className={cn(
             "flex items-center gap-1 text-left text-xs font-semibold uppercase tracking-wider transition-colors group",
-            isActive ? "text-orange-600" : "text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]"
+            isActive ? "text-orange-600" : "text-[#BBB2A0] hover:text-[#3D382F]"
           )}>
             {label}
             <span className="flex flex-col items-center ml-0.5">
@@ -315,18 +315,18 @@ function ColumnFilterPopover({
         )}
       </PopoverTrigger>
       <PopoverContent
-        className="w-64 p-0 bg-[var(--dashboard-surface)] border border-[var(--dashboard-stroke)] text-[var(--dashboard-text)] shadow-lg"
+        className="w-64 p-0 bg-[#FCFAF5] border border-[rgba(90,72,40,0.10)] text-[#3D382F] shadow-[0_16px_38px_-10px_rgba(90,72,40,0.28)] rounded-2xl overflow-hidden"
         align="start"
         onWheel={(e) => e.stopPropagation()}
       >
         {/* Sort buttons (omitted when the filter is not bound to a sortable column) */}
         {triggerStyle === 'header' && (
-          <div className="flex border-b border-[var(--dashboard-stroke)]">
+          <div className="flex border-b border-[rgba(90,72,40,0.10)]">
             <button
               type="button"
               className={cn(
-                "flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs transition-colors hover:bg-[var(--dashboard-surface-2)]",
-                isSorted && sortDirection === 'asc' && "bg-[var(--dashboard-surface-2)] font-semibold text-orange-600",
+                "flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs transition-colors hover:bg-[#F5F1E8]",
+                isSorted && sortDirection === 'asc' && "bg-[#F5F1E8] font-semibold text-orange-600",
               )}
               onClick={() => { onSort(column); setOpen(false); }}
             >
@@ -335,8 +335,8 @@ function ColumnFilterPopover({
             <button
               type="button"
               className={cn(
-                "flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs transition-colors border-l border-[var(--dashboard-stroke)] hover:bg-[var(--dashboard-surface-2)]",
-                isSorted && sortDirection === 'desc' && "bg-[var(--dashboard-surface-2)] font-semibold text-orange-600",
+                "flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs transition-colors border-l border-[rgba(90,72,40,0.10)] hover:bg-[#F5F1E8]",
+                isSorted && sortDirection === 'desc' && "bg-[#F5F1E8] font-semibold text-orange-600",
               )}
               onClick={() => { onSort(column); setOpen(false); }}
             >
@@ -345,22 +345,22 @@ function ColumnFilterPopover({
           </div>
         )}
         {/* Filter search */}
-        <div className="p-2 border-b border-[var(--dashboard-stroke)]">
+        <div className="p-2 border-b border-[rgba(90,72,40,0.10)]">
           <Input
             placeholder={searchPlaceholder ?? 'Filtrele...'}
             value={filterText}
             onChange={(e) => setFilterText(e.target.value)}
-            className="h-7 text-xs bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)]"
+            className="h-7 text-xs bg-[#F5F1E8] border-[rgba(90,72,40,0.10)]"
           />
         </div>
         {/* Select all / Clear (applies to the filtered subset) */}
-        <div className="flex items-center justify-between px-3 py-1.5 border-b border-[var(--dashboard-stroke)]">
+        <div className="flex items-center justify-between px-3 py-1.5 border-b border-[rgba(90,72,40,0.10)]">
           <label
             className={cn(
               "flex items-center gap-2 text-[10px] font-medium cursor-pointer select-none",
               filteredOptions.length === 0
-                ? "text-[var(--dashboard-muted)] opacity-50 cursor-not-allowed"
-                : "text-[var(--dashboard-text)]",
+                ? "text-[#BBB2A0] opacity-50 cursor-not-allowed"
+                : "text-[#3D382F]",
             )}
           >
             <Checkbox
@@ -381,7 +381,7 @@ function ColumnFilterPopover({
             />
             Tümünü Seç
             {normalizedFilter && filteredOptions.length > 0 && (
-              <span className="text-[var(--dashboard-muted)]">({filteredOptions.length})</span>
+              <span className="text-[#BBB2A0]">({filteredOptions.length})</span>
             )}
           </label>
           <button
@@ -400,12 +400,12 @@ function ColumnFilterPopover({
         >
           <div className="p-1">
             {filteredOptions.length === 0 ? (
-              <p className="px-3 py-3 text-xs text-[var(--dashboard-muted)] text-center">Sonuç yok</p>
+              <p className="px-3 py-3 text-xs text-[#BBB2A0] text-center">Sonuç yok</p>
             ) : (
               filteredOptions.map((opt) => (
                 <label
                   key={opt.value}
-                  className="flex items-center gap-2 px-2 py-1.5 text-xs rounded hover:bg-[var(--dashboard-surface-2)] cursor-pointer"
+                  className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-lg hover:bg-[#F5F1E8] cursor-pointer"
                 >
                   <Checkbox
                     checked={localSelected.includes(opt.value)}
@@ -417,11 +417,11 @@ function ColumnFilterPopover({
                     className="h-3.5 w-3.5"
                   />
                   <div className="min-w-0 flex-1 leading-tight">
-                    <div className="truncate text-[var(--dashboard-text)]">
+                    <div className="truncate text-[#3D382F]">
                       {opt.value || '(Boş)'}
                     </div>
                     {opt.secondary && (
-                      <div className="truncate font-mono text-[9px] text-[var(--dashboard-muted)]">
+                      <div className="truncate font-mono text-[9px] text-[#BBB2A0]">
                         {opt.secondary}
                       </div>
                     )}
@@ -432,7 +432,7 @@ function ColumnFilterPopover({
           </div>
         </div>
         {/* Apply */}
-        <div className="border-t border-[var(--dashboard-stroke)] p-2 flex gap-2">
+        <div className="border-t border-[rgba(90,72,40,0.10)] p-2 flex gap-2">
           <Button
             size="sm"
             variant="outline"
@@ -1946,10 +1946,7 @@ export default function StokYonetimiPanel() {
                   const sev = sevClay(miadInfo.severity);
                   const cov = covClay(coverageInfo.severity);
                   const riskyBoxes = getRiskyBoxes(miadInfo, coverageInfo);
-                  const rowBg =
-                    (miadInfo.severity === 'expired' || miadInfo.severity === 'critical') ? '#FCF2EF'
-                    : (miadInfo.severity === 'warning' || miadInfo.severity === 'caution') ? '#FCF7EC'
-                    : i % 2 === 1 ? '#F6F1E7' : C.surface;
+                  const rowBg = i % 2 === 1 ? '#F6F1E7' : C.surface;
                   return (
                     <tr
                       key={row.key}
@@ -2114,19 +2111,19 @@ export default function StokYonetimiPanel() {
         <DialogContent className={cn('max-w-3xl max-h-[90vh] flex flex-col', clayDialogClass)}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
-              <ShieldCheck className="h-4 w-4 text-emerald-600" />
+              <ShieldCheck className="h-4 w-4 text-[#4E9E6B]" />
               İmhadan Kurtarma — Transfer Önerileri
             </DialogTitle>
             {rescueProduct && (
               <DialogDescription asChild>
                 <div className="flex flex-wrap items-center gap-2 mt-1">
-                  <span className="font-semibold text-[var(--dashboard-text)]">{rescueProduct.stokAdi}</span>
-                  <span className="text-[var(--dashboard-muted)]">({rescueProduct.stokKodu})</span>
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800">
+                  <span className="font-semibold text-[#3D382F]">{rescueProduct.stokAdi}</span>
+                  <span className="text-[#BBB2A0]">({rescueProduct.stokKodu})</span>
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[rgba(224,163,62,0.18)] text-[#9A6F1E]">
                     <AlertTriangle className="h-3 w-3" />
                     {rescueProduct.riskyBoxes} kutu riskli
                   </span>
-                  <span className="text-[10px] text-[var(--dashboard-muted)]">
+                  <span className="text-[10px] text-[#BBB2A0]">
                     Miad: {rescueProduct.miad} ({rescueProduct.miadDays} gün)
                   </span>
                 </div>
@@ -2136,12 +2133,12 @@ export default function StokYonetimiPanel() {
 
           <div className="flex-1 overflow-auto py-3 space-y-3">
             {rescueLoading ? (
-              <div className="flex items-center justify-center py-12 text-[var(--dashboard-muted)]">
+              <div className="flex items-center justify-center py-12 text-[#BBB2A0]">
                 <Loader2 className="h-5 w-5 animate-spin mr-2" />
                 Laboratuvar stokları analiz ediliyor...
               </div>
             ) : rescueSuggestions.length === 0 ? (
-              <div className="text-center py-12 text-[var(--dashboard-muted)]">
+              <div className="text-center py-12 text-[#BBB2A0]">
                 <FlaskConical className="h-8 w-8 mx-auto mb-2 opacity-30" />
                 <p className="text-sm">Bu ürün herhangi bir laboratuvara tanımlı değil veya uygun lab bulunamadı.</p>
               </div>
@@ -2153,10 +2150,10 @@ export default function StokYonetimiPanel() {
                   const unrescuable = (rescueProduct?.riskyBoxes ?? 0) - totalRescuable;
                   return (
                     <div className={cn(
-                      "flex items-center gap-3 px-3 py-2 rounded-lg border text-xs",
+                      "flex items-center gap-3 px-3 py-2 rounded-xl border text-xs",
                       unrescuable > 0
-                        ? "border-amber-200 bg-amber-50 text-amber-800"
-                        : "border-emerald-200 bg-emerald-50 text-emerald-800"
+                        ? "border-[rgba(224,163,62,0.35)] bg-[rgba(224,163,62,0.10)] text-[#9A6F1E]"
+                        : "border-[rgba(78,158,107,0.30)] bg-[rgba(78,158,107,0.10)] text-[#2D6B4A]"
                     )}>
                       {unrescuable > 0 ? (
                         <>
@@ -2181,38 +2178,38 @@ export default function StokYonetimiPanel() {
                 {/* Suggestions */}
                 {rescueSuggestions.map((s) => (
                   <div key={s.labId} className={cn(
-                    "rounded-lg border overflow-hidden",
-                    s.status === 'recommended' && "border-emerald-200",
-                    s.status === 'possible' && "border-amber-200",
-                    s.status === 'not_suitable' && "border-[var(--dashboard-stroke)] opacity-60",
+                    "rounded-xl border overflow-hidden",
+                    s.status === 'recommended' && "border-[rgba(78,158,107,0.30)]",
+                    s.status === 'possible' && "border-[rgba(224,163,62,0.35)]",
+                    s.status === 'not_suitable' && "border-[rgba(90,72,40,0.10)] opacity-60",
                   )}>
                     {/* Lab header */}
                     <div className={cn(
                       "flex items-center justify-between px-3 py-2",
-                      s.status === 'recommended' && "bg-emerald-50",
-                      s.status === 'possible' && "bg-amber-50",
-                      s.status === 'not_suitable' && "bg-[var(--dashboard-surface-2)]",
+                      s.status === 'recommended' && "bg-[rgba(78,158,107,0.10)]",
+                      s.status === 'possible' && "bg-[rgba(224,163,62,0.10)]",
+                      s.status === 'not_suitable' && "bg-[#F5F1E8]",
                     )}>
                       <div className="flex items-center gap-2">
-                        {s.status === 'recommended' && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />}
-                        {s.status === 'possible' && <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />}
-                        {s.status === 'not_suitable' && <XCircle className="h-3.5 w-3.5 text-slate-400" />}
-                        <span className="text-sm font-semibold text-[var(--dashboard-text)]">{s.labName}</span>
+                        {s.status === 'recommended' && <CheckCircle2 className="h-3.5 w-3.5 text-[#4E9E6B]" />}
+                        {s.status === 'possible' && <AlertTriangle className="h-3.5 w-3.5 text-[#E0A33E]" />}
+                        {s.status === 'not_suitable' && <XCircle className="h-3.5 w-3.5 text-[#BBB2A0]" />}
+                        <span className="text-sm font-semibold text-[#3D382F]">{s.labName}</span>
                       </div>
                       <div className="flex items-center gap-2">
                         {/* Confidence bar */}
                         {s.status !== 'not_suitable' && (
                           <div className="flex items-center gap-1.5">
-                            <div className="w-16 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                            <div className="w-16 h-1.5 bg-[rgba(90,72,40,0.12)] rounded-full overflow-hidden">
                               <div
                                 className={cn(
                                   "h-full rounded-full transition-all",
-                                  s.confidenceScore >= 70 ? "bg-emerald-500" : s.confidenceScore >= 40 ? "bg-amber-500" : "bg-red-500"
+                                  s.confidenceScore >= 70 ? "bg-[#4E9E6B]" : s.confidenceScore >= 40 ? "bg-[#E0A33E]" : "bg-[#C0796A]"
                                 )}
                                 style={{ width: `${s.confidenceScore}%` }}
                               />
                             </div>
-                            <span className="text-[10px] font-bold text-[var(--dashboard-muted)]">%{s.confidenceScore}</span>
+                            <span className="text-[10px] font-bold text-[#BBB2A0]">%{s.confidenceScore}</span>
                           </div>
                         )}
                         {s.safeTransfer > 0 && (
@@ -2235,35 +2232,35 @@ export default function StokYonetimiPanel() {
                       {/* Metrics row */}
                       <div className={cn("grid gap-2 text-[10px]", s.avgConsumptionDays ? "grid-cols-2 sm:grid-cols-5" : "grid-cols-2 sm:grid-cols-4")}>
                         <div className="flex flex-col">
-                          <span className="text-[var(--dashboard-muted)]">Mevcut / Max</span>
-                          <span className="font-bold text-[var(--dashboard-text)]">{s.currentStock} / {s.maxStock}
-                            <span className="text-[var(--dashboard-muted)] font-normal ml-1">({s.deficit} açık)</span>
+                          <span className="text-[#BBB2A0]">Mevcut / Max</span>
+                          <span className="font-bold text-[#3D382F]">{s.currentStock} / {s.maxStock}
+                            <span className="text-[#BBB2A0] font-normal ml-1">({s.deficit} açık)</span>
                           </span>
                         </div>
                         <div className="flex flex-col">
-                          <span className="text-[var(--dashboard-muted)]">Günlük Tüketim</span>
-                          <span className="font-bold text-[var(--dashboard-text)]">{s.dailyNeed.toFixed(1)} kutu/gün</span>
+                          <span className="text-[#BBB2A0]">Günlük Tüketim</span>
+                          <span className="font-bold text-[#3D382F]">{s.dailyNeed.toFixed(1)} kutu/gün</span>
                         </div>
                         <div className="flex flex-col">
-                          <span className="text-[var(--dashboard-muted)]">Tüketim Süresi</span>
+                          <span className="text-[#BBB2A0]">Tüketim Süresi</span>
                           <span className={cn(
                             "font-bold",
-                            s.daysToConsume !== Infinity && s.daysToConsume <= (rescueProduct?.miadDays ?? 0) ? "text-emerald-700" : "text-red-700"
+                            s.daysToConsume !== Infinity && s.daysToConsume <= (rescueProduct?.miadDays ?? 0) ? "text-[#2D6B4A]" : "text-[#C0796A]"
                           )}>
                             {s.daysToConsume === Infinity ? 'Hesaplanamadı' : `${s.daysToConsume} gün`}
                             {s.daysToConsume !== Infinity && s.daysToConsume <= (rescueProduct?.miadDays ?? 0) && ' ✓'}
                           </span>
                         </div>
                         <div className="flex flex-col">
-                          <span className="text-[var(--dashboard-muted)]">FEFO Uyumu</span>
-                          <span className={cn("font-bold", s.fefoCompatible ? "text-emerald-700" : "text-amber-700")}>
+                          <span className="text-[#BBB2A0]">FEFO Uyumu</span>
+                          <span className={cn("font-bold", s.fefoCompatible ? "text-[#2D6B4A]" : "text-[#9A6F1E]")}>
                             {s.fefoCompatible ? 'Uyumlu ✓' : 'Uyarı ⚠'}
                           </span>
                         </div>
                         {s.avgConsumptionDays != null && s.avgConsumptionDays > 0 && (
                           <div className="flex flex-col">
-                            <span className="text-[var(--dashboard-muted)]">Ort. Tüketim</span>
-                            <span className="font-bold text-blue-700">
+                            <span className="text-[#BBB2A0]">Ort. Tüketim</span>
+                            <span className="font-bold text-[#4A7ABE]">
                               {s.avgConsumptionDays < 1
                                 ? `${Math.round(s.avgConsumptionDays * 24)} saat/kutu`
                                 : `${s.avgConsumptionDays} gün/kutu`}
@@ -2271,7 +2268,7 @@ export default function StokYonetimiPanel() {
                             {s.estimatedConsumptionDays != null && s.safeTransfer > 0 && (
                               <span className={cn(
                                 "text-[9px] mt-0.5",
-                                s.estimatedConsumptionDays <= (rescueProduct?.miadDays ?? 0) ? "text-emerald-600" : "text-red-600"
+                                s.estimatedConsumptionDays <= (rescueProduct?.miadDays ?? 0) ? "text-[#4E9E6B]" : "text-[#C0796A]"
                               )}>
                                 {s.safeTransfer} kutu → ~{s.estimatedConsumptionDays} günde tüketilir
                                 {s.estimatedConsumptionDays <= (rescueProduct?.miadDays ?? 0) ? ' ✓' : ' ✗'}
@@ -2283,10 +2280,10 @@ export default function StokYonetimiPanel() {
 
                       {/* Status reason */}
                       <div className={cn(
-                        "text-[10px] px-2 py-1 rounded",
-                        s.status === 'recommended' && "bg-emerald-50 text-emerald-700",
-                        s.status === 'possible' && "bg-amber-50 text-amber-700",
-                        s.status === 'not_suitable' && "bg-slate-50 text-slate-500",
+                        "text-[10px] px-2 py-1 rounded-lg",
+                        s.status === 'recommended' && "bg-[rgba(78,158,107,0.10)] text-[#2D6B4A]",
+                        s.status === 'possible' && "bg-[rgba(224,163,62,0.10)] text-[#9A6F1E]",
+                        s.status === 'not_suitable' && "bg-[#F5F1E8] text-[#BBB2A0]",
                       )}>
                         {s.statusReason}
                       </div>
@@ -2294,12 +2291,12 @@ export default function StokYonetimiPanel() {
                       {/* Lab stock table */}
                       {s.labItems.length > 0 && (
                         <details className="text-xs">
-                          <summary className="cursor-pointer text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] text-[10px]">
+                          <summary className="cursor-pointer text-[#BBB2A0] hover:text-[#3D382F] text-[10px]">
                             Labdaki mevcut stok ({s.labItems.reduce((sum, i) => sum + i.quantity, 0)} kutu)
                           </summary>
                           <table className="w-full mt-1">
                             <thead>
-                              <tr className="border-b border-[var(--dashboard-stroke)] text-[var(--dashboard-muted)]">
+                              <tr className="border-b border-[rgba(90,72,40,0.10)] text-[#BBB2A0]">
                                 <th className="px-2 py-1 text-left font-medium text-[10px]">Lot</th>
                                 <th className="px-2 py-1 text-left font-medium text-[10px]">Miad</th>
                                 <th className="px-2 py-1 text-center font-medium text-[10px]">Adet</th>
@@ -2310,19 +2307,19 @@ export default function StokYonetimiPanel() {
                               {s.labItems.map((item, idx) => {
                                 const itemMiadInfo = getMiadInfoFromString(item.miad);
                                 return (
-                                  <tr key={`${item.lotNumarasi}-${item.miad}-${idx}`} className="border-b border-[var(--dashboard-stroke)] last:border-0">
-                                    <td className="px-2 py-1 font-mono text-[var(--dashboard-muted)]">{item.lotNumarasi}</td>
-                                    <td className="px-2 py-1 text-[var(--dashboard-text)]">{item.miad || '-'}</td>
+                                  <tr key={`${item.lotNumarasi}-${item.miad}-${idx}`} className="border-b border-[rgba(90,72,40,0.10)] last:border-0">
+                                    <td className="px-2 py-1 font-mono text-[#BBB2A0]">{item.lotNumarasi}</td>
+                                    <td className="px-2 py-1 text-[#3D382F]">{item.miad || '-'}</td>
                                     <td className="px-2 py-1 text-center font-bold">{item.quantity}</td>
                                     <td className="px-2 py-1 text-right">
                                       <span className={cn(
                                         "inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold",
-                                        itemMiadInfo.severity === 'expired' && 'bg-red-100 text-red-700',
-                                        itemMiadInfo.severity === 'critical' && 'bg-red-100 text-red-700',
-                                        itemMiadInfo.severity === 'warning' && 'bg-orange-100 text-orange-700',
-                                        itemMiadInfo.severity === 'caution' && 'bg-amber-100 text-amber-700',
-                                        itemMiadInfo.severity === 'notice' && 'bg-yellow-100 text-yellow-700',
-                                        itemMiadInfo.severity === 'normal' && 'bg-emerald-100 text-emerald-700',
+                                        itemMiadInfo.severity === 'expired' && 'bg-[rgba(192,121,106,0.18)] text-[#C0796A]',
+                                        itemMiadInfo.severity === 'critical' && 'bg-[rgba(192,121,106,0.18)] text-[#C0796A]',
+                                        itemMiadInfo.severity === 'warning' && 'bg-[rgba(224,163,62,0.18)] text-[#9A6F1E]',
+                                        itemMiadInfo.severity === 'caution' && 'bg-[rgba(224,163,62,0.14)] text-[#9A6F1E]',
+                                        itemMiadInfo.severity === 'notice' && 'bg-[rgba(224,163,62,0.10)] text-[#B08728]',
+                                        itemMiadInfo.severity === 'normal' && 'bg-[rgba(78,158,107,0.15)] text-[#2D6B4A]',
                                       )}>
                                         {itemMiadInfo.days < 0 ? 'Süresi dolmuş' : itemMiadInfo.days === Infinity ? '-' : `${itemMiadInfo.days} gün`}
                                       </span>
@@ -2352,7 +2349,7 @@ export default function StokYonetimiPanel() {
         <DialogContent className={cn('max-w-3xl max-h-[90vh] flex flex-col', clayDialogClass)}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
-              <ShieldCheck className="h-4 w-4 text-emerald-600" />
+              <ShieldCheck className="h-4 w-4 text-[#4E9E6B]" />
               Toplu Kurtarma Planı
             </DialogTitle>
             <DialogDescription>
@@ -2362,12 +2359,12 @@ export default function StokYonetimiPanel() {
 
           <div className="flex-1 overflow-auto py-3 space-y-3">
             {bulkRescueLoading ? (
-              <div className="flex items-center justify-center py-12 text-[var(--dashboard-muted)]">
+              <div className="flex items-center justify-center py-12 text-[#BBB2A0]">
                 <Loader2 className="h-5 w-5 animate-spin mr-2" />
                 Tüm riskli ürünler analiz ediliyor...
               </div>
             ) : bulkRescuePlans.length === 0 ? (
-              <div className="text-center py-12 text-[var(--dashboard-muted)]">
+              <div className="text-center py-12 text-[#BBB2A0]">
                 <CheckCircle2 className="h-8 w-8 mx-auto mb-2 opacity-30" />
                 <p className="text-sm">Riskli stok bulunamadı — tüm stoklar güvende!</p>
               </div>
@@ -2380,20 +2377,20 @@ export default function StokYonetimiPanel() {
                   const totalUnrescuable = totalRisky - totalRescuable;
                   return (
                     <div className="grid grid-cols-3 gap-3">
-                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-center">
-                        <div className="text-lg font-bold text-amber-800">{totalRisky}</div>
-                        <div className="text-[10px] text-amber-600">Toplam Riskli Kutu</div>
+                      <div className="rounded-xl border border-[rgba(224,163,62,0.35)] bg-[rgba(224,163,62,0.10)] px-3 py-2 text-center">
+                        <div className="text-lg font-bold text-[#9A6F1E]">{totalRisky}</div>
+                        <div className="text-[10px] text-[#B08728]">Toplam Riskli Kutu</div>
                       </div>
-                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-center">
-                        <div className="text-lg font-bold text-emerald-800">{totalRescuable}</div>
-                        <div className="text-[10px] text-emerald-600">Kurtarılabilir</div>
+                      <div className="rounded-xl border border-[rgba(78,158,107,0.30)] bg-[rgba(78,158,107,0.10)] px-3 py-2 text-center">
+                        <div className="text-lg font-bold text-[#2D6B4A]">{totalRescuable}</div>
+                        <div className="text-[10px] text-[#4E9E6B]">Kurtarılabilir</div>
                       </div>
                       <div className={cn(
-                        "rounded-lg border px-3 py-2 text-center",
-                        totalUnrescuable > 0 ? "border-red-200 bg-red-50" : "border-emerald-200 bg-emerald-50"
+                        "rounded-xl border px-3 py-2 text-center",
+                        totalUnrescuable > 0 ? "border-[rgba(192,121,106,0.35)] bg-[rgba(192,121,106,0.10)]" : "border-[rgba(78,158,107,0.30)] bg-[rgba(78,158,107,0.10)]"
                       )}>
-                        <div className={cn("text-lg font-bold", totalUnrescuable > 0 ? "text-red-800" : "text-emerald-800")}>{totalUnrescuable}</div>
-                        <div className={cn("text-[10px]", totalUnrescuable > 0 ? "text-red-600" : "text-emerald-600")}>İmha Riski</div>
+                        <div className={cn("text-lg font-bold", totalUnrescuable > 0 ? "text-[#C0796A]" : "text-[#2D6B4A]")}>{totalUnrescuable}</div>
+                        <div className={cn("text-[10px]", totalUnrescuable > 0 ? "text-[#C0796A]" : "text-[#4E9E6B]")}>İmha Riski</div>
                       </div>
                     </div>
                   );
@@ -2401,19 +2398,19 @@ export default function StokYonetimiPanel() {
 
                 {/* Per-product plans */}
                 {bulkRescuePlans.map((plan) => (
-                  <div key={plan.stokKodu} className="rounded-lg border border-[var(--dashboard-stroke)] overflow-hidden">
-                    <div className="flex items-center justify-between px-3 py-2 bg-[var(--dashboard-surface-2)]">
+                  <div key={plan.stokKodu} className="rounded-xl border border-[rgba(90,72,40,0.10)] overflow-hidden">
+                    <div className="flex items-center justify-between px-3 py-2 bg-[#F5F1E8]">
                       <div className="flex-1 min-w-0">
-                        <div className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{plan.stokAdi}</div>
-                        <div className="text-[10px] text-[var(--dashboard-muted)] font-mono">({plan.stokKodu}) — Miad: {plan.miad} ({plan.miadDays} gün)</div>
+                        <div className="text-sm font-semibold text-[#3D382F] truncate">{plan.stokAdi}</div>
+                        <div className="text-[10px] text-[#BBB2A0] font-mono">({plan.stokKodu}) — Miad: {plan.miad} ({plan.miadDays} gün)</div>
                       </div>
                       <div className="flex items-center gap-2 ml-2 flex-shrink-0">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[rgba(224,163,62,0.18)] text-[#9A6F1E]">
                           <AlertTriangle className="h-3 w-3" />
                           {plan.riskyBoxes} riskli
                         </span>
                         {plan.rescuable > 0 && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[rgba(78,158,107,0.15)] text-[#2D6B4A]">
                             <CheckCircle2 className="h-3 w-3" />
                             {plan.rescuable} kurtarılabilir
                           </span>
@@ -2439,27 +2436,27 @@ export default function StokYonetimiPanel() {
                         {plan.suggestions.filter(s => s.safeTransfer > 0).map(s => (
                           <div key={s.labId} className="flex items-center justify-between text-[10px]">
                             <div className="flex items-center gap-1.5">
-                              {s.status === 'recommended' ? <CheckCircle2 className="h-3 w-3 text-emerald-600" /> : <AlertTriangle className="h-3 w-3 text-amber-600" />}
-                              <span className="text-[var(--dashboard-text)]">{s.labName}</span>
+                              {s.status === 'recommended' ? <CheckCircle2 className="h-3 w-3 text-[#4E9E6B]" /> : <AlertTriangle className="h-3 w-3 text-[#E0A33E]" />}
+                              <span className="text-[#3D382F]">{s.labName}</span>
                               {s.estimatedConsumptionDays != null && (
                                 <span className={cn(
                                   "px-1 py-0.5 rounded text-[9px]",
-                                  s.estimatedConsumptionDays <= plan.miadDays ? "bg-blue-50 text-blue-700" : "bg-red-50 text-red-700"
+                                  s.estimatedConsumptionDays <= plan.miadDays ? "bg-[rgba(78,158,107,0.15)] text-[#2D6B4A]" : "bg-[rgba(192,121,106,0.15)] text-[#C0796A]"
                                 )}>
                                   ~{s.estimatedConsumptionDays}g tüketim
                                 </span>
                               )}
                             </div>
                             <div className="flex items-center gap-2">
-                              <span className="text-[var(--dashboard-muted)]">{s.currentStock}/{s.maxStock}</span>
-                              <span className="font-bold text-[var(--dashboard-text)]">→ {s.safeTransfer} kutu</span>
-                              <div className="w-10 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                              <span className="text-[#BBB2A0]">{s.currentStock}/{s.maxStock}</span>
+                              <span className="font-bold text-[#3D382F]">→ {s.safeTransfer} kutu</span>
+                              <div className="w-10 h-1.5 bg-[rgba(90,72,40,0.12)] rounded-full overflow-hidden">
                                 <div
-                                  className={cn("h-full rounded-full", s.confidenceScore >= 70 ? "bg-emerald-500" : "bg-amber-500")}
+                                  className={cn("h-full rounded-full", s.confidenceScore >= 70 ? "bg-[#4E9E6B]" : "bg-[#E0A33E]")}
                                   style={{ width: `${s.confidenceScore}%` }}
                                 />
                               </div>
-                              <span className="text-[var(--dashboard-muted)] w-6 text-right">%{s.confidenceScore}</span>
+                              <span className="text-[#BBB2A0] w-6 text-right">%{s.confidenceScore}</span>
                             </div>
                           </div>
                         ))}
@@ -2467,7 +2464,7 @@ export default function StokYonetimiPanel() {
                     )}
 
                     {plan.suggestions.filter(s => s.safeTransfer > 0).length === 0 && (
-                      <div className="px-3 py-2 text-[10px] text-red-600">
+                      <div className="px-3 py-2 text-[10px] text-[#C0796A]">
                         <XCircle className="h-3 w-3 inline mr-1" />
                         Uygun laboratuvar bulunamadı — {plan.riskyBoxes} kutu imha riski altında
                       </div>
