@@ -69,7 +69,49 @@ const COLUMN_PALETTE = [
     { header: 'FFF59E0B', body: 'FFFEF3C7', text: 'FF78350F' }, // 30 Günlük Max — amber
     { header: 'FFEF4444', body: 'FFFEE2E2', text: 'FF7F1D1D' }, // Yakın Miad — red
     { header: 'FF16A34A', body: 'FFDCFCE7', text: 'FF14532D' }, // Talep Adedi — green
+    { header: 'FF22C55E', body: 'FFDCFCE7', text: 'FF14532D' }, // Kutu / Ambalaj — green
 ];
+function parseMiadDate(value) {
+    var _a;
+    if (!value)
+        return null;
+    if (typeof (value === null || value === void 0 ? void 0 : value.toDate) === 'function')
+        return value.toDate();
+    if (value instanceof Date)
+        return Number.isNaN(value.getTime()) ? null : value;
+    if (typeof value === 'object') {
+        const seconds = (_a = value.seconds) !== null && _a !== void 0 ? _a : value._seconds;
+        if (typeof seconds === 'number') {
+            const date = new Date(seconds * 1000);
+            return Number.isNaN(date.getTime()) ? null : date;
+        }
+    }
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        const turkishDate = trimmed.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+        if (turkishDate) {
+            const [, day, month, year] = turkishDate;
+            const date = new Date(Number(year), Number(month) - 1, Number(day));
+            return Number.isNaN(date.getTime()) ? null : date;
+        }
+        const date = new Date(trimmed);
+        return Number.isNaN(date.getTime()) ? null : date;
+    }
+    return null;
+}
+function daysUntilMiad(value) {
+    const miadDate = parseMiadDate(value);
+    if (!miadDate)
+        return null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const normalizedMiad = new Date(miadDate);
+    normalizedMiad.setHours(0, 0, 0, 0);
+    return Math.ceil((normalizedMiad.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+}
+function getStockQuantity(item) {
+    return Math.max(1, Number(item === null || item === void 0 ? void 0 : item.adet) || 1);
+}
 function getTransporter() {
     const smtpHost = process.env.SMTP_HOST;
     const smtpPort = parseInt(process.env.SMTP_PORT || '587', 10);
@@ -87,7 +129,7 @@ function getTransporter() {
     });
 }
 async function buildExcelBuffer(orderId, order, itemInfoMap) {
-    var _a, _b, _c;
+    var _a, _b;
     const isDepotRequest = order.requestSource === 'depot_to_office' || order.isDepotRequest === true;
     const labId = order.labId;
     const depotId = order.depotId;
@@ -142,28 +184,20 @@ async function buildExcelBuffer(orderId, order, itemInfoMap) {
                 groupedByStok[item.stokKodu].push(item);
             });
             for (const [stokKodu, groupItems] of Object.entries(groupedByStok)) {
-                stockMap[stokKodu] = groupItems.length;
-                const itemsWithMiad = groupItems.filter(i => i.miad);
-                if (itemsWithMiad.length > 0) {
-                    itemsWithMiad.sort((a, b) => {
-                        var _a, _b;
-                        const miadA = ((_a = a.miad) === null || _a === void 0 ? void 0 : _a.toDate) ? a.miad.toDate().getTime() : new Date(a.miad).getTime();
-                        const miadB = ((_b = b.miad) === null || _b === void 0 ? void 0 : _b.toDate) ? b.miad.toDate().getTime() : new Date(b.miad).getTime();
-                        return miadA - miadB;
-                    });
-                    const earliestTime = ((_a = itemsWithMiad[0].miad) === null || _a === void 0 ? void 0 : _a.toDate)
-                        ? itemsWithMiad[0].miad.toDate().getTime()
-                        : new Date(itemsWithMiad[0].miad).getTime();
-                    const count = itemsWithMiad.filter(i => {
-                        var _a;
-                        const time = ((_a = i.miad) === null || _a === void 0 ? void 0 : _a.toDate) ? i.miad.toDate().getTime() : new Date(i.miad).getTime();
-                        return time === earliestTime;
-                    }).length;
-                    closestMiadLotMap[stokKodu] = count;
-                }
-                else {
-                    closestMiadLotMap[stokKodu] = 0;
-                }
+                let usableStock = 0;
+                let nearExpiryStock = 0;
+                groupItems.forEach((stockItem) => {
+                    const quantity = getStockQuantity(stockItem);
+                    const miadDays = daysUntilMiad(stockItem.miad);
+                    if (typeof miadDays === 'number' && miadDays < 30) {
+                        nearExpiryStock += quantity;
+                    }
+                    else {
+                        usableStock += quantity;
+                    }
+                });
+                stockMap[stokKodu] = usableStock;
+                closestMiadLotMap[stokKodu] = nearExpiryStock;
             }
         }
         catch (err) {
@@ -177,7 +211,7 @@ async function buildExcelBuffer(orderId, order, itemInfoMap) {
     const sheet = workbook.addWorksheet(isDepotRequest ? 'Depo Talep' : 'Perifer Talep', {
         properties: { defaultRowHeight: 18 },
     });
-    const createdAtText = ((_c = (_b = order.createdAt) === null || _b === void 0 ? void 0 : _b.toDate) === null || _c === void 0 ? void 0 : _c.call(_b))
+    const createdAtText = ((_b = (_a = order.createdAt) === null || _a === void 0 ? void 0 : _a.toDate) === null || _b === void 0 ? void 0 : _b.call(_a))
         ? order.createdAt.toDate().toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' })
         : new Date().toLocaleString('tr-TR', { timeZone: 'Europe/Istanbul' });
     const labName = order.kurumAdi || order.depotName || '-';
@@ -187,7 +221,7 @@ async function buildExcelBuffer(orderId, order, itemInfoMap) {
     const urgencyMeta = URGENCY_META[urgencyKey];
     const noteText = (order.note || '').trim();
     // --- Title row (merged across columns) ---
-    sheet.mergeCells('A1:G1');
+    sheet.mergeCells('A1:H1');
     const titleCell = sheet.getCell('A1');
     titleCell.value = isDepotRequest ? 'DEPO ÜRÜN TALEBİ' : 'PERİFER LABORATUVAR ÜRÜN TALEBİ';
     titleCell.font = { bold: true, size: 16, color: { argb: 'FFFFFFFF' } };
@@ -235,7 +269,7 @@ async function buildExcelBuffer(orderId, order, itemInfoMap) {
         labelCell.alignment = { vertical: 'middle', horizontal: 'left', indent: 1 };
         labelCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: info.labelFill } };
         labelCell.border = THIN_BORDER;
-        sheet.mergeCells(rowIdx, 2, rowIdx, 7);
+        sheet.mergeCells(rowIdx, 2, rowIdx, 8);
         const valueCell = row.getCell(2);
         valueCell.value = info.value;
         valueCell.font = {
@@ -255,7 +289,7 @@ async function buildExcelBuffer(orderId, order, itemInfoMap) {
     // --- Header row sits right after info rows ---
     const HEADER_ROW = 2 + infoRows.length;
     sheet.views = [{ state: 'frozen', ySplit: HEADER_ROW }];
-    const headers = ['#', 'Stok Kodu', 'Stok Adı', isDepotRequest ? 'Depo Stok' : 'Lab Stok', '30 Günlük Max', 'Yakın Miad Lot Adedi', 'Talep Adedi'];
+    const headers = ['#', 'Stok Kodu', 'Stok Adı', isDepotRequest ? 'Depo Stok' : 'Lab Stok', '30 Günlük Max', '30 Gün Altı Miad Adedi', 'Talep Adedi', 'Kutu / Ambalaj'];
     const headerRow = sheet.getRow(HEADER_ROW);
     headerRow.height = 32;
     headers.forEach((label, i) => {
@@ -282,9 +316,9 @@ async function buildExcelBuffer(orderId, order, itemInfoMap) {
         const info = itemInfoMap === null || itemInfoMap === void 0 ? void 0 : itemInfoMap.get(sKodu);
         const anaBirim = ((info === null || info === void 0 ? void 0 : info.anaBirim) || '').trim();
         const ambalaj = info === null || info === void 0 ? void 0 : info.ambalajDegeri;
-        const talepCellValue = typeof ambalaj === 'number' && ambalaj > 0
+        const packagingText = typeof ambalaj === 'number' && ambalaj > 0
             ? `${talep}${anaBirim ? ` ${anaBirim}` : ''} (${talep * ambalaj} adet)`
-            : (anaBirim ? `${talep} ${anaBirim}` : talep);
+            : (anaBirim ? `${talep} ${anaBirim}` : '-');
         const row = sheet.getRow(HEADER_ROW + 1 + idx);
         row.height = 30;
         const values = [
@@ -294,7 +328,8 @@ async function buildExcelBuffer(orderId, order, itemInfoMap) {
             mevcutStok,
             maxAdet,
             yakinMiad,
-            talepCellValue,
+            talep,
+            packagingText,
         ];
         values.forEach((value, colIdx) => {
             const cell = row.getCell(colIdx + 1);
@@ -310,9 +345,13 @@ async function buildExcelBuffer(orderId, order, itemInfoMap) {
                 horizontal: colIdx === 2 ? 'left' : 'center',
                 indent: colIdx === 2 ? 1 : 0,
             };
-            // Talep Adedi (last column) — large, bold, vivid
+            // Talep Adedi and packaging columns — large, bold, vivid
             if (colIdx === 6) {
                 cell.font = { bold: true, size: 18, color: { argb: COLUMN_PALETTE[6].text } };
+                cell.border = MEDIUM_BORDER;
+            }
+            else if (colIdx === 7) {
+                cell.font = { bold: true, size: 14, color: { argb: COLUMN_PALETTE[7].text } };
                 cell.border = MEDIUM_BORDER;
             }
             else if (colIdx === 0) {
@@ -340,8 +379,12 @@ async function buildExcelBuffer(orderId, order, itemInfoMap) {
     totalValueCell.alignment = { vertical: 'middle', horizontal: 'center' };
     totalValueCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFBBF7D0' } };
     totalValueCell.border = MEDIUM_BORDER;
+    const totalPackagingCell = totalRow.getCell(8);
+    totalPackagingCell.value = '';
+    totalPackagingCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFDCFCE7' } };
+    totalPackagingCell.border = MEDIUM_BORDER;
     // --- Column widths (manually tuned for readability) ---
-    const widths = [6, 18, 42, 12, 16, 22, 16];
+    const widths = [6, 18, 42, 12, 16, 24, 14, 22];
     widths.forEach((w, i) => {
         sheet.getColumn(i + 1).width = w;
     });
