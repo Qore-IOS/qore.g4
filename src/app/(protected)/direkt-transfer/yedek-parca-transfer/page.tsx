@@ -242,6 +242,8 @@ export default function YedekParcaTransferPage() {
   const [personnelStockFilter, setPersonnelStockFilter] = useState<'all' | 'used' | 'unused' | 'pending_approval'>('all');
   const [personnelStockSortKey, setPersonnelStockSortKey] = useState<'createdAt' | 'usedAt' | 'movement'>('movement');
   const [personnelStockSortOrder, setPersonnelStockSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [personnelStockSearchQuery, setPersonnelStockSearchQuery] = useState('');
+  const [expandedPersonnelStokKodu, setExpandedPersonnelStokKodu] = useState<string | null>(null);
   const ITEMS_PER_PAGE = 20;
 
   // All personnel stock for toplam stok view
@@ -722,6 +724,8 @@ export default function YedekParcaTransferPage() {
     setPersonnelStockLoading(true);
     setPersonnelStockPage(0);
     setPersonnelStockFilter('all');
+    setPersonnelStockSearchQuery('');
+    setExpandedPersonnelStokKodu(null);
     try {
       const stockQuery = query(
         collection(db, 'personalStock'),
@@ -958,6 +962,16 @@ export default function YedekParcaTransferPage() {
       items = items.filter(s => s.status === 'pending_approval');
     }
 
+    // Search filter
+    if (personnelStockSearchQuery.trim()) {
+      const q = personnelStockSearchQuery.toLowerCase().trim();
+      items = items.filter(s =>
+        s.stokKodu.toLowerCase().includes(q) ||
+        s.stokAdi.toLowerCase().includes(q) ||
+        (s.serialNumber || '').toLowerCase().includes(q)
+      );
+    }
+
     return items.sort((a, b) => {
       let dateA: number;
       let dateB: number;
@@ -975,15 +989,44 @@ export default function YedekParcaTransferPage() {
 
       return personnelStockSortOrder === 'desc' ? dateB - dateA : dateA - dateB;
     });
-  }, [personnelStock, personnelStockFilter, personnelStockSortKey, personnelStockSortOrder]);
+  }, [personnelStock, personnelStockFilter, personnelStockSortKey, personnelStockSortOrder, personnelStockSearchQuery]);
 
-  // Paginated personnel stock
-  const paginatedPersonnelStock = useMemo(() => {
+  // Grouped personnel stock: group by stokKodu + status combo
+  const groupedPersonnelStock = useMemo(() => {
+    const groupMap = new Map<string, { stokKodu: string; stokAdi: string; items: PersonnelStockViewItem[]; latestDate: Date; status: string }>();
+    for (const item of filteredPersonnelStock) {
+      // Group by stokKodu + status to keep "Aktif" and "Kullanıldı" groups separate
+      const statusGroup = item.status === 'used' || item.status === 'pending_return' ? 'used' : item.status;
+      const key = `${item.stokKodu}||${statusGroup}`;
+      if (!groupMap.has(key)) {
+        groupMap.set(key, {
+          stokKodu: item.stokKodu,
+          stokAdi: item.stokAdi,
+          items: [],
+          latestDate: item.createdAt,
+          status: statusGroup,
+        });
+      }
+      const g = groupMap.get(key)!;
+      g.items.push(item);
+      const itemDate = new Date(item.usedAt || item.createdAt);
+      if (itemDate > g.latestDate) g.latestDate = itemDate;
+    }
+    return Array.from(groupMap.values()).sort((a, b) => b.latestDate.getTime() - a.latestDate.getTime());
+  }, [filteredPersonnelStock]);
+
+  // Paginated grouped personnel stock
+  const paginatedGroupedPersonnelStock = useMemo(() => {
     const start = personnelStockPage * ITEMS_PER_PAGE;
-    return filteredPersonnelStock.slice(start, start + ITEMS_PER_PAGE);
-  }, [filteredPersonnelStock, personnelStockPage]);
+    return groupedPersonnelStock.slice(start, start + ITEMS_PER_PAGE);
+  }, [groupedPersonnelStock, personnelStockPage]);
 
-  const totalPersonnelPages = Math.ceil(filteredPersonnelStock.length / ITEMS_PER_PAGE);
+  // Keep paginatedPersonnelStock for mobile cards - flattened from visible groups
+  const paginatedPersonnelStock = useMemo(() => {
+    return paginatedGroupedPersonnelStock.flatMap(g => g.items);
+  }, [paginatedGroupedPersonnelStock]);
+
+  const totalPersonnelPages = Math.ceil(groupedPersonnelStock.length / ITEMS_PER_PAGE);
 
   // Pool stock filtering and pagination
   const filteredPoolStock = useMemo(() => {
@@ -3573,7 +3616,7 @@ export default function YedekParcaTransferPage() {
                   return (
                     <button
                       key={option.key}
-                      onClick={() => { setPersonnelStockFilter(option.key); setPersonnelStockPage(0); }}
+                      onClick={() => { setPersonnelStockFilter(option.key); setPersonnelStockPage(0); setExpandedPersonnelStokKodu(null); }}
                       className="px-2.5 py-1 text-[11px] rounded-lg font-medium transition-all"
                       style={{
                         background: active ? 'var(--dashboard-surface)' : 'transparent',
@@ -3595,6 +3638,31 @@ export default function YedekParcaTransferPage() {
               Manuel Stok Ekle
             </button>
           </div>
+        </div>
+
+        {/* Search */}
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4" style={{ color: 'var(--dashboard-muted)' }} />
+          <input
+            type="text"
+            placeholder="Ürün kodu, ürün adı veya seri no ile ara..."
+            value={personnelStockSearchQuery}
+            onChange={(e) => { setPersonnelStockSearchQuery(e.target.value); setPersonnelStockPage(0); setExpandedPersonnelStokKodu(null); }}
+            className="w-full pl-10 pr-4 py-2.5 text-sm rounded-xl border-0 outline-none transition-all"
+            style={{
+              background: 'var(--dashboard-pressed)',
+              color: 'var(--dashboard-text)',
+            }}
+          />
+          {personnelStockSearchQuery && (
+            <button
+              onClick={() => { setPersonnelStockSearchQuery(''); setPersonnelStockPage(0); }}
+              className="absolute right-3 top-1/2 -translate-y-1/2 p-0.5 rounded-full transition-all hover:opacity-70"
+              style={{ color: 'var(--dashboard-muted)' }}
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
 
         {/* Content */}
@@ -3659,143 +3727,207 @@ export default function YedekParcaTransferPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {paginatedPersonnelStock.map((item) => {
-                    const isUsed = item.status === 'used' || item.status === 'pending_return';
-                    const canTakeOver =
-                      item.status === 'in_stock' &&
-                      !!currentUserProfile?.uid &&
-                      currentUserProfile.uid !== item.ownerUid;
+                  {paginatedGroupedPersonnelStock.map((group) => {
+                    const groupKey = `${group.stokKodu}||${group.status}`;
+                    const isExpanded = expandedPersonnelStokKodu === groupKey;
+                    const isUsedGroup = group.status === 'used';
+                    const count = group.items.length;
+                    const statusLabel = group.status === 'in_stock' ? 'Aktif' : group.status === 'pending_approval' ? 'Onay Bekliyor' : 'Kullanıldı';
+                    const statusColors = group.status === 'in_stock'
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : group.status === 'pending_approval'
+                        ? 'bg-orange-100 text-orange-700'
+                        : 'bg-gray-100 text-gray-600';
 
                     return (
-                      <tr
-                        key={item.id}
-                        className={cn('transition-colors', isUsed && 'opacity-50')}
-                        style={{ borderBottom: '1px solid var(--dashboard-stroke)' }}
-                      >
-                        <td className={cn('px-4 py-3 font-mono text-xs', isUsed && 'line-through')} style={{ color: 'var(--dashboard-text)' }}>
-                          {item.stokKodu}
-                        </td>
-                        <td className={cn('px-4 py-3 text-sm', isUsed && 'line-through')} style={{ color: 'var(--dashboard-text)' }}>
-                          {item.stokAdi}
-                        </td>
-                        <td className={cn('px-4 py-3 font-mono text-xs', isUsed && 'line-through')} style={{ color: 'var(--dashboard-muted)' }}>
-                          {item.serialNumber || '—'}
-                          {(item as any).hucreNumarasi && (
-                            <span className="ml-1.5 text-[10px] font-semibold" style={{ color: '#7C3AED' }}>H:{(item as any).hucreNumarasi}</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          {item.status === 'in_stock' && (
-                            <span className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Aktif</span>
-                          )}
-                          {item.status === 'used' && (
-                            <span className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">Kullanıldı</span>
-                          )}
-                          {item.status === 'pending_return' && (
-                            <span className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">İade Bekliyor</span>
-                          )}
-                          {item.status === 'pending_approval' && (
-                            <span className="inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">Onay Bekliyor</span>
-                          )}
-                        </td>
-                        <td className={cn('px-4 py-3 text-xs', isUsed && 'line-through')} style={{ color: 'var(--dashboard-muted)' }}>
-                          {format(item.createdAt, 'dd.MM.yyyy HH:mm', { locale: tr })}
-                        </td>
-                        <td className="px-4 py-3 text-xs" style={{ color: 'var(--dashboard-muted)' }}>
-                          {item.usedAt
-                            ? format(item.usedAt, 'dd.MM.yyyy HH:mm', { locale: tr })
-                            : '—'
-                          }
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          <button
-                            onClick={() => openObservation({
-                              id: item.id,
-                              scope: 'personal',
-                              stokKodu: item.stokKodu,
-                              stokAdi: item.stokAdi,
-                              serialNumber: item.serialNumber,
-                              hucreNumarasi: (item as any).hucreNumarasi,
-                              ownerName: item.ownerName,
-                            })}
-                            title="Gözlem: Bu ürüne ait transfer geçmişini göster"
-                            className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-lg transition-all active:scale-95"
-                            style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
-                          >
-                            <History className="h-3 w-3" />
-                            Gözlem
-                          </button>
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          {item.status === 'pending_approval' ? (
-                            <div className="flex items-center justify-end gap-1.5">
-                              <button
-                                onClick={() => approveTransfer(item)}
-                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-all active:scale-95"
-                                style={{ background: '#16A34A' }}
-                              >
-                                <CheckCircle className="w-3.5 h-3.5" /> Onayla
-                              </button>
-                              <button
-                                onClick={() => rejectTransfer(item)}
-                                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95 hover:bg-red-50"
-                                style={{ color: '#B91C1C' }}
-                              >
-                                <XCircle className="w-3.5 h-3.5" /> Reddet
-                              </button>
+                      <React.Fragment key={groupKey}>
+                        {/* Group header row */}
+                        <tr
+                          className={cn('transition-colors cursor-pointer hover:brightness-95', isUsedGroup && 'opacity-60')}
+                          style={{
+                            borderBottom: '1px solid var(--dashboard-stroke)',
+                            background: isExpanded ? 'var(--dashboard-pressed)' : undefined,
+                          }}
+                          onClick={() => setExpandedPersonnelStokKodu(isExpanded ? null : groupKey)}
+                        >
+                          <td className={cn('px-4 py-3 font-mono text-xs')} style={{ color: 'var(--dashboard-text)' }}>
+                            <div className="flex items-center gap-1.5">
+                              {isExpanded ? <ChevronDown className="w-3 h-3 shrink-0" style={{ color: 'var(--dashboard-accent)' }} /> : <ChevronRight className="w-3 h-3 shrink-0" style={{ color: 'var(--dashboard-muted)' }} />}
+                              {group.stokKodu}
                             </div>
-                          ) : (isAdmin || isTeknikLojistik) ? (
-                            <button
-                              onClick={() => deletePersonnelStockItem(item)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all active:scale-95 hover:bg-red-50"
-                              style={{ color: '#B91C1C' }}
+                          </td>
+                          <td className={cn('px-4 py-3 text-sm')} style={{ color: 'var(--dashboard-text)' }}>
+                            {group.stokAdi}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold"
+                              style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
                             >
-                              <Trash2 className="h-3.5 w-3.5" />
-                              Stok Sil
-                            </button>
-                          ) : (item.status === 'in_stock' && item.ownerUid === currentUserProfile?.uid) ? (
-                            <div className="flex items-center justify-end gap-1.5">
-                              <button
-                                onClick={() => {
-                                  const maxQty = personnelStock.filter(s => s.status === 'in_stock' && s.ownerUid === item.ownerUid && s.stokKodu === item.stokKodu).length;
-                                  setPTransferItem(item);
-                                  setPTransferQuantity(Math.min(1, maxQty));
-                                  setPTransferTargetUid('');
-                                  setPTransferTargetName('');
-                                  setPTransferSearchQuery('');
-                                  setPTransferModalOpen(true);
-                                }}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all active:scale-95"
-                                style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
-                              >
-                                <Send className="h-3.5 w-3.5" />
-                                Transfer Et
-                              </button>
-                              <button
-                                onClick={() => { setReturnModalItem(item); setReturnCondition('iyi'); setReturnNote(''); setReturnModalOpen(true); }}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all active:scale-95"
-                                style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
-                              >
-                                <Upload className="h-3.5 w-3.5" />
-                                İade Et
-                              </button>
-                            </div>
-                          ) : isUsed ? (
-                            <span className="text-[11px] text-left inline-block max-w-[220px]" style={{ color: 'var(--dashboard-muted)' }}>
-                              {(item.usageLabName || 'Lab bilgisi yok')} · {(item.usageDeviceName || item.usedOnDeviceName || 'Cihaz bilgisi yok')}
+                              <Hash className="w-3 h-3" />
+                              {count}
                             </span>
-                          ) : (
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={cn('inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full', statusColors)}>
+                              {statusLabel}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-xs" style={{ color: 'var(--dashboard-muted)' }}>
+                            {format(group.latestDate, 'dd.MM.yyyy HH:mm', { locale: tr })}
+                          </td>
+                          <td className="px-4 py-3 text-xs" style={{ color: 'var(--dashboard-muted)' }}>—</td>
+                          <td className="px-4 py-3 text-center">—</td>
+                          <td className="px-4 py-3 text-right">
+                            <span className="text-[11px] font-medium" style={{ color: 'var(--dashboard-muted)' }}>
+                              {isExpanded ? 'Kapat' : 'Detay'}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-center">
                             <span className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>—</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 text-center">
-                          {isUsed && item.usedOnFormId && item.usedOnFormType && item.usedOnDeviceId ? (
-                            <SparePartFormPDFButton formId={item.usedOnFormId} formType={item.usedOnFormType} deviceId={item.usedOnDeviceId} />
-                          ) : (
-                            <span className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>—</span>
-                          )}
-                        </td>
-                      </tr>
+                          </td>
+                        </tr>
+
+                        {/* Expanded detail rows */}
+                        {isExpanded && group.items.map((item) => {
+                          const isUsed = item.status === 'used' || item.status === 'pending_return';
+                          return (
+                            <tr
+                              key={item.id}
+                              className={cn('transition-colors', isUsed && 'opacity-50')}
+                              style={{
+                                borderBottom: '1px solid var(--dashboard-stroke)',
+                                background: 'var(--dashboard-pressed)',
+                              }}
+                            >
+                              <td className="px-4 py-2.5 pl-10 text-xs" style={{ color: 'var(--dashboard-muted)' }}>
+                                <span className="text-[10px] opacity-60">↳</span>
+                              </td>
+                              <td className={cn('px-4 py-2.5 text-xs', isUsed && 'line-through')} style={{ color: 'var(--dashboard-muted)' }}>
+                                {item.stokAdi}
+                              </td>
+                              <td className={cn('px-4 py-2.5 font-mono text-xs', isUsed && 'line-through')} style={{ color: 'var(--dashboard-muted)' }}>
+                                {item.serialNumber || '—'}
+                                {(item as any).hucreNumarasi && (
+                                  <span className="ml-1.5 text-[10px] font-semibold" style={{ color: '#7C3AED' }}>H:{(item as any).hucreNumarasi}</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-2.5">
+                                {item.status === 'in_stock' && (
+                                  <span className="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Aktif</span>
+                                )}
+                                {item.status === 'used' && (
+                                  <span className="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">Kullanıldı</span>
+                                )}
+                                {item.status === 'pending_return' && (
+                                  <span className="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">İade Bekliyor</span>
+                                )}
+                                {item.status === 'pending_approval' && (
+                                  <span className="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full bg-orange-100 text-orange-700">Onay Bekliyor</span>
+                                )}
+                              </td>
+                              <td className={cn('px-4 py-2.5 text-xs', isUsed && 'line-through')} style={{ color: 'var(--dashboard-muted)' }}>
+                                {format(item.createdAt, 'dd.MM.yyyy HH:mm', { locale: tr })}
+                              </td>
+                              <td className="px-4 py-2.5 text-xs" style={{ color: 'var(--dashboard-muted)' }}>
+                                {item.usedAt
+                                  ? format(item.usedAt, 'dd.MM.yyyy HH:mm', { locale: tr })
+                                  : '—'
+                                }
+                              </td>
+                              <td className="px-4 py-2.5 text-center">
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); openObservation({
+                                    id: item.id,
+                                    scope: 'personal',
+                                    stokKodu: item.stokKodu,
+                                    stokAdi: item.stokAdi,
+                                    serialNumber: item.serialNumber,
+                                    hucreNumarasi: (item as any).hucreNumarasi,
+                                    ownerName: item.ownerName,
+                                  }); }}
+                                  title="Gözlem: Bu ürüne ait transfer geçmişini göster"
+                                  className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-lg transition-all active:scale-95"
+                                  style={{ background: 'var(--dashboard-surface)', color: 'var(--dashboard-accent)' }}
+                                >
+                                  <History className="h-3 w-3" />
+                                  Gözlem
+                                </button>
+                              </td>
+                              <td className="px-4 py-2.5 text-right">
+                                {item.status === 'pending_approval' ? (
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); approveTransfer(item); }}
+                                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition-all active:scale-95"
+                                      style={{ background: '#16A34A' }}
+                                    >
+                                      <CheckCircle className="w-3.5 h-3.5" /> Onayla
+                                    </button>
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); rejectTransfer(item); }}
+                                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all active:scale-95 hover:bg-red-50"
+                                      style={{ color: '#B91C1C' }}
+                                    >
+                                      <XCircle className="w-3.5 h-3.5" /> Reddet
+                                    </button>
+                                  </div>
+                                ) : (isAdmin || isTeknikLojistik) ? (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); deletePersonnelStockItem(item); }}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all active:scale-95 hover:bg-red-50"
+                                    style={{ color: '#B91C1C' }}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                    Stok Sil
+                                  </button>
+                                ) : (item.status === 'in_stock' && item.ownerUid === currentUserProfile?.uid) ? (
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const maxQty = personnelStock.filter(s => s.status === 'in_stock' && s.ownerUid === item.ownerUid && s.stokKodu === item.stokKodu).length;
+                                        setPTransferItem(item);
+                                        setPTransferQuantity(Math.min(1, maxQty));
+                                        setPTransferTargetUid('');
+                                        setPTransferTargetName('');
+                                        setPTransferSearchQuery('');
+                                        setPTransferModalOpen(true);
+                                      }}
+                                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all active:scale-95"
+                                      style={{ background: 'var(--dashboard-surface)', color: 'var(--dashboard-accent)' }}
+                                    >
+                                      <Send className="h-3.5 w-3.5" />
+                                      Transfer Et
+                                    </button>
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); setReturnModalItem(item); setReturnCondition('iyi'); setReturnNote(''); setReturnModalOpen(true); }}
+                                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg transition-all active:scale-95"
+                                      style={{ background: 'var(--dashboard-surface)', color: 'var(--dashboard-accent)' }}
+                                    >
+                                      <Upload className="h-3.5 w-3.5" />
+                                      İade Et
+                                    </button>
+                                  </div>
+                                ) : isUsed ? (
+                                  <span className="text-[11px] text-left inline-block max-w-[220px]" style={{ color: 'var(--dashboard-muted)' }}>
+                                    {(item.usageLabName || 'Lab bilgisi yok')} · {(item.usageDeviceName || item.usedOnDeviceName || 'Cihaz bilgisi yok')}
+                                  </span>
+                                ) : (
+                                  <span className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>—</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-2.5 text-center">
+                                {isUsed && item.usedOnFormId && item.usedOnFormType && item.usedOnDeviceId ? (
+                                  <SparePartFormPDFButton formId={item.usedOnFormId} formType={item.usedOnFormType} deviceId={item.usedOnDeviceId} />
+                                ) : (
+                                  <span className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>—</span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </React.Fragment>
                     );
                   })}
                 </tbody>
@@ -3932,7 +4064,7 @@ export default function YedekParcaTransferPage() {
             {totalPersonnelPages > 1 && (
               <div className="flex items-center justify-between pt-2">
                 <span className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>
-                  {filteredPersonnelStock.length} kayıt — Sayfa {personnelStockPage + 1} / {totalPersonnelPages}
+                  {groupedPersonnelStock.length} grup ({filteredPersonnelStock.length} adet) — Sayfa {personnelStockPage + 1} / {totalPersonnelPages}
                 </span>
                 <div className="flex gap-2">
                   <button
