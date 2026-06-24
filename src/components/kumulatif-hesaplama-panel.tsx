@@ -111,6 +111,8 @@ export default function KumulatifHesaplamaPanel() {
   const [dbCounterRecordId, setDbCounterRecordId] = useState<string | null>(null);
   const [isLoadingCounter, setIsLoadingCounter] = useState(false);
   const [isSavingCounter, setIsSavingCounter] = useState(false);
+  const [lastLoadedKey, setLastLoadedKey] = useState<string>('');
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
   const hasCounterProducts = useMemo(() => {
     return filteredProducts.some(p => p.counterEnabled || p.counterPlusEnabled);
@@ -330,6 +332,8 @@ export default function KumulatifHesaplamaPanel() {
     }
   }, [pendingDocs, toast]);
 
+  const [isApplyingCounter, setIsApplyingCounter] = useState(false);
+
   const handleCounterFileChange = async (file: File | null) => {
     if (!file) {
       setCounterFile(null);
@@ -339,17 +343,11 @@ export default function KumulatifHesaplamaPanel() {
     setIsSavingCounter(true);
     try {
       const parsedData = await parseCounterExcelForAllSheets(file);
-      const storagePath = `counter-files/${currentCompanyId || 'default'}/${selectedPeriod}/${Date.now()}_${file.name}`;
-      const storageRef = ref(storage, storagePath);
-      await uploadBytes(storageRef, file);
-      const downloadUrl = await getDownloadURL(storageRef);
       
       const recordPayload = {
         companyId: currentCompanyId || 'default',
         period: selectedPeriod,
         fileName: file.name,
-        storagePath,
-        downloadUrl,
         parsedDataJson: JSON.stringify(parsedData),
         uploadedAt: serverTimestamp(),
         uploadedById: currentUser?.uid || '',
@@ -371,10 +369,10 @@ export default function KumulatifHesaplamaPanel() {
         description: `${selectedPeriod} dönemi için counter verileri başarıyla yüklendi ve kaydedildi.`,
       });
     } catch (err: any) {
-      console.error('Counter upload/parse failed:', err);
+      console.error('Counter parse/save failed:', err);
       toast({
         title: 'Yükleme başarısız',
-        description: err?.message || 'Excel dosyası yüklenirken veya ayrıştırılırken hata oluştu.',
+        description: err?.message || 'Excel dosyası yüklenirken veya kaydedilirken hata oluştu.',
         variant: 'destructive',
       });
       setCounterFile(null);
@@ -387,20 +385,7 @@ export default function KumulatifHesaplamaPanel() {
     setIsSavingCounter(true);
     try {
       if (dbCounterRecordId) {
-        const docRef = doc(db, 'qoreCalculationPeriodCounters', dbCounterRecordId);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          if (data.storagePath) {
-            try {
-              const storageRef = ref(storage, data.storagePath);
-              await deleteObject(storageRef);
-            } catch (storageErr) {
-              console.warn('Storage file could not be deleted:', storageErr);
-            }
-          }
-        }
-        await deleteDoc(docRef);
+        await deleteDoc(doc(db, 'qoreCalculationPeriodCounters', dbCounterRecordId));
       }
       
       setDbCounterRecordId(null);
@@ -421,6 +406,135 @@ export default function KumulatifHesaplamaPanel() {
       });
     } finally {
       setIsSavingCounter(false);
+    }
+  };
+
+  const handleApplyCounterData = async () => {
+    if (!dbCounterData && !counterFile) {
+      toast({ title: 'Counter Dosyası Yok', description: 'Lütfen önce bu döneme ait bir Counter Excel dosyası yükleyin.', variant: 'destructive' });
+      return;
+    }
+    if (!hospitalId || filteredProducts.length === 0) {
+      toast({ title: 'Hata', description: 'Lütfen önce bir laboratuvar seçin.', variant: 'destructive' });
+      return;
+    }
+    
+    setIsApplyingCounter(true);
+    try {
+      let counterMap = new Map<string, number>();
+      const selectedHospitalObj = selectedHospital || hospitals.find(h => h.id === hospitalId);
+      
+      if (dbCounterData && selectedHospitalObj) {
+        const sheetKeys = Object.keys(dbCounterData);
+        const targetKey = sheetKeys.find(key => {
+          const s = cleanTurkishChars(key);
+          return (
+            (selectedHospitalObj.ceomedCariKodu && cleanTurkishChars(selectedHospitalObj.ceomedCariKodu) === s) ||
+            (selectedHospitalObj.name && cleanTurkishChars(selectedHospitalObj.name) === s) ||
+            (selectedHospitalObj.kod && cleanTurkishChars(selectedHospitalObj.kod) === s) ||
+            (selectedHospitalObj.name && cleanTurkishChars(selectedHospitalObj.name).includes(s)) ||
+            (selectedHospitalObj.name && s.includes(cleanTurkishChars(selectedHospitalObj.name)))
+          );
+        });
+        if (targetKey) {
+          const sheetMap = dbCounterData[targetKey];
+          Object.entries(sheetMap).forEach(([sutKodu, val]) => {
+            counterMap.set(sutKodu, val as number);
+          });
+        }
+      } else if (counterFile && selectedHospitalObj) {
+        const localData = await parseCounterExcelForAllSheets(counterFile);
+        const sheetKeys = Object.keys(localData);
+        const targetKey = sheetKeys.find(key => {
+          const s = cleanTurkishChars(key);
+          return (
+            (selectedHospitalObj.ceomedCariKodu && cleanTurkishChars(selectedHospitalObj.ceomedCariKodu) === s) ||
+            (selectedHospitalObj.name && cleanTurkishChars(selectedHospitalObj.name) === s) ||
+            (selectedHospitalObj.kod && cleanTurkishChars(selectedHospitalObj.kod) === s) ||
+            (selectedHospitalObj.name && cleanTurkishChars(selectedHospitalObj.name).includes(s)) ||
+            (selectedHospitalObj.name && s.includes(cleanTurkishChars(selectedHospitalObj.name)))
+          );
+        });
+        if (targetKey) {
+          const sheetMap = localData[targetKey];
+          Object.entries(sheetMap).forEach(([sutKodu, val]) => {
+            counterMap.set(sutKodu, val as number);
+          });
+        }
+      }
+      
+      const defsSnap = await getDocs(scopedQuery('testDefinitions', currentCompanyId, isSuperAdmin));
+      const productToSutCodeMap = new Map<string, string>();
+      defsSnap.docs.forEach((d) => {
+        const def = d.data() as any;
+        const sutKodu = String(def.sutKodu || '').trim();
+        const linkedStokKodlari = (def.linkedStokKodlari || []) as string[];
+        linkedStokKodlari.forEach(code => {
+          if (code && typeof code === 'string') {
+            productToSutCodeMap.set(code.trim(), sutKodu);
+          }
+        });
+      });
+      
+      const currentRows = rows.length > 0 ? [...rows] : filteredProducts.map((product) => ({
+        ...product,
+        test: product.testAdi || product.stokKodu,
+        routine: 0,
+        rerun: 0,
+        calib: 0,
+        control: 0,
+        total: 0,
+        matchedTests: [] as string[],
+      }));
+      
+      const updatedRows = currentRows.map(row => {
+        const isCounter = !!row.counterEnabled;
+        const isCounterPlus = !!row.counterPlusEnabled;
+        
+        if (!isCounter && !isCounterPlus) {
+          return row;
+        }
+        
+        const sutKodu = productToSutCodeMap.get(row.stokKodu);
+        let counterVal = 0;
+        if (sutKodu && counterMap.has(sutKodu)) {
+          counterVal = counterMap.get(sutKodu) || 0;
+        }
+        
+        let routine = row.routine || 0;
+        let rerun = row.rerun || 0;
+        let calib = row.calib || 0;
+        let control = row.control || 0;
+        let total = row.total || 0;
+        
+        if (isCounter) {
+          total = counterVal;
+          routine = counterVal;
+          rerun = 0;
+          calib = 0;
+          control = 0;
+        } else if (isCounterPlus) {
+          total = total + counterVal;
+          routine = routine + counterVal;
+        }
+        
+        return {
+          ...row,
+          routine,
+          rerun,
+          calib,
+          control,
+          total,
+        };
+      });
+      
+      setRows(updatedRows);
+      toast({ title: 'Counter verileri uygulandı', description: 'Counter ve Counter+ tanımlı ürünlerin değerleri güncellendi.' });
+    } catch (err: any) {
+      console.error('Apply counter data failed:', err);
+      toast({ title: 'Hata', description: err?.message || 'Counter verileri uygulanırken hata oluştu.', variant: 'destructive' });
+    } finally {
+      setIsApplyingCounter(false);
     }
   };
 
@@ -449,9 +563,77 @@ export default function KumulatifHesaplamaPanel() {
     })();
   }, [currentCompanyId, isSuperAdmin]);
 
+  useEffect(() => {
+    if (!hospitalId || !currentCompanyId) {
+      setRows([]);
+      setUnmatchedTests([]);
+      setLastLoadedKey('');
+      return;
+    }
+    
+    const loadKey = `${hospitalId}_${month}_${year}_${brandFilter}_${productGroupFilter}`;
+    
+    if (lastLoadedKey === loadKey) return;
+    setLastLoadedKey(loadKey);
+
+    (async () => {
+      setIsLoadingHistory(true);
+      try {
+        const snap = await getDocs(
+          query(
+            collection(db, 'kumulatifHesaplamaGecmisi'),
+            where('companyId', '==', currentCompanyId),
+            where('hospitalId', '==', hospitalId),
+            where('month', '==', month + 1),
+            where('year', '==', year)
+          )
+        );
+        if (!snap.empty) {
+          const sortedDocs = [...snap.docs].sort((a, b) => {
+            const aTime = a.data().createdAt?.seconds || 0;
+            const bTime = b.data().createdAt?.seconds || 0;
+            return bTime - aTime;
+          });
+          const latestDoc = sortedDocs[0].data();
+          const items = (latestDoc.items || []) as any[];
+          
+          const historyMap = new Map<string, any>();
+          items.forEach(item => {
+            if (item.productId) {
+              historyMap.set(item.productId, item);
+            }
+          });
+          
+          const mappedRows = filteredProducts.map(product => {
+            const hist = historyMap.get(product.stokKodu);
+            return {
+              ...product,
+              test: product.testAdi || product.stokKodu,
+              routine: hist ? hist.routine || 0 : 0,
+              rerun: hist ? hist.rerun || 0 : 0,
+              calib: hist ? hist.calib || 0 : 0,
+              control: hist ? hist.control || 0 : 0,
+              total: hist ? hist.total || 0 : 0,
+              matchedTests: hist ? hist.matchedTests || [] : [],
+            };
+          });
+          setRows(mappedRows);
+          setUnmatchedTests([]);
+        } else {
+          setRows([]);
+          setUnmatchedTests([]);
+        }
+      } catch (err) {
+        console.error('Error loading cumulative calculation history:', err);
+      } finally {
+        setIsLoadingHistory(false);
+      }
+    })();
+  }, [hospitalId, month, year, currentCompanyId, filteredProducts, brandFilter, productGroupFilter, lastLoadedKey]);
+
   const hasComputed = rows.length > 0;
   const availableUnmatchedProducts = useMemo(() => rows.filter((row) => row.matchedTests.length === 0), [rows]);
-  const canParse = (files.length > 0 || counterFile !== null || dbCounterData !== null) && !!hospitalId && filteredProducts.length > 0 && !isParsing && !isLoadingScope;
+  const canParse = files.length > 0 && !!hospitalId && filteredProducts.length > 0 && !isParsing && !isLoadingScope;
 
   function cancelCombine() {
     setAnchor(null);
@@ -486,10 +668,6 @@ export default function KumulatifHesaplamaPanel() {
       setError('Lütfen önce bir laboratuvar seçin ve dosya ekleyin.');
       return;
     }
-    if (hasCounterProducts && !counterFile && !dbCounterData) {
-      setError('Bu laboratuvarda Counter / Counter+ tanımlı ürünler bulunmaktadır. Lütfen sağ üstteki Counter Excel Dosyası alanından ilgili dosyayı yükleyin.');
-      return;
-    }
     setError(null);
     setIsParsing(true);
     setRows([]);
@@ -502,59 +680,6 @@ export default function KumulatifHesaplamaPanel() {
         parseCumulativePdfFiles(pdfs),
         parseCumulativeTxtFiles(txts),
       ]);
-
-      let counterMap = new Map<string, number>();
-      if (dbCounterData && selectedHospital) {
-        const sheetKeys = Object.keys(dbCounterData);
-        const targetKey = sheetKeys.find(key => {
-          const s = cleanTurkishChars(key);
-          return (
-            (selectedHospital.ceomedCariKodu && cleanTurkishChars(selectedHospital.ceomedCariKodu) === s) ||
-            (selectedHospital.name && cleanTurkishChars(selectedHospital.name) === s) ||
-            (selectedHospital.kod && cleanTurkishChars(selectedHospital.kod) === s) ||
-            (selectedHospital.name && cleanTurkishChars(selectedHospital.name).includes(s)) ||
-            (selectedHospital.name && s.includes(cleanTurkishChars(selectedHospital.name)))
-          );
-        });
-        if (targetKey) {
-          const sheetMap = dbCounterData[targetKey];
-          Object.entries(sheetMap).forEach(([sutKodu, val]) => {
-            counterMap.set(sutKodu, val as number);
-          });
-        }
-      } else if (counterFile && selectedHospital) {
-        const localData = await parseCounterExcelForAllSheets(counterFile);
-        const sheetKeys = Object.keys(localData);
-        const targetKey = sheetKeys.find(key => {
-          const s = cleanTurkishChars(key);
-          return (
-            (selectedHospital.ceomedCariKodu && cleanTurkishChars(selectedHospital.ceomedCariKodu) === s) ||
-            (selectedHospital.name && cleanTurkishChars(selectedHospital.name) === s) ||
-            (selectedHospital.kod && cleanTurkishChars(selectedHospital.kod) === s) ||
-            (selectedHospital.name && cleanTurkishChars(selectedHospital.name).includes(s)) ||
-            (selectedHospital.name && s.includes(cleanTurkishChars(selectedHospital.name)))
-          );
-        });
-        if (targetKey) {
-          const sheetMap = localData[targetKey];
-          Object.entries(sheetMap).forEach(([sutKodu, val]) => {
-            counterMap.set(sutKodu, val as number);
-          });
-        }
-      }
-
-      const defsSnap = await getDocs(scopedQuery('testDefinitions', currentCompanyId, isSuperAdmin));
-      const productToSutCodeMap = new Map<string, string>();
-      defsSnap.docs.forEach((d) => {
-        const def = d.data() as any;
-        const sutKodu = String(def.sutKodu || '').trim();
-        const linkedStokKodlari = (def.linkedStokKodlari || []) as string[];
-        linkedStokKodlari.forEach(code => {
-          if (code && typeof code === 'string') {
-            productToSutCodeMap.set(code.trim(), sutKodu);
-          }
-        });
-      });
 
       const merged = [...pdfRows, ...txtRows];
       const aggregated = applyCumulativeAutoSum(aggregateCumulative(merged), autoSumDefinitions);
@@ -576,34 +701,11 @@ export default function KumulatifHesaplamaPanel() {
           total: acc.total + (match.total || 0),
         }), { routine: 0, rerun: 0, calib: 0, control: 0, total: 0 });
 
-        const isCounter = !!product.counterEnabled;
-        const isCounterPlus = !!product.counterPlusEnabled;
-        let finalTotal = totals.total;
-
-        if (isCounter || isCounterPlus) {
-          const sutKodu = productToSutCodeMap.get(product.stokKodu);
-          let counterVal = 0;
-          if (sutKodu && counterMap && counterMap.has(sutKodu)) {
-            counterVal = counterMap.get(sutKodu) || 0;
-          }
-          
-          if (isCounter) {
-            finalTotal = counterVal;
-            totals.routine = counterVal;
-            totals.rerun = 0;
-            totals.calib = 0;
-            totals.control = 0;
-          } else if (isCounterPlus) {
-            finalTotal = counterVal + totals.total;
-            totals.routine = totals.routine + counterVal;
-          }
-        }
-
         return {
           ...product,
           test: product.testAdi || product.stokKodu,
           ...totals,
-          total: finalTotal,
+          total: totals.total,
           matchedTests: matches.map((match) => match.test),
         };
       });
@@ -974,6 +1076,13 @@ export default function KumulatifHesaplamaPanel() {
               {isParsing ? <Loader2 size={17} style={{ animation: 'cySpin 1s linear infinite' }} /> : <Archive size={17} />}
               {files.length > 0 ? `${files.length} Dosyayı Ayrıştır` : 'Ayrıştır'}
             </PrimaryBtn>
+            <SoftBtn
+              onClick={handleApplyCounterData}
+              disabled={(!dbCounterData && !counterFile) || isApplyingCounter || !hospitalId}
+            >
+              {isApplyingCounter ? <Loader2 size={17} style={{ animation: 'cySpin 1s linear infinite' }} /> : <FileSpreadsheet size={17} />}
+              Counter Verilerini Al
+            </SoftBtn>
             {hasComputed && (
               <>
                 <SoftBtn onClick={removeZeroRows} disabled={!hasZeroRows || combineMode}>
