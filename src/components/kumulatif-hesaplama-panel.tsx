@@ -16,10 +16,11 @@ import {
   XCircle,
   FileSpreadsheet,
 } from 'lucide-react';
-import { addDoc, collection, doc, getDocs, increment, orderBy, serverTimestamp, writeBatch } from 'firebase/firestore';
+import { addDoc, collection, doc, getDocs, increment, orderBy, serverTimestamp, writeBatch, getDoc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
-import { db } from '@/lib/firebase';
+import { db, storage } from '@/lib/firebase';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import type { Hospital } from '@/lib/types';
 import { exportDataToExcel } from '@/lib/utils';
@@ -105,6 +106,12 @@ export default function KumulatifHesaplamaPanel() {
   const [counterFile, setCounterFile] = useState<File | null>(null);
   const counterFileInputRef = useRef<HTMLInputElement>(null);
 
+  const [dbCounterFileName, setDbCounterFileName] = useState<string | null>(null);
+  const [dbCounterData, setDbCounterData] = useState<any | null>(null);
+  const [dbCounterRecordId, setDbCounterRecordId] = useState<string | null>(null);
+  const [isLoadingCounter, setIsLoadingCounter] = useState(false);
+  const [isSavingCounter, setIsSavingCounter] = useState(false);
+
   const hasCounterProducts = useMemo(() => {
     return filteredProducts.some(p => p.counterEnabled || p.counterPlusEnabled);
   }, [filteredProducts]);
@@ -121,7 +128,7 @@ export default function KumulatifHesaplamaPanel() {
       .replace(/[^a-z0-9]/g, '');
   };
 
-  const parseCounterExcel = useCallback((file: File, hospital: Hospital): Promise<Map<string, number>> => {
+  const parseCounterExcelForAllSheets = useCallback((file: File): Promise<{ [sheetName: string]: { [sutKodu: string]: number } }> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = (event) => {
@@ -130,31 +137,7 @@ export default function KumulatifHesaplamaPanel() {
             const data = event.target?.result;
             const workbook = XLSX.read(data, { type: 'array' });
             
-            const cleanedSheetNames = workbook.SheetNames.map(name => ({
-              original: name,
-              cleaned: cleanTurkishChars(name)
-            }));
-            
-            const target = cleanedSheetNames.find(s => 
-              (hospital.ceomedCariKodu && cleanTurkishChars(hospital.ceomedCariKodu) === s.cleaned) ||
-              (hospital.name && cleanTurkishChars(hospital.name) === s.cleaned) ||
-              (hospital.kod && cleanTurkishChars(hospital.kod) === s.cleaned) ||
-              (hospital.name && cleanTurkishChars(hospital.name).includes(s.cleaned)) ||
-              (hospital.name && s.cleaned.includes(cleanTurkishChars(hospital.name)))
-            );
-            
-            const sheetName = target ? target.original : workbook.SheetNames[0];
-            if (!sheetName) {
-              reject(new Error("Excel dosyasında sayfa bulunamadı."));
-              return;
-            }
-            
-            const worksheet = workbook.Sheets[sheetName];
-            const rows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1 });
-            
-            let sutKoduColIndex = -1;
-            let periodColIndex = -1;
-            let headerRowIndex = -1;
+            const parsedData: { [sheetName: string]: { [sutKodu: string]: number } } = {};
             
             const monthAbbrs = ['oca', 'sub', 'mar', 'nis', 'may', 'haz', 'tem', 'agu', 'eyl', 'eki', 'kas', 'ara'];
             const monthFull = ['ocak', 'subat', 'mart', 'nisan', 'mayis', 'haziran', 'temmuz', 'agustos', 'eylul', 'ekim', 'kasim', 'aralik'];
@@ -162,59 +145,88 @@ export default function KumulatifHesaplamaPanel() {
             const targetFull = monthFull[month];
             const shortYear = String(year).slice(-2);
             
-            for (let r = 0; r < Math.min(rows.length, 20); r++) {
-              const row = rows[r];
-              if (!Array.isArray(row)) continue;
+            workbook.SheetNames.forEach((sheetName) => {
+              const worksheet = workbook.Sheets[sheetName];
+              const rows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1 });
               
-              const tempSutIdx = row.findIndex(cell => {
-                const s = String(cell || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-                return s === 'sutkodu' || s === 'sutkod';
-              });
+              let sutKoduColIndex = 3; // Column D is index 3
+              let periodColIndex = -1;
+              let headerRowIndex = -1;
               
-              if (tempSutIdx !== -1) {
-                sutKoduColIndex = tempSutIdx;
-                headerRowIndex = r;
+              // Find header row and period column index (starting from index 6 - Column G)
+              for (let r = 0; r < Math.min(rows.length, 25); r++) {
+                const row = rows[r];
+                if (!Array.isArray(row)) continue;
                 
-                periodColIndex = row.findIndex(cell => {
-                  const s = cleanTurkishChars(String(cell || ''));
-                  return (
+                for (let c = 6; c < row.length; c++) {
+                  const s = cleanTurkishChars(String(row[c] || ''));
+                  if (
                     s.includes(`${targetAbbr}${shortYear}`) ||
                     s.includes(`${targetFull}${year}`) ||
                     s.includes(`${targetFull}${shortYear}`) ||
-                    s.includes(`${targetAbbr}${year}`)
-                  );
-                });
-                break;
+                    s.includes(`${targetAbbr}${year}`) ||
+                    s.includes(`${targetAbbr}.${shortYear}`) ||
+                    s.includes(`${targetAbbr}.${year}`)
+                  ) {
+                    periodColIndex = c;
+                    headerRowIndex = r;
+                    break;
+                  }
+                }
+                if (periodColIndex !== -1) {
+                  break;
+                }
               }
-            }
-            
-            if (sutKoduColIndex === -1) {
-              reject(new Error(`Excel sayfasında (${sheetName}) 'SUT KODU' sütunu bulunamadı.`));
-              return;
-            }
-            if (periodColIndex === -1) {
-              reject(new Error(`Excel sayfasında (${sheetName}) '${targetAbbr}.${shortYear}' dönemi için sütun bulunamadı.`));
-              return;
-            }
-            
-            const counterMap = new Map<string, number>();
-            for (let r = headerRowIndex + 1; r < rows.length; r++) {
-              const row = rows[r];
-              if (!Array.isArray(row)) continue;
-              const sutVal = String(row[sutKoduColIndex] || '').trim();
-              if (!sutVal) continue;
               
-              const rawVal = row[periodColIndex];
-              let parsedNum = 0;
-              if (typeof rawVal === 'number') {
-                parsedNum = rawVal;
-              } else {
-                parsedNum = Number(String(rawVal || '0').replace(/[^0-9.-]/g, '')) || 0;
+              // Fallback: If not found, look at any row containing period header in column >= 6
+              if (periodColIndex === -1) {
+                for (let r = 0; r < Math.min(rows.length, 25); r++) {
+                  const row = rows[r];
+                  if (!Array.isArray(row)) continue;
+                  for (let c = 6; c < row.length; c++) {
+                    const s = cleanTurkishChars(String(row[c] || ''));
+                    if (
+                      s.includes(`${targetAbbr}${shortYear}`) ||
+                      s.includes(`${targetFull}${year}`) ||
+                      s.includes(`${targetFull}${shortYear}`) ||
+                      s.includes(`${targetAbbr}${year}`) ||
+                      s.includes(`${targetAbbr}.${shortYear}`) ||
+                      s.includes(`${targetAbbr}.${year}`)
+                    ) {
+                      periodColIndex = c;
+                      headerRowIndex = r;
+                      break;
+                    }
+                  }
+                  if (periodColIndex !== -1) break;
+                }
               }
-              counterMap.set(sutVal, parsedNum);
-            }
+              
+              if (periodColIndex !== -1) {
+                const sheetMap: { [sutKodu: string]: number } = {};
+                const startRow = headerRowIndex !== -1 ? headerRowIndex + 1 : 0;
+                for (let r = startRow; r < rows.length; r++) {
+                  const row = rows[r];
+                  if (!Array.isArray(row)) continue;
+                  
+                  const sutVal = String(row[sutKoduColIndex] || '').trim();
+                  if (!sutVal) continue;
+                  
+                  const rawVal = row[periodColIndex];
+                  let parsedNum = 0;
+                  if (typeof rawVal === 'number') {
+                    parsedNum = rawVal;
+                  } else {
+                    const cleanVal = String(rawVal || '0').replace(/[\.,]/g, '').trim();
+                    parsedNum = Number(cleanVal) || 0;
+                  }
+                  sheetMap[sutVal] = parsedNum;
+                }
+                parsedData[sheetName] = sheetMap;
+              }
+            });
             
-            resolve(counterMap);
+            resolve(parsedData);
           }).catch(error => {
             reject(error);
           });
@@ -228,6 +240,48 @@ export default function KumulatifHesaplamaPanel() {
       reader.readAsArrayBuffer(file);
     });
   }, [month, year]);
+
+  const loadCounterRecord = useCallback(async () => {
+    if (!currentCompanyId) return;
+    setIsLoadingCounter(true);
+    try {
+      const snap = await getDocs(
+        query(
+          collection(db, 'qoreCalculationPeriodCounters'),
+          where('companyId', '==', currentCompanyId),
+          where('period', '==', selectedPeriod)
+        )
+      );
+      if (!snap.empty) {
+        const docSnap = snap.docs[0];
+        const data = docSnap.data();
+        setDbCounterRecordId(docSnap.id);
+        setDbCounterFileName(data.fileName || 'Kaydedilmiş Counter Dosyası');
+        if (data.parsedDataJson) {
+          try {
+            setDbCounterData(JSON.parse(data.parsedDataJson));
+          } catch (e) {
+            console.error('Parsed counter data JSON could not be parsed:', e);
+            setDbCounterData(null);
+          }
+        } else {
+          setDbCounterData(null);
+        }
+      } else {
+        setDbCounterRecordId(null);
+        setDbCounterFileName(null);
+        setDbCounterData(null);
+      }
+    } catch (err) {
+      console.error('Counter record could not be loaded:', err);
+    } finally {
+      setIsLoadingCounter(false);
+    }
+  }, [selectedPeriod, currentCompanyId]);
+
+  useEffect(() => {
+    loadCounterRecord();
+  }, [loadCounterRecord]);
 
   const refreshPendingDocs = useCallback(async () => {
     if (!hospitalId) {
@@ -276,6 +330,100 @@ export default function KumulatifHesaplamaPanel() {
     }
   }, [pendingDocs, toast]);
 
+  const handleCounterFileChange = async (file: File | null) => {
+    if (!file) {
+      setCounterFile(null);
+      return;
+    }
+    setCounterFile(file);
+    setIsSavingCounter(true);
+    try {
+      const parsedData = await parseCounterExcelForAllSheets(file);
+      const storagePath = `counter-files/${currentCompanyId || 'default'}/${selectedPeriod}/${Date.now()}_${file.name}`;
+      const storageRef = ref(storage, storagePath);
+      await uploadBytes(storageRef, file);
+      const downloadUrl = await getDownloadURL(storageRef);
+      
+      const recordPayload = {
+        companyId: currentCompanyId || 'default',
+        period: selectedPeriod,
+        fileName: file.name,
+        storagePath,
+        downloadUrl,
+        parsedDataJson: JSON.stringify(parsedData),
+        uploadedAt: serverTimestamp(),
+        uploadedById: currentUser?.uid || '',
+        uploadedByName: currentUserProfile?.name || currentUser?.email || 'Bilinmeyen',
+      };
+      
+      if (dbCounterRecordId) {
+        await updateDoc(doc(db, 'qoreCalculationPeriodCounters', dbCounterRecordId), recordPayload);
+      } else {
+        const docRef = await addDoc(collection(db, 'qoreCalculationPeriodCounters'), recordPayload);
+        setDbCounterRecordId(docRef.id);
+      }
+      
+      setDbCounterFileName(file.name);
+      setDbCounterData(parsedData);
+      
+      toast({
+        title: 'Counter dosyası kaydedildi',
+        description: `${selectedPeriod} dönemi için counter verileri başarıyla yüklendi ve kaydedildi.`,
+      });
+    } catch (err: any) {
+      console.error('Counter upload/parse failed:', err);
+      toast({
+        title: 'Yükleme başarısız',
+        description: err?.message || 'Excel dosyası yüklenirken veya ayrıştırılırken hata oluştu.',
+        variant: 'destructive',
+      });
+      setCounterFile(null);
+    } finally {
+      setIsSavingCounter(false);
+    }
+  };
+
+  const handleRemoveCounterFile = async () => {
+    setIsSavingCounter(true);
+    try {
+      if (dbCounterRecordId) {
+        const docRef = doc(db, 'qoreCalculationPeriodCounters', dbCounterRecordId);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          if (data.storagePath) {
+            try {
+              const storageRef = ref(storage, data.storagePath);
+              await deleteObject(storageRef);
+            } catch (storageErr) {
+              console.warn('Storage file could not be deleted:', storageErr);
+            }
+          }
+        }
+        await deleteDoc(docRef);
+      }
+      
+      setDbCounterRecordId(null);
+      setDbCounterFileName(null);
+      setDbCounterData(null);
+      setCounterFile(null);
+      
+      toast({
+        title: 'Counter dosyası silindi',
+        description: `${selectedPeriod} dönemine ait counter verileri temizlendi.`,
+      });
+    } catch (err: any) {
+      console.error('Counter delete failed:', err);
+      toast({
+        title: 'Silme işlemi başarısız',
+        description: err?.message || 'Counter dosyası silinirken hata oluştu.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSavingCounter(false);
+    }
+  };
+
   const visibleRows = rows.length > 0 ? rows : filteredProducts.map((product) => ({
     ...product,
     test: product.testAdi || product.stokKodu,
@@ -303,7 +451,7 @@ export default function KumulatifHesaplamaPanel() {
 
   const hasComputed = rows.length > 0;
   const availableUnmatchedProducts = useMemo(() => rows.filter((row) => row.matchedTests.length === 0), [rows]);
-  const canParse = (files.length > 0 || counterFile !== null) && !!hospitalId && filteredProducts.length > 0 && !isParsing && !isLoadingScope;
+  const canParse = (files.length > 0 || counterFile !== null || dbCounterData !== null) && !!hospitalId && filteredProducts.length > 0 && !isParsing && !isLoadingScope;
 
   function cancelCombine() {
     setAnchor(null);
@@ -338,7 +486,7 @@ export default function KumulatifHesaplamaPanel() {
       setError('Lütfen önce bir laboratuvar seçin ve dosya ekleyin.');
       return;
     }
-    if (hasCounterProducts && !counterFile) {
+    if (hasCounterProducts && !counterFile && !dbCounterData) {
       setError('Bu laboratuvarda Counter / Counter+ tanımlı ürünler bulunmaktadır. Lütfen sağ üstteki Counter Excel Dosyası alanından ilgili dosyayı yükleyin.');
       return;
     }
@@ -350,11 +498,50 @@ export default function KumulatifHesaplamaPanel() {
     try {
       const pdfs = files.filter(isPdf);
       const txts = files.filter(isTxt);
-      const [pdfRows, txtRows, counterMap] = await Promise.all([
+      const [pdfRows, txtRows] = await Promise.all([
         parseCumulativePdfFiles(pdfs),
         parseCumulativeTxtFiles(txts),
-        counterFile && selectedHospital ? parseCounterExcel(counterFile, selectedHospital) : Promise.resolve(new Map<string, number>()),
       ]);
+
+      let counterMap = new Map<string, number>();
+      if (dbCounterData && selectedHospital) {
+        const sheetKeys = Object.keys(dbCounterData);
+        const targetKey = sheetKeys.find(key => {
+          const s = cleanTurkishChars(key);
+          return (
+            (selectedHospital.ceomedCariKodu && cleanTurkishChars(selectedHospital.ceomedCariKodu) === s) ||
+            (selectedHospital.name && cleanTurkishChars(selectedHospital.name) === s) ||
+            (selectedHospital.kod && cleanTurkishChars(selectedHospital.kod) === s) ||
+            (selectedHospital.name && cleanTurkishChars(selectedHospital.name).includes(s)) ||
+            (selectedHospital.name && s.includes(cleanTurkishChars(selectedHospital.name)))
+          );
+        });
+        if (targetKey) {
+          const sheetMap = dbCounterData[targetKey];
+          Object.entries(sheetMap).forEach(([sutKodu, val]) => {
+            counterMap.set(sutKodu, val as number);
+          });
+        }
+      } else if (counterFile && selectedHospital) {
+        const localData = await parseCounterExcelForAllSheets(counterFile);
+        const sheetKeys = Object.keys(localData);
+        const targetKey = sheetKeys.find(key => {
+          const s = cleanTurkishChars(key);
+          return (
+            (selectedHospital.ceomedCariKodu && cleanTurkishChars(selectedHospital.ceomedCariKodu) === s) ||
+            (selectedHospital.name && cleanTurkishChars(selectedHospital.name) === s) ||
+            (selectedHospital.kod && cleanTurkishChars(selectedHospital.kod) === s) ||
+            (selectedHospital.name && cleanTurkishChars(selectedHospital.name).includes(s)) ||
+            (selectedHospital.name && s.includes(cleanTurkishChars(selectedHospital.name)))
+          );
+        });
+        if (targetKey) {
+          const sheetMap = localData[targetKey];
+          Object.entries(sheetMap).forEach(([sutKodu, val]) => {
+            counterMap.set(sutKodu, val as number);
+          });
+        }
+      }
 
       const defsSnap = await getDocs(scopedQuery('testDefinitions', currentCompanyId, isSuperAdmin));
       const productToSutCodeMap = new Map<string, string>();
@@ -650,20 +837,26 @@ export default function KumulatifHesaplamaPanel() {
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <SoftBtn
                   onClick={() => counterFileInputRef.current?.click()}
+                  disabled={isLoadingCounter || isSavingCounter}
                   style={{
                     flex: 1,
                     height: 38,
                     fontSize: 13,
-                    borderColor: counterFile ? '#10B981' : undefined,
-                    background: counterFile ? 'rgba(16, 185, 129, 0.05)' : undefined
+                    borderColor: (dbCounterFileName || counterFile) ? '#10B981' : undefined,
+                    background: (dbCounterFileName || counterFile) ? 'rgba(16, 185, 129, 0.05)' : undefined
                   }}
                 >
-                  <FileSpreadsheet size={15} style={{ color: counterFile ? '#10B981' : undefined }} />
-                  {counterFile ? counterFile.name : 'Counter Excel Seç'}
+                  {isLoadingCounter || isSavingCounter ? (
+                    <Loader2 size={15} className="animate-spin" />
+                  ) : (
+                    <FileSpreadsheet size={15} style={{ color: (dbCounterFileName || counterFile) ? '#10B981' : undefined }} />
+                  )}
+                  {isLoadingCounter ? 'Yükleniyor...' : isSavingCounter ? 'Kaydediliyor...' : dbCounterFileName ? dbCounterFileName : counterFile ? counterFile.name : 'Counter Excel Seç'}
                 </SoftBtn>
-                {counterFile && (
+                {(dbCounterFileName || counterFile) && (
                   <button
-                    onClick={() => setCounterFile(null)}
+                    onClick={handleRemoveCounterFile}
+                    disabled={isSavingCounter}
                     style={{
                       all: 'unset',
                       cursor: 'pointer',
@@ -686,7 +879,7 @@ export default function KumulatifHesaplamaPanel() {
                   accept=".xlsx,.xls"
                   onChange={(e) => {
                     const file = e.target.files?.[0] || null;
-                    setCounterFile(file);
+                    handleCounterFileChange(file);
                   }}
                   style={{ display: 'none' }}
                 />
@@ -695,7 +888,7 @@ export default function KumulatifHesaplamaPanel() {
           </div>
 
           {/* Bekleyen dosya uyarısı */}
-          {hasCounterProducts && !counterFile && (
+          {hasCounterProducts && !counterFile && !dbCounterFileName && (
             <div style={{ padding: 10, borderRadius: C.radiusSm, background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', color: '#D97706', fontSize: 12.5, fontWeight: 600, display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14 }}>
               <span>⚠️ Bu laboratuvarda Counter veya Counter+ tanımlı ürünler var. Lütfen döneme ait Counter Excel dosyasını yükleyin.</span>
             </div>
