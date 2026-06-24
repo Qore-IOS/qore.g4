@@ -19,9 +19,7 @@ import {
   getDocs,
   updateDoc,
 } from 'firebase/firestore';
-import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { Progress } from '@/components/ui/progress';
 import {
   FileText,
   Trash2,
@@ -30,22 +28,24 @@ import {
   FolderOpen,
   Clock,
   Download,
-  FileUp,
   AlertCircle,
   Scan,
   CheckCircle2,
   Wand2,
-  HelpCircle,
   Pencil,
+  Info,
 } from 'lucide-react';
-import BackButton from '@/components/BackButton';
 import CeomedIrsaliyePanel from '@/components/ceomed/CeomedIrsaliyePanel';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import IrsaliyeScanModal from '@/components/dosya-yonetimi/IrsaliyeScanModal';
 import { useProductCodes } from '@/hooks/useFirebaseQueries';
 import { matchLocationFromFileName, type LocationCandidate } from '@/lib/match-location-from-filename';
 import { autoScanIrsaliyeFile } from '@/lib/irsaliye-auto-scan';
-import { Switch } from '@/components/ui/switch';
+import {
+  C, AC, ClayPage, useMode, Card, RaporHead, SoftBtn, FieldLabel,
+  Dropdown, Toggle, UploadZone, EmptyBlock,
+} from '@/components/raporlama/rapor-kit';
+
+const EASE = 'cubic-bezier(.22, 1, .36, 1)';
 
 interface IrsaliyeDosya {
   id: string;
@@ -67,6 +67,8 @@ interface IrsaliyeDosya {
 export default function DosyaYonetimiPage() {
   const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
+  const mode = useMode();
+  const mobile = mode === 'mobile';
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { data: depots = [] } = useDepots();
   const { data: hospitals = [] } = useHospitals();
@@ -184,7 +186,7 @@ export default function DosyaYonetimiPage() {
               name: currentUserProfile?.displayName || currentUserProfile?.email || null,
             },
           });
-          
+
           if (outcome.ok) {
             toast({
               title: 'Otomatik tarandı',
@@ -523,6 +525,12 @@ export default function DosyaYonetimiPage() {
     setIsDragging(false);
   }, []);
 
+  /** UploadZone'dan gelen gerçek FileList'i mevcut yükleyiciye bağlar. */
+  const handleZoneFiles = useCallback(async (fileList: FileList) => {
+    const files = Array.from(fileList || []);
+    if (files.length > 0) await processManyFiles(files);
+  }, [processManyFiles]);
+
   const handleDelete = useCallback(async (dosya: IrsaliyeDosya) => {
     if (!currentUser) return;
     if (!matchesCompanyScope(dosya, currentCompanyId, isSuperAdmin)) {
@@ -587,204 +595,148 @@ export default function DosyaYonetimiPage() {
     ? dosyalar.filter((d) => d.locationType === selectedLocationType)
     : dosyalar;
 
-  return (
-    <div className="dashboard-neu-page min-h-screen p-4 md:p-6 lg:p-8">
-      {/* ─── Header ───────────────────────────────────────── */}
-      <div className="flex items-center gap-4 mb-6">
-        <BackButton />
-        <div className="flex items-center gap-3">
-          <span className="dashboard-panel-icon flex items-center justify-center w-10 h-10 rounded-full shrink-0">
-            <FolderOpen className="w-5 h-5" />
-          </span>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--dashboard-text)' }}>
-              Dosya Yönetimi
-            </h1>
-            <p className="text-sm" style={{ color: 'var(--dashboard-muted)' }}>
-              Dosyalarınızı yükleyin ve yönetin. Yüklenen dosyalar 1 hafta sonra otomatik olarak silinir.
-            </p>
-          </div>
-        </div>
-      </div>
+  // ── small clay status pill helper (matches demo FileRow pills) ──────────────
+  const Pill = ({ children, bg, color, icon }: { children: React.ReactNode; bg: string; color: string; icon?: React.ReactNode }) => (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: C.radiusPill,
+      background: bg, color, fontSize: 11.5, fontWeight: 700, whiteSpace: 'nowrap',
+    }}>
+      {icon}{children}
+    </span>
+  );
 
-      {/* ─── İrsaliye Yönetimi Section ──────────────────────── */}
-      <div className="glass-card rounded-3xl overflow-hidden" style={{ borderRadius: '24px' }}>
-        {/* Section Header */}
-        <div className="px-6 pt-6 pb-4">
-          <div className="flex items-center gap-3 mb-1">
-            <span className="dashboard-panel-icon flex items-center justify-center w-8 h-8 rounded-full shrink-0">
-              <FileText className="w-4 h-4" />
+  return (
+    <ClayPage>
+      <div style={{ animation: `cyRise 360ms ${EASE} both` }}>
+        {/* ─── Header ───────────────────────────────────────── */}
+        <RaporHead
+          icon={FolderOpen}
+          title="Dosya Yönetimi"
+          desc="Dosyalarınızı yükleyin ve yönetin. Yüklenen dosyalar 1 hafta sonra otomatik olarak silinir."
+          onBack={() => window.history.back()}
+          mobile={mobile}
+        />
+
+        {/* ─── İrsaliye Yönetimi ─────────────────────────────── */}
+        <Card style={{ marginBottom: 16 }}>
+          {/* Section head */}
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 13, marginBottom: 20 }}>
+            <span style={{ width: 46, height: 46, flexShrink: 0, borderRadius: 14, display: 'grid', placeItems: 'center', color: AC.primary, background: 'radial-gradient(120% 120% at 30% 24%, #FFFFFF, #ECE4D4 82%)', boxShadow: C.clayFlat }}>
+              <FileText size={22} />
             </span>
-            <div>
-              <h2 className="text-lg font-semibold" style={{ color: 'var(--dashboard-text)' }}>İrsaliye Yönetimi</h2>
-              <p className="text-sm" style={{ color: 'var(--dashboard-muted)' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: C.ink1, letterSpacing: '-0.01em' }}>İrsaliye Yönetimi</h2>
+              <p style={{ margin: '4px 0 0', fontSize: 13.5, color: C.ink2, fontWeight: 500, lineHeight: 1.5 }}>
                 İrsaliye PDF veya Excel dosyalarını yükleyin. Bu dosyalar Mal Kabul &gt; İrsaliye OCR panelinden &quot;Dosyalardan Seç&quot; seçeneği ile kullanılabilir.
               </p>
             </div>
           </div>
-        </div>
 
-        {/* ─── Kategori Seçimi + Otomatik Tarama Ayarları ──────── */}
-        <div className="px-6 pb-4 grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-          <div className="md:col-span-4">
-            <p className="text-xs font-medium mb-1" style={{ color: 'var(--dashboard-muted)' }}>Kategori</p>
-            <Select
-              value={selectedLocationType}
-              onValueChange={(value: 'hospital' | 'depot') => {
-                setSelectedLocationType(value);
-                setDefaultLocationId('');
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Hastane veya Depo havuzu seçin" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="hospital">Hastaneler / Laboratuvarlar</SelectItem>
-                <SelectItem value="depot">Depolar</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="md:col-span-4">
-            <p className="text-xs font-medium mb-1 flex items-center gap-1" style={{ color: 'var(--dashboard-muted)' }}>
-              Eşleşmeyenler için varsayılan
-              <span title="Dosya adından konum bulunamazsa bu seçilen konuma atanır. Boş bırakılırsa konumsuz yüklenir." className="cursor-help inline-flex">
-                <HelpCircle className="h-3 w-3" />
-              </span>
-            </p>
-            <Select
-              value={defaultLocationId}
-              onValueChange={setDefaultLocationId}
-              disabled={!selectedLocationType}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder={selectedLocationType ? 'Otomatik eşleşmeyenler için (opsiyonel)' : 'Önce kategori seçin'} />
-              </SelectTrigger>
-              <SelectContent>
-                {konumSecenekleri.map((loc: any) => (
-                  <SelectItem key={loc.id} value={loc.id}>
-                    {loc.name || loc.ad}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="md:col-span-4 flex items-center gap-3 pb-2">
-            <div className="flex-1">
-              <p className="text-xs font-medium mb-1 flex items-center gap-1" style={{ color: 'var(--dashboard-muted)' }}>
-                <Wand2 className="h-3 w-3" /> Otomatik Tarama
-              </p>
-              <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>
-                Yüklenen PDF irsaliyeler Vision ile arka planda taranıp Bekleyen İrsaliyelere düşer.
-              </p>
+          {/* Kategori + varsayılan + otomatik tarama */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 18, marginBottom: 20, alignItems: 'start' }}>
+            <div>
+              <FieldLabel>Kategori</FieldLabel>
+              <Dropdown
+                value={selectedLocationType}
+                onChange={(v) => {
+                  setSelectedLocationType(v as 'hospital' | 'depot');
+                  setDefaultLocationId('');
+                }}
+                placeholder="Hastane veya Depo havuzu seçin"
+                options={[
+                  { value: 'hospital', label: 'Hastaneler / Laboratuvarlar' },
+                  { value: 'depot', label: 'Depolar' },
+                ]}
+              />
             </div>
-            <Switch checked={autoScanEnabled} onCheckedChange={setAutoScanEnabled} />
+            <div>
+              <FieldLabel hint>Eşleşmeyenler için varsayılan</FieldLabel>
+              <Dropdown
+                value={defaultLocationId}
+                onChange={setDefaultLocationId}
+                disabled={!selectedLocationType}
+                placeholder={selectedLocationType ? 'Otomatik eşleşmeyenler için (opsiyonel)' : 'Önce kategori seçin'}
+                options={konumSecenekleri.map((loc: any) => ({ value: loc.id, label: loc.name || loc.ad }))}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 13, padding: '12px 14px', borderRadius: C.radiusSm, background: C.surface2, boxShadow: C.clayInset }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13.5, fontWeight: 800, color: C.ink1 }}>
+                  <Wand2 size={15} style={{ color: AC.primary }} /> Otomatik Tarama
+                </div>
+                <div style={{ fontSize: 12, color: C.ink2, marginTop: 4, lineHeight: 1.45 }}>
+                  Yüklenen PDF irsaliyeler Vision ile arka planda taranıp Bekleyen İrsaliyelere düşer.
+                </div>
+              </div>
+              <Toggle on={autoScanEnabled} onChange={setAutoScanEnabled} />
+            </div>
           </div>
-        </div>
 
-        {/* ─── Upload Area ────────────────────────────────── */}
-        <div className="px-6 pb-4">
-          <label
-            onDrop={handleDrop}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            className="flex flex-col items-center justify-center w-full py-10 px-6 rounded-2xl cursor-pointer transition-all duration-200"
-            style={{
-              background: 'var(--dashboard-surface-2)',
-              border: isDragging ? '2px dashed var(--dashboard-accent)' : '2px dashed var(--dashboard-stroke)',
-              boxShadow: isDragging ? 'var(--dashboard-pressed)' : 'none',
-              transform: isDragging ? 'scale(1.005)' : 'scale(1)',
-              pointerEvents: uploading ? 'none' : 'auto',
-              opacity: !selectedLocationType ? 0.65 : 1,
-            }}
-          >
-            {uploading ? (
-              <div className="flex flex-col items-center gap-3">
-                <span className="dashboard-panel-icon flex items-center justify-center w-12 h-12 rounded-full">
-                  <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--dashboard-accent)' }} />
+          {/* Upload zone */}
+          <UploadZone
+            accept={['PDF', 'XLSX', 'XLS', 'Maks. 20MB / dosya']}
+            hint="Birden fazla dosya seçebilirsiniz; konumlar dosya adından otomatik eşleşir."
+            onFiles={handleZoneFiles}
+            acceptAttr=".pdf,.xlsx,.xls"
+            multiple
+          />
+
+          {/* Upload progress (clay inset bar) */}
+          {uploading && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, fontWeight: 700, color: C.ink2, marginBottom: 6 }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+                  <Loader2 size={14} style={{ color: AC.primary, animation: 'cySpin 1s linear infinite' }} /> Yükleniyor...
                 </span>
-                <div className="text-center">
-                  <p className="text-sm font-medium" style={{ color: 'var(--dashboard-text)' }}>Yükleniyor... %{Math.round(uploadProgress)}</p>
-                  <Progress value={uploadProgress} className="w-48 mt-2" />
-                </div>
+                <span>%{Math.round(uploadProgress)}</span>
               </div>
-            ) : (
-              <div className="flex flex-col items-center gap-3">
-                <span className="dashboard-panel-icon flex items-center justify-center w-12 h-12 rounded-full">
-                  <FileUp className="w-6 h-6" style={{ color: isDragging ? 'var(--dashboard-accent)' : 'var(--dashboard-muted)' }} />
-                </span>
-                <div className="text-center">
-                  <p className="text-sm font-medium" style={{ color: 'var(--dashboard-text)' }}>
-                    Dosya(lar) yüklemek için tıklayın veya sürükleyin
-                  </p>
-                  <p className="text-[11px] mt-1" style={{ color: 'var(--dashboard-muted)' }}>
-                    Birden fazla dosya seçebilirsiniz; konumlar dosya adından otomatik eşleşir.
-                  </p>
-                  <div className="flex items-center justify-center gap-2 mt-2">
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: 'var(--dashboard-surface)', color: 'var(--dashboard-muted)', border: '1px solid var(--dashboard-stroke)' }}>PDF</span>
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: 'var(--dashboard-surface)', color: 'var(--dashboard-muted)', border: '1px solid var(--dashboard-stroke)' }}>XLSX</span>
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: 'var(--dashboard-surface)', color: 'var(--dashboard-muted)', border: '1px solid var(--dashboard-stroke)' }}>XLS</span>
-                    <span className="text-xs ml-1" style={{ color: 'var(--dashboard-muted)' }}>Maks. 20MB / dosya</span>
-                  </div>
-                </div>
+              <div style={{ height: 8, borderRadius: 99, background: C.surface2, boxShadow: C.clayInset, overflow: 'hidden' }}>
+                <div style={{
+                  height: '100%', width: `${uploadProgress}%`, borderRadius: 99,
+                  background: `linear-gradient(90deg, ${AC.accent}, ${AC.primary})`,
+                  transition: `width 240ms ${EASE}`,
+                }} />
               </div>
-            )}
-            <input
-              type="file"
-              ref={fileInputRef}
-              className="hidden"
-              accept=".pdf,.xlsx,.xls"
-              multiple
-              onChange={handleFileUpload}
-              disabled={uploading}
-            />
-          </label>
-          {!selectedLocationType && (
-            <p className="mt-2 text-xs" style={{ color: 'var(--dashboard-muted)' }}>
-              Dosya yüklemek için önce Kategori (Hastane veya Depo) seçin. Dosya adından konum otomatik atanır.
-            </p>
+            </div>
           )}
-        </div>
 
-        {/* ─── File List ──────────────────────────────────── */}
-        <div style={{ borderTop: '1px solid var(--dashboard-stroke)' }}>
-          <div className="px-6 py-3 flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold" style={{ color: 'var(--dashboard-text)' }}>
-              Yüklenen Dosyalar
-              <span className="ml-1.5 text-xs font-normal" style={{ color: 'var(--dashboard-muted)' }}>({gorunenDosyalar.length})</span>
-              {autoScanQueue.length > 0 && (
-                <span className="ml-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-700">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  Kuyrukta {autoScanQueue.length}
-                </span>
-              )}
-            </h3>
-            <Button
-              variant="outline"
-              size="sm"
+          {!selectedLocationType && (
+            <div style={{ fontSize: 13, color: C.ink3, marginTop: 12, fontWeight: 500 }}>
+              Dosya yüklemek için önce Kategori (Hastane veya Depo) seçin. Dosya adından konum otomatik atanır.
+            </div>
+          )}
+        </Card>
+
+        {/* ─── Yüklenen Dosyalar ─────────────────────────────── */}
+        <Card style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+            <h2 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: C.ink1 }}>
+              Yüklenen Dosyalar <span style={{ color: C.ink3, fontWeight: 700 }}>({gorunenDosyalar.length})</span>
+            </h2>
+            {autoScanQueue.length > 0 && (
+              <Pill bg={C.surface2} color={C.ink2} icon={<Loader2 size={12} style={{ animation: 'cySpin 1s linear infinite' }} />}>
+                Kuyrukta {autoScanQueue.length}
+              </Pill>
+            )}
+            <div style={{ flex: 1 }} />
+            <SoftBtn
+              tone={AC.primary}
               onClick={queueAutoScanForUnscannedMatched}
               disabled={gorunenDosyalar.length === 0 || autoScanQueue.length > 0}
-              className="h-7 text-xs"
-              title="Eşleşmiş ama henüz taranmamış tüm PDF'leri sırayla tara"
+              style={{ height: 42, padding: '0 16px', fontSize: 13.5 }}
             >
-              <Wand2 className="h-3.5 w-3.5 mr-1" />
-              Tümünü Otomatik Tara
-            </Button>
+              <Wand2 size={16} /> Tümünü Otomatik Tara
+            </SoftBtn>
           </div>
 
           {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin" style={{ color: 'var(--dashboard-muted)' }} />
+            <div style={{ display: 'grid', placeItems: 'center', padding: '48px 0' }}>
+              <Loader2 size={26} style={{ color: C.ink3, animation: 'cySpin 1s linear infinite' }} />
             </div>
           ) : gorunenDosyalar.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 px-6">
-              <span className="dashboard-panel-icon flex items-center justify-center w-12 h-12 rounded-full mb-3">
-                <FolderOpen className="w-6 h-6" style={{ color: 'var(--dashboard-muted)', opacity: 0.5 }} />
-              </span>
-              <p className="text-sm font-medium" style={{ color: 'var(--dashboard-muted)' }}>Henüz dosya yüklenmedi</p>
-              <p className="text-xs mt-1" style={{ color: 'var(--dashboard-muted)', opacity: 0.6 }}>PDF veya Excel yükleyerek başlayın</p>
-            </div>
+            <EmptyBlock icon={<FileText size={28} />} text="Henüz dosya yüklenmedi." sub="PDF veya Excel yükleyerek başlayın." />
           ) : (
-            <div className="max-h-[400px] overflow-y-auto">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {gorunenDosyalar.map((dosya) => {
                 const isScanned = pendingScannedDosyaIds.has(dosya.id);
                 const hasLocation = !!dosya.locationId;
@@ -796,169 +748,148 @@ export default function DosyaYonetimiPage() {
                 return (
                   <div
                     key={dosya.id}
-                    className="flex items-center justify-between px-6 py-3 transition-colors hover:opacity-80"
-                    style={{ borderBottom: '1px solid var(--dashboard-stroke)' }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 13, flexWrap: 'wrap',
+                      padding: '13px 14px', borderRadius: C.radius,
+                      background: C.surfaceHi, boxShadow: C.clayFlat,
+                    }}
                   >
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <span className="dashboard-panel-icon flex items-center justify-center w-9 h-9 rounded-full shrink-0">
-                        {dosya.fileType === 'pdf' ? (
-                          <FileText className="h-4 w-4 text-red-500" />
-                        ) : (
-                          <FileSpreadsheet className="h-4 w-4 text-green-600" />
+                    {/* File type icon tile */}
+                    <span style={{
+                      width: 40, height: 40, flexShrink: 0, borderRadius: 12, display: 'grid', placeItems: 'center',
+                      background: C.surface2, boxShadow: C.clayInset,
+                      color: dosya.fileType === 'pdf' ? C.danger : C.waterDeep,
+                    }}>
+                      {dosya.fileType === 'pdf' ? <FileText size={18} /> : <FileSpreadsheet size={18} />}
+                    </span>
+
+                    {/* Name + meta + badges */}
+                    <div style={{ flex: 1, minWidth: 160 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 14, fontWeight: 800, color: C.ink1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>{dosya.fileName}</span>
+
+                        {isScanned && (
+                          <Pill bg="rgba(111,181,133,0.14)" color={C.waterDeep} icon={<CheckCircle2 size={12} />}>
+                            {dosya.locationType === 'depot' ? 'Mal kabulde bekliyor' : 'Lab stoğunda bekliyor'}
+                          </Pill>
                         )}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <p className="font-medium text-sm truncate" style={{ color: 'var(--dashboard-text)' }}>{dosya.fileName}</p>
-                          {isScanned && (
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700">
-                              <CheckCircle2 className="h-3 w-3" />
-                              {dosya.locationType === 'depot' ? 'Mal kabulde bekliyor' : 'Lab stoğunda bekliyor'}
-                            </span>
-                          )}
-                          {!isScanned && dosya.fileType === 'pdf' && !isBeingAutoScanned && !isQueued && (
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-700">
-                              Taranmadı
-                            </span>
-                          )}
-                          {isBeingAutoScanned && (
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-700">
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                              Vision ile taranıyor
-                            </span>
-                          )}
-                          {isQueued && (
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-700">
-                              Kuyrukta
-                            </span>
-                          )}
-                          {hasLocation && wasAutoMatched && (
-                            <>
-                              <span
-                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-violet-100 text-violet-700"
-                                title={`Konum dosya adından otomatik eşleştirildi (${(dosya as any).autoMatchReason || 'name'}, %${Math.round(((dosya as any).autoMatchConfidence || 0) * 100)})`}
-                              >
-                                <Wand2 className="h-3 w-3" />
-                                Otomatik atandı{(dosya as any).autoMatchReason === 'akronim' ? ' · kısaltma' : (dosya as any).autoMatchReason === 'ilk_kelime' ? ' · ilk kelime' : (dosya as any).autoMatchReason === 'kod' ? ' · kod' : ''}
-                              </span>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="h-6 px-2 text-[10px] text-violet-700 hover:bg-violet-100"
-                                onClick={() => setChangingLocationFileId(prev => prev === dosya.id ? null : dosya.id)}
-                                title="Atanan laboratuvarı değiştir"
-                              >
-                                <Pencil className="h-3 w-3 mr-1" />
-                                Değiştir
-                              </Button>
-                              {changingLocationFileId === dosya.id && (
-                                <Select
+                        {!isScanned && dosya.fileType === 'pdf' && !isBeingAutoScanned && !isQueued && (
+                          <Pill bg={C.amberSoft} color="#9A6F1E">Taranmadı</Pill>
+                        )}
+                        {isBeingAutoScanned && (
+                          <Pill bg={C.amberSoft} color="#9A6F1E" icon={<Loader2 size={12} style={{ animation: 'cySpin 1s linear infinite' }} />}>
+                            Vision ile taranıyor
+                          </Pill>
+                        )}
+                        {isQueued && (
+                          <Pill bg={C.surface2} color={C.ink2}>Kuyrukta</Pill>
+                        )}
+                        {hasLocation && wasAutoMatched && (
+                          <>
+                            <Pill bg="rgba(155,134,214,0.16)" color="#7C66C2" icon={<Wand2 size={12} />}>
+                              Otomatik atandı{(dosya as any).autoMatchReason === 'akronim' ? ' · kısaltma' : (dosya as any).autoMatchReason === 'ilk_kelime' ? ' · ilk kelime' : (dosya as any).autoMatchReason === 'kod' ? ' · kod' : ''}
+                            </Pill>
+                            <SoftBtn
+                              tone="#7C66C2"
+                              onClick={() => setChangingLocationFileId(prev => prev === dosya.id ? null : dosya.id)}
+                              style={{ height: 30, padding: '0 11px', fontSize: 12, gap: 5 }}
+                            >
+                              <Pencil size={12} /> Değiştir
+                            </SoftBtn>
+                            {changingLocationFileId === dosya.id && (
+                              <div style={{ width: 220, maxWidth: '100%' }}>
+                                <Dropdown
                                   value={dosya.locationId || ''}
-                                  onValueChange={(v) => assignLocationToFile(dosya, v)}
-                                >
-                                  <SelectTrigger className="h-7 text-xs w-56">
-                                    <SelectValue placeholder="Yeni konum seç..." />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {rowLocationOptions.map((loc: any) => (
-                                      <SelectItem key={loc.id} value={loc.id}>{loc.name || loc.ad}</SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              )}
-                            </>
-                          )}
-                          {!hasLocation && (
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-red-100 text-red-700">
-                              <AlertCircle className="h-3 w-3" />
-                              Konum bulunamadı
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-3 text-xs mt-0.5" style={{ color: 'var(--dashboard-muted)' }}>
-                          <span>{formatFileSize(dosya.fileSize)}</span>
-                          <span className="hidden sm:inline">{dosya.uploadedByName}</span>
-                          <span className="hidden md:inline">{dosya.locationName || 'Konum belirtilmedi'}</span>
-                          <span className="flex items-center gap-1">
-                            <Clock className="h-3 w-3" />
-                            {getRemainingDays(dosya.expiresAt)}
-                          </span>
-                        </div>
+                                  onChange={(v) => assignLocationToFile(dosya, v)}
+                                  placeholder="Yeni konum seç..."
+                                  options={rowLocationOptions.map((loc: any) => ({ value: loc.id, label: loc.name || loc.ad }))}
+                                />
+                              </div>
+                            )}
+                          </>
+                        )}
+                        {!hasLocation && (
+                          <Pill bg="rgba(192,121,106,0.14)" color={C.danger} icon={<AlertCircle size={12} />}>Konum bulunamadı</Pill>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, color: C.ink3, marginTop: 4, flexWrap: 'wrap' }}>
+                        <span>{formatFileSize(dosya.fileSize)}</span>
+                        <span>{dosya.uploadedByName}</span>
+                        <span>{dosya.locationName || 'Konum belirtilmedi'}</span>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <Clock size={12} /> {getRemainingDays(dosya.expiresAt)}
+                        </span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1 shrink-0 ml-2">
+
+                    {/* Actions */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
                       {!hasLocation && selectedLocationType && (
-                        <Select
-                          value=""
-                          onValueChange={(v) => assignLocationToFile(dosya, v)}
-                        >
-                          <SelectTrigger className="h-8 text-xs w-44">
-                            <SelectValue placeholder="Konum ata..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {konumSecenekleri.map((loc: any) => (
-                              <SelectItem key={loc.id} value={loc.id}>{loc.name || loc.ad}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <div style={{ width: 180, maxWidth: '100%' }}>
+                          <Dropdown
+                            value=""
+                            onChange={(v) => assignLocationToFile(dosya, v)}
+                            placeholder="Konum ata..."
+                            options={konumSecenekleri.map((loc: any) => ({ value: loc.id, label: loc.name || loc.ad }))}
+                          />
+                        </div>
                       )}
                       {dosya.fileType === 'pdf' && (
-                        <Button
-                          variant={isScanned ? 'outline' : 'default'}
-                          size="sm"
-                          className="h-8 text-xs"
+                        <SoftBtn
+                          tone={isScanned ? C.ink2 : '#fff'}
                           onClick={() => setScanningFile(dosya)}
                           disabled={!canScan || isBeingAutoScanned}
-                          title={canScan ? (isScanned ? 'Yeniden Tara' : 'Tara') : 'Önce konum atanmalı'}
+                          style={isScanned ? { height: 38, padding: '0 14px', fontSize: 13 } : {
+                            height: 38, padding: '0 14px', fontSize: 13,
+                            background: `linear-gradient(180deg, ${AC.accent}, ${AC.primary})`,
+                            boxShadow: `inset 0 1px 0 rgba(255,255,255,0.4), 0 12px 22px -10px ${AC.glow}`,
+                          }}
                         >
-                          <Scan className="h-3.5 w-3.5 mr-1" />
-                          {isScanned ? 'Yeniden Tara' : 'Tara'}
-                        </Button>
+                          <Scan size={14} /> {isScanned ? 'Yeniden Tara' : 'Tara'}
+                        </SoftBtn>
                       )}
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 rounded-lg"
+                      <button
+                        type="button"
                         onClick={() => window.open(dosya.downloadURL, '_blank')}
                         title="İndir"
+                        style={{
+                          all: 'unset', cursor: 'pointer', width: 36, height: 36, flexShrink: 0, borderRadius: '50%',
+                          display: 'grid', placeItems: 'center', color: C.ink2, background: C.surface2, boxShadow: C.clayFlat,
+                        }}
                       >
-                        <Download className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 rounded-lg text-red-500 hover:text-red-700 hover:bg-red-500/10"
+                        <Download size={16} />
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => handleDelete(dosya)}
                         disabled={deleting === dosya.id}
                         title="Sil"
+                        style={{
+                          all: 'unset', cursor: deleting === dosya.id ? 'not-allowed' : 'pointer', width: 36, height: 36, flexShrink: 0, borderRadius: '50%',
+                          display: 'grid', placeItems: 'center', color: C.danger, background: C.surface2, boxShadow: C.clayFlat,
+                          opacity: deleting === dosya.id ? 0.6 : 1,
+                        }}
                       >
-                        {deleting === dosya.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Trash2 className="h-4 w-4" />
-                        )}
-                      </Button>
+                        {deleting === dosya.id ? <Loader2 size={16} style={{ animation: 'cySpin 1s linear infinite' }} /> : <Trash2 size={16} />}
+                      </button>
                     </div>
                   </div>
                 );
               })}
             </div>
           )}
-        </div>
 
-        {/* Footer note */}
-        <div className="px-6 py-3" style={{ borderTop: '1px solid var(--dashboard-stroke)', background: 'var(--dashboard-surface-2)' }}>
-          <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--dashboard-muted)' }}>
-            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+          {/* Footer note */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 16, paddingTop: 14, borderTop: `1px solid ${C.line}`, fontSize: 13, color: C.ink3 }}>
+            <Info size={15} style={{ flexShrink: 0 }} />
             <span>Yüklenen dosyalar 1 hafta sonra otomatik olarak sistemden ve veritabanından silinir.</span>
           </div>
-        </div>
-      </div>
+        </Card>
 
-      {/* ─── Ceomed İrsaliyeleri ─────────────────────────────── */}
-      <div className="mt-6">
-        <CeomedIrsaliyePanel />
+        {/* ─── Ceomed İrsaliyeleri ─────────────────────────────── */}
+        <div style={{ marginBottom: 16 }}>
+          <CeomedIrsaliyePanel />
+        </div>
       </div>
 
       <IrsaliyeScanModal
@@ -967,6 +898,17 @@ export default function DosyaYonetimiPage() {
         onClose={() => setScanningFile(null)}
         productCodes={productCodes}
       />
-    </div>
+
+      {/* Hidden native input kept for compatibility with existing handlers. */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        style={{ display: 'none' }}
+        accept=".pdf,.xlsx,.xls"
+        multiple
+        onChange={handleFileUpload}
+        disabled={uploading}
+      />
+    </ClayPage>
   );
 }

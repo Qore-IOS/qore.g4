@@ -1,33 +1,8 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-} from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import {
-  Calculator,
+  Archive,
   CheckCircle,
   Download,
   FileText,
@@ -37,9 +12,9 @@ import {
   Network,
   Plus,
   Trash2,
-  UploadCloud,
   X,
   XCircle,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { addDoc, collection, doc, getDocs, increment, orderBy, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
@@ -48,9 +23,8 @@ import { db } from '@/lib/firebase';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import type { Hospital } from '@/lib/types';
 import { exportDataToExcel } from '@/lib/utils';
-import { cn } from '@/lib/utils';
 import Link from 'next/link';
-import BackButton from '@/components/BackButton';
+import { useRouter } from 'next/navigation';
 import { parseCumulativePdfFiles, type CumulativeRow } from '@/lib/qore-hesaplama/parse-cumulative';
 import { parseCumulativeTxtFiles } from '@/lib/qore-hesaplama/parse-cumulative-txt';
 import { aggregateCumulative } from '@/lib/qore-hesaplama/aggregate';
@@ -59,6 +33,12 @@ import { normalizeTestName } from '@/lib/qore-hesaplama/test-name-matcher';
 import { ALL_FILTER_VALUE, type CalculationProductRow, useQoreCalculationProducts } from '@/hooks/useQoreCalculationProducts';
 import { useTestAutoSumDefinitions } from '@/hooks/useTestAutoSumDefinitions';
 import { buildCalculationPeriod, deleteExpiredPendingCalculationFiles, loadPendingCalculationFiles, markPendingCalculationFilesConsumed, pendingPayloadToFile, type PendingCalculationFileDoc } from '@/lib/qore-hesaplama/pending-calculation-files';
+import {
+  C, AC, useMode, ClayPage, RaporHead, Card, SoftBtn, PrimaryBtn,
+  Dropdown, FieldLabel, UploadZone, EmptyBlock,
+} from '@/components/raporlama/rapor-kit';
+
+const EASE = 'cubic-bezier(.22, 1, .36, 1)';
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => ({
   value: i,
@@ -73,6 +53,9 @@ const calculateEfficiency = (routine?: number, total?: number) => total ? ((rout
 
 export default function KumulatifHesaplamaPanel() {
   const { toast } = useToast();
+  const router = useRouter();
+  const mode = useMode();
+  const mobile = mode === 'mobile';
   const { currentCompanyId, currentUser, currentUserProfile, isSuperAdmin } = useAuth();
 
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
@@ -85,7 +68,6 @@ export default function KumulatifHesaplamaPanel() {
   const [pendingDocs, setPendingDocs] = useState<PendingCalculationFileDoc[]>([]);
   const [loadedPendingIds, setLoadedPendingIds] = useState<string[]>([]);
   const [isLoadingPending, setIsLoadingPending] = useState(false);
-  const [isDragActive, setIsDragActive] = useState(false);
   const [isParsing, setIsParsing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSavingHistory, setIsSavingHistory] = useState(false);
@@ -93,7 +75,6 @@ export default function KumulatifHesaplamaPanel() {
   const [unmatchedTests, setUnmatchedTests] = useState<CumulativeRow[]>([]);
   const [brandFilter, setBrandFilter] = useState(ALL_FILTER_VALUE);
   const [productGroupFilter, setProductGroupFilter] = useState(ALL_FILTER_VALUE);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   // Manuel birleştirme durumu
   const [anchor, setAnchor] = useState<string | null>(null);
@@ -445,312 +426,301 @@ export default function KumulatifHesaplamaPanel() {
     exportDataToExcel(data, fname, 'Kumulatif', toast);
   }
 
-  // ---- Sürükle-bırak ----
-  const onDragEnter = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setIsDragActive(true); };
-  const onDragLeave = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); setIsDragActive(false); };
-  const onDragOver = (e: React.DragEvent) => { e.preventDefault(); e.stopPropagation(); };
-  const onDrop = (e: React.DragEvent) => {
-    e.preventDefault(); e.stopPropagation(); setIsDragActive(false);
-    if (e.dataTransfer.files?.length) addFiles(Array.from(e.dataTransfer.files));
-  };
+  const card = (children: React.ReactNode, style?: React.CSSProperties) => (
+    <div style={{
+      borderRadius: C.radius, background: C.surfaceHi, boxShadow: C.clayFlat,
+      padding: mobile ? 14 : 18, ...style,
+    }}>{children}</div>
+  );
 
   return (
-    <div className="p-4 md:p-6 space-y-6">
-      <BackButton fallback="/raporlama" />
+    <ClayPage>
+      <div style={{ animation: `cyRise 360ms ${EASE} both` }}>
+        <RaporHead
+          icon={Archive}
+          title="Kümülatif Hesaplama Motoru"
+          desc="'Cumulative Operation List' PDF/TXT dosyalarını yükleyin; testleri çıkarıp benzersiz listede birleştirin ve Excel'e aktarın."
+          onBack={() => router.push('/raporlama')}
+          mobile={mobile}
+        />
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Calculator className="h-5 w-5 text-primary" />
-            Kümülatif Hesaplama Motoru
-          </CardTitle>
-          <CardDescription>
-            'Cumulative Operation List' PDF/TXT dosyalarını yükleyin; testleri çıkarıp benzersiz listede
-            birleştirin ve Excel'e aktarın.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="col-span-1 md:col-span-2">
-              <label className="text-sm font-medium">Laboratuvar</label>
-              <Select value={hospitalId} onValueChange={(v) => { setHospitalId(v); setRows([]); setUnmatchedTests([]); }} disabled={loadingHospitals}>
-                <SelectTrigger className="mt-1">
-                  <SelectValue placeholder={loadingHospitals ? 'Yükleniyor...' : 'Seçiniz'} />
-                </SelectTrigger>
-                <SelectContent>
-                  {hospitals.filter((h) => h.id).map((h) => (
-                    <SelectItem key={h.id} value={h.id!}>{h.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+        <Card>
+          {/* Lab / Ay / Yıl */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 16 }}>
+            <div>
+              <FieldLabel>Laboratuvar</FieldLabel>
+              <Dropdown
+                value={hospitalId}
+                onChange={(v) => { setHospitalId(v); setRows([]); setUnmatchedTests([]); }}
+                options={hospitals.filter((h) => h.id).map((h) => ({ value: h.id!, label: h.name }))}
+                placeholder={loadingHospitals ? 'Yükleniyor...' : 'Seçiniz'}
+                icon={<Archive size={17} />}
+                disabled={loadingHospitals}
+              />
             </div>
             <div>
-              <label className="text-sm font-medium">Ay</label>
-              <Select value={String(month)} onValueChange={(v) => { setMonth(Number(v)); setRows([]); setUnmatchedTests([]); }}>
-                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {MONTHS.map((m) => (
-                    <SelectItem key={m.value} value={String(m.value)} className="capitalize">{m.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <FieldLabel>Ay</FieldLabel>
+              <Dropdown
+                value={String(month)}
+                onChange={(v) => { setMonth(Number(v)); setRows([]); setUnmatchedTests([]); }}
+                options={MONTHS.map((m) => ({ value: String(m.value), label: m.label }))}
+              />
             </div>
             <div>
-              <label className="text-sm font-medium">Yıl</label>
-              <Select value={String(year)} onValueChange={(v) => { setYear(Number(v)); setRows([]); setUnmatchedTests([]); }}>
-                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {YEARS.map((y) => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <FieldLabel>Yıl</FieldLabel>
+              <Dropdown
+                value={String(year)}
+                onChange={(v) => { setYear(Number(v)); setRows([]); setUnmatchedTests([]); }}
+                options={YEARS.map((y) => String(y))}
+              />
             </div>
           </div>
 
+          {/* Bekleyen dosya uyarısı */}
           {pendingDocs.length > 0 && (
-            <Alert className="border-amber-200 bg-amber-50 text-amber-900">
-              <FileText className="h-4 w-4" />
-              <AlertTitle>Sayım ekranından gelen bekleyen dosya var</AlertTitle>
-              <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <span>{selectedPeriod} döneminde bu laboratuvar için {pendingDocs.reduce((sum, pending) => sum + pending.files.length, 0)} kümülatif dosyası hesaplamaya hazır bekliyor.</span>
-                <Button size="sm" variant="outline" onClick={usePendingFiles} disabled={isLoadingPending}>
-                  {isLoadingPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            card(
+              <div style={{ display: 'flex', flexDirection: mobile ? 'column' : 'row', alignItems: mobile ? 'stretch' : 'center', gap: 12 }}>
+                <span style={{ display: 'inline-flex', flexShrink: 0, color: '#9A6F1E' }}><FileText size={18} /></span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: C.ink1 }}>Sayım ekranından gelen bekleyen dosya var</div>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: C.ink2, marginTop: 3, lineHeight: 1.45 }}>
+                    {selectedPeriod} döneminde bu laboratuvar için {pendingDocs.reduce((sum, pending) => sum + pending.files.length, 0)} kümülatif dosyası hesaplamaya hazır bekliyor.
+                  </div>
+                </div>
+                <SoftBtn onClick={usePendingFiles} disabled={isLoadingPending} style={{ flexShrink: 0 }}>
+                  {isLoadingPending && <Loader2 size={16} style={{ animation: 'cySpin 1s linear infinite' }} />}
                   Dosyaları Kullan
-                </Button>
-              </AlertDescription>
-            </Alert>
+                </SoftBtn>
+              </div>,
+              { marginBottom: 16, background: 'linear-gradient(180deg, rgba(224,163,62,0.10), ' + C.surface2 + ')' }
+            )
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 rounded-xl border bg-muted/20 p-4">
-            <div>
-              <label className="text-sm font-medium">Marka Filtresi</label>
-              <Select value={brandFilter} onValueChange={(v) => { setBrandFilter(v); setRows([]); setUnmatchedTests([]); }}>
-                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL_FILTER_VALUE}>Tüm Markalar</SelectItem>
-                  {brandOptions.map((brand) => <SelectItem key={brand} value={brand}>{brand}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <label className="text-sm font-medium">Ürün Grubu Filtresi</label>
-              <Select value={productGroupFilter} onValueChange={(v) => { setProductGroupFilter(v); setRows([]); setUnmatchedTests([]); }}>
-                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL_FILTER_VALUE}>Tüm Ürün Grupları</SelectItem>
-                  {productGroupOptions.map((group) => <SelectItem key={group} value={group}>{group}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex flex-col justify-end text-sm text-muted-foreground">
-              <span>{isLoadingScope ? 'Ürünler yükleniyor…' : `${filteredProducts.length} ürün listeleniyor`}</span>
-              {scopeLabel && <span>Ortak stok havuzu: {scopeLabel}</span>}
+          {/* Marka / Ürün Grubu filtreleri */}
+          <div style={{ marginBottom: 16, padding: mobile ? 14 : 16, borderRadius: C.radius, background: C.surface2, boxShadow: C.clayInset }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
+              <div>
+                <FieldLabel>Marka Filtresi</FieldLabel>
+                <Dropdown
+                  value={brandFilter}
+                  onChange={(v) => { setBrandFilter(v); setRows([]); setUnmatchedTests([]); }}
+                  options={[{ value: ALL_FILTER_VALUE, label: 'Tüm Markalar' }, ...brandOptions.map((brand) => ({ value: brand, label: brand }))]}
+                />
+              </div>
+              <div>
+                <FieldLabel>Ürün Grubu Filtresi</FieldLabel>
+                <Dropdown
+                  value={productGroupFilter}
+                  onChange={(v) => { setProductGroupFilter(v); setRows([]); setUnmatchedTests([]); }}
+                  options={[{ value: ALL_FILTER_VALUE, label: 'Tüm Ürün Grupları' }, ...productGroupOptions.map((group) => ({ value: group, label: group }))]}
+                />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: 3, fontSize: 13, fontWeight: 600, color: C.ink2 }}>
+                <span>{isLoadingScope ? 'Ürünler yükleniyor…' : `${filteredProducts.length} ürün listeleniyor`}</span>
+                {scopeLabel && <span style={{ color: C.ink3 }}>Ortak stok havuzu: {scopeLabel}</span>}
+              </div>
             </div>
           </div>
 
-          <div
-            className={cn(
-              'group relative flex w-full flex-col items-center justify-center rounded-xl border-2 border-dashed p-10 text-center transition-colors cursor-pointer',
-              isDragActive ? 'border-primary bg-primary/5' : 'border-muted hover:border-primary/50 hover:bg-muted/30'
-            )}
-            onDragEnter={onDragEnter}
-            onDragLeave={onDragLeave}
-            onDragOver={onDragOver}
-            onDrop={onDrop}
-            onClick={() => inputRef.current?.click()}
-          >
-            <UploadCloud className="mb-3 h-10 w-10 text-muted-foreground" />
-            <p className="font-medium">Dosyaları buraya sürükleyip bırakın veya seçmek için tıklayın</p>
-            <p className="text-sm text-muted-foreground">.pdf, .txt, .csv dosyaları (toplu yükleme desteklenir)</p>
-            <input
-              ref={inputRef}
-              type="file"
-              accept=".pdf,.txt,.csv,application/pdf,text/plain,text/csv"
-              multiple
-              className="sr-only"
-              onChange={(e) => { addFiles(Array.from(e.target.files || [])); if (e.target) e.target.value = ''; }}
-            />
-          </div>
+          {/* Yükleme alanı */}
+          <UploadZone
+            hint=".pdf, .txt, .csv dosyaları (toplu yükleme desteklenir)"
+            acceptAttr=".pdf,.txt,.csv,application/pdf,text/plain,text/csv"
+            onFiles={(fl) => addFiles(Array.from(fl))}
+            accept={['.pdf', '.txt', '.csv']}
+          />
 
+          {/* Seçilen dosyalar */}
           {files.length > 0 && (
-            <div className="space-y-2">
-              <h3 className="text-sm font-medium">Seçilen Dosyalar ({files.length})</h3>
-              <ScrollArea className="h-28 rounded-md border p-2">
-                <ul className="space-y-1">
-                  {files.map((file, i) => (
-                    <li key={i} className="flex items-center justify-between rounded-md bg-muted/40 px-2 py-1.5 text-sm">
-                      <span className="flex items-center gap-2 truncate">
-                        <FileText className="h-4 w-4 text-primary shrink-0" />
-                        <span className="truncate">{file.name}</span>
-                      </span>
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => removeFile(i)}>
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              </ScrollArea>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 }}>
+              {files.map((file, i) => (
+                <span key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '8px 13px', borderRadius: 999, background: C.surface2, boxShadow: C.clayInset, fontSize: 13, fontWeight: 600, color: C.ink1, maxWidth: '100%' }}>
+                  <FileText size={15} style={{ color: AC.primary, flexShrink: 0 }} />
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 220 }}>{file.name}</span>
+                  <button type="button" onClick={() => removeFile(i)} aria-label="Kaldır" style={{ all: 'unset', cursor: 'pointer', display: 'inline-flex', color: C.ink3, flexShrink: 0 }}>
+                    <X size={14} />
+                  </button>
+                </span>
+              ))}
             </div>
           )}
 
-          <div className="flex flex-wrap gap-3">
-            <Button asChild variant="outline">
-              <Link href="/oto-toplam-tanimlari"><Network className="mr-2 h-4 w-4" /> Oto Toplam Tanımları</Link>
-            </Button>
-            <Button asChild variant="outline">
-              <Link href="/kumulatif-hesaplama/gecmis"><History className="mr-2 h-4 w-4" /> Geçmiş</Link>
-            </Button>
-            <Button onClick={handleParse} disabled={!canParse}>
-              {isParsing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Calculator className="mr-2 h-4 w-4" />}
+          {/* Aksiyon butonları */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 20 }}>
+            <Link href="/oto-toplam-tanimlari" style={{ textDecoration: 'none' }}>
+              <SoftBtn><Network size={17} /> Oto Toplam Tanımları</SoftBtn>
+            </Link>
+            <Link href="/kumulatif-hesaplama/gecmis" style={{ textDecoration: 'none' }}>
+              <SoftBtn><History size={17} /> Geçmiş</SoftBtn>
+            </Link>
+            <PrimaryBtn onClick={handleParse} disabled={!canParse}>
+              {isParsing ? <Loader2 size={17} style={{ animation: 'cySpin 1s linear infinite' }} /> : <Archive size={17} />}
               {files.length > 0 ? `${files.length} Dosyayı Ayrıştır` : 'Ayrıştır'}
-            </Button>
+            </PrimaryBtn>
             {hasComputed && (
               <>
-                <Button variant="outline" onClick={removeZeroRows} disabled={!hasZeroRows || combineMode}>
-                  <Trash2 className="mr-2 h-4 w-4" /> 0 Olanları Kaldır
-                </Button>
-                <Button variant="outline" onClick={handleSaveHistory} disabled={combineMode || isSavingHistory}>
-                  {isSavingHistory ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />} Kaydet
-                </Button>
-                <Button variant="outline" onClick={handleExport} disabled={combineMode}>
-                  <Download className="mr-2 h-4 w-4" /> Excel'e Aktar
-                </Button>
+                <SoftBtn onClick={removeZeroRows} disabled={!hasZeroRows || combineMode}>
+                  <Trash2 size={17} /> 0 Olanları Kaldır
+                </SoftBtn>
+                <SoftBtn onClick={handleSaveHistory} disabled={combineMode || isSavingHistory}>
+                  {isSavingHistory ? <Loader2 size={17} style={{ animation: 'cySpin 1s linear infinite' }} /> : <Save size={17} />} Kaydet
+                </SoftBtn>
+                <SoftBtn onClick={handleExport} tone={C.waterDeep} disabled={combineMode}>
+                  <FileSpreadsheet size={17} /> Excel'e Aktar
+                </SoftBtn>
               </>
             )}
           </div>
 
+          {/* Kapsam hatası */}
           {scopeError && (
-            <Alert variant="destructive">
-              <AlertTitle>Hata</AlertTitle>
-              <AlertDescription>{scopeError}</AlertDescription>
-            </Alert>
+            <div style={{ marginTop: 16, padding: 14, borderRadius: C.radiusSm, background: 'rgba(192,121,106,0.10)', boxShadow: C.clayInset }}>
+              <div style={{ fontSize: 14, fontWeight: 800, color: C.danger }}>Hata</div>
+              <div style={{ fontSize: 13, fontWeight: 500, color: C.ink2, marginTop: 3 }}>{scopeError}</div>
+            </div>
           )}
 
+          {/* Genel hata */}
           {error && (
-            <Alert variant="destructive">
-              <AlertTitle>Hata</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
+            <div style={{ marginTop: 16, padding: 14, borderRadius: C.radiusSm, background: 'rgba(192,121,106,0.10)', boxShadow: C.clayInset }}>
+              <div style={{ fontSize: 14, fontWeight: 800, color: C.danger }}>Hata</div>
+              <div style={{ fontSize: 13, fontWeight: 500, color: C.ink2, marginTop: 3 }}>{error}</div>
+            </div>
           )}
 
+          {/* Eşleşmeyen testler */}
           {unmatchedTests.length > 0 && (
-            <Alert>
-              <AlertTitle>Eşleşmeyen testler bulundu</AlertTitle>
-              <AlertDescription className="space-y-3 pt-2">
-                <p>PDF/TXT içinden gelen ama seçili lab ürün listesinde otomatik eşleşmeyen testleri, boşta kalan ürünlerden birine aktarabilirsiniz.</p>
-                <div className="space-y-2">
-                  {unmatchedTests.map((item) => (
-                    <div key={item.test} className="grid grid-cols-1 md:grid-cols-[1fr_1.3fr] gap-2 items-center rounded-md border bg-background/60 p-2">
-                      <div className="text-sm">
-                        <div className="font-medium">{item.test}</div>
-                        <div className="text-xs text-muted-foreground">Routine {item.routine} • Rerun {item.rerun} • Calib {item.calib} • Control {item.control} • Total {item.total}</div>
+            <div style={{ marginTop: 18 }}>
+              {card(
+                <>
+                  <div style={{ fontSize: 14.5, fontWeight: 800, color: C.ink1 }}>Eşleşmeyen testler bulundu</div>
+                  <p style={{ margin: '6px 0 14px', fontSize: 13, fontWeight: 500, color: C.ink2, lineHeight: 1.5 }}>
+                    PDF/TXT içinden gelen ama seçili lab ürün listesinde otomatik eşleşmeyen testleri, boşta kalan ürünlerden birine aktarabilirsiniz.
+                  </p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    {unmatchedTests.map((item) => (
+                      <div key={item.test} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10, alignItems: 'center', padding: 12, borderRadius: C.radiusSm, background: C.surface2, boxShadow: C.clayInset }}>
+                        <div>
+                          <div style={{ fontSize: 13.5, fontWeight: 700, color: C.ink1 }}>{item.test}</div>
+                          <div style={{ fontSize: 12, fontWeight: 500, color: C.ink3, marginTop: 2 }}>Routine {item.routine} • Rerun {item.rerun} • Calib {item.calib} • Control {item.control} • Total {item.total}</div>
+                        </div>
+                        <Dropdown
+                          value=""
+                          onChange={(stokKodu) => assignUnmatchedTest(item.test, stokKodu)}
+                          options={availableUnmatchedProducts.map((product) => ({ value: product.stokKodu, label: `${product.stokKodu} • ${product.stokAdi} • ${product.testAdi || 'Test adı yok'}` }))}
+                          placeholder={availableUnmatchedProducts.length ? 'Boşta kalan ürün/test seçin' : 'Boşta kalan ürün yok'}
+                          disabled={availableUnmatchedProducts.length === 0}
+                        />
                       </div>
-                      <Select onValueChange={(stokKodu) => assignUnmatchedTest(item.test, stokKodu)} disabled={availableUnmatchedProducts.length === 0}>
-                        <SelectTrigger>
-                          <SelectValue placeholder={availableUnmatchedProducts.length ? 'Boşta kalan ürün/test seçin' : 'Boşta kalan ürün yok'} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {availableUnmatchedProducts.map((product) => (
-                            <SelectItem key={product.stokKodu} value={product.stokKodu}>
-                              {product.stokKodu} • {product.stokAdi} • {product.testAdi || 'Test adı yok'}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  ))}
-                </div>
-              </AlertDescription>
-            </Alert>
+                    ))}
+                  </div>
+                </>,
+                { background: C.surfaceHi }
+              )}
+            </div>
           )}
 
-          {(visibleRows.length > 0) && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Ürün Bazlı Kümülatif Eşleşmeler ({visibleRows.length} ürün)</CardTitle>
-                <CardDescription>
+          {/* Sonuç tablosu */}
+          {visibleRows.length > 0 ? (
+            <div style={{ marginTop: 22 }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 8, marginBottom: 14 }}>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: C.ink1 }}>Ürün Bazlı Kümülatif Eşleşmeler ({visibleRows.length} ürün)</h3>
+                <span style={{ fontSize: 13, fontWeight: 600, color: C.ink2 }}>
                   {hospitalName ? `${hospitalName} – ${MONTHS[month].label} ${year}` : `${MONTHS[month].label} ${year}`}
                   {combineMode && ' • Birleştirme modu: ana teste eklenecek testleri seçin.'}
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ScrollArea className="h-[55vh] rounded-md border">
-                  <Table>
-                    <TableHeader className="sticky top-0 bg-background z-10">
-                      <TableRow>
-                        <TableHead className="w-10" />
-                        <TableHead>Stok Kodu</TableHead>
-                        <TableHead>Stok Adı</TableHead>
-                        <TableHead>Test Adı</TableHead>
-                        <TableHead>Eşleşen Dosya Testi</TableHead>
-                        <TableHead className="text-right">Routine</TableHead>
-                        <TableHead className="text-right">Rerun</TableHead>
-                        <TableHead className="text-right">Calib</TableHead>
-                        <TableHead className="text-right">Control</TableHead>
-                        <TableHead className="text-right">Total</TableHead>
-                        <TableHead className="text-right">Verimlilik (%)</TableHead>
-                        <TableHead className="w-28" />
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
+                </span>
+              </div>
+              <div style={{ borderRadius: C.radius, background: C.surface2, boxShadow: C.clayInset, overflow: 'hidden' }}>
+                <div style={{ maxHeight: '55vh', overflow: 'auto' }}>
+                  <table style={{ width: '100%', minWidth: 920, borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead style={{ position: 'sticky', top: 0, zIndex: 2, background: C.surface }}>
+                      <tr style={{ textAlign: 'left', color: C.ink3 }}>
+                        <th style={thStyle(40)} />
+                        <th style={thStyle()}>Stok Kodu</th>
+                        <th style={thStyle()}>Stok Adı</th>
+                        <th style={thStyle()}>Test Adı</th>
+                        <th style={thStyle()}>Eşleşen Dosya Testi</th>
+                        <th style={thStyle(undefined, 'right')}>Routine</th>
+                        <th style={thStyle(undefined, 'right')}>Rerun</th>
+                        <th style={thStyle(undefined, 'right')}>Calib</th>
+                        <th style={thStyle(undefined, 'right')}>Control</th>
+                        <th style={thStyle(undefined, 'right')}>Total</th>
+                        <th style={thStyle(undefined, 'right')}>Verimlilik (%)</th>
+                        <th style={thStyle(112)} />
+                      </tr>
+                    </thead>
+                    <tbody>
                       {visibleRows.map((r) => {
                         const isAnchor = combineMode && anchor === r.test;
                         const isPickable = combineMode && !isAnchor;
                         const isPicked = picked.has(r.test);
                         return (
-                          <TableRow
+                          <tr
                             key={r.test}
-                            className={cn(
-                              isPickable && 'cursor-pointer hover:bg-muted/50',
-                              isPicked && 'ring-2 ring-inset ring-sky-400/60',
-                              isAnchor && 'ring-2 ring-inset ring-amber-400/80'
-                            )}
                             onClick={() => { if (isPickable) togglePick(r.test); }}
+                            style={{
+                              cursor: isPickable ? 'pointer' : 'default',
+                              borderTop: `1px solid ${C.line}`,
+                              background: isAnchor ? 'rgba(224,163,62,0.14)' : isPicked ? 'rgba(124,168,222,0.14)' : 'transparent',
+                              boxShadow: isAnchor ? `inset 0 0 0 2px rgba(224,163,62,0.7)` : isPicked ? `inset 0 0 0 2px rgba(124,168,222,0.6)` : 'none',
+                            }}
                           >
-                            <TableCell className="px-2">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7 rounded-full"
+                            <td style={tdStyle()}>
+                              <button
+                                type="button"
+                                title="Bu testi ana test yap ve diğerlerini buna ekle"
                                 disabled={combineMode && !isAnchor}
                                 onClick={(e) => { e.stopPropagation(); startCombine(r.test); }}
-                                title="Bu testi ana test yap ve diğerlerini buna ekle"
+                                style={{ all: 'unset', cursor: combineMode && !isAnchor ? 'not-allowed' : 'pointer', width: 28, height: 28, borderRadius: '50%', display: 'grid', placeItems: 'center', color: C.ink2, background: `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`, boxShadow: C.clayFlat, opacity: combineMode && !isAnchor ? 0.5 : 1 }}
                               >
-                                <Plus className="h-4 w-4" />
-                              </Button>
-                            </TableCell>
-                            <TableCell className="font-medium">{r.stokKodu}</TableCell>
-                            <TableCell>{r.stokAdi}</TableCell>
-                            <TableCell>{r.testAdi || '—'}</TableCell>
-                            <TableCell className="text-muted-foreground">{r.matchedTests.join(', ') || '—'}</TableCell>
-                            <TableCell className="text-right">{r.routine}</TableCell>
-                            <TableCell className="text-right">{r.rerun}</TableCell>
-                            <TableCell className="text-right">{r.calib}</TableCell>
-                            <TableCell className="text-right">{r.control}</TableCell>
-                            <TableCell className="text-right font-semibold">{r.total}</TableCell>
-                            <TableCell className="text-right">{calculateEfficiency(r.routine, r.total)?.toFixed(2) ?? ''}</TableCell>
-                            <TableCell className="text-right">
+                                <Plus size={15} />
+                              </button>
+                            </td>
+                            <td style={{ ...tdStyle(), fontWeight: 700, color: C.ink1 }}>{r.stokKodu}</td>
+                            <td style={tdStyle()}>{r.stokAdi}</td>
+                            <td style={tdStyle()}>{r.testAdi || '—'}</td>
+                            <td style={{ ...tdStyle(), color: C.ink3 }}>{r.matchedTests.join(', ') || '—'}</td>
+                            <td style={tdStyle('right')}>{r.routine}</td>
+                            <td style={tdStyle('right')}>{r.rerun}</td>
+                            <td style={tdStyle('right')}>{r.calib}</td>
+                            <td style={tdStyle('right')}>{r.control}</td>
+                            <td style={{ ...tdStyle('right'), fontWeight: 800, color: AC.primary }}>{r.total}</td>
+                            <td style={tdStyle('right')}>{calculateEfficiency(r.routine, r.total)?.toFixed(2) ?? ''}</td>
+                            <td style={tdStyle('right')}>
                               {isAnchor && (
-                                <div className="flex items-center justify-end gap-1">
-                                  <Button size="sm" variant="outline" className="h-7 px-2 text-green-600" onClick={(e) => { e.stopPropagation(); applyCombine(); }}>
-                                    <CheckCircle className="h-4 w-4 mr-1" /> Ekle
-                                  </Button>
-                                  <Button size="sm" variant="outline" className="h-7 px-2 text-red-600" onClick={(e) => { e.stopPropagation(); cancelCombine(); }}>
-                                    <XCircle className="h-4 w-4 mr-1" /> İptal
-                                  </Button>
+                                <div style={{ display: 'inline-flex', gap: 6 }}>
+                                  <SoftBtn onClick={() => applyCombine()} tone={C.waterDeep} style={{ height: 32, padding: '0 10px', fontSize: 12.5 }}>
+                                    <CheckCircle size={15} /> Ekle
+                                  </SoftBtn>
+                                  <SoftBtn onClick={() => cancelCombine()} tone={C.danger} style={{ height: 32, padding: '0 10px', fontSize: 12.5 }}>
+                                    <XCircle size={15} /> İptal
+                                  </SoftBtn>
                                 </div>
                               )}
-                            </TableCell>
-                          </TableRow>
+                            </td>
+                          </tr>
                         );
                       })}
-                    </TableBody>
-                  </Table>
-                </ScrollArea>
-              </CardContent>
-            </Card>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div style={{ marginTop: 18 }}>
+              <EmptyBlock icon={<Archive size={26} />} text="Henüz sonuç yok" sub="Bir laboratuvar seçip dosya yükleyerek hesaplamayı başlatın." />
+            </div>
           )}
-        </CardContent>
-      </Card>
-    </div>
+        </Card>
+      </div>
+    </ClayPage>
   );
 }
+
+const thStyle = (width?: number, align: 'left' | 'right' = 'left'): React.CSSProperties => ({
+  padding: '11px 12px', fontSize: 11.5, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase',
+  textAlign: align, whiteSpace: 'nowrap', width, color: C.ink3,
+});
+const tdStyle = (align: 'left' | 'right' = 'left'): React.CSSProperties => ({
+  padding: '10px 12px', textAlign: align, color: C.ink1, whiteSpace: 'nowrap',
+});
