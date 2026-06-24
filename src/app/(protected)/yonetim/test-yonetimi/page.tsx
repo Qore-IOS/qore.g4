@@ -5,24 +5,20 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Plus, Trash2, Loader2, Coins, Upload, Download, Search, X, Calculator, RefreshCw, BarChart3 } from 'lucide-react';
+import { Plus, Trash2, Loader2, Upload, Download, Search, X, Calculator, RefreshCw, BarChart3 } from 'lucide-react';
 import TestCostDetailModal from '@/components/TestCostDetailModal';
 import {
   collection,
   addDoc,
   deleteDoc,
   doc,
-  query,
-  orderBy,
   writeBatch,
-  onSnapshot,
-  getDocs,
   serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import type { ProductCode, TestDefinitionGlobal } from '@/lib/types';
-import BackButton from '@/components/BackButton';
+import { useRouter } from 'next/navigation';
 import { YonetimShell, YonetimHeader, YonetimCard } from '@/components/yonetim-ui/YonetimHub';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
@@ -39,9 +35,7 @@ import { useProductCodes, useTestDefinitions } from '@/hooks/useFirebaseQueries'
 const COLLECTION = 'testDefinitions';
 
 /**
- * Excel stok kodu parser: yeni şablonda A=SUT kodu, B=test adı, C=hak ediş,
- * D ve sonrasındaki her hücre ise teste bağlı tek bir stok kodudur. Eski dosyalardan
- * gelebilecek "STOK1;STOK2" hücrelerini de toleranslı parçalar.
+ * Excel şablon parser: A=SUT kodu, B=test adı, C=hak ediş, D+=stok kodları.
  */
 function parseLinkedStokKodlari(raw: unknown): string[] {
   if (!raw) return [];
@@ -97,30 +91,9 @@ type ParsedExcelDefinition = {
   hakEdisMiktari: number;
 };
 
-type CumulativeHistoryItem = {
-  productId?: string;
-  productName?: string;
-  total?: number;
-};
-
-type CumulativeHistoryRecord = {
-  id: string;
-  hospitalId?: string;
-  hospitalName?: string;
-  period?: string;
-  month?: number;
-  year?: number;
-  items?: CumulativeHistoryItem[];
-};
-
-const MONTHS = Array.from({ length: 12 }, (_, i) => ({
-  value: i,
-  short: new Date(0, i, 1).toLocaleString('tr-TR', { month: 'short' }),
-  label: new Date(0, i, 1).toLocaleString('tr-TR', { month: 'long' }),
-}));
-
 export default function HakEdisPage() {
   const { toast } = useToast();
+  const router = useRouter();
   const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
 
   const { data: productCodes = [], isLoading: isLoadingProducts } = useProductCodes();
@@ -139,15 +112,6 @@ export default function HakEdisPage() {
   const [newHakEdisMiktari, setNewHakEdisMiktari] = useState('');
   const [isProductPopoverOpen, setIsProductPopoverOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-
-  // Counter analiz paneli
-  const [showCounterAnalysis, setShowCounterAnalysis] = useState(false);
-  const [analysisRecords, setAnalysisRecords] = useState<CumulativeHistoryRecord[]>([]);
-  const [isLoadingAnalysis, setIsLoadingAnalysis] = useState(false);
-  const [analysisMode, setAnalysisMode] = useState<'monthly' | 'yearly'>('monthly');
-  const [analysisYear, setAnalysisYear] = useState(new Date().getFullYear());
-  const [analysisMonth, setAnalysisMonth] = useState(new Date().getMonth());
-  const [analysisLab, setAnalysisLab] = useState('__all__');
 
   // Arama
   const [searchTerm, setSearchTerm] = useState('');
@@ -492,92 +456,6 @@ export default function HakEdisPage() {
 
   const totalHakEdis = testDefs.reduce((s, d) => s + (Number(d.hakEdisMiktari) || 0), 0);
 
-  useEffect(() => {
-    if (!showCounterAnalysis) return;
-    let alive = true;
-    (async () => {
-      setIsLoadingAnalysis(true);
-      try {
-        const docs = await getScopedDocs('kumulatifHesaplamaGecmisi', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'));
-        if (!alive) return;
-        setAnalysisRecords(docs.map((d) => ({ id: d.id, ...d.data() } as CumulativeHistoryRecord)));
-      } catch (error: any) {
-        if (!alive) return;
-        setAnalysisRecords([]);
-        toast({ title: 'Counter analiz verisi alınamadı', description: error?.message || 'Kümülatif geçmiş kayıtları okunamadı.', variant: 'destructive' });
-      } finally {
-        if (alive) setIsLoadingAnalysis(false);
-      }
-    })();
-    return () => { alive = false; };
-  }, [showCounterAnalysis, currentCompanyId, isSuperAdmin, toast]);
-
-  const analysisYears = useMemo(() => {
-    const years = new Set<number>([new Date().getFullYear(), analysisYear]);
-    analysisRecords.forEach((record) => {
-      const y = record.year || (record.period ? Number(String(record.period).split('-')[0]) : NaN);
-      if (Number.isFinite(y)) years.add(y);
-    });
-    return Array.from(years).sort((a, b) => b - a);
-  }, [analysisRecords, analysisYear]);
-
-  const analysisLabs = useMemo(() => {
-    const map = new Map<string, string>();
-    analysisRecords.forEach((record) => {
-      const id = record.hospitalId || record.hospitalName || 'unknown';
-      if (id && !map.has(id)) map.set(id, record.hospitalName || id);
-    });
-    return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, 'tr'));
-  }, [analysisRecords]);
-
-  const counterAnalysisRows = useMemo(() => {
-    const records = analysisRecords.filter((record) => {
-      const year = record.year || (record.period ? Number(String(record.period).split('-')[0]) : NaN);
-      const month = typeof record.month === 'number' ? record.month - 1 : (record.period ? Number(String(record.period).split('-')[0]) - 1 : NaN);
-      if (year !== analysisYear) return false;
-      if (analysisMode === 'monthly' && month !== analysisMonth) return false;
-      if (analysisLab !== '__all__' && (record.hospitalId || record.hospitalName || 'unknown') !== analysisLab) return false;
-      return true;
-    });
-
-    return testDefs.map((def) => {
-      const linked = new Set(def.linkedStokKodlari || []);
-      const monthlyTotals = Array(12).fill(0) as number[];
-      const labTotals = new Map<string, { name: string; total: number }>();
-      let selectedTotal = 0;
-
-      records.forEach((record) => {
-        const recordMonth = typeof record.month === 'number' ? record.month - 1 : (record.period ? Number(String(record.period).split('-')[0]) - 1 : 0);
-        const labId = record.hospitalId || record.hospitalName || 'unknown';
-        const labName = record.hospitalName || labId;
-        const contribution = (record.items || []).reduce((sum, item) => (
-          linked.has(item.productId || '') ? sum + (Number(item.total) || 0) : sum
-        ), 0);
-        if (contribution <= 0) return;
-        selectedTotal += contribution;
-        if (recordMonth >= 0 && recordMonth < 12) monthlyTotals[recordMonth] += contribution;
-        const existing = labTotals.get(labId) || { name: labName, total: 0 };
-        existing.total += contribution;
-        labTotals.set(labId, existing);
-      });
-
-      return {
-        def,
-        linkedProductNames: (def.linkedStokKodlari || []).map((code) => productMap.get(code)?.stokAdi || code).join(', '),
-        selectedTotal,
-        annualTotal: monthlyTotals.reduce((sum, value) => sum + value, 0),
-        monthlyTotals,
-        labTotals: Array.from(labTotals.entries()).map(([id, value]) => ({ id, ...value })).sort((a, b) => b.total - a.total),
-      };
-    });
-  }, [analysisRecords, analysisYear, analysisMonth, analysisMode, analysisLab, testDefs, productMap]);
-
-  const analysisLabColumns = useMemo(() => {
-    const map = new Map<string, string>();
-    counterAnalysisRows.forEach((row) => row.labTotals.forEach((lab) => map.set(lab.id, lab.name)));
-    return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, 'tr'));
-  }, [counterAnalysisRows]);
-
   return (
     <YonetimShell>
       <YonetimHeader
@@ -629,80 +507,11 @@ export default function HakEdisPage() {
               <Download className="h-4 w-4 mr-2" />
               Şablon İndir
             </Button>
-            <Button variant={showCounterAnalysis ? 'default' : 'outline'} onClick={() => setShowCounterAnalysis((prev) => !prev)}>
+            <Button variant="outline" onClick={() => router.push('/yonetim/test-yonetimi/counter-analiz')}>
               <BarChart3 className="h-4 w-4 mr-2" />
               Counter Analiz
             </Button>
           </div>
-
-          {showCounterAnalysis && (
-            <Card className="border overflow-hidden">
-              <CardHeader className="bg-muted/30">
-                <CardTitle className="text-lg flex items-center gap-2"><BarChart3 className="h-5 w-5" /> Counter Test Analizi</CardTitle>
-                <CardDescription>Test tanımlarını seçili dönem/yıl kümülatif geçmişiyle eşleştirir; bağlı ürünlerin total değerlerini test bazında laboratuvar katkılarına böler.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4 p-4">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                  <select className="rounded-md border bg-background px-3 py-2 text-sm" value={analysisMode} onChange={(e) => setAnalysisMode(e.target.value as 'monthly' | 'yearly')}>
-                    <option value="monthly">Dönem + Laboratuvar</option>
-                    <option value="yearly">Yıllık Ay Dağılımı</option>
-                  </select>
-                  <select className="rounded-md border bg-background px-3 py-2 text-sm" value={analysisYear} onChange={(e) => setAnalysisYear(Number(e.target.value))}>
-                    {analysisYears.map((year) => <option key={year} value={year}>{year}</option>)}
-                  </select>
-                  {analysisMode === 'monthly' && (
-                    <select className="rounded-md border bg-background px-3 py-2 text-sm capitalize" value={analysisMonth} onChange={(e) => setAnalysisMonth(Number(e.target.value))}>
-                      {MONTHS.map((month) => <option key={month.value} value={month.value}>{month.label}</option>)}
-                    </select>
-                  )}
-                  <select className="rounded-md border bg-background px-3 py-2 text-sm" value={analysisLab} onChange={(e) => setAnalysisLab(e.target.value)}>
-                    <option value="__all__">Tüm Laboratuvarlar</option>
-                    {analysisLabs.map((lab) => <option key={lab.id} value={lab.id}>{lab.name}</option>)}
-                  </select>
-                </div>
-
-                {isLoadingAnalysis ? (
-                  <div className="flex h-32 items-center justify-center text-muted-foreground"><Loader2 className="h-5 w-5 mr-2 animate-spin" /> Counter analiz verileri yükleniyor...</div>
-                ) : (
-                  <ScrollArea className="h-[520px] rounded-md border">
-                    <Table className="text-xs">
-                      <TableHeader className="sticky top-0 bg-background z-10">
-                        <TableRow>
-                          <TableHead className="min-w-[110px] bg-slate-100">SUT Kodu</TableHead>
-                          <TableHead className="min-w-[220px] bg-slate-100">SUT Adı</TableHead>
-                          <TableHead className="min-w-[260px] bg-slate-100">Bağlı Ürünler</TableHead>
-                          <TableHead className="text-right min-w-[110px] bg-yellow-200">Counter Toplam</TableHead>
-                          <TableHead className="text-right min-w-[130px] bg-yellow-200">{analysisMode === 'yearly' ? `${analysisYear} Kümülatif` : `${MONTHS[analysisMonth]?.short}.${String(analysisYear).slice(-2)} Total`}</TableHead>
-                          {analysisMode === 'yearly' ? MONTHS.map((month) => (
-                            <TableHead key={month.value} className="text-right min-w-[90px] bg-amber-100">{month.short}.{String(analysisYear).slice(-2)}</TableHead>
-                          )) : analysisLabColumns.map((lab) => (
-                            <TableHead key={lab.id} className="text-right min-w-[120px] bg-amber-100">{lab.name}</TableHead>
-                          ))}
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {counterAnalysisRows.map((row) => (
-                          <TableRow key={row.def.id}>
-                            <TableCell className="font-mono">{row.def.sutKodu}</TableCell>
-                            <TableCell>{row.def.sutTestAdi}</TableCell>
-                            <TableCell className="text-muted-foreground">{row.linkedProductNames || 'Ürün bağlantısı yok'}</TableCell>
-                            <TableCell className="text-right bg-yellow-50 font-semibold">{Number(row.def.counterValue || 0).toLocaleString('tr-TR')}</TableCell>
-                            <TableCell className="text-right bg-yellow-50 font-semibold text-red-600">{(analysisMode === 'yearly' ? row.annualTotal : row.selectedTotal).toLocaleString('tr-TR')}</TableCell>
-                            {analysisMode === 'yearly' ? row.monthlyTotals.map((value, index) => (
-                              <TableCell key={index} className="text-right">{value ? value.toLocaleString('tr-TR') : '0'}</TableCell>
-                            )) : analysisLabColumns.map((lab) => {
-                              const value = row.labTotals.find((item) => item.id === lab.id)?.total || 0;
-                              return <TableCell key={lab.id} className="text-right">{value ? value.toLocaleString('tr-TR') : '0'}</TableCell>;
-                            })}
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </ScrollArea>
-                )}
-              </CardContent>
-            </Card>
-          )}
 
           {/* Yeni satır ekleme */}
           <Card className="border">
