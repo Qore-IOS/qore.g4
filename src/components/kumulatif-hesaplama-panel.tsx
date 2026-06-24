@@ -130,6 +130,10 @@ export default function KumulatifHesaplamaPanel() {
       .replace(/[^a-z0-9]/g, '');
   };
 
+  const normalizeSutCode = (val: string) => {
+    return val.trim().toUpperCase().replace(/^L/, '');
+  };
+
   const parseCounterExcelForAllSheets = useCallback((file: File): Promise<{ [sheetName: string]: { [sutKodu: string]: number } }> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -146,30 +150,60 @@ export default function KumulatifHesaplamaPanel() {
             const targetAbbr = monthAbbrs[month];
             const targetFull = monthFull[month];
             const shortYear = String(year).slice(-2);
+
+            const expectedValues = [
+              targetAbbr,
+              targetFull,
+              `${targetAbbr}${shortYear}`,
+              `${targetAbbr}${year}`,
+              `${targetFull}${shortYear}`,
+              `${targetFull}${year}`
+            ];
             
             workbook.SheetNames.forEach((sheetName) => {
               const worksheet = workbook.Sheets[sheetName];
               const rows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1 });
               
-              let sutKoduColIndex = 3; // Column D is index 3
+              // Detect sutKoduColIndex dynamically (looking at columns 0 to 10 across the first 50 rows)
+              let sutKoduColIndex = 3; // Default to Column D (index 3)
+              const colScores = new Array(11).fill(0);
+              const sutRegex = /^([lL]?\d{5,8})$/;
+              const scanRowsLimit = Math.min(rows.length, 50);
+              
+              for (let r = 0; r < scanRowsLimit; r++) {
+                const row = rows[r];
+                if (!Array.isArray(row)) continue;
+                for (let c = 0; c <= Math.min(row.length - 1, 10); c++) {
+                  const valStr = String(row[c] || '').trim();
+                  if (sutRegex.test(valStr)) {
+                    colScores[c]++;
+                  }
+                }
+              }
+              
+              let maxScore = 0;
+              let bestColIndex = -1;
+              for (let c = 0; c < colScores.length; c++) {
+                if (colScores[c] > maxScore) {
+                  maxScore = colScores[c];
+                  bestColIndex = c;
+                }
+              }
+              if (bestColIndex !== -1 && maxScore > 0) {
+                sutKoduColIndex = bestColIndex;
+              }
+              
               let periodColIndex = -1;
               let headerRowIndex = -1;
               
-              // Find header row and period column index (starting from index 6 - Column G)
+              // Find header row and period column index (starting from index 2 - Column C)
               for (let r = 0; r < Math.min(rows.length, 25); r++) {
                 const row = rows[r];
                 if (!Array.isArray(row)) continue;
                 
-                for (let c = 6; c < row.length; c++) {
+                for (let c = 2; c < row.length; c++) {
                   const s = cleanTurkishChars(String(row[c] || ''));
-                  if (
-                    s.includes(`${targetAbbr}${shortYear}`) ||
-                    s.includes(`${targetFull}${year}`) ||
-                    s.includes(`${targetFull}${shortYear}`) ||
-                    s.includes(`${targetAbbr}${year}`) ||
-                    s.includes(`${targetAbbr}.${shortYear}`) ||
-                    s.includes(`${targetAbbr}.${year}`)
-                  ) {
+                  if (expectedValues.includes(s)) {
                     periodColIndex = c;
                     headerRowIndex = r;
                     break;
@@ -180,21 +214,14 @@ export default function KumulatifHesaplamaPanel() {
                 }
               }
               
-              // Fallback: If not found, look at any row containing period header in column >= 6
+              // Fallback: If not found, look at any row containing period header in column >= 2
               if (periodColIndex === -1) {
                 for (let r = 0; r < Math.min(rows.length, 25); r++) {
                   const row = rows[r];
                   if (!Array.isArray(row)) continue;
-                  for (let c = 6; c < row.length; c++) {
+                  for (let c = 2; c < row.length; c++) {
                     const s = cleanTurkishChars(String(row[c] || ''));
-                    if (
-                      s.includes(`${targetAbbr}${shortYear}`) ||
-                      s.includes(`${targetFull}${year}`) ||
-                      s.includes(`${targetFull}${shortYear}`) ||
-                      s.includes(`${targetAbbr}${year}`) ||
-                      s.includes(`${targetAbbr}.${shortYear}`) ||
-                      s.includes(`${targetAbbr}.${year}`)
-                    ) {
+                    if (expectedValues.includes(s)) {
                       periodColIndex = c;
                       headerRowIndex = r;
                       break;
@@ -439,7 +466,7 @@ export default function KumulatifHesaplamaPanel() {
         if (targetKey) {
           const sheetMap = dbCounterData[targetKey];
           Object.entries(sheetMap).forEach(([sutKodu, val]) => {
-            counterMap.set(sutKodu, val as number);
+            counterMap.set(normalizeSutCode(sutKodu), val as number);
           });
         }
       } else if (counterFile && selectedHospitalObj) {
@@ -458,7 +485,7 @@ export default function KumulatifHesaplamaPanel() {
         if (targetKey) {
           const sheetMap = localData[targetKey];
           Object.entries(sheetMap).forEach(([sutKodu, val]) => {
-            counterMap.set(sutKodu, val as number);
+            counterMap.set(normalizeSutCode(sutKodu), val as number);
           });
         }
       }
@@ -497,8 +524,11 @@ export default function KumulatifHesaplamaPanel() {
         
         const sutKodu = productToSutCodeMap.get(row.stokKodu);
         let counterVal = 0;
-        if (sutKodu && counterMap.has(sutKodu)) {
-          counterVal = counterMap.get(sutKodu) || 0;
+        if (sutKodu) {
+          const normSut = normalizeSutCode(sutKodu);
+          if (counterMap.has(normSut)) {
+            counterVal = counterMap.get(normSut) || 0;
+          }
         }
         
         let routine = row.routine || 0;
