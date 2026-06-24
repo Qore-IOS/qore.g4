@@ -120,13 +120,20 @@ export default function KumulatifHesaplamaPanel() {
 
   const cleanTurkishChars = (str: string) => {
     return str
-      .toLowerCase()
+      .replace(/İ/g, 'i')
       .replace(/ı/g, 'i')
+      .replace(/I/g, 'i')
       .replace(/ğ/g, 'g')
+      .replace(/Ğ/g, 'g')
       .replace(/ü/g, 'u')
+      .replace(/Ü/g, 'u')
       .replace(/ş/g, 's')
+      .replace(/Ş/g, 's')
       .replace(/ö/g, 'o')
+      .replace(/Ö/g, 'o')
       .replace(/ç/g, 'c')
+      .replace(/Ç/g, 'c')
+      .toLowerCase()
       .replace(/[^a-z0-9]/g, '');
   };
 
@@ -152,13 +159,24 @@ export default function KumulatifHesaplamaPanel() {
             const targetFull = monthFull[month];
             const shortYear = String(year).slice(-2);
 
+            const engMonthAbbrs = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+            const engMonthFull = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
+            const engAbbr = engMonthAbbrs[month];
+            const engFull = engMonthFull[month];
+
             const expectedValues = [
               targetAbbr,
               targetFull,
               `${targetAbbr}${shortYear}`,
               `${targetAbbr}${year}`,
               `${targetFull}${shortYear}`,
-              `${targetFull}${year}`
+              `${targetFull}${year}`,
+              engAbbr,
+              engFull,
+              `${engAbbr}${shortYear}`,
+              `${engAbbr}${year}`,
+              `${engFull}${shortYear}`,
+              `${engFull}${year}`
             ];
             console.log('[CounterDebug] Month/Year match parameters:', {
               month,
@@ -169,6 +187,57 @@ export default function KumulatifHesaplamaPanel() {
               expectedValues
             });
             
+            const matchesDate = (str: string, targetMonth: number, targetYear: number) => {
+              const clean = str.trim();
+              const parts = clean.split(/[\.\-\/]/);
+              const targetMonthNum = targetMonth + 1; // 1-indexed
+              const targetYearShort = targetYear % 100;
+              
+              if (parts.length === 3) {
+                const p0 = parseInt(parts[0], 10);
+                const p1 = parseInt(parts[1], 10);
+                const p2 = parseInt(parts[2], 10);
+                
+                if (p0 === targetYear && p1 === targetMonthNum) return true;
+                if (p2 === targetYear && p1 === targetMonthNum) return true;
+                if (p2 === targetYearShort && p1 === targetMonthNum) return true;
+                if (p2 === targetYear && p0 === targetMonthNum) return true;
+              } else if (parts.length === 2) {
+                const p0 = parseInt(parts[0], 10);
+                const p1 = parseInt(parts[1], 10);
+                
+                if (p0 === targetMonthNum && p1 === targetYear) return true;
+                if (p0 === targetMonthNum && p1 === targetYearShort) return true;
+                if (p0 === targetYear && p1 === targetMonthNum) return true;
+                if (p0 === targetYearShort && p1 === targetMonthNum) return true;
+              }
+              return false;
+            };
+
+            const isPeriodCell = (val: any) => {
+              if (val === undefined || val === null) return false;
+              
+              if (typeof val === 'number') {
+                if (val >= 35000 && val <= 60000) {
+                  const jsDate = new Date(Math.round((val - 25569) * 86400 * 1000));
+                  const m = jsDate.getUTCMonth();
+                  const y = jsDate.getUTCFullYear();
+                  if (m === month && y === year) return true;
+                  
+                  const localM = jsDate.getMonth();
+                  const localY = jsDate.getFullYear();
+                  if (localM === month && localY === year) return true;
+                }
+              }
+              
+              const strVal = String(val);
+              const cleaned = cleanTurkishChars(strVal);
+              if (expectedValues.includes(cleaned)) return true;
+              if (matchesDate(strVal, month, year)) return true;
+              
+              return false;
+            };
+
             workbook.SheetNames.forEach((sheetName) => {
               const worksheet = workbook.Sheets[sheetName];
               const rows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1 });
@@ -216,11 +285,10 @@ export default function KumulatifHesaplamaPanel() {
                 
                 for (let c = 2; c < row.length; c++) {
                   const rawVal = row[c];
-                  const s = cleanTurkishChars(String(rawVal || ''));
-                  if (expectedValues.includes(s)) {
+                  if (isPeriodCell(rawVal)) {
                     periodColIndex = c;
                     headerRowIndex = r;
-                    console.log(`[CounterDebug] Found period column! Row: ${r}, Col: ${c} (Column ${String.fromCharCode(65 + c)}), Raw value: "${rawVal}", Cleaned: "${s}"`);
+                    console.log(`[CounterDebug] Found period column! Row: ${r}, Col: ${c} (Column ${String.fromCharCode(65 + c)}), Raw value: "${rawVal}"`);
                     break;
                   }
                 }
@@ -236,11 +304,10 @@ export default function KumulatifHesaplamaPanel() {
                   if (!Array.isArray(row)) continue;
                   for (let c = 2; c < row.length; c++) {
                     const rawVal = row[c];
-                    const s = cleanTurkishChars(String(rawVal || ''));
-                    if (expectedValues.includes(s)) {
+                    if (isPeriodCell(rawVal)) {
                       periodColIndex = c;
                       headerRowIndex = r;
-                      console.log(`[CounterDebug] Fallback found period column! Row: ${r}, Col: ${c} (Column ${String.fromCharCode(65 + c)}), Raw value: "${rawVal}", Cleaned: "${s}"`);
+                      console.log(`[CounterDebug] Fallback found period column! Row: ${r}, Col: ${c} (Column ${String.fromCharCode(65 + c)}), Raw value: "${rawVal}"`);
                       break;
                     }
                   }
