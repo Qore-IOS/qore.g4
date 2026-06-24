@@ -30,6 +30,8 @@ interface RuleState {
     ortalamaTuketimSuresi?: number | string;
     tuketimSuresiBirimi?: 'gun' | 'saat';
     otomatikTransferAdedi?: number | string;
+    counterEnabled?: boolean;
+    counterPlusEnabled?: boolean;
     enabled: boolean;
   }
 }
@@ -71,6 +73,8 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
               ortalamaTuketimSuresi: (data.ortalamaTuketimSuresi ?? '') as string | number,
               tuketimSuresiBirimi: data.tuketimSuresiBirimi ?? 'gun',
               otomatikTransferAdedi: (data.otomatikTransferAdedi ?? '') as string | number,
+              counterEnabled: !!data.counterEnabled,
+              counterPlusEnabled: !!data.counterPlusEnabled,
               enabled: true
             };
           }
@@ -91,12 +95,12 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
     setRules(prev => {
       const newRules = { ...prev };
       if (checked) {
-        newRules[stockCode] = { ...(newRules[stockCode] || { min: '', max: '', maxGun: '', aylikTuketimLimiti: '', ortalamaTuketimSuresi: '', tuketimSuresiBirimi: 'gun' }), enabled: true };
+        newRules[stockCode] = { ...(newRules[stockCode] || { min: '', max: '', maxGun: '', aylikTuketimLimiti: '', ortalamaTuketimSuresi: '', tuketimSuresiBirimi: 'gun', counterEnabled: false, counterPlusEnabled: false }), enabled: true };
       } else {
         if (newRules[stockCode]) {
           newRules[stockCode].enabled = false;
         } else {
-          newRules[stockCode] = { min: '', max: '', maxGun: '', aylikTuketimLimiti: '', ortalamaTuketimSuresi: '', tuketimSuresiBirimi: 'gun', enabled: false };
+          newRules[stockCode] = { min: '', max: '', maxGun: '', aylikTuketimLimiti: '', ortalamaTuketimSuresi: '', tuketimSuresiBirimi: 'gun', counterEnabled: false, counterPlusEnabled: false, enabled: false };
         }
       }
       return newRules;
@@ -116,6 +120,30 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
       ...prev,
       [stockCode]: { ...(prev[stockCode] ?? { min: '', max: '', maxGun: '', aylikTuketimLimiti: '', ortalamaTuketimSuresi: '', tuketimSuresiBirimi: 'gun', enabled: true }), tuketimSuresiBirimi: birim }
     }));
+  };
+
+  const handleCounterChange = (stockCode: string, type: 'counter' | 'counterPlus', checked: boolean) => {
+    setRules(prev => {
+      const existing = prev[stockCode] ?? { min: '', max: '', maxGun: '', aylikTuketimLimiti: '', ortalamaTuketimSuresi: '', tuketimSuresiBirimi: 'gun', enabled: true };
+      let nextCounter = existing.counterEnabled ?? false;
+      let nextCounterPlus = existing.counterPlusEnabled ?? false;
+      if (type === 'counter') {
+        nextCounter = checked;
+        if (checked) nextCounterPlus = false;
+      } else {
+        nextCounterPlus = checked;
+        if (checked) nextCounter = false;
+      }
+      return {
+        ...prev,
+        [stockCode]: {
+          ...existing,
+          counterEnabled: nextCounter,
+          counterPlusEnabled: nextCounterPlus,
+          enabled: true
+        }
+      };
+    });
   };
 
   const handleExcelUpsertRules = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -143,6 +171,11 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
         if (isConsumables) {
           if (isNaN(otomatikTransferAdedi) || otomatikTransferAdedi < 0) { skippedRows++; return; }
         } else if (isNaN(min) || isNaN(max) || min < 0 || max < min) { skippedRows++; return; }
+        const counterVal = String(row['Counter'] || row['counter'] || '').toLowerCase();
+        const counterPlusVal = String(row['Counter+'] || row['counter+'] || '').toLowerCase();
+        const counterEnabled = counterVal === 'evet' || counterVal === 'true' || counterVal === '1';
+        const counterPlusEnabled = counterPlusVal === 'evet' || counterPlusVal === 'true' || counterPlusVal === '1';
+
         const willBeNewRule = !existingRuleCodes.has(stockCode);
         updatedRules[stockCode] = {
           min: isNaN(min) ? 0 : min,
@@ -152,6 +185,8 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
           ortalamaTuketimSuresi: isNaN(ortalamaTuketimSuresi) ? '' : ortalamaTuketimSuresi,
           tuketimSuresiBirimi: tuketimBirimi === 'saat' ? 'saat' : (rules[stockCode]?.tuketimSuresiBirimi ?? 'gun'),
           otomatikTransferAdedi: isNaN(otomatikTransferAdedi) ? (rules[stockCode]?.otomatikTransferAdedi ?? '') : otomatikTransferAdedi,
+          counterEnabled,
+          counterPlusEnabled,
           enabled: true
         };
         upsertedRows++;
@@ -194,6 +229,8 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
           'Aylık Tüketim Limiti': rule.aylikTuketimLimiti,
           'Ort. Tüketim Süresi': rule.ortalamaTuketimSuresi,
           'Tüketim Birimi': rule.tuketimSuresiBirimi === 'saat' ? 'Saat' : 'Gün',
+          'Counter': rule.counterEnabled ? 'Evet' : 'Hayır',
+          'Counter+': rule.counterPlusEnabled ? 'Evet' : 'Hayır',
         }));
     exportDataToExcel(dataToExport, isConsumables ? `${targetName}_Otomatik_Transfer_Listesi` : `${targetName}_MinMax_Kurallari`, 'Kurallar', toast);
   };
@@ -246,6 +283,8 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
         if (maxGun !== undefined) dataToSet.maxGun = maxGun;
         if (aylikTuketimLimiti !== undefined) dataToSet.aylikTuketimLimiti = aylikTuketimLimiti;
         if (ortalamaTuketimSuresi !== undefined) { dataToSet.ortalamaTuketimSuresi = ortalamaTuketimSuresi; dataToSet.tuketimSuresiBirimi = tuketimSuresiBirimi; }
+        if (rule.counterEnabled !== undefined) dataToSet.counterEnabled = !!rule.counterEnabled;
+        if (rule.counterPlusEnabled !== undefined) dataToSet.counterPlusEnabled = !!rule.counterPlusEnabled;
         if (isConsumables) {
           const otomatikAdet = rule.otomatikTransferAdedi === '' || rule.otomatikTransferAdedi === undefined ? 0 : Number(rule.otomatikTransferAdedi);
           if (isNaN(otomatikAdet) || otomatikAdet < 0) {
@@ -486,7 +525,11 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
                         <th className="text-left px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wider w-[90px]" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>Max</th>
                         <th className="text-left px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wider w-[90px]" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>Max Gün</th>
                         {!isDepotLike && (
-                          <th className="text-left px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wider w-[110px]" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>Aylık Limit</th>
+                          <>
+                            <th className="text-left px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wider w-[110px]" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>Aylık Limit</th>
+                            <th className="text-center px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wider w-[80px]" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>Counter</th>
+                            <th className="text-center px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wider w-[80px]" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>Counter+</th>
+                          </>
                         )}
                         <th className="text-left px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wider w-[160px]" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>
                           <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> Ort. Tüketim</span>
@@ -562,17 +605,33 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
                           />
                         </td>
                         {!isDepotLike && (
-                          <td className="px-2 py-2">
-                            <input
-                              type="number"
-                              value={isEnabled ? (rule?.aylikTuketimLimiti ?? '') : ''}
-                              onChange={e => handleRuleChange(product.stokKodu!, 'aylikTuketimLimiti', e.target.value)}
-                              disabled={!isEnabled}
-                              className="w-full h-8 px-2.5 rounded-lg text-xs border-0 outline-none disabled:opacity-30"
-                              style={{ background: 'var(--dashboard-pressed, #f3f4f6)', color: 'var(--dashboard-text, #111)' }}
-                              placeholder="-"
-                            />
-                          </td>
+                          <>
+                            <td className="px-2 py-2">
+                              <input
+                                type="number"
+                                value={isEnabled ? (rule?.aylikTuketimLimiti ?? '') : ''}
+                                onChange={e => handleRuleChange(product.stokKodu!, 'aylikTuketimLimiti', e.target.value)}
+                                disabled={!isEnabled}
+                                className="w-full h-8 px-2.5 rounded-lg text-xs border-0 outline-none disabled:opacity-30"
+                                style={{ background: 'var(--dashboard-pressed, #f3f4f6)', color: 'var(--dashboard-text, #111)' }}
+                                placeholder="-"
+                              />
+                            </td>
+                            <td className="px-2 py-2 text-center">
+                              <Checkbox
+                                checked={isEnabled ? !!rule?.counterEnabled : false}
+                                onCheckedChange={(val) => handleCounterChange(product.stokKodu!, 'counter', !!val)}
+                                disabled={!isEnabled}
+                              />
+                            </td>
+                            <td className="px-2 py-2 text-center">
+                              <Checkbox
+                                checked={isEnabled ? !!rule?.counterPlusEnabled : false}
+                                onCheckedChange={(val) => handleCounterChange(product.stokKodu!, 'counterPlus', !!val)}
+                                disabled={!isEnabled}
+                              />
+                            </td>
+                          </>
                         )}
                         <td className="px-2 py-2">
                           <div className="flex items-center gap-1.5">

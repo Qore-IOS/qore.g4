@@ -164,6 +164,8 @@ export interface MinMaxRule {
   tuketimSuresiBirimi?: 'gun' | 'saat';
   /** Hastane Sarf labları için: transfer ekranında otomatik gelen transfer adedi */
   otomatikTransferAdedi?: number;
+  counterEnabled?: boolean;
+  counterPlusEnabled?: boolean;
 }
 
 /* ——— Sarf Dağıtım (Hastane Sarf) transfer akışı ——— */
