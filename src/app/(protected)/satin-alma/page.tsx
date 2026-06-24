@@ -1,7 +1,7 @@
 'use client';
 
-import SatinAlmaPanel from '@/components/purchasing/SatinAlmaPanel';
+import NoxPanel from '@/components/purchasing/NoxPanel';
 
 export default function SatinAlmaPage() {
-  return <SatinAlmaPanel />;
+  return <NoxPanel />;
 }
