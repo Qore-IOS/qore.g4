@@ -32,6 +32,10 @@ const config = {
         ],
       },
       colors: {
+        brand: {
+          bg: 'var(--bg-color)',
+          fg: 'var(--theme-color)',
+        },
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
