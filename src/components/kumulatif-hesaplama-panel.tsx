@@ -135,6 +135,7 @@ export default function KumulatifHesaplamaPanel() {
   };
 
   const parseCounterExcelForAllSheets = useCallback((file: File): Promise<{ [sheetName: string]: { [sutKodu: string]: number } }> => {
+    console.log('[CounterDebug] parseCounterExcelForAllSheets triggered for file:', file.name);
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = (event) => {
@@ -159,10 +160,21 @@ export default function KumulatifHesaplamaPanel() {
               `${targetFull}${shortYear}`,
               `${targetFull}${year}`
             ];
+            console.log('[CounterDebug] Month/Year match parameters:', {
+              month,
+              year,
+              targetAbbr,
+              targetFull,
+              shortYear,
+              expectedValues
+            });
             
             workbook.SheetNames.forEach((sheetName) => {
               const worksheet = workbook.Sheets[sheetName];
               const rows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1 });
+              console.log(`[CounterDebug] Sheet: "${sheetName}", Total rows: ${rows.length}`);
+              
+              if (rows.length === 0) return;
               
               // Detect sutKoduColIndex dynamically (looking at columns 0 to 10 across the first 50 rows)
               let sutKoduColIndex = 3; // Default to Column D (index 3)
@@ -192,6 +204,7 @@ export default function KumulatifHesaplamaPanel() {
               if (bestColIndex !== -1 && maxScore > 0) {
                 sutKoduColIndex = bestColIndex;
               }
+              console.log(`[CounterDebug] Detected SUT column index: ${sutKoduColIndex} (Column ${String.fromCharCode(65 + sutKoduColIndex)}) with score: ${maxScore}. Col scores:`, colScores);
               
               let periodColIndex = -1;
               let headerRowIndex = -1;
@@ -202,10 +215,12 @@ export default function KumulatifHesaplamaPanel() {
                 if (!Array.isArray(row)) continue;
                 
                 for (let c = 2; c < row.length; c++) {
-                  const s = cleanTurkishChars(String(row[c] || ''));
+                  const rawVal = row[c];
+                  const s = cleanTurkishChars(String(rawVal || ''));
                   if (expectedValues.includes(s)) {
                     periodColIndex = c;
                     headerRowIndex = r;
+                    console.log(`[CounterDebug] Found period column! Row: ${r}, Col: ${c} (Column ${String.fromCharCode(65 + c)}), Raw value: "${rawVal}", Cleaned: "${s}"`);
                     break;
                   }
                 }
@@ -220,10 +235,12 @@ export default function KumulatifHesaplamaPanel() {
                   const row = rows[r];
                   if (!Array.isArray(row)) continue;
                   for (let c = 2; c < row.length; c++) {
-                    const s = cleanTurkishChars(String(row[c] || ''));
+                    const rawVal = row[c];
+                    const s = cleanTurkishChars(String(rawVal || ''));
                     if (expectedValues.includes(s)) {
                       periodColIndex = c;
                       headerRowIndex = r;
+                      console.log(`[CounterDebug] Fallback found period column! Row: ${r}, Col: ${c} (Column ${String.fromCharCode(65 + c)}), Raw value: "${rawVal}", Cleaned: "${s}"`);
                       break;
                     }
                   }
@@ -234,6 +251,7 @@ export default function KumulatifHesaplamaPanel() {
               if (periodColIndex !== -1) {
                 const sheetMap: { [sutKodu: string]: number } = {};
                 const startRow = headerRowIndex !== -1 ? headerRowIndex + 1 : 0;
+                let dataRowCount = 0;
                 for (let r = startRow; r < rows.length; r++) {
                   const row = rows[r];
                   if (!Array.isArray(row)) continue;
@@ -250,20 +268,27 @@ export default function KumulatifHesaplamaPanel() {
                     parsedNum = Number(cleanVal) || 0;
                   }
                   sheetMap[sutVal] = parsedNum;
+                  dataRowCount++;
                 }
                 parsedData[sheetName] = sheetMap;
+                console.log(`[CounterDebug] Sheet "${sheetName}" parsed successfully. Total data rows matched: ${dataRowCount}`);
+              } else {
+                console.warn(`[CounterDebug] Could not find period column for sheet "${sheetName}". Checked row headers (first 25 rows, columns >= 2) against expectedValues. First row was:`, rows[0]);
               }
             });
             
             resolve(parsedData);
           }).catch(error => {
+            console.error('[CounterDebug] import xlsx or process error:', error);
             reject(error);
           });
         } catch (e) {
+          console.error('[CounterDebug] FileReader try/catch error:', e);
           reject(e);
         }
       };
       reader.onerror = (error) => {
+        console.error('[CounterDebug] FileReader error:', error);
         reject(error);
       };
       reader.readAsArrayBuffer(file);
@@ -437,11 +462,19 @@ export default function KumulatifHesaplamaPanel() {
   };
 
   const handleApplyCounterData = async () => {
+    console.log('[CounterDebug] Starting handleApplyCounterData');
+    console.log('[CounterDebug] dbCounterData:', dbCounterData ? Object.keys(dbCounterData) : 'null');
+    console.log('[CounterDebug] counterFile:', counterFile ? counterFile.name : 'null');
+    console.log('[CounterDebug] hospitalId:', hospitalId);
+    console.log('[CounterDebug] filteredProducts count:', filteredProducts.length);
+    
     if (!dbCounterData && !counterFile) {
+      console.warn('[CounterDebug] No counter data or file available.');
       toast({ title: 'Counter Dosyası Yok', description: 'Lütfen önce bu döneme ait bir Counter Excel dosyası yükleyin.', variant: 'destructive' });
       return;
     }
     if (!hospitalId || filteredProducts.length === 0) {
+      console.warn('[CounterDebug] Hospital ID or filteredProducts is empty.');
       toast({ title: 'Hata', description: 'Lütfen önce bir laboratuvar seçin.', variant: 'destructive' });
       return;
     }
@@ -450,46 +483,66 @@ export default function KumulatifHesaplamaPanel() {
     try {
       let counterMap = new Map<string, number>();
       const selectedHospitalObj = selectedHospital || hospitals.find(h => h.id === hospitalId);
+      console.log('[CounterDebug] selectedHospitalObj:', {
+        id: selectedHospitalObj?.id,
+        name: selectedHospitalObj?.name,
+        kod: selectedHospitalObj?.kod,
+        ceomedCariKodu: selectedHospitalObj?.ceomedCariKodu
+      });
       
-      if (dbCounterData && selectedHospitalObj) {
-        const sheetKeys = Object.keys(dbCounterData);
+      let localData: any = null;
+      if (!dbCounterData && counterFile) {
+        console.log('[CounterDebug] Parsing local counter file...');
+        localData = await parseCounterExcelForAllSheets(counterFile);
+        console.log('[CounterDebug] Parsed local data sheets:', Object.keys(localData));
+      }
+      
+      const targetData = dbCounterData || localData;
+      if (!targetData) {
+        console.warn('[CounterDebug] Target data is empty after parsing.');
+      } else {
+        const sheetKeys = Object.keys(targetData);
+        console.log('[CounterDebug] Available sheets in targetData:', sheetKeys);
+        
         const targetKey = sheetKeys.find(key => {
           const s = cleanTurkishChars(key);
-          return (
-            (selectedHospitalObj.ceomedCariKodu && cleanTurkishChars(selectedHospitalObj.ceomedCariKodu) === s) ||
-            (selectedHospitalObj.name && cleanTurkishChars(selectedHospitalObj.name) === s) ||
-            (selectedHospitalObj.kod && cleanTurkishChars(selectedHospitalObj.kod) === s) ||
-            (selectedHospitalObj.name && cleanTurkishChars(selectedHospitalObj.name).includes(s)) ||
-            (selectedHospitalObj.name && s.includes(cleanTurkishChars(selectedHospitalObj.name)))
-          );
+          const ceomedCari = selectedHospitalObj?.ceomedCariKodu ? cleanTurkishChars(selectedHospitalObj.ceomedCariKodu) : '';
+          const hospName = selectedHospitalObj?.name ? cleanTurkishChars(selectedHospitalObj.name) : '';
+          const hospKod = selectedHospitalObj?.kod ? cleanTurkishChars(selectedHospitalObj.kod) : '';
+          
+          const matchCari = ceomedCari && ceomedCari === s;
+          const matchName = hospName && hospName === s;
+          const matchKod = hospKod && hospKod === s;
+          const matchSubName = hospName && hospName.includes(s);
+          const matchSubKey = hospName && s.includes(hospName);
+          
+          if (matchCari || matchName || matchKod || matchSubName || matchSubKey) {
+            console.log(`[CounterDebug] Sheet match found! Sheet: "${key}" matched with hospital search parameters:`, {
+              matchCari, matchName, matchKod, matchSubName, matchSubKey
+            });
+            return true;
+          }
+          return false;
         });
+        
         if (targetKey) {
-          const sheetMap = dbCounterData[targetKey];
+          const sheetMap = targetData[targetKey];
+          console.log(`[CounterDebug] Selected sheet "${targetKey}". Entry count:`, Object.keys(sheetMap).length);
           Object.entries(sheetMap).forEach(([sutKodu, val]) => {
-            counterMap.set(normalizeSutCode(sutKodu), val as number);
+            const norm = normalizeSutCode(sutKodu);
+            counterMap.set(norm, val as number);
           });
-        }
-      } else if (counterFile && selectedHospitalObj) {
-        const localData = await parseCounterExcelForAllSheets(counterFile);
-        const sheetKeys = Object.keys(localData);
-        const targetKey = sheetKeys.find(key => {
-          const s = cleanTurkishChars(key);
-          return (
-            (selectedHospitalObj.ceomedCariKodu && cleanTurkishChars(selectedHospitalObj.ceomedCariKodu) === s) ||
-            (selectedHospitalObj.name && cleanTurkishChars(selectedHospitalObj.name) === s) ||
-            (selectedHospitalObj.kod && cleanTurkishChars(selectedHospitalObj.kod) === s) ||
-            (selectedHospitalObj.name && cleanTurkishChars(selectedHospitalObj.name).includes(s)) ||
-            (selectedHospitalObj.name && s.includes(cleanTurkishChars(selectedHospitalObj.name)))
-          );
-        });
-        if (targetKey) {
-          const sheetMap = localData[targetKey];
-          Object.entries(sheetMap).forEach(([sutKodu, val]) => {
-            counterMap.set(normalizeSutCode(sutKodu), val as number);
+          console.log('[CounterDebug] counterMap keys after normalization (first 10):', Array.from(counterMap.keys()).slice(0, 10));
+        } else {
+          console.warn('[CounterDebug] Could not match any sheet name to selected hospital. Tried comparing cleaned names with:', {
+            ceomedCariKodu: selectedHospitalObj?.ceomedCariKodu,
+            name: selectedHospitalObj?.name,
+            kod: selectedHospitalObj?.kod
           });
         }
       }
       
+      console.log('[CounterDebug] Fetching testDefinitions...');
       const defsSnap = await getDocs(scopedQuery('testDefinitions', currentCompanyId, isSuperAdmin));
       const productToSutCodeMap = new Map<string, string>();
       defsSnap.docs.forEach((d) => {
@@ -502,6 +555,7 @@ export default function KumulatifHesaplamaPanel() {
           }
         });
       });
+      console.log('[CounterDebug] Loaded productToSutCodeMap entries:', productToSutCodeMap.size);
       
       const currentRows = rows.length > 0 ? [...rows] : filteredProducts.map((product) => ({
         ...product,
@@ -513,7 +567,10 @@ export default function KumulatifHesaplamaPanel() {
         total: 0,
         matchedTests: [] as string[],
       }));
+      console.log('[CounterDebug] Initial rows count for processing:', currentRows.length);
       
+      let matchCount = 0;
+      let skippedCount = 0;
       const updatedRows = currentRows.map(row => {
         const isCounter = !!row.counterEnabled;
         const isCounterPlus = !!row.counterPlusEnabled;
@@ -524,11 +581,22 @@ export default function KumulatifHesaplamaPanel() {
         
         const sutKodu = productToSutCodeMap.get(row.stokKodu);
         let counterVal = 0;
+        let matched = false;
+        
         if (sutKodu) {
           const normSut = normalizeSutCode(sutKodu);
           if (counterMap.has(normSut)) {
             counterVal = counterMap.get(normSut) || 0;
+            matched = true;
+            matchCount++;
+            console.log(`[CounterDebug] MATCH! Product: "${row.stokAdi}" (${row.stokKodu}) -> SUT: "${sutKodu}" (normalized: "${normSut}") -> Value: ${counterVal} (Mode: ${isCounter ? 'Counter' : 'Counter+'})`);
+          } else {
+            skippedCount++;
+            console.log(`[CounterDebug] NO VALUE! Product: "${row.stokAdi}" (${row.stokKodu}) -> SUT: "${sutKodu}" (normalized: "${normSut}") was NOT found in counterMap.`);
           }
+        } else {
+          skippedCount++;
+          console.log(`[CounterDebug] NO SUT MAPPING! Product: "${row.stokAdi}" (${row.stokKodu}) does not have a SUT code mapped in testDefinitions.`);
         }
         
         let routine = row.routine || 0;
@@ -558,10 +626,16 @@ export default function KumulatifHesaplamaPanel() {
         };
       });
       
+      console.log(`[CounterDebug] Processing finished. Total matched products: ${matchCount}, Total not matched/no SUT: ${skippedCount}`);
       setRows(updatedRows);
-      toast({ title: 'Counter verileri uygulandı', description: 'Counter ve Counter+ tanımlı ürünlerin değerleri güncellendi.' });
+      
+      if (matchCount > 0) {
+        toast({ title: 'Counter verileri uygulandı', description: `${matchCount} ürünün değerleri güncellendi.` });
+      } else {
+        toast({ title: 'Eşleşen Veri Yok', description: 'Counter/Counter+ seçili ürünlerden hiçbiri excel verisiyle eşleşmedi. Konsol çıktılarını inceleyin.', variant: 'warning' as any });
+      }
     } catch (err: any) {
-      console.error('Apply counter data failed:', err);
+      console.error('[CounterDebug] Error applying counter data:', err);
       toast({ title: 'Hata', description: err?.message || 'Counter verileri uygulanırken hata oluştu.', variant: 'destructive' });
     } finally {
       setIsApplyingCounter(false);
