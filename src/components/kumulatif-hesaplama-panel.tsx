@@ -510,18 +510,41 @@ export default function KumulatifHesaplamaPanel() {
           const hospName = selectedHospitalObj?.name ? cleanTurkishChars(selectedHospitalObj.name) : '';
           const hospKod = selectedHospitalObj?.kod ? cleanTurkishChars(selectedHospitalObj.kod) : '';
           
-          const matchCari = ceomedCari && ceomedCari === s;
-          const matchName = hospName && hospName === s;
-          const matchKod = hospKod && hospKod === s;
-          const matchSubName = hospName && hospName.includes(s);
-          const matchSubKey = hospName && s.includes(hospName);
+          const matchCari = ceomedCari && (s === ceomedCari || s.includes(ceomedCari) || ceomedCari.includes(s));
+          const matchName = hospName && (s === hospName || hospName.includes(s) || s.includes(hospName));
+          const matchKod = hospKod && (s === hospKod || s.includes(hospKod) || hospKod.includes(s));
           
-          if (matchCari || matchName || matchKod || matchSubName || matchSubKey) {
-            console.log(`[CounterDebug] Sheet match found! Sheet: "${key}" matched with hospital search parameters:`, {
-              matchCari, matchName, matchKod, matchSubName, matchSubKey
+          if (matchCari || matchName || matchKod) {
+            console.log(`[CounterDebug] Sheet match found (direct/substring)! Sheet: "${key}" matched hospital parameters:`, {
+              matchCari, matchName, matchKod
             });
             return true;
           }
+          
+          // First word match (if first word length >= 4)
+          const nameWords = (selectedHospitalObj?.name || '').split(/[^a-zA-ZçğıöşüÇĞİÖŞÜ0-9]+/);
+          if (nameWords.length > 0) {
+            const firstWord = cleanTurkishChars(nameWords[0]);
+            if (firstWord.length >= 4 && s.includes(firstWord)) {
+              console.log(`[CounterDebug] Sheet match found (first word)! Sheet: "${key}" matched hospital first word: "${firstWord}"`);
+              return true;
+            }
+          }
+          
+          // Significant initials match (e.g. FSM, HNH)
+          const stopWords = new Set(['ve', 'egitim', 'arastirma', 'hastanesi', 'devlet', 'saglik', 'merkezi', 'kamu', 'sehir']);
+          const sigWords = nameWords
+            .map(w => cleanTurkishChars(w))
+            .filter(w => w.length > 0 && !stopWords.has(w));
+            
+          if (sigWords.length >= 2) {
+            const sigInitials = sigWords.map(w => w.charAt(0)).join('');
+            if (sigInitials.length >= 2 && s.includes(sigInitials)) {
+              console.log(`[CounterDebug] Sheet match found (significant initials)! Sheet: "${key}" matched initials: "${sigInitials}"`);
+              return true;
+            }
+          }
+          
           return false;
         });
         
