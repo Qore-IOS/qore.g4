@@ -6,7 +6,6 @@ import {
   Plus, Check, ChevronLeft, X, Search, Volume2, VolumeX,
   Settings, BarChart2, Calendar, Share2, Copy, Zap,
 } from 'lucide-react';
-import confetti from 'canvas-confetti';
 import NoxStatsOverlay, { FlatTask } from './NoxStatsOverlay';
 import { useAuth } from '@/contexts/auth-context';
 import { db } from '@/lib/firebase';
@@ -64,6 +63,73 @@ const playSubtleSound = (type: 'add' | 'complete' | 'delete', isEnabled: boolean
     gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
     osc.start(now); osc.stop(now + 0.1);
   }
+};
+
+// Dependency-free confetti burst rendered on a transient full-screen canvas.
+const fireConfetti = (colors: string[]) => {
+  if (typeof document === 'undefined') return;
+
+  const canvas = document.createElement('canvas');
+  canvas.style.cssText = 'position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:2147483647';
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  document.body.appendChild(canvas);
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) { canvas.remove(); return; }
+
+  const count = 60;
+  const originX = canvas.width / 2;
+  const originY = canvas.height * 0.8;
+  const gravity = 0.35;
+
+  const particles = Array.from({ length: count }, () => {
+    // Spread ~45deg cone aimed upward.
+    const angle = -Math.PI / 2 + (Math.random() - 0.5) * (Math.PI / 4);
+    const speed = 8 + Math.random() * 9;
+    return {
+      x: originX,
+      y: originY,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      size: 4 + Math.random() * 4,
+      rot: Math.random() * Math.PI,
+      vrot: (Math.random() - 0.5) * 0.4,
+      color: colors[Math.floor(Math.random() * colors.length)] || '#ffffff',
+      life: 1,
+    };
+  });
+
+  let frame = 0;
+  const maxFrames = 120;
+
+  const tick = () => {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    let alive = false;
+    for (const p of particles) {
+      p.vy += gravity;
+      p.x += p.vx;
+      p.y += p.vy;
+      p.rot += p.vrot;
+      p.life = Math.max(0, 1 - frame / maxFrames);
+      if (p.life > 0 && p.y < canvas.height + 20) alive = true;
+      ctx.save();
+      ctx.globalAlpha = p.life;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.7);
+      ctx.restore();
+    }
+    frame++;
+    if (alive && frame < maxFrames) {
+      requestAnimationFrame(tick);
+    } else {
+      canvas.remove();
+    }
+  };
+
+  requestAnimationFrame(tick);
 };
 
 export default function NoxPanel() {
@@ -173,11 +239,7 @@ export default function NoxPanel() {
   };
 
   const triggerConfetti = () => {
-    confetti({
-      particleCount: 60, spread: 45, origin: { y: 0.8 },
-      colors: [themeColor, '#888888', '#aaaaaa', '#555555', '#dddddd'],
-      ticks: 120, gravity: 1.2, scalar: 0.7,
-    });
+    fireConfetti([themeColor, '#888888', '#aaaaaa', '#555555', '#dddddd']);
   };
 
   const handlePointerDown = (task: TreeTask) => {
