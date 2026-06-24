@@ -337,7 +337,7 @@ export default function CounterAnalizPage() {
         />
 
         {/* Filter toolbar */}
-        <Card style={{ marginBottom: 16, padding: mobile ? 14 : '16px 20px' }}>
+        <Card style={{ marginBottom: 16, padding: mobile ? 14 : '16px 20px', position: 'relative', zIndex: 40, overflow: 'visible' }}>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <div style={{ flex: '1 1 180px', minWidth: 160 }}>
               <FieldLabel>Görünüm</FieldLabel>
