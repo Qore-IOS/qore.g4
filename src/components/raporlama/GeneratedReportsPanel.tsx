@@ -2,16 +2,20 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { collection, limit, onSnapshot, orderBy, query as firestoreQuery, where } from 'firebase/firestore';
-import { Download, ExternalLink, FileText, Inbox, Mail, MessageCircle, Monitor, RefreshCw } from 'lucide-react';
+import {
+  Download, ExternalLink, FileText, Inbox, Mail, MessageCircle,
+  Monitor, RefreshCw,
+} from 'lucide-react';
 import { useRouter } from 'next/navigation';
-
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/contexts/auth-context';
 import { db } from '@/lib/firebase';
-import { cn } from '@/lib/utils';
+import {
+  C, AC, ClayPage, useMode, Card, RaporHead, SoftBtn, Pill, EmptyBlock,
+} from '@/components/raporlama/rapor-kit';
 
+const EASE = 'cubic-bezier(.22, 1, .36, 1)';
+
+// ── types ─────────────────────────────────────────────────────────────────────
 type TimestampLike = { toDate?: () => Date; seconds?: number } | Date | string | number | null | undefined;
 
 type GeneratedFile = {
@@ -53,6 +57,7 @@ type ShortcutRun = {
   } | null;
 };
 
+// ── helpers ───────────────────────────────────────────────────────────────────
 function toDate(value: TimestampLike): Date | null {
   if (!value) return null;
   if (value instanceof Date) return value;
@@ -60,8 +65,8 @@ function toDate(value: TimestampLike): Date | null {
     const parsed = new Date(value);
     return Number.isNaN(parsed.getTime()) ? null : parsed;
   }
-  if (typeof value.toDate === 'function') return value.toDate();
-  if (typeof value.seconds === 'number') return new Date(value.seconds * 1000);
+  if (typeof (value as any).toDate === 'function') return (value as any).toDate();
+  if (typeof (value as any).seconds === 'number') return new Date((value as any).seconds * 1000);
   return null;
 }
 
@@ -97,9 +102,9 @@ function channelsForRun(run: ShortcutRun): string[] {
 }
 
 function channelIcon(channel: string) {
-  if (channel === 'email') return <Mail className="h-3.5 w-3.5" />;
-  if (channel === 'whatsapp') return <MessageCircle className="h-3.5 w-3.5" />;
-  return <Monitor className="h-3.5 w-3.5" />;
+  if (channel === 'email') return <Mail size={14} />;
+  if (channel === 'whatsapp') return <MessageCircle size={14} />;
+  return <Monitor size={14} />;
 }
 
 function channelLabel(channel: string) {
@@ -111,31 +116,169 @@ function channelLabel(channel: string) {
   return channel;
 }
 
+// ── status pill ───────────────────────────────────────────────────────────────
+function StatusPill({ status }: { status?: string | null }) {
+  const ok = status === 'success';
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', padding: '4px 11px', borderRadius: 999,
+      fontSize: 11.5, fontWeight: 700, whiteSpace: 'nowrap',
+      background: ok ? 'rgba(78,158,107,0.16)' : 'rgba(90,72,40,0.10)',
+      color: ok ? C.waterDeep : C.ink2,
+    }}>
+      {status || 'bekliyor'}
+    </span>
+  );
+}
+
+// ── channel tag ───────────────────────────────────────────────────────────────
+function ChannelTag({ channel }: { channel: string }) {
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 999,
+      background: C.surface2, boxShadow: C.clayInset, fontSize: 11.5, fontWeight: 600, color: C.ink2,
+    }}>
+      {channelIcon(channel)} {channelLabel(channel)}
+    </span>
+  );
+}
+
+// ── run list item ──────────────────────────────────────────────────────────────
+function RunItem({ run, active, onClick }: { run: ShortcutRun; active: boolean; onClick: () => void }) {
+  const [p, setP] = useState(false);
+  const files = filesForRun(run);
+  const channels = channelsForRun(run);
+  return (
+    <button
+      type="button" onClick={onClick}
+      onPointerDown={() => setP(true)} onPointerUp={() => setP(false)} onPointerLeave={() => setP(false)}
+      style={{
+        all: 'unset', cursor: 'pointer', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: 8,
+        padding: '14px 16px', borderRadius: C.radius,
+        background: active ? `${AC.primary}12` : C.surfaceHi,
+        boxShadow: active ? `inset 0 0 0 1.5px ${AC.primary}30, ${C.clayFlat}` : p ? C.clayPress : C.clayFlat,
+        transition: `box-shadow 200ms ${EASE}, transform 200ms ${EASE}`,
+        transform: p && !active ? 'translateY(1px) scale(0.99)' : 'none',
+        textAlign: 'left',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: C.ink1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {run.actionKey || 'Kestirme raporu'}
+          </div>
+          <div style={{ marginTop: 3, fontSize: 12.5, fontWeight: 600, color: C.ink2 }}>
+            {formatDate(run.completedAt || run.createdAt)}
+          </div>
+        </div>
+        <StatusPill status={run.status} />
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+        {channels.map((ch) => <ChannelTag key={ch} channel={ch} />)}
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', padding: '4px 10px', borderRadius: 999,
+          background: C.surface2, boxShadow: C.clayInset, fontSize: 11.5, fontWeight: 600, color: C.ink2,
+        }}>
+          {files.length} dosya
+        </span>
+      </div>
+    </button>
+  );
+}
+
+// ── detail meta row ───────────────────────────────────────────────────────────
+function MetaRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div style={{ display: 'flex', gap: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
+      <span style={{ fontSize: 11.5, fontWeight: 700, color: C.ink3, letterSpacing: '0.04em', textTransform: 'uppercase', minWidth: 90 }}>{label}</span>
+      <span style={{ fontSize: 13.5, fontWeight: 600, color: C.ink1, flex: 1, minWidth: 0, fontFamily: typeof value === 'string' && value.length > 20 ? 'ui-monospace, monospace' : 'inherit', wordBreak: 'break-all' }}>{value}</span>
+    </div>
+  );
+}
+
+// ── section header ────────────────────────────────────────────────────────────
+function SectionHead({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ fontSize: 12, fontWeight: 700, color: C.ink3, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 10 }}>{children}</div>
+  );
+}
+
+// ── file card ──────────────────────────────────────────────────────────────────
+function FileCard({ file }: { file: GeneratedFile }) {
+  const url = file.url;
+  const name = file.name || file.path || file.storagePath || 'Rapor dosyası';
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', justifyContent: 'space-between',
+      padding: '13px 16px', borderRadius: C.radius, background: C.surfaceHi, boxShadow: C.clayFlat,
+    }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 14, fontWeight: 700, color: C.ink1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
+        <div style={{ marginTop: 3, fontSize: 12.5, fontWeight: 600, color: C.ink2 }}>
+          {file.contentType || 'dosya'}{file.sizeBytes ? ` · ${formatBytes(file.sizeBytes)}` : ''}
+        </div>
+      </div>
+      {url ? (
+        <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+          <a href={url} target="_blank" rel="noreferrer" style={{ textDecoration: 'none' }}>
+            <SoftBtn><ExternalLink size={15} /> Aç</SoftBtn>
+          </a>
+          <a href={url} download style={{ textDecoration: 'none' }}>
+            <SoftBtn tone={C.waterDeep}><Download size={15} /> İndir</SoftBtn>
+          </a>
+        </div>
+      ) : (
+        <span style={{
+          padding: '5px 12px', borderRadius: 999, background: C.surface2, boxShadow: C.clayInset,
+          fontSize: 12, fontWeight: 600, color: C.ink3, fontFamily: 'ui-monospace, monospace',
+        }}>
+          {file.path || file.storagePath || '—'}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ── delivery attempt card ──────────────────────────────────────────────────────
+function AttemptCard({ attempt, index }: { attempt: DeliveryAttempt; index: number }) {
+  return (
+    <div style={{ padding: '13px 16px', borderRadius: C.radius, background: C.surfaceHi, boxShadow: C.clayFlat, display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontSize: 14, fontWeight: 700, color: C.ink1 }}>
+          {channelIcon(attempt.channel || '')} {channelLabel(attempt.channel || 'unknown')}
+        </span>
+        <StatusPill status={attempt.status} />
+      </div>
+      {attempt.message && (
+        <div style={{ fontSize: 12.5, fontWeight: 500, color: C.ink2, lineHeight: 1.45 }}>{attempt.message}</div>
+      )}
+    </div>
+  );
+}
+
+// ── main panel ─────────────────────────────────────────────────────────────────
 export function GeneratedReportsPanel({ focusRunId }: { focusRunId?: string }) {
   const router = useRouter();
   const { currentUser } = useAuth();
+  const mode = useMode();
+  const mobile = mode === 'mobile';
+
   const [runs, setRuns] = useState<ShortcutRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(focusRunId || null);
 
-  useEffect(() => {
-    setSelectedRunId(focusRunId || null);
-  }, [focusRunId]);
+  useEffect(() => { setSelectedRunId(focusRunId || null); }, [focusRunId]);
 
   useEffect(() => {
-    if (!currentUser?.uid) {
-      setRuns([]);
-      setLoading(false);
-      return;
-    }
+    if (!currentUser?.uid) { setRuns([]); setLoading(false); return; }
     setLoading(true);
-    const runsQuery = firestoreQuery(
+    const q = firestoreQuery(
       collection(db, 'shortcutRuns'),
       where('createdByUid', '==', currentUser.uid),
       orderBy('createdAt', 'desc'),
       limit(100),
     );
-    return onSnapshot(runsQuery, (snapshot) => {
+    return onSnapshot(q, (snapshot) => {
       setRuns(snapshot.docs.map((item) => ({ id: item.id, ...(item.data() as Omit<ShortcutRun, 'id'>) })));
       setLoading(false);
     }, () => setLoading(false));
@@ -155,150 +298,114 @@ export function GeneratedReportsPanel({ focusRunId }: { focusRunId?: string }) {
     router.replace(`/raporlama/olusturulan-raporlar?runId=${run.id}`, { scroll: false });
   };
 
-  return (
-    <div className="dashboard-neu-page min-h-screen p-4 md:p-6 lg:p-8">
-      <div className="mb-6 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight" style={{ color: 'var(--dashboard-text)' }}>
-            Oluşturulan raporlar
-          </h1>
-          <p className="mt-1 text-sm" style={{ color: 'var(--dashboard-muted)' }}>
-            Kestirmelerden üretilen ve kanal fark etmeksizin teslim edilen PDF/Excel raporlarınız.
-          </p>
+  // ── list pane ───────────────────────────────────────────────────────────────
+  const listPane = (
+    <Card style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '18px 20px', borderBottom: `1px solid ${C.line}` }}>
+        <span style={{ width: 36, height: 36, flexShrink: 0, borderRadius: 11, display: 'grid', placeItems: 'center', color: AC.primary, background: 'radial-gradient(120% 120% at 30% 24%, #FFFFFF, #ECE4D4 82%)', boxShadow: C.clayFlat }}>
+          <FileText size={18} />
+        </span>
+        <span style={{ fontSize: 16, fontWeight: 800, color: C.ink1 }}>Rapor Geçmişi</span>
+      </div>
+
+      {loading ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '24px 20px', fontSize: 14, fontWeight: 700, color: C.ink2 }}>
+          <RefreshCw size={17} style={{ animation: 'cySpin 1s linear infinite', color: AC.primary }} /> Yükleniyor…
         </div>
-        <Button type="button" variant="outline" onClick={() => router.push('/raporlama')}>
-          Raporlama paneline dön
-        </Button>
+      ) : reportRuns.length === 0 ? (
+        <EmptyBlock icon={<Inbox size={26} />} text="Henüz oluşturulmuş rapor bulunmuyor." />
+      ) : (
+        <div style={{ overflowY: 'auto', maxHeight: mobile ? 320 : 'calc(100vh - 260px)', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 9 }}>
+          {reportRuns.map((run, i) => (
+            <div key={run.id} style={{ animation: `cyRise 360ms ${EASE} ${i * 30}ms both` }}>
+              <RunItem run={run} active={selectedRun?.id === run.id} onClick={() => selectRun(run)} />
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+
+  // ── detail pane ─────────────────────────────────────────────────────────────
+  const detailPane = (
+    <Card style={{ flex: 1, minWidth: 0 }}>
+      {!selectedRun ? (
+        <div style={{ minHeight: 280, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          <EmptyBlock icon={<Inbox size={28} />} text="Bir rapor seçin." sub="Sol listeden bir raporu tıklayarak detaylarını görün." />
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* Run summary */}
+          <div style={{ padding: '16px 20px', borderRadius: C.radius, background: C.surface2, boxShadow: C.clayInset }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, marginBottom: 14 }}>
+              <div>
+                <div style={{ fontSize: 19, fontWeight: 800, color: C.ink1 }}>{selectedRun.actionKey || 'Kestirme raporu'}</div>
+                <div style={{ marginTop: 5, fontSize: 13.5, fontWeight: 500, color: C.ink2, lineHeight: 1.5 }}>
+                  {selectedRun.result?.deliverySummary || selectedRun.message || selectedRun.result?.summaryText || 'Rapor oluşturuldu.'}
+                </div>
+              </div>
+              <StatusPill status={selectedRun.status} />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: mobile ? '1fr' : '1fr 1fr', gap: 8 }}>
+              <MetaRow label="Run ID" value={selectedRun.id} />
+              <MetaRow label="Tarih" value={formatDate(selectedRun.completedAt || selectedRun.createdAt)} />
+              <MetaRow label="Panel" value={selectedRun.panelKey || '—'} />
+              <MetaRow label="Tetikleyici" value={selectedRun.trigger || '—'} />
+            </div>
+          </div>
+
+          {/* Files */}
+          {selectedFiles.length > 0 && (
+            <div>
+              <SectionHead>Dosyalar ({selectedFiles.length})</SectionHead>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+                {selectedFiles.map((file) => (
+                  <FileCard key={file.url || file.path || file.storagePath || file.name} file={file} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Delivery attempts */}
+          {(selectedRun.result?.deliveryAttempts || []).length > 0 && (
+            <div>
+              <SectionHead>Teslimat Kanalları</SectionHead>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
+                {(selectedRun.result?.deliveryAttempts || []).map((attempt, i) => (
+                  <AttemptCard key={`${attempt.channel}-${i}`} attempt={attempt} index={i} />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+
+  return (
+    <ClayPage>
+      <div style={{ animation: `cyRise 360ms ${EASE} both` }}>
+        <RaporHead
+          icon={FileText}
+          title="Oluşturulan Raporlar"
+          desc="Kestirmelerden üretilen PDF/Excel raporları ve teslimat durumları."
+          onBack={() => router.push('/raporlama')}
+          mobile={mobile}
+        />
+
+        {mobile ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            {listPane}
+            {detailPane}
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: '360px 1fr', gap: 16, alignItems: 'start' }}>
+            {listPane}
+            {detailPane}
+          </div>
+        )}
       </div>
-
-      <div className="grid gap-4 lg:grid-cols-[360px_1fr]">
-        <Card className="glass-card overflow-hidden">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <FileText className="h-4 w-4 text-orange-500" /> Rapor geçmişi
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            {loading ? (
-              <div className="flex items-center gap-2 p-4 text-sm text-muted-foreground">
-                <RefreshCw className="h-4 w-4 animate-spin" /> Yükleniyor…
-              </div>
-            ) : reportRuns.length === 0 ? (
-              <div className="flex flex-col items-center gap-2 p-8 text-center text-sm text-muted-foreground">
-                <Inbox className="h-8 w-8 opacity-40" /> Henüz oluşturulmuş rapor bulunmuyor.
-              </div>
-            ) : (
-              <div className="max-h-[70vh] divide-y overflow-auto">
-                {reportRuns.map((run) => {
-                  const files = filesForRun(run);
-                  const active = selectedRun?.id === run.id;
-                  const channels = channelsForRun(run);
-                  return (
-                    <button
-                      key={run.id}
-                      type="button"
-                      onClick={() => selectRun(run)}
-                      className={cn('block w-full px-4 py-3 text-left transition hover:bg-black/[0.03] dark:hover:bg-white/[0.05]', active && 'bg-orange-500/10')}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-semibold text-foreground">{run.actionKey || 'Kestirme raporu'}</div>
-                          <div className="mt-0.5 text-xs text-muted-foreground">{formatDate(run.completedAt || run.createdAt)}</div>
-                        </div>
-                        <Badge variant={run.status === 'success' ? 'default' : 'secondary'}>{run.status || 'unknown'}</Badge>
-                      </div>
-                      <div className="mt-2 flex flex-wrap gap-1.5">
-                        {channels.map((channel) => (
-                          <span key={channel} className="inline-flex items-center gap-1 rounded-full bg-black/5 px-2 py-0.5 text-[11px] text-muted-foreground dark:bg-white/10">
-                            {channelIcon(channel)} {channelLabel(channel)}
-                          </span>
-                        ))}
-                        <span className="rounded-full bg-black/5 px-2 py-0.5 text-[11px] text-muted-foreground dark:bg-white/10">{files.length} dosya</span>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        <Card className="glass-card min-h-[420px]">
-          <CardHeader>
-            <CardTitle className="text-base">Seçili rapor</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {!selectedRun ? (
-              <div className="flex min-h-[260px] flex-col items-center justify-center gap-2 text-center text-muted-foreground">
-                <Inbox className="h-10 w-10 opacity-40" /> Bir rapor seçin.
-              </div>
-            ) : (
-              <div className="space-y-5">
-                <div className="rounded-2xl border border-black/10 bg-black/[0.03] p-4 dark:border-white/10 dark:bg-white/[0.04]">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <h2 className="text-lg font-bold text-foreground">{selectedRun.actionKey || 'Kestirme raporu'}</h2>
-                      <p className="mt-1 text-sm text-muted-foreground">{selectedRun.result?.deliverySummary || selectedRun.message || selectedRun.result?.summaryText || 'Rapor oluşturuldu.'}</p>
-                    </div>
-                    <Badge variant={selectedRun.status === 'success' ? 'default' : 'secondary'}>{selectedRun.status || 'unknown'}</Badge>
-                  </div>
-                  <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
-                    <div>Run ID: <span className="font-mono">{selectedRun.id}</span></div>
-                    <div>Tarih: {formatDate(selectedRun.completedAt || selectedRun.createdAt)}</div>
-                    <div>Panel: {selectedRun.panelKey || '—'}</div>
-                    <div>Tetikleyici: {selectedRun.trigger || '—'}</div>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <h3 className="text-sm font-bold text-foreground">Dosyalar</h3>
-                  <div className="grid gap-2">
-                    {selectedFiles.map((file) => {
-                      const url = file.url;
-                      return (
-                        <div key={file.url || file.path || file.storagePath || file.name} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-black/10 bg-white/70 p-3 dark:border-white/10 dark:bg-white/[0.04]">
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-semibold text-foreground">{file.name || file.path || file.storagePath || 'Rapor dosyası'}</div>
-                            <div className="mt-0.5 text-xs text-muted-foreground">{file.contentType || 'dosya'} {formatBytes(file.sizeBytes)}</div>
-                          </div>
-                          {url ? (
-                            <div className="flex gap-2">
-                              <Button asChild size="sm" variant="outline">
-                                <a href={url} target="_blank" rel="noreferrer"><ExternalLink className="mr-1 h-4 w-4" /> Aç</a>
-                              </Button>
-                              <Button asChild size="sm">
-                                <a href={url} download><Download className="mr-1 h-4 w-4" /> İndir</a>
-                              </Button>
-                            </div>
-                          ) : (
-                            <Badge variant="secondary">Storage: {file.path || file.storagePath || '—'}</Badge>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <h3 className="text-sm font-bold text-foreground">Teslimat kanalları</h3>
-                  <div className="grid gap-2">
-                    {(selectedRun.result?.deliveryAttempts || []).map((attempt, index) => (
-                      <div key={`${attempt.channel}-${index}`} className="rounded-xl border border-black/10 p-3 text-sm dark:border-white/10">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span className="inline-flex items-center gap-2 font-semibold">{channelIcon(attempt.channel || '')} {channelLabel(attempt.channel || 'unknown')}</span>
-                          <Badge variant={attempt.status === 'sent' ? 'default' : 'secondary'}>{attempt.status || 'unknown'}</Badge>
-                        </div>
-                        {attempt.message && <p className="mt-1 text-xs text-muted-foreground">{attempt.message}</p>}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+    </ClayPage>
   );
 }
 

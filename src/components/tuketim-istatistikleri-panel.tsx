@@ -3,43 +3,9 @@
 import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { useAuth } from "@/contexts/auth-context";
 import type { Hospital, ProductCode, ConsumptionRecord } from "@/lib/types";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { LabSelector } from "@/components/common/LabSelector";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogClose,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import {
-  LineChart,
+  TrendingUp,
   Filter,
-  CalendarDays,
   BarChartHorizontalBig,
   X,
   Search,
@@ -49,24 +15,27 @@ import {
   FileSpreadsheet,
   Eye,
   Download,
+  Archive,
+  Hash,
+  Building2,
+  CalendarClock,
+  User as UserIcon,
 } from "lucide-react";
 import { fetchConsumptionByDateRange } from "@/hooks/useFirebaseQueries";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { Calendar } from "@/components/ui/calendar";
 import { format, isValid, addDays, endOfDay } from "date-fns";
 import { tr } from "date-fns/locale";
-import { useToast } from "@/hooks/use-toast";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { DatePickerWithRange } from "@/components/ui/date-range-picker";
 import { DateRange } from "react-day-picker";
 import TimestampText from "./TimestampText";
 import { toDateFromAny } from "@/lib/time";
 import { exportDataToExcel } from "@/lib/utils";
-import { Badge } from "./ui/badge";
+import {
+  C, AC, ClayPage, useMode, Card, RaporHead, SoftBtn, PrimaryBtn,
+  ClayInput, Dropdown, FieldLabel, Pill, EmptyBlock, HBar,
+  Modal, ModalHead,
+} from "@/components/raporlama/rapor-kit";
+
+const EASE = 'cubic-bezier(.22, 1, .36, 1)';
 
 interface MonthlyAverage {
   stokKodu: string;
@@ -85,29 +54,79 @@ type SortKey =
   | "userName"
   | "laboratoryName";
 
-const SortableHeader: React.FC<{
+// ── small typographic helpers (match demo Mono / Strong / Muted) ───────────────
+const Mono: React.FC<{ children: React.ReactNode; title?: string }> = ({ children, title }) => (
+  <span
+    title={title}
+    style={{
+      fontSize: 13, fontWeight: 600, color: C.ink2,
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', minWidth: 0,
+    }}
+  >
+    {children}
+  </span>
+);
+const Strong: React.FC<{ children: React.ReactNode; title?: string }> = ({ children, title }) => (
+  <span
+    title={title}
+    style={{ fontSize: 13.5, fontWeight: 700, color: C.ink1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', minWidth: 0 }}
+  >
+    {children}
+  </span>
+);
+const Muted: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <span style={{ fontSize: 13, fontWeight: 600, color: C.ink2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', minWidth: 0 }}>
+    {children}
+  </span>
+);
+
+// ── tüketim tipi badge ─────────────────────────────────────────────────────────
+const ConsumeBadge: React.FC<{ type?: string }> = ({ type }) => {
+  const isNormal = type === "normal_kullanim";
+  const label = isNormal ? "Normal Kullanım" : "Sayımdan Düşüm";
+  const style: React.CSSProperties = isNormal
+    ? {
+        color: '#fff',
+        background: `linear-gradient(180deg, #CE8978, ${C.danger})`,
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.25)',
+      }
+    : {
+        color: '#5582C0',
+        background: 'rgba(124,168,222,0.18)',
+      };
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', padding: '4px 11px', borderRadius: 999,
+      fontSize: 11.5, fontWeight: 700, whiteSpace: 'nowrap', maxWidth: '100%',
+      overflow: 'hidden', textOverflow: 'ellipsis', ...style,
+    }}>{label}</span>
+  );
+};
+
+// ── sortable header cell (grid table) ──────────────────────────────────────────
+const SortHead: React.FC<{
   label: string;
-  sortKey: SortKey;
+  sortKey?: SortKey;
   currentSortKey: SortKey;
   sortOrder: "asc" | "desc";
-  setSort: (key: SortKey) => void;
+  setSort?: (key: SortKey) => void;
 }> = ({ label, sortKey, currentSortKey, sortOrder, setSort }) => {
-  const isActive = currentSortKey === sortKey;
+  const active = sortKey != null && currentSortKey === sortKey;
+  const clickable = sortKey != null && setSort != null;
   return (
-    <TableHead
-      onClick={() => setSort(sortKey)}
-      className="cursor-pointer hover:bg-muted/50"
+    <button
+      type="button"
+      onClick={clickable ? () => setSort!(sortKey!) : undefined}
+      style={{
+        all: 'unset', cursor: clickable ? 'pointer' : 'default', display: 'flex', alignItems: 'center', gap: 4,
+        fontSize: 10.5, fontWeight: 700, color: active ? AC.primary : C.ink3,
+        letterSpacing: '0.05em', textTransform: 'uppercase', minWidth: 0,
+      }}
     >
-      <div className="flex items-center gap-1">
-        {label}
-        {isActive &&
-          (sortOrder === "asc" ? (
-            <ChevronUp className="h-4 w-4" />
-          ) : (
-            <ChevronDown className="h-4 w-4" />
-          ))}
-      </div>
-    </TableHead>
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+      {active && (sortOrder === "asc" ? <ChevronUp size={13} /> : <ChevronDown size={13} />)}
+    </button>
   );
 };
 
@@ -129,6 +148,9 @@ export default function TuketimIstatistikleriPanel({
   toast,
 }: TuketimIstatistikleriPanelProps) {
   const { currentCompanyId, isSuperAdmin } = useAuth();
+  const mode = useMode();
+  const mobile = mode === 'mobile';
+
   const [selectedHospitalId, setSelectedHospitalId] = useState<string>("");
   const [filterStokKoduAdi, setFilterStokKoduAdi] = useState<string>("");
   const [dateRange, setDateRange] = useState<DateRange | undefined>({
@@ -347,7 +369,7 @@ export default function TuketimIstatistikleriPanel({
       setIsAverageModalOpen(true);
       return;
     }
-    
+
     const consumptionsByProduct: Record<
       string,
       { total: number; months: Set<string> }
@@ -443,384 +465,380 @@ export default function TuketimIstatistikleriPanel({
     exportDataToExcel(dataToExport, fileName, "Tüketimler", toast);
   };
 
+  // ── derived view data ─────────────────────────────────────────────────────────
+  const hospitalOptions = useMemo(
+    () => hospitals.map((h) => ({ value: h.id, label: h.kod ? `${h.name} (${h.kod})` : h.name })),
+    [hospitals]
+  );
+
+  const labFilterOptions = useMemo(
+    () => [
+      { value: 'all', label: 'Laboratuvar (Tümü)' },
+      ...uniqueLabs.map((lab) => ({ value: lab as string, label: lab as string })),
+    ],
+    [uniqueLabs]
+  );
+
+  const showLabColumn = showAll || isDataFetched;
+
+  // Monthly-average top products → HBar items (overflow-proof chart)
+  const avgChartItems = useMemo(
+    () =>
+      [...monthlyAverages]
+        .sort((a, b) => b.ortalamaAylikTuketim - a.ortalamaAylikTuketim)
+        .slice(0, 8)
+        .map((a) => ({ label: a.stokAdi, v: a.ortalamaAylikTuketim, color: AC.primary })),
+    [monthlyAverages]
+  );
+
+  // grid template for tablet/wide table (lab column optional)
+  const cols = showLabColumn
+    ? 'minmax(0,1.1fr) 110px minmax(0,1.4fr) 100px 110px 120px 130px minmax(0,0.9fr)'
+    : '110px minmax(0,1.6fr) 100px 110px 120px 130px minmax(0,0.9fr)';
+
+  const labelCol = { fontSize: 11, fontWeight: 700, color: C.ink3, letterSpacing: '0.03em', textTransform: 'uppercase' as const };
+
   return (
-    <div className="space-y-6">
-      <Card className="shadow-md rounded-lg">
-        <CardHeader className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
-          <div>
-            <CardTitle className="text-xl flex items-center"><LineChart className="mr-2 h-6 w-6 text-primary" />Tüketim İstatistikleri</CardTitle>
-            <CardDescription>Laboratuvar bazlı ürün tüketim geçmişi ve analizleri.</CardDescription>
-          </div>
-          <Button
-            onClick={calculateMonthlyAverages}
-            variant="outline"
-            className="rounded-md"
-            disabled={!selectedHospitalId && !showAll}
-          >
-            <BarChartHorizontalBig className="mr-2 h-4 w-4" /> Aylık Ortalama
-            Tüketim
-          </Button>
-        </CardHeader>
-        <CardContent>
-          <div className="mb-4 w-full md:w-1/2 lg:w-1/3">
-            <LabSelector
-              id="laboratory-select-stats"
-              label="Laboratuvar Seçin"
-              labs={hospitals.map(h => ({ id: h.id, name: h.name, kod: h.kod }))}
+    <ClayPage>
+      <div style={{ animation: `cyRise 360ms ${EASE} both` }}>
+        <RaporHead
+          icon={TrendingUp}
+          title="Tüketim İstatistikleri"
+          desc="Laboratuvar bazlı ürün tüketim geçmişi ve analizleri."
+          mobile={mobile}
+          right={
+            <SoftBtn
+              tone={AC.primary}
+              onClick={calculateMonthlyAverages}
+              disabled={!selectedHospitalId && !showAll}
+            >
+              <BarChartHorizontalBig size={18} /> Aylık Ortalama Tüketim
+            </SoftBtn>
+          }
+        />
+
+        {/* Laboratuvar seçimi */}
+        <Card style={{ marginBottom: 16 }}>
+          <FieldLabel>Laboratuvar Seçin</FieldLabel>
+          <div style={{ maxWidth: 460 }}>
+            <Dropdown
               value={selectedHospitalId}
               onChange={(v) => {
                 setSelectedHospitalId(v);
                 setShowAll(false);
               }}
-              placeholder="Analiz için laboratuvar seçin..."
+              options={hospitalOptions}
+              placeholder="Analiz için laboratuvar seçin…"
+              icon={<Archive size={17} />}
             />
           </div>
+        </Card>
 
-          <Card className="border-border dark:border-input rounded-lg p-4 mt-4">
-            <CardTitle className="text-lg mb-3 flex items-center">
-              <Filter className="mr-2 h-5 w-5 text-foreground/80" />
-              Filtreler
-            </CardTitle>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-              <div>
-                <label
-                  htmlFor="filter-stok"
-                  className="block text-sm font-medium mb-1"
-                >
-                  Stok Kodu/Adı
-                </label>
-                <div className="relative">
-                  <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="filter-stok"
-                    placeholder="Ara..."
-                    value={filterStokKoduAdi}
-                    onChange={(e) => setFilterStokKoduAdi(e.target.value)}
-                    className="rounded-md pl-8"
-                  />
-                </div>
+        {/* Filtreler + Kayıtlar */}
+        <Card>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 18 }}>
+            <Filter size={20} color={AC.primary} />
+            <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: C.ink1 }}>Filtreler</h2>
+          </div>
+
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 20 }}>
+            <div style={{ flex: 1, minWidth: mobile ? '100%' : 220 }}>
+              <FieldLabel>Stok Kodu / Adı</FieldLabel>
+              <ClayInput
+                value={filterStokKoduAdi}
+                onChange={setFilterStokKoduAdi}
+                placeholder="Ara…"
+                icon={<Search size={17} />}
+              />
+            </div>
+            <div style={{ flex: mobile ? '1 1 100%' : '0 0 auto', minWidth: mobile ? '100%' : 240 }}>
+              <FieldLabel>Tarih Aralığı</FieldLabel>
+              <DatePickerWithRange
+                date={dateRange}
+                setDate={(newRange) => {
+                  setDateRange(newRange);
+                  // Reset fetched data when date range changes
+                  if (isDataFetched) {
+                    setFetchedData([]);
+                    setIsDataFetched(false);
+                  }
+                }}
+                className="w-full"
+                disabled={showAll}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'flex-end', width: mobile ? '100%' : 'auto' }}>
+              <PrimaryBtn
+                onClick={handleFetchDateRange}
+                disabled={isFetching || !dateRange?.from || !dateRange?.to}
+              >
+                {isFetching ? <Loader2 size={18} style={{ animation: 'cySpin 1s linear infinite' }} /> : <Download size={18} />}
+                Verileri Getir
+              </PrimaryBtn>
+              <SoftBtn onClick={clearFilters}>
+                <X size={16} /> Temizle
+              </SoftBtn>
+              <SoftBtn onClick={handleShowAllToggle} disabled={isFetching}>
+                {isFetching ? <Loader2 size={17} style={{ animation: 'cySpin 1s linear infinite' }} /> : <Eye size={17} />}
+                {showAll ? "Filtreye Dön" : "Tümünü Göster"}
+              </SoftBtn>
+              <SoftBtn
+                tone={C.waterDeep}
+                onClick={handleExport}
+                disabled={sortedData.length === 0 || isFetching}
+              >
+                <FileSpreadsheet size={18} /> Excel&apos;e Aktar
+              </SoftBtn>
+            </div>
+          </div>
+
+          {/* Lab filter + user filter (only when showing across labs) */}
+          {showLabColumn && (
+            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 18 }}>
+              <div style={{ flex: 1, minWidth: mobile ? '100%' : 220 }}>
+                <FieldLabel>Laboratuvar Filtresi</FieldLabel>
+                <Dropdown
+                  value={labFilter}
+                  onChange={setLabFilter}
+                  options={labFilterOptions}
+                  placeholder="Laboratuvar (Tümü)"
+                  icon={<Building2 size={17} />}
+                />
               </div>
-              <div className="flex flex-col sm:flex-row gap-2 col-span-1 md:col-span-2">
-                <div className="flex-1">
-                  <label
-                    htmlFor="filter-start-date"
-                    className="block text-sm font-medium mb-1"
-                  >
-                    Tarih Aralığı
-                  </label>
-                  <div className="flex gap-2">
-                    <DatePickerWithRange
-                      date={dateRange}
-                      setDate={(newRange) => {
-                        setDateRange(newRange);
-                        // Reset fetched data when date range changes
-                        if (isDataFetched) {
-                          setFetchedData([]);
-                          setIsDataFetched(false);
-                        }
-                      }}
-                      className="flex-1"
-                      disabled={showAll}
-                    />
-                    <Button
-                      onClick={handleFetchDateRange}
-                      variant="default"
-                      disabled={isFetching || !dateRange?.from || !dateRange?.to}
-                      className="whitespace-nowrap"
-                    >
-                      {isFetching ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <Download className="mr-2 h-4 w-4" />
-                      )}
-                      Verileri Getir
-                    </Button>
-                  </div>
-                </div>
-                <div className="flex items-end gap-2 flex-wrap">
-                  <Button
-                    onClick={clearFilters}
-                    variant="ghost"
-                    className="rounded-md self-end mt-2 sm:mt-0"
-                  >
-                    <X className="mr-2 h-4 w-4" /> Temizle
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={handleShowAllToggle}
-                    disabled={isFetching}
-                  >
-                    {isFetching ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Eye className="mr-2 h-4 w-4" />
-                    )}{" "}
-                    {showAll ? "Filtreye Dön" : "Tümünü Göster"}
-                  </Button>
-                  <Button
-                    onClick={handleExport}
-                    variant="outline"
-                    className="rounded-md self-end mt-2 sm:mt-0"
-                    disabled={sortedData.length === 0 || isFetching}
-                  >
-                    <FileSpreadsheet className="mr-2 h-4 w-4" /> Excel'e Aktar
-                  </Button>
-                </div>
+              <div style={{ flex: 1, minWidth: mobile ? '100%' : 220 }}>
+                <FieldLabel>Kullanıcı Filtresi</FieldLabel>
+                <ClayInput
+                  value={userFilter}
+                  onChange={setUserFilter}
+                  placeholder="Kullanıcı…"
+                  icon={<UserIcon size={17} />}
+                />
               </div>
             </div>
+          )}
 
-            <h4 className="text-md font-semibold mt-6 mb-2 flex items-center gap-2 flex-wrap">
-              Tüketim Kayıtları ({sortedData.length})
-              {showAll && <Badge variant="secondary">TÜMÜ GÖSTERİLİYOR</Badge>}
-              {!isDataFetched && (
-                <Badge variant="outline" className="text-muted-foreground">
-                  Son 500 kayıt gösteriliyor
-                </Badge>
-              )}
-              {isDataFetched && (
-                <Badge variant="default" className="bg-green-600">
-                  Tarih aralığı verileri yüklendi ({activeData.length} kayıt)
-                </Badge>
-              )}
-              {isFetching && (
-                <Badge variant="secondary" className="flex items-center gap-1">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  Veriler yükleniyor...
-                </Badge>
-              )}
-            </h4>
-
-            <>
-              <ScrollArea className="h-[500px] border rounded-md">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      {(showAll || isDataFetched) && (
-                        <TableHead className="min-w-[180px]">
-                          <LabSelector
-                            size="sm"
-                            icon={false}
-                            labs={uniqueLabs.map((lab) => ({ id: lab as string, name: lab as string }))}
-                            value={labFilter}
-                            onChange={setLabFilter}
-                            placeholder="Laboratuvar"
-                            allOption={{ value: 'all', label: 'Laboratuvar (Tümü)' }}
-                          />
-                        </TableHead>
-                      )}
-                      <SortableHeader
-                        label="Stok Kodu"
-                        sortKey="stokKodu"
-                        currentSortKey={sortKey}
-                        sortOrder={sortOrder}
-                        setSort={handleSort}
-                      />
-                      <SortableHeader
-                        label="Stok Adı"
-                        sortKey="stokAdi"
-                        currentSortKey={sortKey}
-                        sortOrder={sortOrder}
-                        setSort={handleSort}
-                      />
-                      <SortableHeader
-                        label="Lot No"
-                        sortKey="lotNumarasi"
-                        currentSortKey={sortKey}
-                        sortOrder={sortOrder}
-                        setSort={handleSort}
-                      />
-                      <TableHead>Miad</TableHead>
-                      <SortableHeader
-                        label="Seri No"
-                        sortKey="seriNumarasi"
-                        currentSortKey={sortKey}
-                        sortOrder={sortOrder}
-                        setSort={handleSort}
-                      />
-                      <SortableHeader
-                        label="Tüketim Zamanı"
-                        sortKey="consumptionTimestamp"
-                        currentSortKey={sortKey}
-                        sortOrder={sortOrder}
-                        setSort={handleSort}
-                      />
-                      <TableHead>Tüketim Tipi</TableHead>
-                      <TableHead>
-                        <Input
-                          placeholder="Kullanıcı..."
-                          value={userFilter}
-                          onChange={(e) => setUserFilter(e.target.value)}
-                          className="h-8 p-1 border-none bg-transparent focus-visible:ring-1 focus-visible:ring-ring"
-                        />
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {paginatedData.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={9} className="text-center py-6">
-                          Kayıt bulunamadı.
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      paginatedData.map((record) => (
-                        <TableRow key={record.id}>
-                          {(showAll || isDataFetched) && (
-                            <TableCell>{record.laboratoryName}</TableCell>
-                          )}
-                          <TableCell className="font-mono text-xs">
-                            {record.stokKodu}
-                          </TableCell>
-                          <TableCell>{record.stokAdi}</TableCell>
-                          <TableCell className="font-mono text-xs">
-                            {record.lotNumarasi}
-                          </TableCell>
-                          <TableCell>
-                            <TimestampText value={record.miad} />
-                          </TableCell>
-                          <TableCell className="font-mono text-xs">
-                            {record.seriNumarasi}
-                          </TableCell>
-                          <TableCell>
-                            <TimestampText
-                              value={record.consumptionTimestamp}
-                              format="dd.MM.yyyy HH:mm"
-                            />
-                          </TableCell>
-                          <TableCell>
-                            {record.consumptionType === "normal_kullanim"
-                              ? "Normal Kullanım"
-                              : "Sayımdan Düşüm"}
-                          </TableCell>
-                          <TableCell>{record.userName}</TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </ScrollArea>
-              <div className="flex items-center justify-between pt-4">
-                <div className="flex items-center space-x-2">
-                  <span className="text-sm text-muted-foreground">
-                    Satır/sayfa:
-                  </span>
-                  <Select
-                    value={String(rowsPerPage)}
-                    onValueChange={(val) => setRowsPerPage(Number(val))}
-                  >
-                    <SelectTrigger className="w-20">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {[50, 100, 200].map((n) => (
-                        <SelectItem key={n} value={String(n)}>
-                          {n}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex items-center space-x-2 text-sm">
-                  <span>
-                    Sayfa {currentPage} / {totalPages}
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={currentPage === 1}
-                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                  >
-                    Önceki
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={currentPage >= totalPages}
-                    onClick={() =>
-                      setCurrentPage((p) => Math.min(totalPages, p + 1))
-                    }
-                  >
-                    Sonraki
-                  </Button>
-                </div>
-              </div>
-            </>
-          </Card>
-        </CardContent>
-      </Card>
-
-      <Dialog open={isAverageModalOpen} onOpenChange={setIsAverageModalOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Aylık Ortalama Tüketim Raporu</DialogTitle>
-            <CardDescription>
-              {selectedHospitalId
-                ? hospitals.find((h) => h.id === selectedHospitalId)?.name
-                : ""}{" "}
-              laboratuvarı için ürün bazlı ortalama aylık tüketim miktarları.
-              {dateRange?.from || dateRange?.to
-                ? ` (Filtre: ${
-                    dateRange.from
-                      ? format(dateRange.from, "dd.MM.yy")
-                      : "Başlangıç"
-                  } - ${
-                    dateRange.to ? format(dateRange.to, "dd.MM.yy") : "Bitiş"
-                  })`
-                : "(Tüm zamanlar)"}
-            </CardDescription>
-          </DialogHeader>
-          <div className="py-4 max-h-[60vh] overflow-y-auto">
-            {monthlyAverages.length === 0 ? (
-              <p className="text-muted-foreground text-center">
-                Bu laboratuvar için hesaplanacak tüketim verisi bulunamadı.
-              </p>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Stok Adı (Kodu)</TableHead>
-                    <TableHead className="text-right">
-                      Ort. Aylık Tüketim
-                    </TableHead>
-                    <TableHead className="text-right">Toplam Tüketim</TableHead>
-                    <TableHead className="text-right">
-                      Tüketim Olan Ay Sayısı
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {monthlyAverages.map((avg) => (
-                    <TableRow key={avg.stokKodu}>
-                      <TableCell>
-                        {avg.stokAdi}
-                        <span className="block text-xs text-muted-foreground font-mono">
-                          ({avg.stokKodu})
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-right font-semibold">
-                        {avg.ortalamaAylikTuketim}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {avg.toplamTuketim}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {avg.aySayisi}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+          <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: C.ink1 }}>
+              Tüketim Kayıtları <span style={{ color: C.ink3 }}>({sortedData.length})</span>
+            </h3>
+            {showAll && <Pill tone="amber">TÜMÜ GÖSTERİLİYOR</Pill>}
+            {!isDataFetched && <Pill>Son 500 kayıt gösteriliyor</Pill>}
+            {isDataFetched && <Pill tone="ok">Tarih aralığı yüklendi ({activeData.length} kayıt)</Pill>}
+            {isFetching && (
+              <Pill>
+                <Loader2 size={13} style={{ animation: 'cySpin 1s linear infinite' }} /> Yükleniyor…
+              </Pill>
             )}
           </div>
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button variant="outline" className="rounded-md">
-                Kapat
-              </Button>
-            </DialogClose>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
+
+          {/* ── records ──────────────────────────────────────────────────────── */}
+          {mobile ? (
+            // Mobile: stacked clay cards, one per record
+            paginatedData.length === 0 ? (
+              <EmptyBlock text="Kayıt bulunamadı." />
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {paginatedData.map((record) => (
+                  <div
+                    key={record.id}
+                    style={{
+                      background: C.surfaceHi, boxShadow: C.clayFlat, borderRadius: C.radiusSm,
+                      padding: 14, display: 'flex', flexDirection: 'column', gap: 9,
+                    }}
+                  >
+                    <div style={{ fontSize: 14.5, fontWeight: 800, color: C.ink1, lineHeight: 1.3 }}>
+                      {record.stokAdi}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                      {showLabColumn && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                          <span style={labelCol}>Laboratuvar</span>
+                          <Muted>{record.laboratoryName}</Muted>
+                        </div>
+                      )}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                        <span style={labelCol}>Stok Kodu</span>
+                        <Mono>{record.stokKodu}</Mono>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                        <span style={labelCol}>Lot No</span>
+                        <Mono>{record.lotNumarasi}</Mono>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                        <span style={labelCol}>Miad</span>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: C.ink2 }}><TimestampText value={record.miad} /></span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                        <span style={labelCol}>Seri No</span>
+                        <Mono>{record.seriNumarasi}</Mono>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                        <span style={labelCol}>Zaman</span>
+                        <span style={{ fontSize: 13, fontWeight: 600, color: C.ink2 }}>
+                          <TimestampText value={record.consumptionTimestamp} format="dd.MM.yyyy HH:mm" />
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center' }}>
+                        <span style={labelCol}>Tip</span>
+                        <ConsumeBadge type={record.consumptionType} />
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+                        <span style={labelCol}>Kullanıcı</span>
+                        <Muted>{record.userName}</Muted>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
+          ) : (
+            // Tablet / wide: clay grid table
+            <div style={{ borderRadius: C.radius, background: C.surface2, boxShadow: C.clayInset, overflow: 'hidden' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: cols, gap: 12, padding: '14px 20px', borderBottom: `1px solid ${C.line}`, alignItems: 'center' }}>
+                {showLabColumn && (
+                  <SortHead label="Laboratuvar" sortKey="laboratoryName" currentSortKey={sortKey} sortOrder={sortOrder} setSort={handleSort} />
+                )}
+                <SortHead label="Stok Kodu" sortKey="stokKodu" currentSortKey={sortKey} sortOrder={sortOrder} setSort={handleSort} />
+                <SortHead label="Stok Adı" sortKey="stokAdi" currentSortKey={sortKey} sortOrder={sortOrder} setSort={handleSort} />
+                <SortHead label="Lot No" sortKey="lotNumarasi" currentSortKey={sortKey} sortOrder={sortOrder} setSort={handleSort} />
+                <SortHead label="Miad" currentSortKey={sortKey} sortOrder={sortOrder} />
+                <SortHead label="Seri No" sortKey="seriNumarasi" currentSortKey={sortKey} sortOrder={sortOrder} setSort={handleSort} />
+                <SortHead label="Tüketim Zamanı" sortKey="consumptionTimestamp" currentSortKey={sortKey} sortOrder={sortOrder} setSort={handleSort} />
+                <SortHead label="Tip / Kullanıcı" currentSortKey={sortKey} sortOrder={sortOrder} />
+              </div>
+              {paginatedData.length === 0 ? (
+                <div style={{ padding: 48, textAlign: 'center', color: C.ink3, fontWeight: 600 }}>Kayıt bulunamadı.</div>
+              ) : (
+                <div style={{ maxHeight: 460, overflowY: 'auto', padding: '8px 10px', display: 'flex', flexDirection: 'column', gap: 7 }}>
+                  {paginatedData.map((record) => (
+                    <div
+                      key={record.id}
+                      style={{
+                        display: 'grid', gridTemplateColumns: cols, gap: 12, alignItems: 'center',
+                        padding: '12px 14px', borderRadius: C.radiusSm, background: C.surfaceHi, boxShadow: C.clayFlat,
+                      }}
+                    >
+                      {showLabColumn && <Muted>{record.laboratoryName}</Muted>}
+                      <Mono title={record.stokKodu}>{record.stokKodu}</Mono>
+                      <Strong title={record.stokAdi}>{record.stokAdi}</Strong>
+                      <Mono title={record.lotNumarasi}>{record.lotNumarasi}</Mono>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: C.ink2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+                        <TimestampText value={record.miad} />
+                      </span>
+                      <Mono title={record.seriNumarasi}>{record.seriNumarasi}</Mono>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: C.ink2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+                        <TimestampText value={record.consumptionTimestamp} format="dd.MM.yyyy HH:mm" />
+                      </span>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0 }}>
+                        <ConsumeBadge type={record.consumptionType} />
+                        <Muted>{record.userName}</Muted>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Pagination */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', paddingTop: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: C.ink2 }}>Satır/sayfa:</span>
+              <div style={{ width: 90 }}>
+                <Dropdown
+                  value={String(rowsPerPage)}
+                  onChange={(v) => setRowsPerPage(Number(v))}
+                  options={[50, 100, 200].map((n) => String(n))}
+                  icon={<Hash size={15} />}
+                />
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: C.ink2 }}>
+                Sayfa {currentPage} / {totalPages || 1}
+              </span>
+              <SoftBtn
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                style={{ height: 42, padding: '0 14px' }}
+              >
+                Önceki
+              </SoftBtn>
+              <SoftBtn
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage >= totalPages}
+                style={{ height: 42, padding: '0 14px' }}
+              >
+                Sonraki
+              </SoftBtn>
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      {/* Aylık Ortalama Tüketim modal */}
+      <Modal open={isAverageModalOpen} onClose={() => setIsAverageModalOpen(false)} width={720}>
+        <ModalHead
+          icon={BarChartHorizontalBig}
+          title="Aylık Ortalama Tüketim Raporu"
+          desc={`${
+            selectedHospitalId
+              ? hospitals.find((h) => h.id === selectedHospitalId)?.name + " — "
+              : ""
+          }ürün bazlı ortalama aylık tüketim miktarları.${
+            dateRange?.from || dateRange?.to
+              ? ` (Filtre: ${dateRange?.from ? format(dateRange.from, "dd.MM.yy") : "Başlangıç"} – ${dateRange?.to ? format(dateRange.to, "dd.MM.yy") : "Bitiş"})`
+              : " (Tüm zamanlar)"
+          }`}
+          onClose={() => setIsAverageModalOpen(false)}
+        />
+        <div style={{ padding: '18px 22px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 18 }}>
+          {monthlyAverages.length === 0 ? (
+            <EmptyBlock text="Bu laboratuvar için hesaplanacak tüketim verisi bulunamadı." />
+          ) : (
+            <>
+              {/* Top products chart (overflow-proof) */}
+              {avgChartItems.length > 0 && (
+                <div>
+                  <FieldLabel>En Yüksek Ortalama Aylık Tüketim</FieldLabel>
+                  <div style={{ background: C.surface2, boxShadow: C.clayInset, borderRadius: C.radius, padding: 16 }}>
+                    <HBar items={avgChartItems} labelW={mobile ? 110 : 160} />
+                  </div>
+                </div>
+              )}
+
+              {/* Detail list */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1.6fr) 1fr 1fr 1fr', gap: 10, padding: '0 14px' }}>
+                  {['Stok Adı (Kodu)', 'Ort. Aylık', 'Toplam', 'Ay Sayısı'].map((h, i) => (
+                    <div key={h} style={{ ...labelCol, textAlign: i === 0 ? 'left' : 'right' }}>{h}</div>
+                  ))}
+                </div>
+                {monthlyAverages.map((avg) => (
+                  <div
+                    key={avg.stokKodu}
+                    style={{
+                      display: 'grid', gridTemplateColumns: 'minmax(0,1.6fr) 1fr 1fr 1fr', gap: 10, alignItems: 'center',
+                      padding: '11px 14px', borderRadius: C.radiusSm, background: C.surfaceHi, boxShadow: C.clayFlat,
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 700, color: C.ink1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{avg.stokAdi}</div>
+                      <div style={{ fontSize: 11.5, fontWeight: 600, color: C.ink3, fontFamily: 'ui-monospace, monospace' }}>({avg.stokKodu})</div>
+                    </div>
+                    <div style={{ textAlign: 'right', fontSize: 14, fontWeight: 800, color: AC.primary, fontVariantNumeric: 'tabular-nums' }}>{avg.ortalamaAylikTuketim}</div>
+                    <div style={{ textAlign: 'right', fontSize: 13.5, fontWeight: 700, color: C.ink1, fontVariantNumeric: 'tabular-nums' }}>{avg.toplamTuketim}</div>
+                    <div style={{ textAlign: 'right', fontSize: 13.5, fontWeight: 600, color: C.ink2, fontVariantNumeric: 'tabular-nums' }}>{avg.aySayisi}</div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+        <div style={{ padding: '16px 22px', borderTop: `1px solid ${C.line}`, display: 'flex', justifyContent: 'flex-end' }}>
+          <SoftBtn onClick={() => setIsAverageModalOpen(false)}>Kapat</SoftBtn>
+        </div>
+      </Modal>
+    </ClayPage>
   );
 }
