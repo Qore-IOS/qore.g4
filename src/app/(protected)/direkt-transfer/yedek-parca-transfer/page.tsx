@@ -3686,6 +3686,7 @@ export default function YedekParcaTransferPage() {
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Ürün Kodu</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Ürün Adı</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Seri No</th>
+                    <th className="text-center px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Adet</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted)' }}>Durum</th>
                     <th
                       className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer group"
@@ -3759,7 +3760,8 @@ export default function YedekParcaTransferPage() {
                           <td className={cn('px-4 py-3 text-sm')} style={{ color: 'var(--dashboard-text)' }}>
                             {group.stokAdi}
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 font-mono text-xs" style={{ color: 'var(--dashboard-muted)' }}>—</td>
+                          <td className="px-4 py-3 text-center">
                             <span
                               className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-bold"
                               style={{ background: 'var(--dashboard-pressed)', color: 'var(--dashboard-accent)' }}
@@ -3811,6 +3813,9 @@ export default function YedekParcaTransferPage() {
                                 {(item as any).hucreNumarasi && (
                                   <span className="ml-1.5 text-[10px] font-semibold" style={{ color: '#7C3AED' }}>H:{(item as any).hucreNumarasi}</span>
                                 )}
+                              </td>
+                              <td className={cn('px-4 py-2.5 text-xs text-center', isUsed && 'line-through')} style={{ color: 'var(--dashboard-muted)' }}>
+                                {(item as any).quantity || 1}
                               </td>
                               <td className="px-4 py-2.5">
                                 {item.status === 'in_stock' && (
