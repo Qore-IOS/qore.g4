@@ -13,6 +13,8 @@ export type CalculationProductRow = {
   testAdi: string;
   marka: string;
   urunGrubu: string;
+  counterEnabled?: boolean;
+  counterPlusEnabled?: boolean;
 };
 
 const ALL = '__all__';
@@ -34,6 +36,7 @@ export function useQoreCalculationProducts({
   const productCodes = useMemo(() => productsQuery.data ?? [], [productsQuery.data]);
   const [labPools, setLabPools] = useState<LabPool[]>([]);
   const [minMaxProductCodes, setMinMaxProductCodes] = useState<Set<string>>(new Set());
+  const [minMaxRulesMap, setMinMaxRulesMap] = useState<Map<string, { counterEnabled: boolean; counterPlusEnabled: boolean }>>(new Map());
   const [isLoadingScope, setIsLoadingScope] = useState(false);
   const [scopeError, setScopeError] = useState<string | null>(null);
 
@@ -72,6 +75,7 @@ export function useQoreCalculationProducts({
     let alive = true;
     if (!hospitalId) {
       setMinMaxProductCodes(new Set());
+      setMinMaxRulesMap(new Map());
       setScopeError(null);
       return;
     }
@@ -83,13 +87,39 @@ export function useQoreCalculationProducts({
         const entries = await Promise.all(
           scopedLabIds.map(async (labId) => {
             const snap = await getDocs(collection(db, 'hospitals', labId, 'minMaxRules'));
-            return snap.docs.map((d) => d.id || String((d.data() as any).stokKodu || '')).filter(Boolean);
+            return snap.docs.map((d) => {
+              const data = d.data();
+              return {
+                stokKodu: d.id || String(data.stokKodu || ''),
+                counterEnabled: !!data.counterEnabled,
+                counterPlusEnabled: !!data.counterPlusEnabled
+              };
+            });
           })
         );
         if (!alive) return;
-        setMinMaxProductCodes(new Set(entries.flat()));
+        
+        const ruleMap = new Map<string, { counterEnabled: boolean; counterPlusEnabled: boolean }>();
+        entries.flat().forEach(entry => {
+          if (!ruleMap.has(entry.stokKodu)) {
+            ruleMap.set(entry.stokKodu, {
+              counterEnabled: entry.counterEnabled,
+              counterPlusEnabled: entry.counterPlusEnabled
+            });
+          } else {
+            const existing = ruleMap.get(entry.stokKodu)!;
+            ruleMap.set(entry.stokKodu, {
+              counterEnabled: existing.counterEnabled || entry.counterEnabled,
+              counterPlusEnabled: existing.counterPlusEnabled || entry.counterPlusEnabled
+            });
+          }
+        });
+        
+        setMinMaxRulesMap(ruleMap);
+        setMinMaxProductCodes(new Set(ruleMap.keys()));
       } catch (e: any) {
         if (!alive) return;
+        setMinMaxRulesMap(new Map());
         setMinMaxProductCodes(new Set());
         setScopeError(e?.message || 'Min-max ürünleri yüklenemedi.');
       } finally {
@@ -107,15 +137,20 @@ export function useQoreCalculationProducts({
       if (p.stokKodu && minMaxProductCodes.has(p.stokKodu) && !byCode.has(p.stokKodu)) byCode.set(p.stokKodu, p);
     });
     return Array.from(byCode.values())
-      .map((p) => ({
-        stokKodu: p.stokKodu,
-        stokAdi: p.stokAdi,
-        testAdi: String(p.testAdi || ''),
-        marka: String(p.marka || ''),
-        urunGrubu: String(p.urunGrubu || ''),
-      }))
+      .map((p) => {
+        const rule = minMaxRulesMap.get(p.stokKodu!);
+        return {
+          stokKodu: p.stokKodu!,
+          stokAdi: p.stokAdi!,
+          testAdi: String(p.testAdi || ''),
+          marka: String(p.marka || ''),
+          urunGrubu: String(p.urunGrubu || ''),
+          counterEnabled: rule?.counterEnabled ?? false,
+          counterPlusEnabled: rule?.counterPlusEnabled ?? false,
+        };
+      })
       .sort((a, b) => a.stokAdi.localeCompare(b.stokAdi, 'tr'));
-  }, [minMaxProductCodes, productCodes]);
+  }, [minMaxProductCodes, productCodes, minMaxRulesMap]);
 
   const brandOptions = useMemo(
     () => Array.from(new Set(rows.map((r) => r.marka).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'tr')),
