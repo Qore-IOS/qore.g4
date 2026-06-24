@@ -63,3 +63,6 @@ reports/audit-*.json
 # Python bytecode (skill scripts)
 __pycache__/
 *.pyc
+
+# npm lockfile (repo uses pnpm)
+package-lock.json
