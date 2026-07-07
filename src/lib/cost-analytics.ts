@@ -9,6 +9,12 @@ export interface SayimSessionItem {
   marka: string;
   stokAdedi: number;
   cihazUstuAdedi: number;
+  /** Cost snapshot captured when the count was saved. */
+  cost?: number;
+  /** Currency snapshot captured when the count was saved. */
+  currency?: Currency;
+  /** Package-size snapshot captured when the count was saved. */
+  ambalajDegeri?: number;
 }
 
 export interface SayimSession {
@@ -17,6 +23,12 @@ export interface SayimSession {
   locationId: string;
   locationName: string;
   createdAt: any;
+  /** Optional accounting period for back-dated bulk count sessions, formatted as YYYY-MM. */
+  period?: string;
+  /** Optional zero-based month saved by the bulk count flow. */
+  month?: number;
+  /** Optional year saved by the bulk count flow. */
+  year?: number;
   items: SayimSessionItem[];
 }
 
@@ -66,12 +78,37 @@ export interface TurnoverMetrics {
   dio: number;
 }
 
-export function getSessionDate(session: SayimSession): Date | null {
+function getCreatedAtDate(session: SayimSession): Date | null {
   if (!session.createdAt) return null;
   if (session.createdAt.toDate) return session.createdAt.toDate();
   if (session.createdAt.seconds) return new Date(session.createdAt.seconds * 1000);
   const d = new Date(session.createdAt);
   return isValid(d) ? d : null;
+}
+
+function getSessionPeriodDate(session: SayimSession): Date | null {
+  const periodMatch = typeof session.period === 'string' ? session.period.match(/^(\d{4})-(\d{2})$/) : null;
+  if (periodMatch) {
+    const year = Number(periodMatch[1]);
+    const monthIndex = Number(periodMatch[2]) - 1;
+    const d = new Date(year, monthIndex, 1);
+    return isValid(d) ? d : null;
+  }
+
+  if (typeof session.year === 'number' && typeof session.month === 'number') {
+    const d = new Date(session.year, session.month, 1);
+    return isValid(d) ? d : null;
+  }
+
+  return null;
+}
+
+/**
+ * Date used by cost-observation analytics. Back-dated bulk counts are grouped
+ * by their selected accounting period; legacy sessions fall back to createdAt.
+ */
+export function getSessionDate(session: SayimSession): Date | null {
+  return getSessionPeriodDate(session) || getCreatedAtDate(session);
 }
 
 export function getProductCostInCurrency(
@@ -80,15 +117,18 @@ export function getProductCostInCurrency(
   cihazUstu: number,
   productMap: Map<string, ProductCode>,
   rates: Record<Currency, number>,
-  targetCurrency: Currency
+  targetCurrency: Currency,
+  snapshot?: Pick<SayimSessionItem, 'cost' | 'currency' | 'ambalajDegeri'>
 ): number {
   const product = productMap.get(stokKodu);
-  if (!product?.cost || !product?.ambalajDegeri) return 0;
+  const productCost = Number(product?.cost ?? snapshot?.cost ?? 0);
+  const packageSize = Number(product?.ambalajDegeri ?? snapshot?.ambalajDegeri ?? 0);
+  if (!productCost || !packageSize) return 0;
 
-  const totalTest = (quantity * product.ambalajDegeri) + cihazUstu;
-  const costPerTest = product.cost / product.ambalajDegeri;
+  const totalTest = (quantity * packageSize) + cihazUstu;
+  const costPerTest = productCost / packageSize;
   const totalCostNative = costPerTest * totalTest;
-  const productCurrency = (product.currency || 'TRY') as Currency;
+  const productCurrency = (product?.currency || snapshot?.currency || 'TRY') as Currency;
 
   let costEUR = totalCostNative;
   if (productCurrency === 'USD') costEUR = totalCostNative / (rates.USD || 1);
@@ -97,14 +137,28 @@ export function getProductCostInCurrency(
   return costEUR * (rates[targetCurrency] || 1);
 }
 
+function compareSessionsByAnalyticsDateDesc(a: SayimSession, b: SayimSession): number {
+  const ad = getSessionDate(a)?.getTime() ?? 0;
+  const bd = getSessionDate(b)?.getTime() ?? 0;
+  if (bd !== ad) return bd - ad;
+  const ac = getCreatedAtDate(a)?.getTime() ?? 0;
+  const bc = getCreatedAtDate(b)?.getTime() ?? 0;
+  return bc - ac;
+}
+
+function sortSessionsByAnalyticsDateDesc(sessions: SayimSession[]): SayimSession[] {
+  return [...sessions].sort(compareSessionsByAnalyticsDateDesc);
+}
+
 export function getSessionsInRange(
   sessions: SayimSession[],
   range: TimeRange,
   customStart?: Date,
   customEnd?: Date
 ): SayimSession[] {
-  if (range === 'all') return sessions;
-  if (range === 'latest') return sessions.length > 0 ? [sessions[0]] : [];
+  const sortedSessions = sortSessionsByAnalyticsDateDesc(sessions);
+  if (range === 'all') return sortedSessions;
+  if (range === 'latest') return sortedSessions.length > 0 ? [sortedSessions[0]] : [];
 
   const now = new Date();
   let start: Date;
@@ -123,7 +177,7 @@ export function getSessionsInRange(
     start = subMonths(now, 12);
   }
 
-  return sessions.filter((s) => {
+  return sortedSessions.filter((s) => {
     const d = getSessionDate(s);
     return d && d >= start && d <= end;
   });
@@ -131,7 +185,7 @@ export function getSessionsInRange(
 
 export function getLatestByLocation(sessions: SayimSession[]): Map<string, SayimSession> {
   const latestByLocation = new Map<string, SayimSession>();
-  sessions.forEach((session) => {
+  sortSessionsByAnalyticsDateDesc(sessions).forEach((session) => {
     const key = `${session.locationType}-${session.locationId}`;
     if (!latestByLocation.has(key)) latestByLocation.set(key, session);
   });
@@ -144,7 +198,7 @@ export function getSessionCost(
   rates: Record<Currency, number>,
   currency: Currency
 ): number {
-  return session.items.reduce((sum, item) => sum + getProductCostInCurrency(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi, productMap, rates, currency), 0);
+  return session.items.reduce((sum, item) => sum + getProductCostInCurrency(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi, productMap, rates, currency, item), 0);
 }
 
 export function getConsolidatedCostForWindow(
@@ -231,7 +285,7 @@ export function getBrandCostBreakdown(
     session.items.forEach((item) => {
       const name = item.marka || 'Diğer';
       const row = map.get(name) || { value: 0, products: new Set<string>() };
-      row.value += getProductCostInCurrency(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi, productMap, rates, currency);
+      row.value += getProductCostInCurrency(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi, productMap, rates, currency, item);
       row.products.add(item.stokKodu);
       map.set(name, row);
     });
@@ -255,7 +309,7 @@ export function getLocationCostBreakdown(
     const brandMap = new Map<string, number>();
     let total = 0;
     session.items.forEach((item) => {
-      const cost = getProductCostInCurrency(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi, productMap, rates, currency);
+      const cost = getProductCostInCurrency(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi, productMap, rates, currency, item);
       total += cost;
       brandMap.set(item.marka || 'Diğer', (brandMap.get(item.marka || 'Diğer') || 0) + cost);
     });
@@ -290,7 +344,7 @@ export function getProductGroupBreakdown(
     session.items.forEach((item) => {
       const group = (productMap.get(item.stokKodu)?.urunGrubu || 'diger') as ProductGroupCostData['group'];
       const normalizedGroup = ['kit', 'sarf', 'yedek_parca'].includes(group) ? group : 'diger';
-      const cost = getProductCostInCurrency(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi, productMap, rates, currency);
+      const cost = getProductCostInCurrency(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi, productMap, rates, currency, item);
       totals.set(normalizedGroup, (totals.get(normalizedGroup) || 0) + cost);
     });
   });
@@ -334,8 +388,9 @@ export function getMonthlyTrend(
     .filter((x): x is { session: SayimSession; d: Date } => !!x.d);
 
   if (!dated.length) return [];
-  const minDate = dated[dated.length - 1].d;
-  const maxDate = dated[0].d;
+  dated.sort((a, b) => a.d.getTime() - b.d.getTime());
+  const minDate = dated[0].d;
+  const maxDate = dated[dated.length - 1].d;
   const start = startOfMonth(minDate);
   const end = endOfMonth(maxDate);
 
