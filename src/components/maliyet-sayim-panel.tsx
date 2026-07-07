@@ -38,6 +38,8 @@ import {
   Mail,
   ShieldCheck,
   Bell,
+  FileSpreadsheet,
+  Download,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
@@ -53,6 +55,7 @@ import {
   type MaliyetSayimOturum, type SessionParticipant, type PresenceData,
 } from '@/lib/maliyet-session';
 import { emitMaliyetSayimInvitation } from '@/lib/notifications';
+import { downloadMaliyetSayimTemplate, parseMaliyetSayimExcel } from '@/lib/labCountExcel';
 import { normalizeCompanyId, filterByCompanyScope, filterByAssignedLabs } from '@/lib/company-scope';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -628,6 +631,10 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
   const [scanFeedback, setScanFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const { formats: barcodeFormats } = useSafeBarcodeFormats();
 
+  // Excel-based count entry
+  const [isExcelBusy, setIsExcelBusy] = useState(false);
+  const excelInputRef = useRef<HTMLInputElement | null>(null);
+
   // Voice counting
   const [voiceActive, setVoiceActive] = useState(false);
   const [voiceTranscript, setVoiceTranscript] = useState('');
@@ -1006,6 +1013,111 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
       setActiveBrand(nextIncomplete.brand);
     }
   }, [brandProgressList, activeBrand]);
+
+  // ------------------------------------------------------------------
+  // Excel-based count entry (template download + upload)
+  // ------------------------------------------------------------------
+  const handleDownloadExcelTemplate = useCallback(async () => {
+    const stokKoduSet = new Set(locationMinMaxRules.map(r => r.stokKodu));
+    const scopeProducts = productCodes.filter(p => stokKoduSet.has(p.stokKodu));
+    if (scopeProducts.length === 0) {
+      toast({ title: 'Ürün yok', description: 'Bu lokasyonda sayıma dahil ürün bulunmuyor.' });
+      return;
+    }
+    setIsExcelBusy(true);
+    try {
+      const rows = scopeProducts
+        .map(p => ({
+          marka: p.marka || '',
+          stokKodu: p.stokKodu,
+          stokAdi: p.stokAdi,
+          mevcutStok: locationStock[p.stokKodu] ?? 0,
+        }))
+        .sort((a, b) => {
+          const byMarka = (a.marka || '').localeCompare(b.marka || '', 'tr');
+          if (byMarka !== 0) return byMarka;
+          return a.stokAdi.localeCompare(b.stokAdi, 'tr');
+        });
+      const safeName = (locationName || 'Lokasyon').replace(/[^\p{L}\p{N}]+/gu, '_');
+      await downloadMaliyetSayimTemplate(rows, `Maliyet_Sayim_Sablonu_${safeName}.xlsx`);
+      toast({ title: 'Şablon indirildi', description: 'Maliyet sayım şablonu Excel olarak indirildi.' });
+    } catch (err: any) {
+      console.error('Maliyet sayım template download error:', err);
+      toast({ title: 'Hata', description: err?.message || 'Şablon oluşturulamadı.', variant: 'destructive' });
+    } finally {
+      setIsExcelBusy(false);
+    }
+  }, [locationMinMaxRules, productCodes, locationStock, locationName, toast]);
+
+  const handleExcelFileSelected = useCallback(async (file: File | null | undefined) => {
+    if (!file) return;
+    setIsExcelBusy(true);
+    try {
+      const parsed = await parseMaliyetSayimExcel(file);
+      if (parsed.length === 0) {
+        toast({ title: 'Veri bulunamadı', description: 'Yüklenen dosyada geçerli "Stok Adedi" / "Cihaz Üstü Test" girişi bulunamadı.', variant: 'destructive' });
+        return;
+      }
+
+      const stokKoduSet = new Set(locationMinMaxRules.map(r => r.stokKodu));
+      const productByCode = new Map(productCodes.map(p => [p.stokKodu, p]));
+
+      const next: Record<string, ProductCountEntry> = { ...countData };
+      const appliedEntries: ProductCountEntry[] = [];
+      let unknown = 0;
+
+      parsed.forEach(({ stokKodu, stokAdedi, cihazUstuAdedi }) => {
+        if (!stokKoduSet.has(stokKodu)) {
+          unknown++;
+          return;
+        }
+        const product = productByCode.get(stokKodu);
+        const base: ProductCountEntry = next[stokKodu] ?? {
+          stokKodu,
+          stokAdi: product?.stokAdi || stokKodu,
+          marka: product?.marka || '',
+          stokAdedi: '',
+          cihazUstuAdedi: '',
+          counted: false,
+          lots: [],
+          serials: [],
+          expiryWarnings: [],
+        };
+        const updated: ProductCountEntry = {
+          ...base,
+          stokAdedi: stokAdedi !== null ? String(stokAdedi) : base.stokAdedi,
+          cihazUstuAdedi: cihazUstuAdedi !== null ? String(cihazUstuAdedi) : base.cihazUstuAdedi,
+          counted: true,
+        };
+        next[stokKodu] = updated;
+        appliedEntries.push(updated);
+      });
+
+      const applied = appliedEntries.length;
+      if (applied > 0) setCountData(next);
+
+      // Propagate to collaborative session participants, if any.
+      if (applied > 0 && sessionMode === 'collaborative' && activeSessionId && currentUserProfile?.uid) {
+        appliedEntries.forEach(entry => {
+          syncToSession(entry.stokKodu, 'counted', true, entry);
+        });
+      }
+
+      const parts: string[] = [`${applied} ürün için sayım girildi`];
+      if (unknown > 0) parts.push(`${unknown} tanımsız satır atlandı`);
+      toast({
+        title: applied > 0 ? 'Excel ile sayım yüklendi' : 'Eşleşen ürün yok',
+        description: parts.join(' · '),
+        variant: applied > 0 ? 'default' : 'destructive',
+      });
+    } catch (err: any) {
+      console.error('Maliyet sayım Excel import error:', err);
+      toast({ title: 'Hata', description: err?.message || 'Excel dosyası okunamadı.', variant: 'destructive' });
+    } finally {
+      setIsExcelBusy(false);
+      if (excelInputRef.current) excelInputRef.current.value = '';
+    }
+  }, [locationMinMaxRules, productCodes, countData, sessionMode, activeSessionId, currentUserProfile, syncToSession, toast]);
 
   const resetToLocationSelection = useCallback(() => {
     // Stop voice recognition if active
@@ -2013,6 +2125,33 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
             >
               {voiceActive ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
               {voiceActive ? 'Mikrofon Aktif' : 'Sesli Sayım'}
+            </button>
+
+            {/* Excel ile sayım */}
+            <input
+              ref={excelInputRef}
+              type="file"
+              accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+              className="sr-only"
+              onChange={(e) => handleExcelFileSelected(e.target.files?.[0])}
+            />
+            <button
+              onClick={handleDownloadExcelTemplate}
+              disabled={isExcelBusy}
+              title="Maliyet sayım şablonunu Excel olarak indir"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isExcelBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              <span className="hidden md:inline">Şablon İndir</span>
+            </button>
+            <button
+              onClick={() => excelInputRef.current?.click()}
+              disabled={isExcelBusy}
+              title="Doldurulmuş Excel şablonunu yükleyerek sayım gir"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 dark:text-emerald-400 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isExcelBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
+              <span className="hidden md:inline">Excel ile Sayım</span>
             </button>
 
             {/* Voice transcript live preview */}
