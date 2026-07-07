@@ -9,6 +9,12 @@ export interface SayimSessionItem {
   marka: string;
   stokAdedi: number;
   cihazUstuAdedi: number;
+  /** Cost snapshot captured when the count was saved. */
+  cost?: number;
+  /** Currency snapshot captured when the count was saved. */
+  currency?: Currency;
+  /** Package-size snapshot captured when the count was saved. */
+  ambalajDegeri?: number;
 }
 
 export interface SayimSession {
@@ -80,15 +86,18 @@ export function getProductCostInCurrency(
   cihazUstu: number,
   productMap: Map<string, ProductCode>,
   rates: Record<Currency, number>,
-  targetCurrency: Currency
+  targetCurrency: Currency,
+  snapshot?: Pick<SayimSessionItem, 'cost' | 'currency' | 'ambalajDegeri'>
 ): number {
   const product = productMap.get(stokKodu);
-  if (!product?.cost || !product?.ambalajDegeri) return 0;
+  const productCost = Number(product?.cost ?? snapshot?.cost ?? 0);
+  const packageSize = Number(product?.ambalajDegeri ?? snapshot?.ambalajDegeri ?? 0);
+  if (!productCost || !packageSize) return 0;
 
-  const totalTest = (quantity * product.ambalajDegeri) + cihazUstu;
-  const costPerTest = product.cost / product.ambalajDegeri;
+  const totalTest = (quantity * packageSize) + cihazUstu;
+  const costPerTest = productCost / packageSize;
   const totalCostNative = costPerTest * totalTest;
-  const productCurrency = (product.currency || 'TRY') as Currency;
+  const productCurrency = (product?.currency || snapshot?.currency || 'TRY') as Currency;
 
   let costEUR = totalCostNative;
   if (productCurrency === 'USD') costEUR = totalCostNative / (rates.USD || 1);
@@ -144,7 +153,7 @@ export function getSessionCost(
   rates: Record<Currency, number>,
   currency: Currency
 ): number {
-  return session.items.reduce((sum, item) => sum + getProductCostInCurrency(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi, productMap, rates, currency), 0);
+  return session.items.reduce((sum, item) => sum + getProductCostInCurrency(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi, productMap, rates, currency, item), 0);
 }
 
 export function getConsolidatedCostForWindow(
@@ -231,7 +240,7 @@ export function getBrandCostBreakdown(
     session.items.forEach((item) => {
       const name = item.marka || 'Diğer';
       const row = map.get(name) || { value: 0, products: new Set<string>() };
-      row.value += getProductCostInCurrency(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi, productMap, rates, currency);
+      row.value += getProductCostInCurrency(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi, productMap, rates, currency, item);
       row.products.add(item.stokKodu);
       map.set(name, row);
     });
@@ -255,7 +264,7 @@ export function getLocationCostBreakdown(
     const brandMap = new Map<string, number>();
     let total = 0;
     session.items.forEach((item) => {
-      const cost = getProductCostInCurrency(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi, productMap, rates, currency);
+      const cost = getProductCostInCurrency(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi, productMap, rates, currency, item);
       total += cost;
       brandMap.set(item.marka || 'Diğer', (brandMap.get(item.marka || 'Diğer') || 0) + cost);
     });
@@ -290,7 +299,7 @@ export function getProductGroupBreakdown(
     session.items.forEach((item) => {
       const group = (productMap.get(item.stokKodu)?.urunGrubu || 'diger') as ProductGroupCostData['group'];
       const normalizedGroup = ['kit', 'sarf', 'yedek_parca'].includes(group) ? group : 'diger';
-      const cost = getProductCostInCurrency(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi, productMap, rates, currency);
+      const cost = getProductCostInCurrency(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi, productMap, rates, currency, item);
       totals.set(normalizedGroup, (totals.get(normalizedGroup) || 0) + cost);
     });
   });
