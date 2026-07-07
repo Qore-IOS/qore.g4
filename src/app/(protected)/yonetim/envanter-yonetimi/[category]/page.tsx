@@ -187,6 +187,7 @@ export default function AssetCategoryPage() {
       ...editingAsset,
       konum: finalKonum,
       category: categoryName,
+      bolum: String(editingAsset.bolum || '').trim(),
       manuelKonum: editingAsset.konum === 'Diğer' ? manualLocation.trim() : undefined,
     };
     try {
@@ -261,7 +262,7 @@ export default function AssetCategoryPage() {
     if (globalSearch.trim()) {
       const q = globalSearch.toLocaleLowerCase('tr').trim();
       scoped = scoped.filter(a =>
-        `${a.urunAdi || ''} ${a.demirbasNo || ''} ${a.konum || ''} ${a.marka || ''}`.toLocaleLowerCase('tr').includes(q)
+        `${a.urunAdi || ''} ${a.demirbasNo || ''} ${a.konum || ''} ${a.bolum || ''} ${a.marka || ''}`.toLocaleLowerCase('tr').includes(q)
       );
     }
     if (activeKeys.length === 0) return scoped;
@@ -306,6 +307,7 @@ export default function AssetCategoryPage() {
         Marka: '',
         Model: '',
         Konum: '',
+        'Bölüm': '',
         'Teslim Edilen Personel': '',
         'Mülkiyet Tipi': 'Satılık',
         'Alım Fiyatı (TL)': '',
@@ -375,6 +377,7 @@ export default function AssetCategoryPage() {
       Marka: asset.marka || '',
       Model: asset.model || '',
       Konum: asset.konum || '',
+      'Bölüm': asset.bolum || '',
       'Teslim Edilen Personel': asset.teslimEdilenPersonel || '',
       'Mülkiyet Tipi': getOwnershipLabel(asset),
       'Alım Fiyatı (TL)': typeof asset.alimFiyatiTl === 'number' ? asset.alimFiyatiTl : '',
@@ -423,6 +426,7 @@ export default function AssetCategoryPage() {
           marka: String(row['Marka'] || row['marka'] || '').trim(),
           model: String(row['Model'] || row['model'] || '').trim(),
           konum: konumVal,
+          bolum: String(row['Bölüm'] || row['Bolum'] || row['bölüm'] || row['bolum'] || '').trim(),
           teslimEdilenPersonel: String(row['Teslim Edilen Personel'] || row['teslimedilenpersonel'] || '').trim(),
           mulkiyet: String(row['Mülkiyet Tipi'] || row['mulkiyettipi'] || row['Mülkiyet'] || row['mulkiyet'] || '').toLocaleLowerCase('tr').includes('kira') ? 'kira' : 'satin_alma',
           alimFiyatiTl: Number(row['Alım Fiyatı (TL)'] || row['alimfiyatitl'] || 0) || 0,
@@ -585,6 +589,7 @@ export default function AssetCategoryPage() {
                       <th className="text-left py-2 px-3"><FilterPopover column="durum" title="Durum" options={uniqueFilterOptions.durum} selectedValues={filters.durum} onSelectionChange={handleFilterChange} /></th>
                       <th className="text-left py-2 px-3"><FilterPopover column="marka" title="Marka" options={uniqueFilterOptions.marka} selectedValues={filters.marka} onSelectionChange={handleFilterChange} /></th>
                       <th className="text-left py-2 px-3"><FilterPopover column="konum" title="Konum" options={uniqueFilterOptions.konum} selectedValues={filters.konum} onSelectionChange={handleFilterChange} /></th>
+                      <th className="text-left py-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--dashboard-muted)]">Bölüm</th>
                       <th className="text-left py-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--dashboard-muted)]">Personel</th>
                       <th className="text-left py-2 px-3"><FilterPopover column="mulkiyet" title="Tip" options={uniqueFilterOptions.mulkiyet} selectedValues={filters.mulkiyet} onSelectionChange={handleFilterChange} /></th>
                       <th className="text-left py-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--dashboard-muted)]">Maliyet</th>
@@ -593,7 +598,7 @@ export default function AssetCategoryPage() {
                   </thead>
                   <tbody>
                     {filteredAssets.length === 0 ? (
-                      <tr><td colSpan={9} className="text-center py-12 text-sm text-[var(--dashboard-muted)]">Kayıtlı ürün yok veya filtre ile eşleşmiyor.</td></tr>
+                      <tr><td colSpan={10} className="text-center py-12 text-sm text-[var(--dashboard-muted)]">Kayıtlı ürün yok veya filtre ile eşleşmiyor.</td></tr>
                     ) : filteredAssets.map(asset => (
                       <tr
                         key={asset.id}
@@ -609,6 +614,7 @@ export default function AssetCategoryPage() {
                         </td>
                         <td className="py-2.5 px-3 text-[var(--dashboard-text)]">{asset.marka || '-'}</td>
                         <td className="py-2.5 px-3 text-[var(--dashboard-text)]">{asset.konum || '-'}</td>
+                        <td className="py-2.5 px-3 text-[var(--dashboard-text)]">{asset.bolum || '-'}</td>
                         <td className="py-2.5 px-3 text-[var(--dashboard-muted)]">{asset.zimmetliKisi || asset.teslimEdilenPersonel || '-'}</td>
                         <td className="py-2.5 px-3">
                           <span className={cn("text-xs font-medium px-2 py-0.5 rounded-lg", asset.mulkiyet === 'kira' ? 'bg-sky-500/10 text-sky-600' : 'bg-emerald-500/10 text-emerald-600')}>
@@ -696,6 +702,9 @@ export default function AssetCategoryPage() {
                   <input className={inputClass} placeholder="Ad Soyad" value={editingAsset.teslimEdilenPersonel || ''} onChange={e => set('teslimEdilenPersonel', e.target.value)} />
                 </FormField>
               </div>
+              <FormField label="Bölüm">
+                <input className={inputClass} placeholder="Örn. Biyokimya, Hematoloji, Acil" value={editingAsset.bolum || ''} onChange={e => set('bolum', e.target.value)} />
+              </FormField>
               {editingAsset.konum === 'Diğer' && (
                 <FormField label="Manuel Konum">
                   <input className={inputClass} placeholder="Konum girin" value={manualLocation} onChange={e => setManualLocation(e.target.value)} />
