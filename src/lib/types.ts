@@ -1127,6 +1127,7 @@ export interface Asset {
   seriNumarasi?: string;
   durum?: 'iyi' | 'orta' | 'kötü' | 'çok kötü';
   konum: string;
+  bolum?: string;
   manuelKonum?: string;
   alimFiyatiTl?: number;
   satinAlmaTarihi?: string;

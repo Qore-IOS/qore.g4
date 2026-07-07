@@ -210,6 +210,7 @@ export default function EnvanterYonetimiPage() {
         Model: '',
         'Lab Kodu': '',
         Konum: '',
+        'Bölüm': '',
         'Teslim Edilen Personel': '',
         'Alım Fiyatı (TL)': '',
         'Satın Alma Tarihi': '',
@@ -262,7 +263,7 @@ export default function EnvanterYonetimiPage() {
   const handleDownloadCurrentInventory = () => {
     const mappedAssetKeys = new Set([
       'category', 'demirbasNo', 'urunAdi', 'seriNumarasi', 'durum', 'marka', 'model', 'konum',
-      'teslimEdilenPersonel', 'alimFiyatiTl', 'satinAlmaTarihi', 'garantiBitisTarihi',
+      'bolum', 'teslimEdilenPersonel', 'alimFiyatiTl', 'satinAlmaTarihi', 'garantiBitisTarihi',
       'planliKullanimOmruYil', 'amortismanYontemi', 'amortismanBaslangicTarihi', 'hurdaTarihi',
       'imhaTarihi', 'satisTarihi', 'sonBakimTarihi', 'sonrakiBakimTarihi', 'sonKalibrasyonTarihi',
       'sonrakiKalibrasyonTarihi', 'bakimMaliyetiTl', 'zimmetliKisi', 'checkOutTarihi', 'checkInTarihi',
@@ -280,6 +281,7 @@ export default function EnvanterYonetimiPage() {
         Model: asset.model || '',
         'Lab Kodu': locations.find(l => l.type === 'lab' && l.name === asset.konum)?.code || '',
         Konum: asset.konum || '',
+        'Bölüm': asset.bolum || '',
         'Teslim Edilen Personel': asset.teslimEdilenPersonel || '',
         'Alım Fiyatı (TL)': typeof asset.alimFiyatiTl === 'number' ? asset.alimFiyatiTl : '',
         'Satın Alma Tarihi': asset.satinAlmaTarihi || '',
@@ -362,6 +364,7 @@ export default function EnvanterYonetimiPage() {
           marka: String(row['Marka'] || row['marka'] || '').trim(),
           model: String(row['Model'] || row['model'] || '').trim(),
           konum: resolvedKonum,
+          bolum: String(row['Bölüm'] || row['Bolum'] || row['bölüm'] || row['bolum'] || '').trim(),
           teslimEdilenPersonel: String(row['Teslim Edilen Personel'] || row['teslimedilenpersonel'] || '').trim(),
           alimFiyatiTl: Number(row['Alım Fiyatı (TL)'] || row['Alim Fiyati (TL)'] || row['alimfiyatitl'] || row['alim_fiyati_tl'] || 0) || 0,
           satinAlmaTarihi: String(row['Satın Alma Tarihi'] || row['Satin Alma Tarihi'] || row['satinalmatarihi'] || '').trim(),
