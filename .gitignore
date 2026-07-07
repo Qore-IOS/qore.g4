@@ -29,6 +29,7 @@
 scripts/ceomed-sync/set-env.bat
 scripts/ceomed-sync/sync.log
 scripts/ceomed-sync/sync-depo.log
+scripts/ceomed-sync/.sync-state.json
 
 # debug
 npm-debug.log*

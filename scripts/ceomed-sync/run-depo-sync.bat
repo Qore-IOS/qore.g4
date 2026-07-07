@@ -40,27 +40,6 @@ if not defined FIREBASE_PROJECT_ID (
   exit /b 1
 )
 
-if not defined CEOMED_BASE_URL (
-  echo [HATA] CEOMED_BASE_URL tanimli degil. >> sync-depo.log
-  exit /b 1
-)
-if not defined CEOMED_EPOSTA (
-  echo [HATA] CEOMED_EPOSTA tanimli degil. >> sync-depo.log
-  exit /b 1
-)
-if not defined CEOMED_PAROLA (
-  echo [HATA] CEOMED_PAROLA tanimli degil. >> sync-depo.log
-  exit /b 1
-)
-if not defined GOOGLE_APPLICATION_CREDENTIALS (
-  echo [HATA] GOOGLE_APPLICATION_CREDENTIALS tanimli degil. >> sync-depo.log
-  exit /b 1
-)
-if not defined FIREBASE_PROJECT_ID (
-  echo [HATA] FIREBASE_PROJECT_ID tanimli degil. >> sync-depo.log
-  exit /b 1
-)
-
 echo [%date% %time%] Depo sync basliyor >> sync-depo.log
 node syncMerkezDepo.js >> sync-depo.log 2>&1
 set SYNC_EXIT=%ERRORLEVEL%

@@ -64,9 +64,21 @@ alabilirsin (her tenant kendi sync kurulumunu çalıştırır).
 
 Çalıştır (3 durumun hepsini çekip Firestore `pendingCeomedIrsaliye` koleksiyonuna yazar):
 ```bash
+# Tarih verilmezse aralık otomatik: son başarılı sync'ten bugüne (önerilen)
+node syncToFirestore.js
+# Elle tarih aralığı:
 node syncToFirestore.js 05.05.2026 06.05.2026
 # Sadece tek durum:
 node syncToFirestore.js 05.05.2026 06.05.2026 --status="KURUMA SEVK EDILDI"
+```
+
+Otomatik mod son başarılı çalışma zamanını `scripts/ceomed-sync/.sync-state.json`
+dosyasında tutar (gitignore'da). Makine günlerce kapalı kalsa bile bir sonraki
+çalışmada aralık o güne kadar geriye uzar; aradaki irsaliyeler kaybolmaz.
+İsteğe bağlı env ayarları:
+```env
+CEOMED_SYNC_MIN_LOOKBACK_DAYS=7    # her çalışmada en az bu kadar gün geriye bak
+CEOMED_SYNC_MAX_LOOKBACK_DAYS=90   # uzun kesintide en fazla bu kadar gün geriye bak
 ```
 
 Yazılan doküman şeması:
@@ -114,7 +126,7 @@ Task Scheduler'a günde 1 kez çalışacak şekilde ayrı bir görev ekle (örn.
 
 ## Adım 5 — Windows Task Scheduler ile Otomasyon
 
-`run-sync.bat` hazır — varsa önce `set-env.bat`, sonra `.env` dosyasını yükler; `.env` değerleri `set-env.bat` değerlerini ezer. İçinde bulunduğumuz haftanın tarih aralığıyla izinli durumları çeker ve `sync.log`'a yazar. Batch dosyası eksik zorunlu ayar veya Node hatasında non-zero exit code döndürür; böylece Task Scheduler gerçek hatayı “başarılı” gibi göstermez.
+`run-sync.bat` hazır — varsa önce `set-env.bat`, sonra `.env` dosyasını yükler; `.env` değerleri `set-env.bat` değerlerini ezer. Tarih aralığını Node tarafı otomatik hesaplar: son başarılı sync'ten bugüne (eski "içinde bulunulan hafta" penceresi kaldırıldı — o pencere, makine hafta sonu/tatilde kapalı kaldığında önceki haftanın irsaliyelerini kalıcı olarak atlıyordu). Batch dosyası eksik zorunlu ayar veya Node hatasında non-zero exit code döndürür; böylece Task Scheduler gerçek hatayı “başarılı” gibi göstermez.
 
 ### Önce `.env` oluştur
 `scripts/ceomed-sync/.env` dosyası (gitignore'da) düz `KEY=VALUE` satırları içermeli:
