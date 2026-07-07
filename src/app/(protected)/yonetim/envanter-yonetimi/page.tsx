@@ -163,7 +163,7 @@ export default function EnvanterYonetimiPage() {
     const data: Record<string, unknown> = { name: categoryName };
     try {
       if (editingCategory.id) {
-        await setDoc(doc(db, 'assetCategories', editingCategory.id), data, { merge: true });
+        await setDoc(doc(db, 'assetCategories', editingCategory.id), withCompanyScope(data, currentCompanyId), { merge: true });
       } else {
         const iconRes = await fetch('/api/envanter/category-icon', {
           method: 'POST',
@@ -174,7 +174,7 @@ export default function EnvanterYonetimiPage() {
           const iconData = await iconRes.json();
           data.iconSvg = iconData.iconSvg;
         }
-        await addDoc(collection(db, 'assetCategories'), data);
+        await addDoc(collection(db, 'assetCategories'), withCompanyScope(data, currentCompanyId));
       }
       toast({ title: 'Basarili', description: 'Kategori kaydedildi.' });
       setIsModalOpen(false);
