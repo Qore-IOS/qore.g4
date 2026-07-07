@@ -56,6 +56,7 @@ import {
 } from '@/lib/maliyet-session';
 import { emitMaliyetSayimInvitation } from '@/lib/notifications';
 import { downloadMaliyetSayimTemplate, parseMaliyetSayimExcel } from '@/lib/labCountExcel';
+import TopluMaliyetSayimPanel from '@/components/toplu-maliyet-sayim-panel';
 import { normalizeCompanyId, filterByCompanyScope, filterByAssignedLabs } from '@/lib/company-scope';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -634,6 +635,9 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
   // Excel-based count entry
   const [isExcelBusy, setIsExcelBusy] = useState(false);
   const excelInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Toplu (bulk) sayım girişi
+  const [bulkMode, setBulkMode] = useState(false);
 
   // Voice counting
   const [voiceActive, setVoiceActive] = useState(false);
@@ -1824,6 +1828,18 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
     );
   }
 
+  // ---- RENDER: Toplu (bulk) sayım girişi ----
+  if (bulkMode && locationType && !selectedLocationId) {
+    return (
+      <TopluMaliyetSayimPanel
+        locationType={locationType}
+        locations={(locationType === 'lab' ? hospitals : depots).map(l => ({ id: l.id, name: l.name }))}
+        productCodes={productCodes}
+        onClose={() => setBulkMode(false)}
+      />
+    );
+  }
+
   // ---- RENDER: Location Selection (with tabs for invitations) ----
   if (!locationType || !selectedLocationId) {
     const myPendingInvitations = pendingInvitations.filter(s =>
@@ -1917,6 +1933,23 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
                   : allLocations;
                 return (
                 <div className="space-y-2">
+                  {/* Toplu sayım girişi */}
+                  <button
+                    onClick={() => setBulkMode(true)}
+                    className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl bg-[var(--dashboard-accent)]/10 hover:bg-[var(--dashboard-accent)]/20 transition-colors mb-3 text-left"
+                  >
+                    <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-[var(--dashboard-accent)] shadow-md shrink-0">
+                      <ClipboardCheck className="h-4 w-4 text-white" />
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm font-semibold text-[var(--dashboard-text)] block">Toplu Sayım Gir</span>
+                      <span className="text-[11px] text-[var(--dashboard-muted)]">
+                        Birden fazla {locationType === 'lab' ? 'laboratuvar' : 'depo'} için Excel ile döneme bağlı toplu sayım girin
+                      </span>
+                    </div>
+                    <ChevronRight className="h-4 w-4 text-[var(--dashboard-accent)] shrink-0" />
+                  </button>
+
                   <p className="text-xs font-medium text-[var(--dashboard-muted)] uppercase tracking-wider px-1 mb-3">
                     {locationType === 'lab' ? 'Laboratuvar Seçin' : 'Depo Seçin'}
                   </p>
