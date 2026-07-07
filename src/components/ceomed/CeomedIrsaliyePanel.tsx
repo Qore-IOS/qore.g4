@@ -289,6 +289,9 @@ export default function CeomedIrsaliyePanel() {
                 irsaliyeNumarasi: irs.irsaliyeNo,
                 eklenmeTarihi: Timestamp.now(),
                 isShipped: !useDepot,
+                // Kuruma direkt aktarımda onay anı = sevk anı; Total Verimlilik
+                // "Ay Başı Sevk (Kutu)" otomatik doldurma bu tarihe göre sayar.
+                sevkTarihi: useDepot ? null : Timestamp.now(),
                 hedefKurumId: useDepot ? '' : targetHospital!.id,
                 hedefKurum: useDepot ? '' : targetHospital!.name,
                 createdByName: currentUserProfile?.name || currentUser?.email || 'Ceomed Sync',

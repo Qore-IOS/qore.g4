@@ -1150,6 +1150,67 @@ export default function TotalVerimlilikPanel({
           totalVerimlilikLogger.warn('Cihazdan çıkan kit kayıtları yüklenirken hata oluştu', { poolId: selectedPoolId, error: e });
         }
 
+        // ── Ay Başı Sevkiyat (Kutu) otomatik doldurma ────────────────────────
+        // Dönem içinde havuz üyesi laboratuvarlara sevk edilip stoğa aktarılan
+        // depoStok kayıtları sayılır; lot farkı gözetilmez, her kayıt 1 kutudur.
+        // İki tarih kaynağı birleştirilir:
+        //  - sevkTarihi: uygulama içi sevk akışları (depodan kuruma sevk)
+        //  - eklenmeTarihi (sevkTarihi yoksa): Ceomed onayıyla doğrudan kuruma
+        //    yazılan kayıtlar — onay anı sevk anıdır
+        const sevkKutuByLabCode = new Map<string, number>();
+        let sevkFetchOk = false;
+        try {
+          const tsStart = Timestamp.fromDate(monthStart);
+          const tsEnd = Timestamp.fromDate(monthEndExclusive);
+          const sevkResults = await Promise.all(
+            Array.from(labIdsToProcess).map(async (labId) => {
+              const [bySevkTarihi, byEklenme] = await Promise.all([
+                getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin,
+                  where('hedefKurumId', '==', labId),
+                  where('sevkTarihi', '>=', tsStart),
+                  where('sevkTarihi', '<', tsEnd),
+                )),
+                getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin,
+                  where('hedefKurumId', '==', labId),
+                  where('eklenmeTarihi', '>=', tsStart),
+                  where('eklenmeTarihi', '<', tsEnd),
+                )),
+              ]);
+              return { labId, bySevkTarihi, byEklenme };
+            })
+          );
+          for (const { labId, bySevkTarihi, byEklenme } of sevkResults) {
+            const seenDocIds = new Set<string>();
+            const countDoc = (id: string, data: Record<string, unknown>) => {
+              if (seenDocIds.has(id)) return;
+              seenDocIds.add(id);
+              const code = String(data.stokKodu || '');
+              if (!code) return;
+              const key = `${labId}|${code}`;
+              sevkKutuByLabCode.set(key, (sevkKutuByLabCode.get(key) || 0) + 1);
+            };
+            bySevkTarihi.docs.forEach(d => countDoc(d.id, d.data()));
+            byEklenme.docs.forEach(d => {
+              const data = d.data();
+              // sevkTarihi olan kayıtların dönemi sevk ayına göre belirlenir
+              // (ilk sorgu kapsar); burada yalnızca sevkTarihi'siz kayıtlar
+              // (Ceomed onayıyla doğrudan kuruma yazılanlar) sayılır.
+              if (data.sevkTarihi) return;
+              if (data.isShipped === false) return;
+              countDoc(d.id, data);
+            });
+          }
+          sevkFetchOk = true;
+          if (sevkKutuByLabCode.size > 0) {
+            toast({
+              title: 'Sevkiyatlar Aktarıldı',
+              description: `Ay Başı Sevk (Kutu) sütunu ${MONTHS[selectedMonth]?.label} ${selectedYear} sevk kayıtlarından otomatik dolduruldu.`,
+            });
+          }
+        } catch (e) {
+          totalVerimlilikLogger.warn('Ay başı sevkiyat kayıtları yüklenirken hata oluştu', { poolId: selectedPoolId, error: e });
+        }
+
         // Her laboratuvar için benzersiz ürün listesi oluştur
         const newRows: TableRow[] = [];
 
@@ -1182,6 +1243,13 @@ export default function TotalVerimlilikPanel({
               arizaliKitTest += ejectedTestByLabCode.get(`${lid}|${stokKodu}`) || 0;
             });
 
+            // Ay Başı Sevk (Kutu): havuz üyesi lablere dönem içi sevk toplamı
+            // (ana lab satırında tüm ortak havuz üyeleri toplanır).
+            let ayBasiSevkKutu = 0;
+            labIdsForMinMax.forEach(lid => {
+              ayBasiSevkKutu += sevkKutuByLabCode.get(`${lid}|${stokKodu}`) || 0;
+            });
+
             // NOT: Marka / ürün grubu filtresi burada UYGULANMAZ. Tüm satırlar
             // kurulur; marka/grup filtresi yalnızca GÖRÜNÜM aşamasında
             // (filteredAndSortedRows) uygulanır. Böylece filtre değişiminde veri
@@ -1202,7 +1270,7 @@ export default function TotalVerimlilikPanel({
               ayBasiCihazUstuTest: 0,
               totalAyBasiStok: 0,
               // Phase 2 alanları
-              ayBasiSevkiyatKutu: 0,
+              ayBasiSevkiyatKutu: ayBasiSevkKutu,
               ayBasiSevkiyatTest: 0,
               goztepeSevkiyat: 0,
               kurumlarArasiSevk: 0,
@@ -1331,7 +1399,10 @@ export default function TotalVerimlilikPanel({
                   ...row,
                   baslangicStokuKutu: savedRow.baslangicStokuKutu,
                   ayBasiCihazUstuTest: savedRow.ayBasiCihazUstuTest,
-                  ayBasiSevkiyatKutu: savedRow.ayBasiSevkiyatKutu,
+                  // Ay Başı Sevk (Kutu) canlı sevkiyat kayıtlarından otomatik
+                  // hesaplanır; ara kayıttaki değer yalnızca canlı veri
+                  // çekilemediğinde (sevkFetchOk=false) kullanılır.
+                  ayBasiSevkiyatKutu: sevkFetchOk ? row.ayBasiSevkiyatKutu : savedRow.ayBasiSevkiyatKutu,
                   goztepeSevkiyat: savedRow.goztepeSevkiyat,
                   kurumlarArasiSevk: savedRow.kurumlarArasiSevk,
                   lojistikAraTransfer: savedRow.lojistikAraTransfer,
@@ -1412,7 +1483,7 @@ export default function TotalVerimlilikPanel({
     // selectedBrand / selectedUrunGrubu KASITLI olarak bağımlılıkta DEĞİL: marka/
     // grup filtresi artık client-side (görünüm) uygulanıyor; değişiminde veri
     // yeniden çekilmiyor.
-  }, [selectedPoolId, selectedMonth, selectedYear, efficiencyPools, labPools, hospitals, productCodes, toast]);
+  }, [selectedPoolId, selectedMonth, selectedYear, efficiencyPools, labPools, hospitals, productCodes, toast, currentCompanyId, isSuperAdmin]);
 
   // Hesaplama fonksiyonu
   const computeRow = useCallback((row: TableRow, allRows?: TableRow[], transfers?: Record<string, { sourceLabId: string; sourceLabName: string; kutuAdet: number }>): TableRow => {
@@ -3488,6 +3559,8 @@ export default function TotalVerimlilikPanel({
         return `((AyBaşıSevk ${f(row.ayBasiSevkiyatKutu)} + Göztepe ${f(row.goztepeSevkiyat)} + K.Arası ${f(row.kurumlarArasiSevk)} + Loj ${f(row.lojistikAraTransfer)}) × Ambalaj ${f(row.ambalajDegeri)}) + TotalAyBaşı ${f(row.totalAyBasiStok)} = ${f(row.sevkiyatlarSonrasiTotalTest)}`;
       case 'donemSonuToplamTest':
         return `(D.SonuStok ${f(row.donemSonuStokKutu)} × Ambalaj ${f(row.ambalajDegeri)}) + D.SonuCihaz ${f(row.donemSonuCihazUstuTest)} = ${f(row.donemSonuToplamTest)}`;
+      case 'ayBasiSevkiyatKutu':
+        return `Dönem içi sevk kayıtlarından otomatik: ${row.labName} laboratuvarına ${f(row.ayBasiSevkiyatKutu)} kutu (lot farkı gözetilmez; elle düzenlenebilir)`;
       case 'arizaliKitTest':
         return `Cihazdan çıkan kit (dönem içi) test toplamı = ${f(row.arizaliKitTest)}`;
       case 'beklenenTestSayisi':
