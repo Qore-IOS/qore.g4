@@ -118,6 +118,7 @@ export default function DepoYonetimPanel() {
         ceomedDepoKodu: currentDepot.ceomedEnabled ? (currentDepot.ceomedDepoKodu || '').toString().trim() : '',
         ceomedCariKodu: (currentDepot.ceomedCariKodu || '').toString().trim().toUpperCase(),
         orderLimitEnabled: currentDepot.orderLimitEnabled ?? false,
+        verimlilikMalKabulEnabled: currentDepot.verimlilikMalKabulEnabled ?? false,
       };
 
       if (currentDepot.id) {
@@ -312,6 +313,22 @@ export default function DepoYonetimPanel() {
                 <Switch
                   checked={currentDepot.orderLimitEnabled || false}
                   onCheckedChange={(checked) => setCurrentDepot({ ...currentDepot, orderLimitEnabled: checked })}
+                />
+              </div>
+
+              <div className="flex items-start justify-between gap-3 p-3 border rounded-md">
+                <div className="space-y-0.5">
+                  <label className="text-sm font-medium">Verimlilik: Sevkiyatı Mal Kabulden Al</label>
+                  <p className="text-xs text-muted-foreground">
+                    Aktifse Total Verimlilik&apos;te &quot;Ay Başı Sevkiyatları Getir&quot; işlemi, bu depoya
+                    bağlı laboratuvarlar için laboratuvara yapılan sevkler yerine bu deponun dönem içi
+                    mal kabul geçmişini sayar. Mal kabulünü Ceomed&apos;e bakmadan uygulama içinde kendisi
+                    yapan depolar için açın; depo başına tek laboratuvar senaryosu için tasarlanmıştır.
+                  </p>
+                </div>
+                <Switch
+                  checked={Boolean(currentDepot.verimlilikMalKabulEnabled)}
+                  onCheckedChange={(checked) => setCurrentDepot({ ...currentDepot, verimlilikMalKabulEnabled: checked })}
                 />
               </div>
 
