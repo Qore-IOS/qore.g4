@@ -222,42 +222,6 @@ export function toTRY(amount: number, src: Currency | undefined, rates: Record<C
 // ============================================================================
 
 /**
- * Bir lab'da verilen stok kodları için toplam test adedini ve TL maliyetini hesaplar.
- * Test adedi = adet × ambalajDegeri (cihazUstu desteklenmiyor — gerçek stok bazlı).
- */
-function computeStockForLab(
-  labId: string,
-  stokKodlari: Set<string>,
-  productMap: Map<string, ProductCode>,
-  depoStok: DepoStokItem[],
-  rates: Record<Currency, number>,
-  warnings: string[],
-): { units: number; costTL: number } {
-  let units = 0;
-  let costTL = 0;
-
-  for (const item of depoStok) {
-    if (!item.isShipped) continue;
-    if (item.hedefKurumId !== labId) continue;
-    if (!stokKodlari.has(item.stokKodu)) continue;
-
-    const product = productMap.get(item.stokKodu);
-    if (!product) {
-      warnings.push(`Ürün tanımı bulunamadı: ${item.stokKodu}`);
-      continue;
-    }
-    const ambalaj = Number(product.ambalajDegeri) || 0;
-    const birimFiyatTRY = toTRY(Number(product.cost) || 0, product.currency as Currency, rates);
-    // DepoStokItem her bir kutu/seri için 1 satır → adet = 1
-    // ConsumptionRecord ile birlikte aggregation yapılacaksa burada miktar alanı eklenir.
-    units += ambalaj;
-    costTL += birimFiyatTRY;
-  }
-
-  return { units, costTL };
-}
-
-/**
  * Asset'in aylık maliyeti.
  * - `bakimMaliyetiTl` aylık bakım gideri olarak değerlendirilir.
  * - `alimFiyatiTl` + `planliKullanimOmruYil` varsa aylık amortisman türetilir.
@@ -423,15 +387,53 @@ export function computeLabSharedMonthlyCosts(
 }
 
 // ============================================================================
-// ANA HESAP: TEST BAZLI MALİYET
+// PAYLAŞILAN HESAP BAĞLAMI (performans)
 // ============================================================================
+//
+// Eski uygulama her test için tüm depoStok satırlarını (lab × diğer testler
+// kadar kez) yeniden tarıyordu → O(test² × lab × stokSatırı). Gerçek veri
+// hacminde bu ana thread'i dakikalarca kilitleyip sekmeyi çökertiyordu.
+// Bağlam (context) yaklaşımı stok satırlarını ve lab ortak giderlerini TEK
+// SEFER indeksler; test başına hesap yalnızca küçük map lookuplarına düşer.
+
+interface LabStockAgg {
+  units: number;
+  costTL: number;
+  /** Bu stok koduna ait ürün tanımı productMap'te yok */
+  missingProduct: boolean;
+}
+
+interface LabSharedCosts {
+  inventoryCostTL: number;
+  deviceCostMonthlyTL: number;
+  personnelCostMonthlyTL: number;
+  warnings: string[];
+}
+
+export interface TestCostContext {
+  /** Lab filtresi uygulanmış liste */
+  labs: Hospital[];
+  periotAy: number;
+  /** labId → stokKodu → toplam {units, costTL} */
+  stockIndex: Map<string, Map<string, LabStockAgg>>;
+  /** labId → aylık ortak giderler (envanter/cihaz/personel) */
+  labShared: Map<string, LabSharedCosts>;
+  /** labId → o laba atanmış cihazlar */
+  labDevices: Map<string, AssignedDevice[]>;
+  /** testId → testin filtrelenmiş lablardaki toplam stok maliyeti (TL) */
+  perTestStockTL: Map<string, number>;
+  /** Tüm testlerin stok maliyetleri toplamı (TL) */
+  allTestsStockTL: number;
+  inputs: Omit<TestCostInputs, 'testDef'>;
+}
 
 /**
- * Bir testin tüm laboratuvarlardaki maliyet kırılımını hesaplar.
+ * Verilen girdiler için paylaşılan hesap bağlamını kurar. `calculateAllTestCosts`
+ * tüm testleri tek bağlam üzerinden hesaplar; tek test için `calculateTestCost`
+ * da aynı yolu kullanır.
  */
-export function calculateTestCost(inputs: TestCostInputs): TestCostBreakdown {
+export function buildTestCostContext(inputs: Omit<TestCostInputs, 'testDef'>): TestCostContext {
   const {
-    testDef,
     allTestDefs,
     productMap,
     labs: allLabs,
@@ -441,21 +443,127 @@ export function calculateTestCost(inputs: TestCostInputs): TestCostBreakdown {
     personnel,
     depoStok,
     rates,
-    periot,
     filterLabIds,
   } = inputs;
 
-  // Lab filtresi
   const labs = filterLabIds && filterLabIds.length > 0
     ? allLabs.filter((l) => filterLabIds.includes(l.id))
     : allLabs;
+  const labIdSet = new Set(labs.map((l) => l.id));
 
+  // 1) Stok indeksi: labId → stokKodu → {units, costTL} (tek geçiş)
+  const stockIndex = new Map<string, Map<string, LabStockAgg>>();
+  for (const item of depoStok) {
+    if (!item.isShipped) continue;
+    if (!labIdSet.has(item.hedefKurumId)) continue;
+
+    let inner = stockIndex.get(item.hedefKurumId);
+    if (!inner) {
+      inner = new Map<string, LabStockAgg>();
+      stockIndex.set(item.hedefKurumId, inner);
+    }
+    let agg = inner.get(item.stokKodu);
+    if (!agg) {
+      agg = { units: 0, costTL: 0, missingProduct: false };
+      inner.set(item.stokKodu, agg);
+    }
+
+    const product = productMap.get(item.stokKodu);
+    if (!product) {
+      agg.missingProduct = true;
+      continue;
+    }
+    // DepoStokItem her bir kutu/seri için 1 satır → adet = 1
+    agg.units += Number(product.ambalajDegeri) || 0;
+    agg.costTL += toTRY(Number(product.cost) || 0, product.currency as Currency, rates);
+  }
+
+  // 2) Lab başına ortak giderler (tek sefer — test bazından bağımsız)
+  const labDevices = new Map<string, AssignedDevice[]>();
+  for (const ad of assignedDevices) {
+    const list = labDevices.get(ad.hastaneId);
+    if (list) list.push(ad);
+    else labDevices.set(ad.hastaneId, [ad]);
+  }
+
+  const labShared = new Map<string, LabSharedCosts>();
+  for (const lab of labs) {
+    const warnings: string[] = [];
+    const shared = computeLabSharedMonthlyCosts(
+      lab.id,
+      lab.name,
+      labDevices.get(lab.id) || [],
+      deviceDefs,
+      assets,
+      personnel,
+      rates,
+      warnings,
+    );
+    labShared.set(lab.id, { ...shared, warnings });
+  }
+
+  // 3) Test başına stok maliyeti (küçük lookuplar — otherTestsStock için)
+  const perTestStockTL = new Map<string, number>();
+  let allTestsStockTL = 0;
+  for (const t of allTestDefs) {
+    let costTL = 0;
+    const kodSet = new Set(t.linkedStokKodlari || []);
+    for (const lab of labs) {
+      const inner = stockIndex.get(lab.id);
+      if (!inner) continue;
+      for (const kod of kodSet) {
+        const agg = inner.get(kod);
+        if (agg) costTL += agg.costTL;
+      }
+    }
+    perTestStockTL.set(t.id, costTL);
+    allTestsStockTL += costTL;
+  }
+
+  return {
+    labs,
+    periotAy: periotInMonths(inputs.periot),
+    stockIndex,
+    labShared,
+    labDevices,
+    perTestStockTL,
+    allTestsStockTL,
+    inputs,
+  };
+}
+
+// ============================================================================
+// ANA HESAP: TEST BAZLI MALİYET
+// ============================================================================
+
+/**
+ * Bir testin tüm laboratuvarlardaki maliyet kırılımını hesaplar.
+ * Tek test için kullanılır; birden çok test hesaplanacaksa
+ * `calculateAllTestCosts` (paylaşılan bağlam) çok daha hızlıdır.
+ */
+export function calculateTestCost(inputs: TestCostInputs): TestCostBreakdown {
+  const { testDef, ...rest } = inputs;
+  return calculateTestCostWithContext(buildTestCostContext(rest), testDef);
+}
+
+/**
+ * Tüm testlerin maliyet kırılımını TEK paylaşılan bağlam üzerinden hesaplar.
+ * TestTab gibi toplu ekranlar için ana giriş noktası.
+ */
+export function calculateAllTestCosts(inputs: Omit<TestCostInputs, 'testDef'>): TestCostBreakdown[] {
+  const ctx = buildTestCostContext(inputs);
+  return inputs.allTestDefs.map((t) => calculateTestCostWithContext(ctx, t));
+}
+
+export function calculateTestCostWithContext(ctx: TestCostContext, testDef: TestDefinitionGlobal): TestCostBreakdown {
+  const { deviceDefs, rates, periot } = ctx.inputs;
+  const labs = ctx.labs;
   const periotAy = periotInMonths(periot);
 
-  const warnings: string[] = [];
+  const warningSet = new Set<string>();
   const stokKodlari = new Set(testDef.linkedStokKodlari || []);
   if (stokKodlari.size === 0) {
-    warnings.push('Bu teste bağlı ürün tanımlanmamış');
+    warningSet.add('Bu teste bağlı ürün tanımlanmamış');
   }
 
   const perLab: LabBreakdown[] = [];
@@ -466,19 +574,28 @@ export function calculateTestCost(inputs: TestCostInputs): TestCostBreakdown {
   let totalPersonnelMonthlyTL = 0;
 
   for (const lab of labs) {
-    const stockRes = computeStockForLab(lab.id, stokKodlari, productMap, depoStok, rates, warnings);
-    const shared = computeLabSharedMonthlyCosts(
-      lab.id,
-      lab.name,
-      assignedDevices,
-      deviceDefs,
-      assets,
-      personnel,
-      rates,
-      warnings,
-    );
+    let units = 0;
+    let costTL = 0;
+    const inner = ctx.stockIndex.get(lab.id);
+    if (inner) {
+      for (const kod of stokKodlari) {
+        const agg = inner.get(kod);
+        if (!agg) continue;
+        if (agg.missingProduct) warningSet.add(`Ürün tanımı bulunamadı: ${kod}`);
+        units += agg.units;
+        costTL += agg.costTL;
+      }
+    }
 
-    const hasStock = stockRes.units > 0 || stockRes.costTL > 0;
+    const shared = ctx.labShared.get(lab.id) || {
+      inventoryCostTL: 0,
+      deviceCostMonthlyTL: 0,
+      personnelCostMonthlyTL: 0,
+      warnings: [],
+    };
+    for (const w of shared.warnings) warningSet.add(w);
+
+    const hasStock = units > 0 || costTL > 0;
     const hasShared =
       shared.inventoryCostTL > 0 || shared.deviceCostMonthlyTL > 0 || shared.personnelCostMonthlyTL > 0;
     if (!hasStock && !hasShared) continue;
@@ -486,30 +603,25 @@ export function calculateTestCost(inputs: TestCostInputs): TestCostBreakdown {
     perLab.push({
       labId: lab.id,
       labName: lab.name,
-      testUnits: stockRes.units,
-      stockCostTL: stockRes.costTL,
+      testUnits: units,
+      stockCostTL: costTL,
       inventoryCostTL: shared.inventoryCostTL * periotAy,
       deviceCostMonthlyTL: shared.deviceCostMonthlyTL * periotAy,
       personnelCostMonthlyTL: shared.personnelCostMonthlyTL * periotAy,
     });
 
-    totalStockUnits += stockRes.units;
-    totalStockCostTL += stockRes.costTL;
+    totalStockUnits += units;
+    totalStockCostTL += costTL;
     totalInventoryMonthlyTL += shared.inventoryCostTL;
     totalDeviceMonthlyTL += shared.deviceCostMonthlyTL;
     totalPersonnelMonthlyTL += shared.personnelCostMonthlyTL;
   }
 
-  // Diğer testlerin stok maliyeti (filtrelenmiş labs üzerinde)
-  let otherStockTL = 0;
-  for (const t of allTestDefs) {
-    if (t.id === testDef.id) continue;
-    const otherSet = new Set(t.linkedStokKodlari || []);
-    for (const lab of labs) {
-      const res = computeStockForLab(lab.id, otherSet, productMap, depoStok, rates, warnings);
-      otherStockTL += res.costTL;
-    }
-  }
+  // Diğer testlerin stok maliyeti (filtrelenmiş labs üzerinde) — indeksle O(1)
+  const ownStockTL = ctx.perTestStockTL.get(testDef.id) ?? 0;
+  const otherStockTL = ctx.allTestsStockTL - ownStockTL;
+  const warnings = Array.from(warningSet);
+  const inputs = { ...ctx.inputs, testDef } as TestCostInputs;
 
   // Periyot uygulanan ortak gider tutarları
   const inventoryPeriotTL = totalInventoryMonthlyTL * periotAy;
@@ -541,7 +653,7 @@ export function calculateTestCost(inputs: TestCostInputs): TestCostBreakdown {
 
   for (const lab of labs) {
     const labHours = getLabMonthlyHours(lab);
-    const labDevices = assignedDevices.filter((d) => d.hastaneId === lab.id);
+    const labDevices = ctx.labDevices.get(lab.id) || [];
     let hasCapacity = false;
 
     for (const ad of labDevices) {
@@ -698,26 +810,11 @@ export function calculateTestCost(inputs: TestCostInputs): TestCostBreakdown {
  * tek sefer sayar, üzerine TÜM test stoklarını ekler.
  */
 export function calculateSystemTotal(inputs: Omit<TestCostInputs, 'testDef'>): SystemCostSummary {
-  const {
-    allTestDefs,
-    productMap,
-    labs: allLabs,
-    assignedDevices,
-    deviceDefs,
-    assets,
-    personnel,
-    depoStok,
-    rates,
-    periot,
-    filterLabIds,
-  } = inputs;
-
-  const labs = filterLabIds && filterLabIds.length > 0
-    ? allLabs.filter((l) => filterLabIds.includes(l.id))
-    : allLabs;
+  const { allTestDefs, assets, personnel, periot } = inputs;
+  const ctx = buildTestCostContext(inputs);
+  const labs = ctx.labs;
 
   const periotAy = periotInMonths(periot);
-  const warnings: string[] = [];
 
   let inventoryMonthlyTL = 0;
   let deviceMonthlyTL = 0;
@@ -727,20 +824,13 @@ export function calculateSystemTotal(inputs: Omit<TestCostInputs, 'testDef'>): S
   let personnelCount = 0;
 
   for (const lab of labs) {
-    const shared = computeLabSharedMonthlyCosts(
-      lab.id,
-      lab.name,
-      assignedDevices,
-      deviceDefs,
-      assets,
-      personnel,
-      rates,
-      warnings,
-    );
-    inventoryMonthlyTL += shared.inventoryCostTL;
-    deviceMonthlyTL += shared.deviceCostMonthlyTL;
-    personnelMonthlyTL += shared.personnelCostMonthlyTL;
-    deviceCount += assignedDevices.filter((d) => d.hastaneId === lab.id).length;
+    const shared = ctx.labShared.get(lab.id);
+    if (shared) {
+      inventoryMonthlyTL += shared.inventoryCostTL;
+      deviceMonthlyTL += shared.deviceCostMonthlyTL;
+      personnelMonthlyTL += shared.personnelCostMonthlyTL;
+    }
+    deviceCount += (ctx.labDevices.get(lab.id) || []).length;
     assetCount += assets.filter((a) => a.konum === lab.id || a.konum === lab.name).length;
     personnelCount += personnel.filter((p) => p.assignedLabIds?.includes(lab.id)).length;
   }
@@ -752,8 +842,12 @@ export function calculateSystemTotal(inputs: Omit<TestCostInputs, 'testDef'>): S
 
   let allStockTL = 0;
   for (const lab of labs) {
-    const res = computeStockForLab(lab.id, allStokKodlari, productMap, depoStok, rates, warnings);
-    allStockTL += res.costTL;
+    const inner = ctx.stockIndex.get(lab.id);
+    if (!inner) continue;
+    for (const kod of allStokKodlari) {
+      const agg = inner.get(kod);
+      if (agg) allStockTL += agg.costTL;
+    }
   }
 
   // Periyot uygulanır

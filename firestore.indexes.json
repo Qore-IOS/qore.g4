@@ -1239,6 +1239,22 @@
         { "fieldPath": "isShipped", "order": "ASCENDING" },
         { "fieldPath": "stokKodu", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "productCodes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "companyId", "order": "ASCENDING" },
+        { "fieldPath": "stokAdi", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "hospitals",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "companyId", "order": "ASCENDING" },
+        { "fieldPath": "name", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
