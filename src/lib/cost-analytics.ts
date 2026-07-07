@@ -23,6 +23,12 @@ export interface SayimSession {
   locationId: string;
   locationName: string;
   createdAt: any;
+  /** Optional accounting period for back-dated bulk count sessions, formatted as YYYY-MM. */
+  period?: string;
+  /** Optional zero-based month saved by the bulk count flow. */
+  month?: number;
+  /** Optional year saved by the bulk count flow. */
+  year?: number;
   items: SayimSessionItem[];
 }
 
@@ -72,12 +78,37 @@ export interface TurnoverMetrics {
   dio: number;
 }
 
-export function getSessionDate(session: SayimSession): Date | null {
+function getCreatedAtDate(session: SayimSession): Date | null {
   if (!session.createdAt) return null;
   if (session.createdAt.toDate) return session.createdAt.toDate();
   if (session.createdAt.seconds) return new Date(session.createdAt.seconds * 1000);
   const d = new Date(session.createdAt);
   return isValid(d) ? d : null;
+}
+
+function getSessionPeriodDate(session: SayimSession): Date | null {
+  const periodMatch = typeof session.period === 'string' ? session.period.match(/^(\d{4})-(\d{2})$/) : null;
+  if (periodMatch) {
+    const year = Number(periodMatch[1]);
+    const monthIndex = Number(periodMatch[2]) - 1;
+    const d = new Date(year, monthIndex, 1);
+    return isValid(d) ? d : null;
+  }
+
+  if (typeof session.year === 'number' && typeof session.month === 'number') {
+    const d = new Date(session.year, session.month, 1);
+    return isValid(d) ? d : null;
+  }
+
+  return null;
+}
+
+/**
+ * Date used by cost-observation analytics. Back-dated bulk counts are grouped
+ * by their selected accounting period; legacy sessions fall back to createdAt.
+ */
+export function getSessionDate(session: SayimSession): Date | null {
+  return getSessionPeriodDate(session) || getCreatedAtDate(session);
 }
 
 export function getProductCostInCurrency(
@@ -106,14 +137,28 @@ export function getProductCostInCurrency(
   return costEUR * (rates[targetCurrency] || 1);
 }
 
+function compareSessionsByAnalyticsDateDesc(a: SayimSession, b: SayimSession): number {
+  const ad = getSessionDate(a)?.getTime() ?? 0;
+  const bd = getSessionDate(b)?.getTime() ?? 0;
+  if (bd !== ad) return bd - ad;
+  const ac = getCreatedAtDate(a)?.getTime() ?? 0;
+  const bc = getCreatedAtDate(b)?.getTime() ?? 0;
+  return bc - ac;
+}
+
+function sortSessionsByAnalyticsDateDesc(sessions: SayimSession[]): SayimSession[] {
+  return [...sessions].sort(compareSessionsByAnalyticsDateDesc);
+}
+
 export function getSessionsInRange(
   sessions: SayimSession[],
   range: TimeRange,
   customStart?: Date,
   customEnd?: Date
 ): SayimSession[] {
-  if (range === 'all') return sessions;
-  if (range === 'latest') return sessions.length > 0 ? [sessions[0]] : [];
+  const sortedSessions = sortSessionsByAnalyticsDateDesc(sessions);
+  if (range === 'all') return sortedSessions;
+  if (range === 'latest') return sortedSessions.length > 0 ? [sortedSessions[0]] : [];
 
   const now = new Date();
   let start: Date;
@@ -132,7 +177,7 @@ export function getSessionsInRange(
     start = subMonths(now, 12);
   }
 
-  return sessions.filter((s) => {
+  return sortedSessions.filter((s) => {
     const d = getSessionDate(s);
     return d && d >= start && d <= end;
   });
@@ -140,7 +185,7 @@ export function getSessionsInRange(
 
 export function getLatestByLocation(sessions: SayimSession[]): Map<string, SayimSession> {
   const latestByLocation = new Map<string, SayimSession>();
-  sessions.forEach((session) => {
+  sortSessionsByAnalyticsDateDesc(sessions).forEach((session) => {
     const key = `${session.locationType}-${session.locationId}`;
     if (!latestByLocation.has(key)) latestByLocation.set(key, session);
   });
@@ -343,8 +388,9 @@ export function getMonthlyTrend(
     .filter((x): x is { session: SayimSession; d: Date } => !!x.d);
 
   if (!dated.length) return [];
-  const minDate = dated[dated.length - 1].d;
-  const maxDate = dated[0].d;
+  dated.sort((a, b) => a.d.getTime() - b.d.getTime());
+  const minDate = dated[0].d;
+  const maxDate = dated[dated.length - 1].d;
   const start = startOfMonth(minDate);
   const end = endOfMonth(maxDate);
 
