@@ -71,6 +71,19 @@ export function periotInMonths(p?: PeriotConfig): number {
   return 1;
 }
 
+/**
+ * Sunucu tarafında özetlenmiş sevk edilmiş stok: lab + stok kodu başına
+ * kutu/seri (satır) sayısı. Ham `DepoStokItem[]` listesinin on binlerce
+ * belge indirmesini önlemek için `/api/maliyet-gozlem/depo-stok-ozet`
+ * route'u bu şekli döndürür.
+ */
+export interface DepoStokCount {
+  hedefKurumId: string;
+  stokKodu: string;
+  /** Bu lab + stok kodu için sevk edilmiş kutu/seri sayısı */
+  count: number;
+}
+
 export interface TestCostInputs {
   testDef: TestDefinitionGlobal;
   /** Tüm testler — diğer testlerin stoğu da grandTotal'a girer */
@@ -81,7 +94,10 @@ export interface TestCostInputs {
   deviceDefs: Map<string, Device>;
   assets: Asset[];
   personnel: Personnel[];
-  depoStok: DepoStokItem[];
+  /** Ham sevk edilmiş stok satırları — `depoStokCounts` verilmişse gerekmez */
+  depoStok?: DepoStokItem[];
+  /** Sunucuda özetlenmiş stok sayıları — verilirse `depoStok` yerine kullanılır */
+  depoStokCounts?: DepoStokCount[];
   /** EUR base'e göre kurlar (rates.TRY = 1 EUR kaç TL) */
   rates: Record<Currency, number>;
   mode?: AllocationMode;
@@ -442,6 +458,7 @@ export function buildTestCostContext(inputs: Omit<TestCostInputs, 'testDef'>): T
     assets,
     personnel,
     depoStok,
+    depoStokCounts,
     rates,
     filterLabIds,
   } = inputs;
@@ -453,29 +470,51 @@ export function buildTestCostContext(inputs: Omit<TestCostInputs, 'testDef'>): T
 
   // 1) Stok indeksi: labId → stokKodu → {units, costTL} (tek geçiş)
   const stockIndex = new Map<string, Map<string, LabStockAgg>>();
-  for (const item of depoStok) {
-    if (!item.isShipped) continue;
-    if (!labIdSet.has(item.hedefKurumId)) continue;
-
-    let inner = stockIndex.get(item.hedefKurumId);
+  const getAgg = (labId: string, stokKodu: string): LabStockAgg => {
+    let inner = stockIndex.get(labId);
     if (!inner) {
       inner = new Map<string, LabStockAgg>();
-      stockIndex.set(item.hedefKurumId, inner);
+      stockIndex.set(labId, inner);
     }
-    let agg = inner.get(item.stokKodu);
+    let agg = inner.get(stokKodu);
     if (!agg) {
       agg = { units: 0, costTL: 0, missingProduct: false };
-      inner.set(item.stokKodu, agg);
+      inner.set(stokKodu, agg);
     }
+    return agg;
+  };
 
-    const product = productMap.get(item.stokKodu);
-    if (!product) {
-      agg.missingProduct = true;
-      continue;
+  if (depoStokCounts) {
+    // Sunucuda özetlenmiş sayılar — satır başına ürün fiyatı/ambalaj çarpılır
+    for (const row of depoStokCounts) {
+      if (!labIdSet.has(row.hedefKurumId)) continue;
+      const n = Number(row.count) || 0;
+      if (n <= 0) continue;
+
+      const agg = getAgg(row.hedefKurumId, row.stokKodu);
+      const product = productMap.get(row.stokKodu);
+      if (!product) {
+        agg.missingProduct = true;
+        continue;
+      }
+      agg.units += n * (Number(product.ambalajDegeri) || 0);
+      agg.costTL += n * toTRY(Number(product.cost) || 0, product.currency as Currency, rates);
     }
-    // DepoStokItem her bir kutu/seri için 1 satır → adet = 1
-    agg.units += Number(product.ambalajDegeri) || 0;
-    agg.costTL += toTRY(Number(product.cost) || 0, product.currency as Currency, rates);
+  } else {
+    for (const item of depoStok || []) {
+      if (!item.isShipped) continue;
+      if (!labIdSet.has(item.hedefKurumId)) continue;
+
+      const agg = getAgg(item.hedefKurumId, item.stokKodu);
+      const product = productMap.get(item.stokKodu);
+      if (!product) {
+        agg.missingProduct = true;
+        continue;
+      }
+      // DepoStokItem her bir kutu/seri için 1 satır → adet = 1
+      agg.units += Number(product.ambalajDegeri) || 0;
+      agg.costTL += toTRY(Number(product.cost) || 0, product.currency as Currency, rates);
+    }
   }
 
   // 2) Lab başına ortak giderler (tek sefer — test bazından bağımsız)

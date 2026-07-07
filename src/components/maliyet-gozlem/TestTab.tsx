@@ -15,7 +15,9 @@ import {
   calculateSystemTotal,
   type TestCostBreakdown,
   type PeriotConfig,
+  type DepoStokCount,
 } from '../../lib/test-cost-calculator';
+import { fetchDepoStokCounts, aggregateDepoStokRows } from '@/lib/depo-stok-ozet';
 import type {
   ProductCode,
   Hospital,
@@ -1011,7 +1013,7 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
   const [assignedDevices, setAssignedDevices] = useState<AssignedDevice[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
   const [personnel, setPersonnel] = useState<Personnel[]>([]);
-  const [depoStok, setDepoStok] = useState<DepoStokItem[]>([]);
+  const [depoStokCounts, setDepoStokCounts] = useState<DepoStokCount[]>([]);
   const [rates, setRates] = useState<Record<Currency, number>>({ EUR: 1, USD: 1.08, TRY: 38.5 });
 
   // Filtreler
@@ -1035,7 +1037,7 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
           assignedSnap,
           assetsSnap,
           personnelSnap,
-          stokSnap,
+          stokCounts,
           testDefsSnap,
           ratesValue,
         ] = await Promise.all([
@@ -1045,8 +1047,15 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
           getDocs(scopedQuery('hospitalDeviceAssignments', currentCompanyId, isSuperAdmin)),
           getDocs(scopedQuery('assets', currentCompanyId, isSuperAdmin)),
           getDocs(scopedQuery('personnel', currentCompanyId, isSuperAdmin)),
-          // Sadece sevk edilmiş stok; server-side filter.
-          getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true))),
+          // Sevk edilmiş stok sunucuda özetlenir (lab+stok kodu başına satır
+          // sayısı) — on binlerce belgeyi indirmek yerine kompakt özet gelir.
+          // API erişilemezse eski belge-belge Firestore yoluna düşülür.
+          fetchDepoStokCounts(currentCompanyId, isSuperAdmin).catch(async () => {
+            const snap = await getDocs(
+              scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true)),
+            );
+            return aggregateDepoStokRows(snap.docs.map((d) => d.data() as DepoStokItem));
+          }),
           getDocs(scopedQuery('testDefinitions', currentCompanyId, isSuperAdmin, orderBy('sutKodu', 'asc'))),
           getExchangeRates().catch(() => ({ EUR: 1, USD: 1.08, TRY: 38.5 })),
         ]);
@@ -1085,9 +1094,7 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
             isSuperAdmin,
           ),
         );
-        // Server zaten isShipped=true filtreliyor; ek client filtresi gerekmez.
-        const stok = stokSnap.docs.map((d) => ({ id: d.id, ...d.data() } as DepoStokItem));
-        setDepoStok(stok);
+        setDepoStokCounts(stokCounts);
 
         setTestDefs(
           filterByCompanyScope(
@@ -1122,12 +1129,12 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
       deviceDefs,
       assets,
       personnel,
-      depoStok,
+      depoStokCounts,
       rates,
       periot,
       filterLabIds: selectedLabIds.length > 0 ? selectedLabIds : undefined,
     });
-  }, [testDefs, productMap, labs, assignedDevices, deviceDefs, assets, personnel, depoStok, rates, periot, selectedLabIds]);
+  }, [testDefs, productMap, labs, assignedDevices, deviceDefs, assets, personnel, depoStokCounts, rates, periot, selectedLabIds]);
 
   const systemTotal = useMemo(() => {
     if (testDefs.length === 0) return null;
@@ -1139,12 +1146,12 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
       deviceDefs,
       assets,
       personnel,
-      depoStok,
+      depoStokCounts,
       rates,
       periot,
       filterLabIds: selectedLabIds.length > 0 ? selectedLabIds : undefined,
     });
-  }, [testDefs, productMap, labs, assignedDevices, deviceDefs, assets, personnel, depoStok, rates, periot, selectedLabIds]);
+  }, [testDefs, productMap, labs, assignedDevices, deviceDefs, assets, personnel, depoStokCounts, rates, periot, selectedLabIds]);
 
   // Filtreleme + sıralama
   const filtered = useMemo(() => {
@@ -1233,7 +1240,7 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
       deviceAssignmentCount: assignedDevices.length,
       assetCount: assets.length,
       personnelCount: personnel.length,
-      shippedStockRows: depoStok.length,
+      shippedStockRows: depoStokCounts.reduce((sum, r) => sum + r.count, 0),
       rates,
       allFilteredTests: filtered.map((t) => ({
         testId: t.testId,
@@ -1268,7 +1275,7 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
     assignedDevices.length,
     assets.length,
     personnel.length,
-    depoStok.length,
+    depoStokCounts,
     rates,
   ]);
 
