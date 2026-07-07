@@ -31,10 +31,13 @@ import {
   ArrowRight,
   UploadCloud,
   FileText,
+  FileSpreadsheet,
+  Download,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { ProductCode, DepoStokItem, ConsumptionRecord, MinMaxRule } from '@/lib/types';
 import { saveLabCountSession } from '@/lib/labCount';
+import { downloadLabCountTemplate, parseLabCountExcel } from '@/lib/labCountExcel';
 import { buildCalculationPeriod, savePendingCalculationFiles, type PendingCalculationKind } from '@/lib/qore-hesaplama/pending-calculation-files';
 import { formatMiad } from '@/lib/date';
 import { differenceInDays, parse, isValid } from 'date-fns';
@@ -367,6 +370,10 @@ export default function LaboratuvarSayimPage() {
   const [modalFiles, setModalFiles] = useState<File[]>([]);
   const [isUploadingCalcFile, setIsUploadingCalcFile] = useState(false);
 
+  // Excel-based count entry
+  const [isExcelBusy, setIsExcelBusy] = useState(false);
+  const excelInputRef = useRef<HTMLInputElement | null>(null);
+
   const countPeriod = useMemo(() => buildCalculationPeriod(countMonth, countYear), [countMonth, countYear]);
   const countMonthOptions = useMemo(() => Array.from({ length: 12 }, (_, i) => ({
     value: i,
@@ -658,6 +665,81 @@ export default function LaboratuvarSayimPage() {
     const next = groupProgress.find(g => g.status !== 'completed' && g.key !== activeGroup);
     if (next) setActiveGroup(next.key);
   }, [groupProgress, activeGroup]);
+
+  // ------------------------------------------------------------------
+  // Excel-based count entry (template download + upload)
+  // ------------------------------------------------------------------
+  const handleDownloadExcelTemplate = useCallback(async () => {
+    const entries = Object.values(productEntries);
+    if (entries.length === 0) {
+      toast({ title: 'Ürün yok', description: 'Bu laboratuvarda sayıma dahil ürün bulunmuyor.' });
+      return;
+    }
+    setIsExcelBusy(true);
+    try {
+      const rows = entries
+        .map(e => ({
+          marka: e.marka || '',
+          stokKodu: e.stokKodu,
+          stokAdi: e.stokAdi,
+          mevcutAdet: e.existingTotal,
+        }))
+        .sort((a, b) => {
+          const byMarka = (a.marka || '').localeCompare(b.marka || '', 'tr');
+          if (byMarka !== 0) return byMarka;
+          return a.stokAdi.localeCompare(b.stokAdi, 'tr');
+        });
+      const safeName = (labName || 'Laboratuvar').replace(/[^\p{L}\p{N}]+/gu, '_');
+      await downloadLabCountTemplate(rows, `Sayim_Sablonu_${safeName}.xlsx`);
+      toast({ title: 'Şablon indirildi', description: 'Sayım şablonu Excel olarak indirildi.' });
+    } catch (err: any) {
+      console.error('Lab count template download error:', err);
+      toast({ title: 'Hata', description: err?.message || 'Şablon oluşturulamadı.', variant: 'destructive' });
+    } finally {
+      setIsExcelBusy(false);
+    }
+  }, [productEntries, labName, toast]);
+
+  const handleExcelFileSelected = useCallback(async (file: File | null | undefined) => {
+    if (!file) return;
+    setIsExcelBusy(true);
+    try {
+      const parsed = await parseLabCountExcel(file);
+      if (parsed.length === 0) {
+        toast({ title: 'Veri bulunamadı', description: 'Yüklenen dosyada geçerli "Sayım Adeti" girişi bulunamadı.', variant: 'destructive' });
+        return;
+      }
+
+      let applied = 0;
+      let unknown = 0;
+      setCountData(prev => {
+        const next = { ...prev };
+        parsed.forEach(({ stokKodu, sayimAdeti }) => {
+          if (!productEntries[stokKodu]) {
+            unknown++;
+            return;
+          }
+          next[stokKodu] = { enteredQty: String(sayimAdeti), counted: true };
+          applied++;
+        });
+        return next;
+      });
+
+      const parts: string[] = [`${applied} ürün için sayım girildi`];
+      if (unknown > 0) parts.push(`${unknown} tanımsız satır atlandı`);
+      toast({
+        title: applied > 0 ? 'Excel ile sayım yüklendi' : 'Eşleşen ürün yok',
+        description: parts.join(' · '),
+        variant: applied > 0 ? 'default' : 'destructive',
+      });
+    } catch (err: any) {
+      console.error('Lab count Excel import error:', err);
+      toast({ title: 'Hata', description: err?.message || 'Excel dosyası okunamadı.', variant: 'destructive' });
+    } finally {
+      setIsExcelBusy(false);
+      if (excelInputRef.current) excelInputRef.current.value = '';
+    }
+  }, [productEntries, toast]);
 
   // ------------------------------------------------------------------
   // Barcode scanning
@@ -976,6 +1058,35 @@ export default function LaboratuvarSayimPage() {
                 {scanFeedback.message}
               </span>
             )}
+          </div>
+
+          {/* Excel ile sayım */}
+          <div className="flex items-center gap-1.5">
+            <input
+              ref={excelInputRef}
+              type="file"
+              accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+              className="sr-only"
+              onChange={(e) => handleExcelFileSelected(e.target.files?.[0])}
+            />
+            <button
+              onClick={handleDownloadExcelTemplate}
+              disabled={isExcelBusy}
+              title="Sayım şablonunu Excel olarak indir"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isExcelBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              <span className="hidden md:inline">Şablon İndir</span>
+            </button>
+            <button
+              onClick={() => excelInputRef.current?.click()}
+              disabled={isExcelBusy}
+              title="Doldurulmuş Excel şablonunu yükleyerek sayım gir"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 dark:text-emerald-400 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isExcelBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
+              <span className="hidden md:inline">Excel ile Sayım</span>
+            </button>
           </div>
 
           {/* Filter mode toggle */}
