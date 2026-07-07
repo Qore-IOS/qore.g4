@@ -39,6 +39,8 @@ export function StokTab({ currency }: StokTabProps) {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   const isMobile = useIsMobile();
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
   const [sessions, setSessions] = useState<SayimSession[]>([]);
   const [productMap, setProductMap] = useState<Map<string, ProductCode>>(new Map());
   const [rates, setRates] = useState<Record<Currency, number>>({ EUR: 1, USD: 1.08, TRY: 38.5 });
@@ -47,6 +49,7 @@ export function StokTab({ currency }: StokTabProps) {
     let cancelled = false;
     (async () => {
       setLoading(true);
+      setLoadError(null);
       try {
         const [sessionsSnap, productsSnap, ratesValue] = await Promise.all([
           getDocs(scopedQuery('maliyetSayimSessions', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
@@ -71,6 +74,7 @@ export function StokTab({ currency }: StokTabProps) {
         setRates(ratesValue as Record<Currency, number>);
       } catch (e) {
         console.error('StokTab load error', e);
+        if (!cancelled) setLoadError(e instanceof Error ? e.message : String(e));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -78,7 +82,7 @@ export function StokTab({ currency }: StokTabProps) {
     return () => {
       cancelled = true;
     };
-  }, [currentCompanyId, isSuperAdmin]);
+  }, [currentCompanyId, isSuperAdmin, reloadKey]);
 
   const total = useMemo(
     () => calculateTotalCostForRange(sessions, productMap, rates, currency, 'all'),
@@ -169,6 +173,35 @@ export function StokTab({ currency }: StokTabProps) {
         <Loader2 size={32} className="animate-spin" style={{ display: 'inline-block', marginBottom: 12 }} />
         <div style={{ fontSize: 14 }}>Sayım verileri yükleniyor...</div>
       </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <Card>
+        <div style={{ padding: 40, textAlign: 'center', color: 'var(--mg-muted)' }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--mg-text)', marginBottom: 8 }}>
+            Sayım verileri yüklenemedi
+          </div>
+          <div style={{ fontSize: 12, marginBottom: 16, wordBreak: 'break-word' }}>{loadError}</div>
+          <button
+            onClick={() => setReloadKey((k) => k + 1)}
+            style={{
+              padding: '8px 20px',
+              borderRadius: 10,
+              background: 'var(--mg-accent)',
+              color: '#0a0a0c',
+              border: 'none',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              fontSize: 12,
+              fontWeight: 700,
+            }}
+          >
+            Tekrar dene
+          </button>
+        </div>
+      </Card>
     );
   }
 

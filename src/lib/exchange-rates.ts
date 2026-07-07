@@ -43,6 +43,37 @@ async function fetchFromFreeCurrencyApi(): Promise<ExchangeRates> {
   return { EUR: 1, USD: usd, TRY: tryRate };
 }
 
+/**
+ * Yedek kur kaynağı — frankfurter.dev (ECB verileri, API anahtarı gerektirmez).
+ * FreeCurrencyAPI 403/limit hatası verdiğinde devreye girer.
+ */
+async function fetchFromFrankfurter(): Promise<ExchangeRates> {
+  const res = await fetch('https://api.frankfurter.dev/v1/latest?base=EUR&symbols=USD,TRY');
+
+  if (!res.ok) {
+    throw new Error(`Frankfurter HTTP ${res.status}`);
+  }
+
+  const payload = await res.json();
+  const data = payload?.rates || {};
+  const usd = Number(data.USD);
+  const tryRate = Number(data.TRY);
+
+  if (!Number.isFinite(usd) || !Number.isFinite(tryRate) || usd <= 0 || tryRate <= 0) {
+    throw new Error('Frankfurter response missing valid USD/TRY values');
+  }
+
+  return { EUR: 1, USD: usd, TRY: tryRate };
+}
+
+async function fetchLiveRates(): Promise<ExchangeRates> {
+  try {
+    return await fetchFromFreeCurrencyApi();
+  } catch {
+    return await fetchFromFrankfurter();
+  }
+}
+
 export async function getExchangeRates(options?: {
   cacheKey?: string;
   ttl?: number;
@@ -81,7 +112,7 @@ export async function getExchangeRates(options?: {
   }
 
   try {
-    const rates = await fetchFromFreeCurrencyApi();
+    const rates = await fetchLiveRates();
     localStorage.setItem(cacheKey, JSON.stringify({ rates, timestamp: Date.now() }));
     return rates;
   } catch (error) {
