@@ -447,6 +447,23 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "companyId", "order": "ASCENDING" },
+        { "fieldPath": "depotId", "order": "ASCENDING" },
+        { "fieldPath": "eklenmeTarihi", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "depoStok",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "depotId", "order": "ASCENDING" },
+        { "fieldPath": "eklenmeTarihi", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "depoStok",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "companyId", "order": "ASCENDING" },
         { "fieldPath": "hedefKurumId", "order": "ASCENDING" },
         { "fieldPath": "sevkTarihi", "order": "ASCENDING" }
       ]

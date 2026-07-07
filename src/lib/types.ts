@@ -149,6 +149,11 @@ export interface Depot {
   ceomedDepoKodu?: string; // Ceomed'deki depo kodu (örn. "77") — selectMerkezDepoListesi'ndeki DEPO{kod} alanını okur
   ceomedCariKodu?: string; // Ceomed cari kodu (örn. M51001) — Ceomed irsaliye eşleştirmesi için
   orderLimitEnabled?: boolean; // Manuel depo talebinde max stok üstü siparişi engeller
+  // Total Verimlilik: bağlı laboratuvarların "Ay Başı Sevk (Kutu)" verisi,
+  // laboratuvara yapılan sevkler yerine bu deponun dönem içi mal kabul
+  // geçmişinden (depoStok eklenmeTarihi) alınır. Depo mal kabulünü uygulama
+  // içinde kendisi yapan (Ceomed'e bakılmayan) kurulumlar için kullanılır.
+  verimlilikMalKabulEnabled?: boolean;
   [k: string]: any;
 }
 
