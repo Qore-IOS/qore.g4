@@ -321,8 +321,21 @@ export default function EnvanterYonetimiPage() {
     try {
       const data = await readExcelDataSmart(file, 'product', toast);
       if (!data || data.length === 0) {
-        toast({ title: 'Bos Dosya', description: 'Excel dosyasinda veri bulunamadi.', variant: 'default' });
-        setLoading(false);
+        if (assets.length === 0) {
+          toast({ title: 'Bos Envanter', description: 'Excel dosyasinda veri yok ve silinecek envanter kaydi bulunmuyor.', variant: 'default' });
+          return;
+        }
+
+        for (let i = 0; i < assets.length; i += 450) {
+          const deleteBatch = writeBatch(db);
+          assets.slice(i, i + 450).forEach((asset) => {
+            deleteBatch.delete(doc(db, 'assets', asset.id));
+          });
+          await deleteBatch.commit();
+        }
+
+        toast({ title: 'Envanter Temizlendi', description: `Excel dosyasi bos oldugu icin ${assets.length} envanter kaydi silindi.` });
+        fetchData();
         return;
       }
 
