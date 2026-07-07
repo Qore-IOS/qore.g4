@@ -419,3 +419,226 @@ export async function parseMaliyetSayimExcel(file: File): Promise<MaliyetSayimPa
 
   return result;
 }
+
+// ============================================================================
+// Bulk (toplu) maliyet count template — one flat list covering MULTIPLE
+// locations (hospital by hospital), used by the bulk count entry screen.
+//
+// Template columns (Turkish, in order):
+//   Laboratuvar | Marka | Stok Kodu | Stok Adı | Stok Adedi | Cihaz Üstü Test
+// ============================================================================
+
+export interface TopluMaliyetTemplateRow {
+  /** Location (lab/depot) display name. */
+  lokasyon: string;
+  marka: string;
+  stokKodu: string;
+  stokAdi: string;
+}
+
+export interface TopluMaliyetParsedRow {
+  /** Location name as written in the sheet (matched case/space-insensitively). */
+  lokasyon: string;
+  stokKodu: string;
+  stokAdedi: number | null;
+  cihazUstuAdedi: number | null;
+}
+
+const TOPLU_HEADERS = ['Laboratuvar', 'Marka', 'Stok Kodu', 'Stok Adı', 'Stok Adedi', 'Cihaz Üstü Test'] as const;
+
+const LOKASYON_ALIASES = ['laboratuvar', 'lab', 'hastane', 'depo', 'lokasyon', 'kurum'];
+
+/** Normalize a location name for tolerant matching between sheet and app data. */
+export function normalizeLokasyonAdi(value: string): string {
+  return normalizeHeader(value);
+}
+
+/**
+ * Build and download a bulk .xlsx template listing every location's products
+ * sequentially in a single sheet (hospital by hospital). The two count columns
+ * are left blank; location blocks are visually separated by a tinted location
+ * column.
+ */
+export async function downloadTopluMaliyetSayimTemplate(
+  rows: TopluMaliyetTemplateRow[],
+  fileName: string,
+): Promise<void> {
+  const ExcelJS = await import('exceljs');
+  const fileSaverModule = await import('file-saver');
+  const saveAs =
+    (fileSaverModule as any).saveAs ||
+    (fileSaverModule as any).default?.saveAs ||
+    (fileSaverModule as any).default;
+
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'QORE';
+  workbook.created = new Date();
+
+  const ws = workbook.addWorksheet('Toplu Sayım');
+  ws.columns = [
+    { key: 'lokasyon', width: 28 },
+    { key: 'marka', width: 20 },
+    { key: 'stokKodu', width: 18 },
+    { key: 'stokAdi', width: 44 },
+    { key: 'stokAdedi', width: 14 },
+    { key: 'cihazUstuTest', width: 16 },
+  ];
+
+  const thinBorder = {
+    top: { style: 'thin' as const },
+    left: { style: 'thin' as const },
+    bottom: { style: 'thin' as const },
+    right: { style: 'thin' as const },
+  };
+
+  const headerRow = ws.getRow(1);
+  TOPLU_HEADERS.forEach((header, index) => {
+    const cell = headerRow.getCell(index + 1);
+    cell.value = header;
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    cell.border = thinBorder;
+  });
+  headerRow.height = 22;
+  ws.views = [{ state: 'frozen', ySplit: 1 }];
+
+  // Alternate a light tint per location block so boundaries are easy to see.
+  const locationTints = ['FFEFF6FF', 'FFF0FDF4'];
+  let tintIndex = -1;
+  let prevLokasyon: string | null = null;
+
+  rows.forEach((row, index) => {
+    if (row.lokasyon !== prevLokasyon) {
+      prevLokasyon = row.lokasyon;
+      tintIndex = (tintIndex + 1) % locationTints.length;
+    }
+    const r = ws.getRow(index + 2);
+    r.getCell(1).value = row.lokasyon || '';
+    r.getCell(2).value = row.marka || '';
+    r.getCell(3).value = row.stokKodu || '';
+    r.getCell(4).value = row.stokAdi || '';
+    r.getCell(5).value = null; // Stok Adedi — user fills this in
+    r.getCell(6).value = null; // Cihaz Üstü Test — user fills this in
+    for (let c = 1; c <= 6; c++) {
+      const cell = r.getCell(c);
+      cell.border = thinBorder;
+      cell.alignment = { horizontal: c >= 5 ? 'center' : 'left', vertical: 'middle' };
+    }
+    r.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: locationTints[tintIndex] } };
+    r.getCell(1).font = { bold: true };
+    r.getCell(5).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7CC' } };
+    r.getCell(6).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF7CC' } };
+  });
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  saveAs(new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), fileName);
+}
+
+/**
+ * Parse an uploaded bulk count Excel file into per-location, per-product
+ * quantities. A row is returned when at least one of the two count columns
+ * holds a value — an explicit 0 counts as an entry.
+ */
+export async function parseTopluMaliyetSayimExcel(file: File): Promise<TopluMaliyetParsedRow[]> {
+  const ExcelJS = await import('exceljs');
+  const buffer = await file.arrayBuffer();
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+
+  const ws = workbook.worksheets[0];
+  if (!ws) return [];
+
+  const rows: unknown[][] = [];
+  ws.eachRow({ includeEmpty: false }, (row) => {
+    const values: unknown[] = [];
+    const raw = Array.isArray(row.values) ? row.values : [];
+    for (let c = 1; c < raw.length; c++) {
+      values[c - 1] = extractCellValue(raw[c]);
+    }
+    rows.push(values);
+  });
+  if (rows.length === 0) return [];
+
+  // Find the header row within the first few rows.
+  let headerRowIndex = -1;
+  let lokasyonCol = -1;
+  let stokKoduCol = -1;
+  let stokAdediCol = -1;
+  let cihazCol = -1;
+  for (let r = 0; r < Math.min(rows.length, 10); r++) {
+    const row = rows[r];
+    if (!Array.isArray(row)) continue;
+    let lo = -1;
+    let sk = -1;
+    let sa = -1;
+    let cu = -1;
+    for (let c = 0; c < row.length; c++) {
+      const h = normalizeHeader(row[c]);
+      if (lo === -1 && LOKASYON_ALIASES.includes(h)) lo = c;
+      if (sk === -1 && STOK_KODU_ALIASES.includes(h)) sk = c;
+      if (sa === -1 && STOK_ADEDI_ALIASES.includes(h)) sa = c;
+      if (cu === -1 && CIHAZ_USTU_ALIASES.includes(h)) cu = c;
+    }
+    if (lo !== -1 && sk !== -1 && (sa !== -1 || cu !== -1)) {
+      headerRowIndex = r;
+      lokasyonCol = lo;
+      stokKoduCol = sk;
+      stokAdediCol = sa;
+      cihazCol = cu;
+      break;
+    }
+  }
+
+  // Fallback to the documented column order.
+  if (headerRowIndex === -1) {
+    headerRowIndex = 0;
+    lokasyonCol = 0;
+    stokKoduCol = 2;
+    stokAdediCol = 4;
+    cihazCol = 5;
+  }
+
+  const result: TopluMaliyetParsedRow[] = [];
+  const indexByKey = new Map<string, number>();
+  // Rows may omit the location on continuation lines; carry the last seen one.
+  let lastLokasyon = '';
+  for (let r = headerRowIndex + 1; r < rows.length; r++) {
+    const row = rows[r];
+    if (!Array.isArray(row)) continue;
+
+    const lokasyonRaw = String(row[lokasyonCol] ?? '').trim();
+    if (lokasyonRaw) lastLokasyon = lokasyonRaw;
+    const lokasyon = lokasyonRaw || lastLokasyon;
+
+    const stokKodu = String(row[stokKoduCol] ?? '').trim();
+    if (!stokKodu || !lokasyon) continue;
+
+    const rawStok = stokAdediCol !== -1 ? row[stokAdediCol] : undefined;
+    const rawCihaz = cihazCol !== -1 ? row[cihazCol] : undefined;
+
+    const stokAdedi =
+      rawStok === null || rawStok === undefined || String(rawStok).trim() === ''
+        ? null
+        : parseQuantity(rawStok);
+    const cihazUstuAdedi =
+      rawCihaz === null || rawCihaz === undefined || String(rawCihaz).trim() === ''
+        ? null
+        : parseQuantity(rawCihaz);
+
+    // Skip rows where the user entered nothing in either count column.
+    if (stokAdedi === null && cihazUstuAdedi === null) continue;
+
+    const key = `${normalizeLokasyonAdi(lokasyon)}|${stokKodu}`;
+    if (indexByKey.has(key)) {
+      const existing = result[indexByKey.get(key)!];
+      if (stokAdedi !== null) existing.stokAdedi = stokAdedi;
+      if (cihazUstuAdedi !== null) existing.cihazUstuAdedi = cihazUstuAdedi;
+      continue;
+    }
+    indexByKey.set(key, result.length);
+    result.push({ lokasyon, stokKodu, stokAdedi, cihazUstuAdedi });
+  }
+
+  return result;
+}
