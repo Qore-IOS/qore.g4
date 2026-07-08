@@ -34,7 +34,7 @@ import { useIsMobile } from './useIsMobile';
 import { collection, getDocs, query, orderBy, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { filterByCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery, getScopedDocs } from '@/lib/firestore-helpers';
 import { useAuth } from '@/contexts/auth-context';
 import { getExchangeRates } from '@/lib/exchange-rates';
 import { getLatestByLocation, getSessionDate, type SayimSession } from '@/lib/cost-analytics';
@@ -1078,7 +1078,9 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
           ratesValue,
           sayimSessionsSnap,
         ] = await Promise.all([
-          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin, orderBy('stokAdi', 'asc'))),
+          // Legacy-aware: companyId'si eksik ya da __legacy__ etiketli ürün
+          // kayıtları da gelsin — aksi halde maliyet hesapları 0 çıkıyor.
+          getScopedDocs('productCodes', currentCompanyId, isSuperAdmin),
           getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin, orderBy('name', 'asc'))),
           getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
           getDocs(scopedQuery('hospitalDeviceAssignments', currentCompanyId, isSuperAdmin)),
@@ -1099,7 +1101,7 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
         ]);
         if (cancelled) return;
 
-        const products = productsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ProductCode));
+        const products = productsSnap.map((d) => ({ id: d.id, ...d.data() } as ProductCode));
         const pMap = new Map<string, ProductCode>();
         products.forEach((p) => pMap.set(p.stokKodu, p));
         setProductMap(pMap);

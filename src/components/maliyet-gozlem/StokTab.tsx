@@ -13,7 +13,7 @@ import { collection, getDocs, orderBy, query } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery, getScopedDocs } from '@/lib/firestore-helpers';
 import { getExchangeRates } from '@/lib/exchange-rates';
 import type { ProductCode, Currency } from '@/lib/types';
 import {
@@ -54,14 +54,17 @@ export function StokTab({ currency }: StokTabProps) {
       setLoading(true);
       setLoadError(null);
       try {
-        const [sessionsSnap, productsSnap, ratesValue] = await Promise.all([
+        const [sessionsSnap, productDocs, ratesValue] = await Promise.all([
           getDocs(scopedQuery('maliyetSayimSessions', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
-          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin, orderBy('stokAdi', 'asc'))),
+          // Legacy-aware: companyId'si eksik ya da __legacy__ etiketli ürün
+          // kayıtları da gelsin — scopedQuery'nin where('companyId') filtresi
+          // eski ürünleri dışarıda bırakınca tüm maliyetler 0 hesaplanıyordu.
+          getScopedDocs('productCodes', currentCompanyId, isSuperAdmin),
           getExchangeRates().catch(() => ({ EUR: 1, USD: 1.08, TRY: 38.5 })),
         ]);
         if (cancelled) return;
 
-        const products = productsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ProductCode));
+        const products = productDocs.map((d) => ({ id: d.id, ...d.data() } as ProductCode));
         const pMap = new Map<string, ProductCode>();
         products.forEach((p) => pMap.set(p.stokKodu, p));
         setProductMap(pMap);
