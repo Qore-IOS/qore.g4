@@ -38,6 +38,9 @@ import { scopedQuery, getScopedDocs } from '@/lib/firestore-helpers';
 import { useAuth } from '@/contexts/auth-context';
 import { getExchangeRates } from '@/lib/exchange-rates';
 import { getLatestByLocation, getSessionDate, type SayimSession } from '@/lib/cost-analytics';
+import { exportDataToExcel, exportDataToPdf } from '@/lib/utils';
+import { useToast } from '@/hooks/use-toast';
+import type { TabExportHandlers } from './MaliyetGozlemMerkezi';
 import { Loader2, ChevronDown, ChevronsUpDown, Search, Check, X } from 'lucide-react';
 import { LabSelector } from '@/components/common/LabSelector';
 
@@ -1030,10 +1033,13 @@ interface TestTabProps {
   currency: Currency;
   search: string;
   setSearch: (s: string) => void;
+  /** Header'daki Excel/PDF butonlarının çağıracağı işleyicileri kaydeder. */
+  registerExportHandlers?: (handlers: TabExportHandlers) => void;
 }
 
-export function TestTab({ currency: _currency, search, setSearch }: TestTabProps) {
+export function TestTab({ currency: _currency, search, setSearch, registerExportHandlers }: TestTabProps) {
   const { currentCompanyId, isSuperAdmin } = useAuth();
+  const { toast } = useToast();
   const isMobile = useIsMobile();
 
   const [loading, setLoading] = useState(true);
@@ -1263,6 +1269,65 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
     });
     return list;
   }, [breakdowns, selectedTestIds, search, sortBy]);
+
+  // Header'daki Excel/PDF butonları için dışa aktarma işleyicilerini kaydet
+  useEffect(() => {
+    if (!registerExportHandlers) return;
+    const sourceName = countPeriod === 'live'
+      ? 'Anlık Stok'
+      : `Sayım ${countPeriodOptions.find((p) => p.key === countPeriod)?.label || countPeriod}`;
+    const periotName = periot.type === 'gunluk' ? 'Günlük' : periot.type === 'yillik' ? 'Yıllık' : 'Aylık';
+
+    const rows = filtered.map((b) => ({
+      'SUT Kodu': b.sutKodu,
+      'Test Adı': b.sutTestAdi,
+      'Test Adedi': Math.round(b.totalTestUnits),
+      'Stok Maliyeti (TL)': Math.round(b.stockCostTL),
+      'Ortak Giderler (TL)': Math.round(b.ortakGiderlerTL),
+      'Toplam Maliyet (TL)': Math.round(b.testTotalCostTL),
+      'Birim Maliyet (TL)': Number(b.costPerTestTL.toFixed(2)),
+      'Hak Ediş (TL)': Number(b.hakEdisTL.toFixed(2)),
+      'Marj (TL)': Number(b.marjTL.toFixed(2)),
+    }));
+
+    registerExportHandlers({
+      excel: () => {
+        exportDataToExcel(
+          {
+            'Test Maliyetleri': rows,
+            'Özet': [
+              { Alan: 'Veri Kaynağı', Değer: sourceName },
+              { Alan: 'Periyot', Değer: periotName },
+              { Alan: 'Test Sayısı', Değer: filtered.length },
+              { Alan: 'Toplam Harcama (TL)', Değer: Math.round(systemTotal?.realTotalSpendTL ?? 0) },
+              { Alan: 'Envanter Maliyeti (TL)', Değer: Math.round(systemTotal?.inventoryCostTL ?? 0) },
+              { Alan: 'Cihaz Maliyeti (TL/ay)', Değer: Math.round(systemTotal?.deviceCostMonthlyTL ?? 0) },
+              { Alan: 'Personel Gideri (TL/ay)', Değer: Math.round(systemTotal?.personnelCostMonthlyTL ?? 0) },
+              { Alan: 'Tüm Stok Maliyeti (TL)', Değer: Math.round(systemTotal?.allStockCostTL ?? 0) },
+            ],
+          },
+          `Maliyet_Gozlem_Test_${sourceName}`,
+          toast,
+        );
+      },
+      pdf: () => {
+        exportDataToPdf(
+          rows.map((r) => ({
+            ...r,
+            'Stok Maliyeti (TL)': r['Stok Maliyeti (TL)'].toLocaleString('tr-TR'),
+            'Ortak Giderler (TL)': r['Ortak Giderler (TL)'].toLocaleString('tr-TR'),
+            'Toplam Maliyet (TL)': r['Toplam Maliyet (TL)'].toLocaleString('tr-TR'),
+            'Birim Maliyet (TL)': r['Birim Maliyet (TL)'].toLocaleString('tr-TR'),
+            'Hak Ediş (TL)': r['Hak Ediş (TL)'].toLocaleString('tr-TR'),
+            'Marj (TL)': r['Marj (TL)'].toLocaleString('tr-TR'),
+          })),
+          `Maliyet_Gozlem_Test_${sourceName}`,
+          `Maliyet Gözlem — Test Bazlı Maliyet (${sourceName} · ${periotName})`,
+          toast,
+        );
+      },
+    });
+  }, [registerExportHandlers, filtered, systemTotal, countPeriod, countPeriodOptions, periot.type, toast]);
 
   const maxTotal = Math.max(...filtered.map((t) => t.testTotalCostTL), 1);
   const filteredTotal = filtered.reduce((s, t) => s + t.testTotalCostTL, 0);
