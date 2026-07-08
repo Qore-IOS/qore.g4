@@ -30,16 +30,22 @@ import { ActivitiesPanel, InsightsCard, MiniStat, SectionHeader, Card, HBarList 
 import { DonutChart } from './charts';
 import { useIsMobile } from './useIsMobile';
 import { Loader2 } from 'lucide-react';
+import { exportDataToExcel, exportDataToPdf } from '@/lib/utils';
+import { useToast } from '@/hooks/use-toast';
+import type { TabExportHandlers } from './MaliyetGozlemMerkezi';
 
 interface StokTabProps {
   currency: Currency;
+  /** Header'daki Excel/PDF butonlarının çağıracağı işleyicileri kaydeder. */
+  registerExportHandlers?: (handlers: TabExportHandlers) => void;
 }
 
 const BRAND_COLORS = ['#fb923c', '#a78bfa', '#3b82f6', '#42e46d', '#6ea8ff', '#fc7272', '#f59e0b', '#06b6d4'];
 
-export function StokTab({ currency }: StokTabProps) {
+export function StokTab({ currency, registerExportHandlers }: StokTabProps) {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   const router = useRouter();
+  const { toast } = useToast();
   const isMobile = useIsMobile();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -142,6 +148,66 @@ export function StokTab({ currency }: StokTabProps) {
 
   const groupLabel = (g: string) =>
     g === 'kit' ? 'Kit' : g === 'sarf' ? 'Sarf' : g === 'yedek_parca' ? 'Yedek Parça' : 'Diğer';
+
+  // Header'daki Excel/PDF butonları için dışa aktarma işleyicilerini kaydet
+  useEffect(() => {
+    if (!registerExportHandlers) return;
+    const periodName = selectedPeriod === 'all'
+      ? 'Tüm Dönemler'
+      : periodOptions.find((p) => p.key === selectedPeriod)?.label || selectedPeriod;
+
+    registerExportHandlers({
+      excel: () => {
+        exportDataToExcel(
+          {
+            'Özet': [
+              { Alan: 'Dönem', Değer: periodName },
+              { Alan: `Toplam Envanter (${currency})`, Değer: Math.round(total) },
+              { Alan: 'Lokasyon Sayısı', Değer: locations.length },
+              { Alan: 'Marka Sayısı', Değer: brands.length },
+              { Alan: 'Sayım Oturumu', Değer: periodSessions.length },
+            ],
+            'Markalar': brands.map((b) => ({
+              Marka: b.name,
+              [`Maliyet (${currency})`]: Math.round(b.value),
+              'Ürün Sayısı': b.productCount,
+            })),
+            'Lokasyonlar': locations.map((l) => ({
+              Lokasyon: l.locationName,
+              Tip: l.locationType === 'lab' ? 'Lab' : 'Depo',
+              [`Maliyet (${currency})`]: Math.round(l.totalCost),
+              'Ürün Sayısı': l.productCount,
+              'Son Sayım': l.lastSessionDate ? l.lastSessionDate.toLocaleDateString('tr-TR') : '',
+            })),
+            'Ürün Grupları': groups.map((g) => ({
+              Grup: groupLabel(g.group),
+              [`Maliyet (${currency})`]: Math.round(g.value),
+            })),
+            'Aylık Trend': trend.map((t) => ({
+              Ay: t.monthLabel,
+              [`Maliyet (${currency})`]: Math.round(t.cost),
+            })),
+          },
+          `Maliyet_Gozlem_Stok_${periodName}`,
+          toast,
+        );
+      },
+      pdf: () => {
+        exportDataToPdf(
+          locations.map((l) => ({
+            'Lokasyon': l.locationName,
+            'Tip': l.locationType === 'lab' ? 'Lab' : 'Depo',
+            [`Maliyet (${currency})`]: Math.round(l.totalCost).toLocaleString('tr-TR'),
+            'Ürün Sayısı': l.productCount,
+            'Son Sayım': l.lastSessionDate ? l.lastSessionDate.toLocaleDateString('tr-TR') : '',
+          })),
+          `Maliyet_Gozlem_Stok_${periodName}`,
+          `Maliyet Gözlem — Stok Maliyeti (${periodName})`,
+          toast,
+        );
+      },
+    });
+  }, [registerExportHandlers, selectedPeriod, periodOptions, currency, total, brands, locations, groups, trend, periodSessions.length, toast]);
   const symbol = currency === 'TRY' ? '₺' : currency === 'EUR' ? '€' : '$';
 
   const assistantContext = useMemo(() => ({
