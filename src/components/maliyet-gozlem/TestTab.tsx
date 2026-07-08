@@ -37,6 +37,7 @@ import { filterByCompanyScope } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { useAuth } from '@/contexts/auth-context';
 import { getExchangeRates } from '@/lib/exchange-rates';
+import { getLatestByLocation, getSessionDate, type SayimSession } from '@/lib/cost-analytics';
 import { Loader2, ChevronDown, ChevronsUpDown, Search, Check, X } from 'lucide-react';
 import { LabSelector } from '@/components/common/LabSelector';
 
@@ -486,7 +487,14 @@ function FilterBar({
   setSelectedTestIds,
   periot,
   setPeriot,
-}: Omit<FilterBarProps, 'search' | 'setSearch'>) {
+  countPeriod,
+  setCountPeriod,
+  countPeriodOptions,
+}: Omit<FilterBarProps, 'search' | 'setSearch'> & {
+  countPeriod: string;
+  setCountPeriod: (p: string) => void;
+  countPeriodOptions: { key: string; label: string }[];
+}) {
   const isMobile = useIsMobile();
   const periodOpts: { k: PeriotConfig['type']; label: string }[] = [
     { k: 'gunluk', label: 'Günlük' },
@@ -496,6 +504,31 @@ function FilterBar({
 
   return (
     <div style={{ display: 'flex', gap: isMobile ? 8 : 12, alignItems: isMobile ? 'stretch' : 'center', flexWrap: 'wrap', flexDirection: isMobile ? 'column' : 'row' }}>
+      {/* Veri kaynağı: anlık stok veya sayım dönemi */}
+      <select
+        value={countPeriod}
+        onChange={(e) => setCountPeriod(e.target.value)}
+        title="Test hacmi kaynağı: anlık sevk edilmiş stok veya seçili dönemin maliyet sayımı"
+        style={{
+          padding: isMobile ? '9px 12px' : '8px 12px',
+          borderRadius: 10,
+          background: countPeriod === 'live' ? 'var(--mg-surface-2)' : 'var(--mg-accent)',
+          color: countPeriod === 'live' ? 'var(--mg-text)' : '#0a0a0c',
+          border: '1px solid var(--mg-border)',
+          fontFamily: 'inherit',
+          fontSize: 11,
+          fontWeight: 700,
+          cursor: 'pointer',
+          outline: 'none',
+          width: isMobile ? '100%' : undefined,
+        }}
+      >
+        <option value="live">Anlık Stok</option>
+        {countPeriodOptions.map((p) => (
+          <option key={p.key} value={p.key}>Sayım: {p.label}</option>
+        ))}
+      </select>
+
       {/* Periyot toggle */}
       <div
         style={{
@@ -1014,12 +1047,15 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
   const [assets, setAssets] = useState<Asset[]>([]);
   const [personnel, setPersonnel] = useState<Personnel[]>([]);
   const [depoStokCounts, setDepoStokCounts] = useState<DepoStokCount[]>([]);
+  const [countSessions, setCountSessions] = useState<SayimSession[]>([]);
   const [rates, setRates] = useState<Record<Currency, number>>({ EUR: 1, USD: 1.08, TRY: 38.5 });
 
   // Filtreler
   const [selectedLabIds, setSelectedLabIds] = useState<string[]>([]);
   const [selectedTestIds, setSelectedTestIds] = useState<string[]>([]);
   const [periot, setPeriot] = useState<PeriotConfig>({ type: 'aylik' });
+  /** Test hacmi kaynağı: 'live' = anlık sevk edilmiş stok, aksi halde 'YYYY-MM' sayım dönemi */
+  const [countPeriod, setCountPeriod] = useState<string>('live');
   const [sortBy, setSortBy] = useState<'total' | 'unit' | 'volume'>('total');
   const [expandedTestId, setExpandedTestId] = useState<string | null>(null);
 
@@ -1040,6 +1076,7 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
           stokCounts,
           testDefsSnap,
           ratesValue,
+          sayimSessionsSnap,
         ] = await Promise.all([
           getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin, orderBy('stokAdi', 'asc'))),
           getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin, orderBy('name', 'asc'))),
@@ -1058,6 +1095,7 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
           }),
           getDocs(scopedQuery('testDefinitions', currentCompanyId, isSuperAdmin, orderBy('sutKodu', 'asc'))),
           getExchangeRates().catch(() => ({ EUR: 1, USD: 1.08, TRY: 38.5 })),
+          getDocs(scopedQuery('maliyetSayimSessions', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))).catch(() => null),
         ]);
         if (cancelled) return;
 
@@ -1096,6 +1134,16 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
         );
         setDepoStokCounts(stokCounts);
 
+        if (sayimSessionsSnap) {
+          setCountSessions(
+            filterByCompanyScope(
+              sayimSessionsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as SayimSession)),
+              currentCompanyId,
+              isSuperAdmin,
+            ),
+          );
+        }
+
         setTestDefs(
           filterByCompanyScope(
             testDefsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as TestDefinitionGlobal)),
@@ -1117,6 +1165,48 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
     };
   }, [currentCompanyId, isSuperAdmin, reloadKey]);
 
+  // Sayım oturumlarında bulunan dönemler (yeniden eskiye)
+  const countPeriodOptions = useMemo(() => {
+    const keys = new Map<string, string>();
+    countSessions.forEach((s) => {
+      const d = getSessionDate(s);
+      if (!d) return;
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      if (!keys.has(key)) {
+        keys.set(key, d.toLocaleDateString('tr-TR', { month: 'long', year: 'numeric' }));
+      }
+    });
+    return Array.from(keys.entries())
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([key, label]) => ({ key, label }));
+  }, [countSessions]);
+
+  // Test hacmi kaynağı: anlık stok özeti veya seçili dönemin sayım oturumları.
+  // Dönem seçildiğinde her lab için o ayın en güncel oturumu esas alınır;
+  // stokAdedi kutu sayısı, cihazUstuAdedi test adedi olarak hesaba girer.
+  const effectiveStokCounts = useMemo<DepoStokCount[]>(() => {
+    if (countPeriod === 'live') return depoStokCounts;
+    const monthSessions = countSessions.filter((s) => {
+      if (s.locationType !== 'lab') return false;
+      const d = getSessionDate(s);
+      if (!d) return false;
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` === countPeriod;
+    });
+    const latestByLab = getLatestByLocation(monthSessions);
+    const rows: DepoStokCount[] = [];
+    Array.from(latestByLab.values()).forEach((session) => {
+      session.items.forEach((item) => {
+        rows.push({
+          hedefKurumId: session.locationId,
+          stokKodu: item.stokKodu,
+          count: Number(item.stokAdedi) || 0,
+          cihazUstuAdedi: Number(item.cihazUstuAdedi) || 0,
+        });
+      });
+    });
+    return rows;
+  }, [countPeriod, depoStokCounts, countSessions]);
+
   // Hesap motoru — tüm testler tek paylaşılan bağlamla hesaplanır
   // (test başına ayrı ayrı hesaplamak veri büyüdüğünde ana thread'i kilitliyordu)
   const breakdowns = useMemo<TestCostBreakdown[]>(() => {
@@ -1129,12 +1219,12 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
       deviceDefs,
       assets,
       personnel,
-      depoStokCounts,
+      depoStokCounts: effectiveStokCounts,
       rates,
       periot,
       filterLabIds: selectedLabIds.length > 0 ? selectedLabIds : undefined,
     });
-  }, [testDefs, productMap, labs, assignedDevices, deviceDefs, assets, personnel, depoStokCounts, rates, periot, selectedLabIds]);
+  }, [testDefs, productMap, labs, assignedDevices, deviceDefs, assets, personnel, effectiveStokCounts, rates, periot, selectedLabIds]);
 
   const systemTotal = useMemo(() => {
     if (testDefs.length === 0) return null;
@@ -1146,12 +1236,12 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
       deviceDefs,
       assets,
       personnel,
-      depoStokCounts,
+      depoStokCounts: effectiveStokCounts,
       rates,
       periot,
       filterLabIds: selectedLabIds.length > 0 ? selectedLabIds : undefined,
     });
-  }, [testDefs, productMap, labs, assignedDevices, deviceDefs, assets, personnel, depoStokCounts, rates, periot, selectedLabIds]);
+  }, [testDefs, productMap, labs, assignedDevices, deviceDefs, assets, personnel, effectiveStokCounts, rates, periot, selectedLabIds]);
 
   // Filtreleme + sıralama
   const filtered = useMemo(() => {
@@ -1382,6 +1472,9 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
         setSelectedTestIds={setSelectedTestIds}
         periot={periot}
         setPeriot={setPeriot}
+        countPeriod={countPeriod}
+        setCountPeriod={setCountPeriod}
+        countPeriodOptions={countPeriodOptions}
       />
 
       {/* KPI Row */}

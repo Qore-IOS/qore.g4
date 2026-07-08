@@ -22,6 +22,7 @@ import {
   getLocationCostBreakdown,
   getProductGroupBreakdown,
   getMonthlyTrend,
+  getSessionDate,
   type SayimSession,
 } from '@/lib/cost-analytics';
 import { ActivitiesPanel, InsightsCard, MiniStat, SectionHeader, Card, HBarList } from './primitives';
@@ -44,6 +45,8 @@ export function StokTab({ currency }: StokTabProps) {
   const [sessions, setSessions] = useState<SayimSession[]>([]);
   const [productMap, setProductMap] = useState<Map<string, ProductCode>>(new Map());
   const [rates, setRates] = useState<Record<Currency, number>>({ EUR: 1, USD: 1.08, TRY: 38.5 });
+  /** Seçili sayım dönemi ('all' = tüm dönemler, aksi halde 'YYYY-MM') */
+  const [selectedPeriod, setSelectedPeriod] = useState<string>('all');
 
   useEffect(() => {
     let cancelled = false;
@@ -84,22 +87,48 @@ export function StokTab({ currency }: StokTabProps) {
     };
   }, [currentCompanyId, isSuperAdmin, reloadKey]);
 
+  // Oturumlarda bulunan sayım dönemleri (yeniden eskiye)
+  const periodOptions = useMemo(() => {
+    const keys = new Map<string, string>(); // key -> label
+    sessions.forEach((s) => {
+      const d = getSessionDate(s);
+      if (!d) return;
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      if (!keys.has(key)) {
+        keys.set(key, d.toLocaleDateString('tr-TR', { month: 'long', year: 'numeric' }));
+      }
+    });
+    return Array.from(keys.entries())
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([key, label]) => ({ key, label }));
+  }, [sessions]);
+
+  // Dönem seçiliyse yalnızca o ayın oturumları analiz edilir
+  const periodSessions = useMemo(() => {
+    if (selectedPeriod === 'all') return sessions;
+    return sessions.filter((s) => {
+      const d = getSessionDate(s);
+      if (!d) return false;
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` === selectedPeriod;
+    });
+  }, [sessions, selectedPeriod]);
+
   const total = useMemo(
-    () => calculateTotalCostForRange(sessions, productMap, rates, currency, 'all'),
-    [sessions, productMap, rates, currency],
+    () => calculateTotalCostForRange(periodSessions, productMap, rates, currency, 'all'),
+    [periodSessions, productMap, rates, currency],
   );
 
   const brands = useMemo(
-    () => getBrandCostBreakdown(sessions, productMap, rates, currency),
-    [sessions, productMap, rates, currency],
+    () => getBrandCostBreakdown(periodSessions, productMap, rates, currency),
+    [periodSessions, productMap, rates, currency],
   );
   const locations = useMemo(
-    () => getLocationCostBreakdown(sessions, productMap, rates, currency),
-    [sessions, productMap, rates, currency],
+    () => getLocationCostBreakdown(periodSessions, productMap, rates, currency),
+    [periodSessions, productMap, rates, currency],
   );
   const groups = useMemo(
-    () => getProductGroupBreakdown(sessions, productMap, rates, currency),
-    [sessions, productMap, rates, currency],
+    () => getProductGroupBreakdown(periodSessions, productMap, rates, currency),
+    [periodSessions, productMap, rates, currency],
   );
   const trend = useMemo(
     () => getMonthlyTrend(sessions, productMap, rates, currency),
@@ -217,12 +246,45 @@ export function StokTab({ currency }: StokTabProps) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? 12 : 20 }}>
+      {/* Dönem seçici */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--mg-muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+          Sayım Dönemi
+        </span>
+        <select
+          value={selectedPeriod}
+          onChange={(e) => setSelectedPeriod(e.target.value)}
+          style={{
+            padding: '7px 12px',
+            borderRadius: 10,
+            background: 'var(--mg-card)',
+            color: 'var(--mg-text)',
+            border: '1px solid var(--mg-border)',
+            fontFamily: 'inherit',
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer',
+            outline: 'none',
+          }}
+        >
+          <option value="all">Tüm Dönemler</option>
+          {periodOptions.map((p) => (
+            <option key={p.key} value={p.key}>{p.label}</option>
+          ))}
+        </select>
+        {selectedPeriod !== 'all' && periodSessions.length === 0 && (
+          <span style={{ fontSize: 12, color: 'var(--mg-muted)' }}>
+            Bu dönemde sayım oturumu bulunamadı.
+          </span>
+        )}
+      </div>
+
       {/* KPI Row */}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(220px, 1fr))', gap: isMobile ? 8 : 16 }}>
-        <MiniStat label={`Toplam Envanter (${currency})`} value={total} sub="Son sayımlar" color="#fb923c" />
+        <MiniStat label={`Toplam Envanter (${currency})`} value={total} sub={selectedPeriod === 'all' ? 'Son sayımlar' : periodOptions.find((p) => p.key === selectedPeriod)?.label || 'Dönem'} color="#fb923c" />
         <MiniStat label="Lokasyon Sayısı" value={locations.length} sub="aktif" color="#6ea8ff" isCount unit="lab/depo" />
         <MiniStat label="Marka Sayısı" value={brands.length} sub="aktif" color="#a78bfa" isCount unit="marka" />
-        <MiniStat label="Sayım Oturumu" value={sessions.length} sub="tamamlandı" color="#42e46d" isCount unit="oturum" />
+        <MiniStat label="Sayım Oturumu" value={periodSessions.length} sub={selectedPeriod === 'all' ? 'tamamlandı' : 'bu dönemde'} color="#42e46d" isCount unit="oturum" />
       </div>
 
       {/* Activities + Insights */}

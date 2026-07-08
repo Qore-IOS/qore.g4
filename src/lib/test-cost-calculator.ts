@@ -82,6 +82,11 @@ export interface DepoStokCount {
   stokKodu: string;
   /** Bu lab + stok kodu için sevk edilmiş kutu/seri sayısı */
   count: number;
+  /**
+   * Cihaz üstü test adedi (maliyet sayım oturumlarından). Test hacmine doğrudan
+   * eklenir; maliyeti test başına birim fiyat (cost/ambalaj) üzerinden hesaplanır.
+   */
+  cihazUstuAdedi?: number;
 }
 
 export interface TestCostInputs {
@@ -489,7 +494,8 @@ export function buildTestCostContext(inputs: Omit<TestCostInputs, 'testDef'>): T
     for (const row of depoStokCounts) {
       if (!labIdSet.has(row.hedefKurumId)) continue;
       const n = Number(row.count) || 0;
-      if (n <= 0) continue;
+      const cihazUstu = Number(row.cihazUstuAdedi) || 0;
+      if (n <= 0 && cihazUstu <= 0) continue;
 
       const agg = getAgg(row.hedefKurumId, row.stokKodu);
       const product = productMap.get(row.stokKodu);
@@ -497,8 +503,14 @@ export function buildTestCostContext(inputs: Omit<TestCostInputs, 'testDef'>): T
         agg.missingProduct = true;
         continue;
       }
-      agg.units += n * (Number(product.ambalajDegeri) || 0);
-      agg.costTL += n * toTRY(Number(product.cost) || 0, product.currency as Currency, rates);
+      const ambalaj = Number(product.ambalajDegeri) || 0;
+      const costTL = toTRY(Number(product.cost) || 0, product.currency as Currency, rates);
+      agg.units += n * ambalaj + cihazUstu;
+      agg.costTL += n * costTL;
+      // Cihaz üstü testler açılmış kutudan gelir — test başına birim maliyetle eklenir
+      if (cihazUstu > 0 && ambalaj > 0) {
+        agg.costTL += (costTL / ambalaj) * cihazUstu;
+      }
     }
   } else {
     for (const item of depoStok || []) {
