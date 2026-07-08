@@ -9,6 +9,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { collection, getDocs, orderBy, query } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { filterByCompanyScope } from '@/lib/company-scope';
@@ -38,6 +39,7 @@ const BRAND_COLORS = ['#fb923c', '#a78bfa', '#3b82f6', '#42e46d', '#6ea8ff', '#f
 
 export function StokTab({ currency }: StokTabProps) {
   const { currentCompanyId, isSuperAdmin } = useAuth();
+  const router = useRouter();
   const isMobile = useIsMobile();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -424,6 +426,7 @@ export function StokTab({ currency }: StokTabProps) {
                 value: b.value,
                 color: BRAND_COLORS[i % BRAND_COLORS.length],
               }))}
+              onSelect={(name) => router.push(`/cost-dashboard/gozlem/marka/${encodeURIComponent(name)}`)}
             />
           ) : (
             <div style={{ padding: 40, textAlign: 'center', color: 'var(--mg-muted)' }}>Veri yok</div>
