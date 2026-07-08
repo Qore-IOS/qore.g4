@@ -15,7 +15,7 @@ import {
 import { format, isValid } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
-import { useFirebaseQueries } from '@/hooks/useFirebaseQueries';
+import { useProductCodes } from '@/hooks/useFirebaseQueries';
 import { useAuth } from '@/contexts/auth-context';
 import { matchesCompanyScope } from '@/lib/company-scope';
 import { getExchangeRates } from '@/lib/exchange-rates';
@@ -166,7 +166,7 @@ export default function MaliyetSayimDetayPage() {
   const params = useParams();
   const sessionId = Array.isArray(params?.sessionId) ? params.sessionId[0] : params?.sessionId;
   const router = useRouter();
-  const { productCodes } = useFirebaseQueries();
+  const { data: productCodes } = useProductCodes();
   const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
   const isAdminRole = ['admin', 'admin_developer', 'super_admin'].includes(currentUserProfile?.role ?? '');
 
