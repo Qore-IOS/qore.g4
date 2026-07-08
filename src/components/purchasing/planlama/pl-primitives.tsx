@@ -228,7 +228,7 @@ export const PL_CSS = `
 
   font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
   color: var(--ink-1);
-  min-height: 100%;
+  min-height: 100vh;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   background:
@@ -236,6 +236,8 @@ export const PL_CSS = `
     radial-gradient(120% 80% at 100% 100%, #E8E1D2 0%, transparent 55%),
     var(--bg-0);
 }
+/* satın-alma edge-to-edge: force the single cream backdrop everywhere */
+body.mg-edge-body:has(.pl-root) { background: #EFEAE0 !important; }
 .pl-root *, .pl-root *::before, .pl-root *::after { box-sizing: border-box; }
 .pl-root button:focus-visible, .pl-root input:focus-visible, .pl-root textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .pl-root ::-webkit-scrollbar { width: 9px; height: 9px; }

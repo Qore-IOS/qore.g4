@@ -5,7 +5,7 @@ import { Search, X, Plus, BarChart2 } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { db } from '@/lib/firebase';
 import {
-  collection, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, doc, serverTimestamp, orderBy,
+  collection, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, doc, serverTimestamp,
 } from 'firebase/firestore';
 import {
   AC, PlStyles, PlIconBtn, PlToast, useContainerMode, uid,
@@ -49,8 +49,10 @@ const toTask = (id: string, d: any): Task => ({
   end: d.end || '',
   done: !!d.done,
   subs: Array.isArray(d.subs) ? d.subs : [],
-  createdAt: d.createdAt,
+  createdAt: typeof d.createdAt === 'number' ? d.createdAt : (d.createdAt?.toMillis?.() ?? 0),
 });
+
+const sortTasks = (arr: Task[]) => arr.slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
 
 export default function PlanlamaPanel() {
   const { currentUser, currentCompanyId } = useAuth();
@@ -74,52 +76,64 @@ export default function PlanlamaPanel() {
     toastRef.current = setTimeout(() => setToast(null), 2400);
   };
 
-  /* Firestore subscription, company-scoped */
+  /* Firestore subscription, company-scoped.
+     No orderBy → no composite index needed, and pending local writes
+     (latency compensation) surface immediately; we sort client-side. */
   React.useEffect(() => {
     if (!currentUser || !currentCompanyId) return;
     setLoading(true);
-    const q = query(collection(db, COLLECTION), where('companyId', '==', currentCompanyId), orderBy('createdAt', 'desc'));
+    const q = query(collection(db, COLLECTION), where('companyId', '==', currentCompanyId));
     const unsub = onSnapshot(q, (snap) => {
-      setTasks(snap.docs.map((d) => toTask(d.id, d.data())));
+      setTasks(sortTasks(snap.docs.map((d) => toTask(d.id, d.data()))));
       setLoading(false);
     }, (err) => { console.error('PlanlamaPanel Firestore error:', err); setLoading(false); });
     return unsub;
   }, [currentUser, currentCompanyId]);
 
-  /* task operations → Firestore */
+  /* task operations → optimistic local update + Firestore write.
+     Optimistic keeps the UI instant even if the snapshot round-trips. */
+  const patchLocal = (id: string, fn: (t: Task) => Task) =>
+    setTasks((cur) => cur.map((t) => (t.id === id ? fn(t) : t)));
+
   const toggleTask = async (id: string) => {
     const t = tasks.find((x) => x.id === id); if (!t) return;
+    patchLocal(id, (x) => ({ ...x, done: !x.done }));
     try { await updateDoc(doc(db, COLLECTION, id), { done: !t.done, updatedAt: serverTimestamp() }); }
     catch (e) { console.error(e); }
   };
   const toggleSub = async (tid: string, sid: string) => {
     const t = tasks.find((x) => x.id === tid); if (!t) return;
     const subs = t.subs.map((s) => s.id === sid ? { ...s, done: !s.done } : s);
+    patchLocal(tid, (x) => ({ ...x, subs }));
     try { await updateDoc(doc(db, COLLECTION, tid), { subs, updatedAt: serverTimestamp() }); }
     catch (e) { console.error(e); }
   };
   const addSub = async (tid: string, title: string) => {
     const t = tasks.find((x) => x.id === tid); if (!t) return;
     const subs: SubTask[] = [...t.subs, { id: 's' + uid(), title, done: false }];
+    patchLocal(tid, (x) => ({ ...x, subs }));
     try { await updateDoc(doc(db, COLLECTION, tid), { subs, updatedAt: serverTimestamp() }); }
     catch (e) { console.error(e); }
   };
   const delTask = async (id: string) => {
+    setTasks((cur) => cur.filter((t) => t.id !== id));
     try { await deleteDoc(doc(db, COLLECTION, id)); fire({ title: 'Görev Silindi' }); }
     catch (e) { console.error(e); }
   };
   const saveTask = async (data: any) => {
     try {
       if (data.id) {
+        patchLocal(data.id, (x) => ({ ...x, title: data.title, note: data.note, pri: data.pri, date: data.date, time: data.time || '', end: data.end || '' }));
         await updateDoc(doc(db, COLLECTION, data.id), {
           title: data.title, note: data.note, pri: data.pri, date: data.date, time: data.time || '', end: data.end || '', updatedAt: serverTimestamp(),
         });
         fire({ tone: 'ok', title: 'Görev Güncellendi' });
       } else {
+        const now = Date.now();
         await addDoc(collection(db, COLLECTION), {
           title: data.title, note: data.note, pri: data.pri, date: data.date, time: data.time || '', end: data.end || '',
           done: false, subs: [], companyId: currentCompanyId, userId: currentUser?.uid || '',
-          createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+          createdAt: now, updatedAt: serverTimestamp(),
         });
         fire({ tone: 'ok', title: 'Görev Eklendi', sub: data.title });
       }

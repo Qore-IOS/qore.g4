@@ -31,8 +31,8 @@ const PlCalendar: React.FC<CalProps> = ({ ac, mode, tasks, onToggle, onEdit, onA
   const prevM = cursor.m === 0 ? 11 : cursor.m - 1;
   const nextM = cursor.m === 11 ? 0 : cursor.m + 1;
 
-  const monthSideStyle: React.CSSProperties = { all: 'unset' as any, cursor: 'pointer', fontFamily: 'var(--serif)', fontWeight: 700, fontSize: mobile ? 17 : 22, color: 'var(--ink-3)', letterSpacing: '0.03em' };
-  const chevStyle: React.CSSProperties = { all: 'unset' as any, cursor: 'pointer', width: 44, height: 44, borderRadius: '50%', display: 'grid', placeItems: 'center', color: 'var(--ink-2)', background: 'linear-gradient(180deg, var(--surface-hi), var(--surface-2))', boxShadow: 'var(--clay)' };
+  const monthSideStyle: React.CSSProperties = { all: 'unset' as any, cursor: 'pointer', fontFamily: 'var(--serif)', fontWeight: 700, fontSize: mobile ? 17 : 22, color: 'var(--ink-3)', letterSpacing: '0.03em', whiteSpace: 'nowrap', flexShrink: 0 };
+  const chevStyle: React.CSSProperties = { all: 'unset' as any, cursor: 'pointer', width: 44, height: 44, minWidth: 44, borderRadius: '50%', display: 'grid', placeItems: 'center', color: 'var(--ink-2)', background: 'linear-gradient(180deg, var(--surface-hi), var(--surface-2))', boxShadow: 'var(--clay)', flexShrink: 0 };
 
   return (
     <div>

@@ -114,6 +114,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const isEdgeToEdgeRoute =
     pathname?.startsWith("/maliyet-gozlem") ||
     pathname?.startsWith("/cihaz-test-dagilimi") ||
+    pathname?.startsWith("/satin-alma") ||
     pathname?.startsWith("/cari-odeme") ||
     pathname?.startsWith("/sarf-dagitim") ||
     pathname?.startsWith("/sarf-teslimat") ||
