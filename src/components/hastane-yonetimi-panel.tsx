@@ -773,11 +773,13 @@ export default function LaboratuvarYonetimiPanel() {
       const headerKeys = jsonData.length > 0 ? Object.keys(jsonData[0]) : [];
       const colMap = detectExcelColumns(headerKeys);
 
-      // Positional fallback when the file has unrecognizable headers.
-      // Default column order: A=Stok Kodu, B=Barkod Seri, C=Miat, D=Lot.
+      // Use positional fallback only when none of the headers are recognizable.
+      // This prevents a headered LOT column in B from being interpreted as Seri No.
+      // Legacy headerless order remains: A=Stok Kodu, B=Barkod Seri, C=Miat, D=Lot, E=Adet.
+      const hasRecognizedHeaders = Object.keys(colMap).length > 0;
       const positional = headerKeys;
       const positionalRole = (role: ColumnRole, index: number): string | undefined =>
-        colMap[role] ?? positional[index];
+        colMap[role] ?? (hasRecognizedHeaders ? undefined : positional[index]);
 
       const rows: ParsedExcelRow[] = [];
 
@@ -786,7 +788,7 @@ export default function LaboratuvarYonetimiPanel() {
         const seriHeader = positionalRole('seri', 1);
         const miadHeader = positionalRole('miad', 2);
         const lotHeader = positionalRole('lot', 3);
-        const adetHeader = colMap.adet;
+        const adetHeader = positionalRole('adet', 4);
         const stokAdiHeader = colMap.stokAdi;
 
         const stokKodu = String((stokKoduHeader && rawRow[stokKoduHeader]) || '').trim();
@@ -1398,8 +1400,9 @@ export default function LaboratuvarYonetimiPanel() {
 
             <div className="text-xs text-muted-foreground bg-muted/50 rounded-md px-3 py-2">
               Beklenen sütunlar: <strong>Stok Kodu</strong> (zorunlu), Lot / Lot Numarası, Miad / Miat / SKT,
-              Seri Numarası / Barkod Seri, Adet. Başlık satırı yoksa kolon sırası A=Stok Kodu, B=Barkod Seri,
-              C=Miat, D=Lot olarak okunur.
+              Seri Numarası / Barkod Seri, Adet. Başlıklı dosyalarda Lot kolonu seri numarası gibi okunmaz;
+              hem <strong>Stok Kodu + Seri No + Adet=1</strong> hem de <strong>Stok Kodu + Lot + Miad + Adet</strong> formatı desteklenir.
+              Başlık satırı yoksa kolon sırası A=Stok Kodu, B=Barkod Seri, C=Miat, D=Lot, E=Adet olarak okunur.
             </div>
 
             <ScrollArea className="h-[350px] border rounded-md">
