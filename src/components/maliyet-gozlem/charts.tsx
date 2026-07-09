@@ -68,12 +68,14 @@ export function BigCurrency({
   decSize = 24,
   showSymbol = true,
 }: BigCurrencyProps) {
+  // Son binlik grubu görsel olarak küçük basılır ama ayraç NOKTA kalır —
+  // virgülle basmak 3.973.495'i "3.973,495" (üç bin küsur) gibi gösteriyordu.
   const fmt = (v: number): [string, string] => {
     const rounded = Math.round(v);
     const s = rounded.toLocaleString('tr-TR');
     if (s.length <= 3) return [s, ''];
     const main = s.slice(0, -4);
-    const tail = s.slice(-4);
+    const tail = s.slice(-4); // ".495" — nokta ayraç dahil
     return [main, tail];
   };
   const [staticMain, staticTail] = animated ? ['', ''] : fmt(value);
@@ -103,7 +105,7 @@ export function BigCurrency({
                 <span style={{ fontSize: mainSize, color: 'var(--mg-text)', fontWeight: 400 }}>{m}</span>
                 {t && (
                   <span style={{ fontSize: decSize, color: 'var(--mg-muted)', marginLeft: 1, fontWeight: 400 }}>
-                    ,{t.replace(/^\./, '')}
+                    {t}
                   </span>
                 )}
               </>
@@ -115,13 +117,28 @@ export function BigCurrency({
           <span style={{ fontSize: mainSize, color: 'var(--mg-text)', fontWeight: 400 }}>{staticMain}</span>
           {staticTail && (
             <span style={{ fontSize: decSize, color: 'var(--mg-muted)', marginLeft: 1, fontWeight: 400 }}>
-              ,{staticTail.replace(/^\./, '')}
+              {staticTail}
             </span>
           )}
         </>
       )}
     </span>
   );
+}
+
+/**
+ * Kompakt tutar formatı: milyonlar "5,2M", binler "298k", altı tam sayı.
+ * "5.000k" gibi milyonların bin sanılmasına yol açan gösterimleri önler.
+ */
+export function formatCompactTL(v: number): string {
+  const abs = Math.abs(v);
+  if (abs >= 1_000_000) {
+    return `${(v / 1_000_000).toLocaleString('tr-TR', { maximumFractionDigits: 2, minimumFractionDigits: 0 })}M`;
+  }
+  if (abs >= 1_000) {
+    return `${Math.round(v / 1_000).toLocaleString('tr-TR')}k`;
+  }
+  return Math.round(v).toLocaleString('tr-TR');
 }
 
 // ────────────────────────────────────────────────────────────────────────────
