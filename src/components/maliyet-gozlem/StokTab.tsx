@@ -26,8 +26,8 @@ import {
   getSessionDate,
   type SayimSession,
 } from '@/lib/cost-analytics';
-import { ActivitiesPanel, InsightsCard, MiniStat, SectionHeader, Card, HBarList } from './primitives';
-import { DonutChart } from './charts';
+import { ActivitiesPanel, InsightsCard, MiniStat, SectionHeader, Card, HBarList, KpiBreakdownModal, type KpiBreakdownRow } from './primitives';
+import { DonutChart, formatCompactTL } from './charts';
 import { useIsMobile } from './useIsMobile';
 import { Loader2 } from 'lucide-react';
 import { exportDataToExcel, exportDataToPdf } from '@/lib/utils';
@@ -55,8 +55,16 @@ export function StokTab({ currency, registerExportHandlers }: StokTabProps) {
   const [rates, setRates] = useState<Record<Currency, number>>({ EUR: 1, USD: 1.08, TRY: 38.5 });
   /** Seçili sayım dönemi ('all' = tüm dönemler, aksi halde 'YYYY-MM') */
   const [selectedPeriod, setSelectedPeriod] = useState<string>('all');
+  /** Kullanıcı kaynak/dönem seçmeden veri YÜKLENMEZ (performans + netlik). */
+  const [sourceChosen, setSourceChosen] = useState(false);
+  const [pendingMonth, setPendingMonth] = useState(new Date().getMonth());
+  const [pendingYear, setPendingYear] = useState(new Date().getFullYear());
+  /** KPI kartına tıklanınca gösterilen alt kırılım */
+  const [kpiModal, setKpiModal] = useState<{ title: string; subtitle?: string; rows: KpiBreakdownRow[] } | null>(null);
 
   useEffect(() => {
+    // Kaynak/dönem seçilmeden hiçbir veri çekilmez.
+    if (!sourceChosen) return;
     let cancelled = false;
     (async () => {
       setLoading(true);
@@ -96,7 +104,7 @@ export function StokTab({ currency, registerExportHandlers }: StokTabProps) {
     return () => {
       cancelled = true;
     };
-  }, [currentCompanyId, isSuperAdmin, reloadKey]);
+  }, [currentCompanyId, isSuperAdmin, reloadKey, sourceChosen]);
 
   // Oturumlarda bulunan sayım dönemleri (yeniden eskiye)
   const periodOptions = useMemo(() => {
@@ -210,6 +218,19 @@ export function StokTab({ currency, registerExportHandlers }: StokTabProps) {
   }, [registerExportHandlers, selectedPeriod, periodOptions, currency, total, brands, locations, groups, trend, periodSessions.length, toast]);
   const symbol = currency === 'TRY' ? '₺' : currency === 'EUR' ? '€' : '$';
 
+  /** Tam Türkçe tutar formatı (kırılım modalı ve alt metinler için) */
+  const fmtFull = (v: number) => `${symbol}${Math.round(v).toLocaleString('tr-TR')}`;
+
+  // Aktivite kartlarında ortak tutar formatı — milyonlar "5,2M", binler "298k"
+  const cardMoneyFormat = (v: number) => (
+    <>
+      <span style={{ fontSize: 20, color: 'var(--mg-muted)', fontWeight: 300, marginRight: 2 }}>
+        {symbol}
+      </span>
+      {formatCompactTL(v)}
+    </>
+  );
+
   const assistantContext = useMemo(() => ({
     panel: 'stok' as const,
     currency,
@@ -266,6 +287,74 @@ export function StokTab({ currency, registerExportHandlers }: StokTabProps) {
       })),
     },
   }), [currency, total, sessions, locations, brands, groups, trend, rates, productMap.size]);
+
+  // ---- Kaynak/dönem seçilmeden veri yüklenmez ----
+  if (!sourceChosen) {
+    const btnBase: React.CSSProperties = {
+      padding: '10px 18px',
+      borderRadius: 12,
+      border: '1px solid var(--mg-border)',
+      fontFamily: 'inherit',
+      fontSize: 13,
+      fontWeight: 700,
+      cursor: 'pointer',
+    };
+    const selBase: React.CSSProperties = {
+      padding: '9px 12px',
+      borderRadius: 10,
+      background: 'var(--mg-surface-2)',
+      color: 'var(--mg-text)',
+      border: '1px solid var(--mg-border)',
+      fontFamily: 'inherit',
+      fontSize: 13,
+      fontWeight: 600,
+      outline: 'none',
+      cursor: 'pointer',
+    };
+    return (
+      <Card>
+        <div style={{ padding: '40px 24px', textAlign: 'center' }}>
+          <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--mg-text)', marginBottom: 6 }}>
+            Sayım Dönemi Seçin
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--mg-muted)', marginBottom: 24 }}>
+            Veriler seçim yapılana kadar yüklenmez. Belirli bir dönemin sayımını ya da tüm dönemleri görüntüleyebilirsiniz.
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <select value={pendingMonth} onChange={(e) => setPendingMonth(Number(e.target.value))} style={selBase}>
+              {Array.from({ length: 12 }, (_, i) => (
+                <option key={i} value={i}>{new Date(0, i, 1).toLocaleString('tr-TR', { month: 'long' })}</option>
+              ))}
+            </select>
+            <select value={pendingYear} onChange={(e) => setPendingYear(Number(e.target.value))} style={selBase}>
+              {Array.from({ length: 7 }, (_, i) => new Date().getFullYear() - 3 + i).map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => {
+                setSelectedPeriod(`${pendingYear}-${String(pendingMonth + 1).padStart(2, '0')}`);
+                setSourceChosen(true);
+              }}
+              style={{ ...btnBase, background: 'var(--mg-accent)', color: '#0a0a0c', boxShadow: '0 2px 12px rgba(251,146,60,0.35)' }}
+            >
+              Dönemi Yükle
+            </button>
+            <span style={{ fontSize: 12, color: 'var(--mg-muted)' }}>veya</span>
+            <button
+              onClick={() => {
+                setSelectedPeriod('all');
+                setSourceChosen(true);
+              }}
+              style={{ ...btnBase, background: 'var(--mg-surface-2)', color: 'var(--mg-text-2)' }}
+            >
+              Tüm Dönemler
+            </button>
+          </div>
+        </div>
+      </Card>
+    );
+  }
 
   if (loading) {
     return (
@@ -350,12 +439,71 @@ export function StokTab({ currency, registerExportHandlers }: StokTabProps) {
         )}
       </div>
 
-      {/* KPI Row */}
+      {/* KPI Row — kartlara tıklayınca hesabın alt kırılımı açılır */}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(220px, 1fr))', gap: isMobile ? 8 : 16 }}>
-        <MiniStat label={`Toplam Envanter (${currency})`} value={total} sub={selectedPeriod === 'all' ? 'Son sayımlar' : periodOptions.find((p) => p.key === selectedPeriod)?.label || 'Dönem'} color="#fb923c" />
-        <MiniStat label="Lokasyon Sayısı" value={locations.length} sub="aktif" color="#6ea8ff" isCount unit="lab/depo" />
-        <MiniStat label="Marka Sayısı" value={brands.length} sub="aktif" color="#a78bfa" isCount unit="marka" />
-        <MiniStat label="Sayım Oturumu" value={periodSessions.length} sub={selectedPeriod === 'all' ? 'tamamlandı' : 'bu dönemde'} color="#42e46d" isCount unit="oturum" />
+        <MiniStat
+          label={`Toplam Envanter (${currency})`}
+          value={total}
+          sub={selectedPeriod === 'all' ? 'Son sayımlar' : periodOptions.find((p) => p.key === selectedPeriod)?.label || 'Dönem'}
+          color="#fb923c"
+          onClick={() => setKpiModal({
+            title: 'Toplam Envanter — Lokasyon Kırılımı',
+            subtitle: `${fmtFull(total)} · ${locations.length} lokasyon`,
+            rows: locations.map((l) => ({
+              label: l.locationName,
+              sub: `${l.locationType === 'lab' ? 'Lab' : 'Depo'} · ${l.productCount} ürün`,
+              value: fmtFull(l.totalCost),
+            })),
+          })}
+        />
+        <MiniStat
+          label="Lokasyon Sayısı"
+          value={locations.length}
+          sub="aktif"
+          color="#6ea8ff"
+          isCount
+          unit="lab/depo"
+          onClick={() => setKpiModal({
+            title: 'Aktif Lokasyonlar',
+            rows: locations.map((l) => ({
+              label: l.locationName,
+              sub: `${l.productCount} ürün · Son sayım: ${l.lastSessionDate ? l.lastSessionDate.toLocaleDateString('tr-TR') : '—'}`,
+              value: fmtFull(l.totalCost),
+            })),
+          })}
+        />
+        <MiniStat
+          label="Marka Sayısı"
+          value={brands.length}
+          sub="aktif"
+          color="#a78bfa"
+          isCount
+          unit="marka"
+          onClick={() => setKpiModal({
+            title: 'Marka Kırılımı',
+            subtitle: `Toplam ${fmtFull(total)}`,
+            rows: brands.map((b) => ({
+              label: b.name,
+              sub: `${b.productCount} ürün · %${total > 0 ? ((b.value / total) * 100).toFixed(1) : 0} pay`,
+              value: fmtFull(b.value),
+            })),
+          })}
+        />
+        <MiniStat
+          label="Sayım Oturumu"
+          value={periodSessions.length}
+          sub={selectedPeriod === 'all' ? 'tamamlandı' : 'bu dönemde'}
+          color="#42e46d"
+          isCount
+          unit="oturum"
+          onClick={() => setKpiModal({
+            title: 'Sayım Oturumları',
+            rows: periodSessions.map((s) => ({
+              label: s.locationName,
+              sub: `${s.items.length} ürün · ${getSessionDate(s)?.toLocaleDateString('tr-TR') ?? ''}`,
+            })),
+          })}
+        />
       </div>
 
       {/* Activities + Insights */}
@@ -377,23 +525,7 @@ export function StokTab({ currency, registerExportHandlers }: StokTabProps) {
                   sublabel: isCurrent ? 'Bu Ay' : 'Geçen',
                   color: isCurrent ? 'var(--mg-accent)' : '#6ea8ff',
                   delta: m.cost === 0 ? null : delta > 0 ? `+${delta}%` : `${delta}%`,
-                  format: (v) =>
-                    v >= 1000 ? (
-                      <>
-                        <span style={{ fontSize: 20, color: 'var(--mg-muted)', fontWeight: 300, marginRight: 2 }}>
-                          {symbol}
-                        </span>
-                        {Math.round(v / 1000).toLocaleString('tr-TR')}
-                        <span style={{ fontSize: 20, color: 'var(--mg-muted)', marginLeft: 1, fontWeight: 300 }}>k</span>
-                      </>
-                    ) : (
-                      <>
-                        <span style={{ fontSize: 20, color: 'var(--mg-muted)', fontWeight: 300, marginRight: 2 }}>
-                          {symbol}
-                        </span>
-                        {Math.round(v).toLocaleString('tr-TR')}
-                      </>
-                    ),
+                  format: cardMoneyFormat,
                   sparkData: spark.length > 1 ? spark : null,
                   active: isCurrent,
                 };
@@ -407,15 +539,7 @@ export function StokTab({ currency, registerExportHandlers }: StokTabProps) {
                 sublabel: `${loc.productCount} ürün`,
                 color: BRAND_COLORS[i % BRAND_COLORS.length],
                 delta: null,
-                format: (v) => (
-                  <>
-                    <span style={{ fontSize: 20, color: 'var(--mg-muted)', fontWeight: 300, marginRight: 2 }}>
-                      {symbol}
-                    </span>
-                    {Math.round(v / 1000).toLocaleString('tr-TR')}
-                    <span style={{ fontSize: 20, color: 'var(--mg-muted)', marginLeft: 1, fontWeight: 300 }}>k</span>
-                  </>
-                ),
+                format: cardMoneyFormat,
                 sparkData: null,
               })),
             },
@@ -427,15 +551,7 @@ export function StokTab({ currency, registerExportHandlers }: StokTabProps) {
                 sublabel: `${b.productCount} ürün`,
                 color: BRAND_COLORS[i % BRAND_COLORS.length],
                 delta: `%${total > 0 ? ((b.value / total) * 100).toFixed(0) : 0}`,
-                format: (v) => (
-                  <>
-                    <span style={{ fontSize: 20, color: 'var(--mg-muted)', fontWeight: 300, marginRight: 2 }}>
-                      {symbol}
-                    </span>
-                    {Math.round(v / 1000).toLocaleString('tr-TR')}
-                    <span style={{ fontSize: 20, color: 'var(--mg-muted)', marginLeft: 1, fontWeight: 300 }}>k</span>
-                  </>
-                ),
+                format: cardMoneyFormat,
                 sparkData: null,
               })),
             },
@@ -492,7 +608,9 @@ export function StokTab({ currency, registerExportHandlers }: StokTabProps) {
                 value: b.value,
                 color: BRAND_COLORS[i % BRAND_COLORS.length],
               }))}
-              onSelect={(name) => router.push(`/cost-dashboard/gozlem/marka/${encodeURIComponent(name)}`)}
+              onSelect={(name) => router.push(
+                `/cost-dashboard/gozlem/marka/${encodeURIComponent(name)}${selectedPeriod !== 'all' ? `?period=${selectedPeriod}` : ''}`,
+              )}
             />
           ) : (
             <div style={{ padding: 40, textAlign: 'center', color: 'var(--mg-muted)' }}>Veri yok</div>
@@ -519,6 +637,15 @@ export function StokTab({ currency, registerExportHandlers }: StokTabProps) {
           />
         </Card>
       </div>
+
+      {kpiModal && (
+        <KpiBreakdownModal
+          title={kpiModal.title}
+          subtitle={kpiModal.subtitle}
+          rows={kpiModal.rows}
+          onClose={() => setKpiModal(null)}
+        />
+      )}
     </div>
   );
 }

@@ -445,6 +445,10 @@ export interface TestCostContext {
   perTestStockTL: Map<string, number>;
   /** Tüm testlerin stok maliyetleri toplamı (TL) */
   allTestsStockTL: number;
+  /** testId → testin filtrelenmiş lablardaki toplam test adedi */
+  perTestStockUnits: Map<string, number>;
+  /** Tüm testlerin test adetleri toplamı (volume_weighted dağıtım payı için) */
+  allTestsStockUnits: number;
   inputs: Omit<TestCostInputs, 'testDef'>;
 }
 
@@ -553,22 +557,30 @@ export function buildTestCostContext(inputs: Omit<TestCostInputs, 'testDef'>): T
     labShared.set(lab.id, { ...shared, warnings });
   }
 
-  // 3) Test başına stok maliyeti (küçük lookuplar — otherTestsStock için)
+  // 3) Test başına stok maliyeti + adedi (otherTestsStock ve volume_weighted için)
   const perTestStockTL = new Map<string, number>();
+  const perTestStockUnits = new Map<string, number>();
   let allTestsStockTL = 0;
+  let allTestsStockUnits = 0;
   for (const t of allTestDefs) {
     let costTL = 0;
+    let units = 0;
     const kodSet = new Set(t.linkedStokKodlari || []);
     for (const lab of labs) {
       const inner = stockIndex.get(lab.id);
       if (!inner) continue;
       for (const kod of kodSet) {
         const agg = inner.get(kod);
-        if (agg) costTL += agg.costTL;
+        if (agg) {
+          costTL += agg.costTL;
+          units += agg.units;
+        }
       }
     }
     perTestStockTL.set(t.id, costTL);
+    perTestStockUnits.set(t.id, units);
     allTestsStockTL += costTL;
+    allTestsStockUnits += units;
   }
 
   return {
@@ -579,6 +591,8 @@ export function buildTestCostContext(inputs: Omit<TestCostInputs, 'testDef'>): T
     labDevices,
     perTestStockTL,
     allTestsStockTL,
+    perTestStockUnits,
+    allTestsStockUnits,
     inputs,
   };
 }
@@ -681,8 +695,27 @@ export function calculateTestCostWithContext(ctx: TestCostContext, testDef: Test
 
   // Grand total: stok (anlık değer) + diğer testlerin stoğu + ortak giderler × periyot
   const grandTotal = totalStockCostTL + otherStockTL + inventoryPeriotTL + devicePeriotTL + personnelPeriotTL;
-  const ortakGiderler = grandTotal - totalStockCostTL;
-  const testTotalCost = totalStockCostTL + ortakGiderler; // = grandTotal
+
+  // Dağıtım modu:
+  //  - full_burden (varsayılan, geriye uyumlu): her testin toplamı grandTotal'a
+  //    eşittir — testler arasında AYNI toplam görünür.
+  //  - volume_weighted: ortak giderler (envanter + cihaz + personel × periyot)
+  //    testin hacim payına göre dağıtılır — test toplamları hacimle farklılaşır
+  //    ve tüm testlerin toplamı sistem toplamına yaklaşır.
+  //  - equal_alloc: ortak giderler test sayısına eşit bölünür.
+  const allocationMode: AllocationMode = ctx.inputs.mode || 'full_burden';
+  const sharedPeriotTL = inventoryPeriotTL + devicePeriotTL + personnelPeriotTL;
+  let ortakGiderler: number;
+  if (allocationMode === 'volume_weighted') {
+    const volumeShare = ctx.allTestsStockUnits > 0 ? totalStockUnits / ctx.allTestsStockUnits : 0;
+    ortakGiderler = sharedPeriotTL * volumeShare;
+  } else if (allocationMode === 'equal_alloc') {
+    const testCount = Math.max(ctx.inputs.allTestDefs.length, 1);
+    ortakGiderler = sharedPeriotTL / testCount;
+  } else {
+    ortakGiderler = grandTotal - totalStockCostTL;
+  }
+  const testTotalCost = totalStockCostTL + ortakGiderler; // full_burden'da = grandTotal
   const costPerTest = totalStockUnits > 0 ? testTotalCost / totalStockUnits : 0;
 
   if (totalStockUnits === 0) {
@@ -790,7 +823,9 @@ export function calculateTestCostWithContext(ctx: TestCostContext, testDef: Test
     // CAWC = stok birim + (deviceShareToTest + nonDeviceOrtak) / stockUnits
     if (totalStockUnits > 0) {
       const stockUnitCost = totalStockCostTL / totalStockUnits;
-      const nonDeviceOrtak = ortakGiderler - devicePeriotTL;
+      // volume_weighted/equal_alloc dağıtımında pay cihaz maliyetinin altına
+      // düşebilir — negatif ortak gider hesaba karışmasın.
+      const nonDeviceOrtak = Math.max(0, ortakGiderler - devicePeriotTL);
       const cawcCost = stockUnitCost + (deviceShareToTestTL + nonDeviceOrtak) / totalStockUnits;
       // capacity modu CAWC kullansın (en gerçekçi), hybrid optimistik kalsın
       if (costModeResolved === 'capacity') {
