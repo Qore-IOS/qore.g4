@@ -366,6 +366,9 @@ export default function TopluMaliyetSayimPanel({
               marka: p.marka || '',
               stokAdedi: parseInt(e.stokAdedi, 10) || 0,
               cihazUstuAdedi: parseInt(e.cihazUstuAdedi, 10) || 0,
+              cost: p.cost ?? 0,
+              currency: p.currency || 'TRY',
+              ambalajDegeri: Number(p.ambalajDegeri) || 0,
             };
           });
         return { loc, items };

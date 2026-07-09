@@ -658,7 +658,7 @@ function TestRow({ result, expanded, onToggle, maxTotal }: TestRowProps) {
               { label: 'Stok (anlık)', v: result.stockCostTL, color: '#fb923c' },
               { label: 'Envanter', v: result.inventoryCostTL, color: '#3b82f6' },
               { label: 'Cihaz', v: result.deviceCostMonthlyTL, color: '#a78bfa' },
-              { label: 'Personel', v: result.personnelCostMonthlyTL, color: '#10b981' },
+              { label: 'Personel (hacim payı)', v: result.personnelCostMonthlyTL, color: '#10b981' },
               { label: 'Diğer testler stoğu', v: result.otherTestsStockCostTL, color: '#71717a' },
             ].map((comp, i) => {
               const pct = result.testTotalCostTL > 0 ? (comp.v / result.testTotalCostTL) * 100 : 0;
@@ -686,7 +686,7 @@ function TestRow({ result, expanded, onToggle, maxTotal }: TestRowProps) {
                     <div key={l.labId} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 8px', background: 'var(--mg-surface)', borderRadius: 6, fontSize: 11 }}>
                       <span style={{ fontWeight: 600, color: 'var(--mg-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.labName}</span>
                       <span style={{ color: 'var(--mg-muted)', fontVariantNumeric: 'tabular-nums', flexShrink: 0, marginLeft: 8 }}>
-                        {l.testUnits.toLocaleString('tr-TR')}t
+                        {l.testUnits.toLocaleString('tr-TR')}t · %{((l.testVolumeShare || 0) * 100).toFixed(1)} · {fmtTL(l.personnelUnitCostTL || 0)} pers/test
                       </span>
                     </div>
                   ))}
@@ -849,7 +849,7 @@ function TestRow({ result, expanded, onToggle, maxTotal }: TestRowProps) {
                 { label: 'Stok (anlık)', v: result.stockCostTL, color: '#fb923c' },
                 { label: 'Envanter', v: result.inventoryCostTL, color: '#3b82f6' },
                 { label: 'Cihaz', v: result.deviceCostMonthlyTL, color: '#a78bfa' },
-                { label: 'Personel', v: result.personnelCostMonthlyTL, color: '#10b981' },
+                { label: 'Personel (hacim payı)', v: result.personnelCostMonthlyTL, color: '#10b981' },
                 { label: 'Diğer testler stoğu', v: result.otherTestsStockCostTL, color: '#71717a' },
               ].map((comp, i) => {
                 const pct = result.testTotalCostTL > 0 ? (comp.v / result.testTotalCostTL) * 100 : 0;
@@ -889,6 +889,9 @@ function TestRow({ result, expanded, onToggle, maxTotal }: TestRowProps) {
                   </div>
                   <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--mg-text)', fontVariantNumeric: 'tabular-nums' }}>
                     {fmtTL(result.costPerTestTL)}
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--mg-muted)', marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>
+                    Stok %{(result.stockSharePct || 0).toFixed(0)} · Personel %{(result.personnelSharePct || 0).toFixed(0)}
                   </div>
                 </div>
                 <div style={{ background: 'var(--mg-surface)', padding: '12px 14px', borderRadius: 10, border: '1px solid var(--mg-border)' }}>
@@ -973,7 +976,7 @@ function TestRow({ result, expanded, onToggle, maxTotal }: TestRowProps) {
                       >
                         <span style={{ fontWeight: 600, color: 'var(--mg-text)' }}>{l.labName}</span>
                         <span style={{ color: 'var(--mg-muted)', fontVariantNumeric: 'tabular-nums' }}>
-                          {l.testUnits.toLocaleString('tr-TR')} test · {fmtTL(l.stockCostTL, 0)} stok
+                          {l.testUnits.toLocaleString('tr-TR')} test · %{((l.testVolumeShare || 0) * 100).toFixed(1)} hacim · {fmtTL(l.stockUnitCostTL || 0)} stok/test · {fmtTL(l.personnelUnitCostTL || 0)} pers/test
                         </span>
                       </div>
                     ))}

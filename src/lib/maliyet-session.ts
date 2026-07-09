@@ -74,6 +74,9 @@ export interface MaliyetSayimOturum {
     marka: string;
     stokAdedi: number;
     cihazUstuAdedi: number;
+    cost?: number;
+    currency?: 'EUR' | 'USD' | 'TRY';
+    ambalajDegeri?: number;
     countedByUid?: string;
     countedByName?: string;
     updates: CellUpdate[];
@@ -242,6 +245,9 @@ export async function completeSession(
     marka: string;
     stokAdedi: number;
     cihazUstuAdedi: number;
+    cost?: number;
+    currency?: 'EUR' | 'USD' | 'TRY';
+    ambalajDegeri?: number;
     countedByUid?: string;
     countedByName?: string;
     updates: CellUpdate[];
@@ -273,6 +279,9 @@ export async function completeSession(
       marka: item.marka,
       stokAdedi: item.stokAdedi,
       cihazUstuAdedi: item.cihazUstuAdedi,
+      cost: item.cost ?? 0,
+      currency: item.currency || 'TRY',
+      ambalajDegeri: Number(item.ambalajDegeri) || 0,
     })),
     // Enhanced data for history
     itemsDetailed: finalItems,
