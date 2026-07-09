@@ -16,6 +16,8 @@ import {
   type TestCostBreakdown,
   type PeriotConfig,
   type DepoStokCount,
+  type PersonnelCostConfigInput,
+  type LabPoolLite,
 } from '../../lib/test-cost-calculator';
 import { fetchDepoStokCounts, aggregateDepoStokRows } from '@/lib/depo-stok-ozet';
 import type {
@@ -29,14 +31,19 @@ import type {
   DepoStokItem,
   Currency,
 } from '../../lib/types';
-import { ActivitiesPanel, InsightsCard, MiniStat, SectionHeader, Card } from './primitives';
+import { ActivitiesPanel, InsightsCard, MiniStat, SectionHeader, Card, KpiBreakdownModal, type KpiBreakdownRow } from './primitives';
+import { formatCompactTL } from './charts';
 import { useIsMobile } from './useIsMobile';
 import { collection, getDocs, query, orderBy, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { filterByCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery, getScopedDocs } from '@/lib/firestore-helpers';
 import { useAuth } from '@/contexts/auth-context';
 import { getExchangeRates } from '@/lib/exchange-rates';
+import { getLatestByLocation, getSessionDate, type SayimSession } from '@/lib/cost-analytics';
+import { exportDataToExcel, exportDataToPdf } from '@/lib/utils';
+import { useToast } from '@/hooks/use-toast';
+import type { TabExportHandlers } from './MaliyetGozlemMerkezi';
 import { Loader2, ChevronDown, ChevronsUpDown, Search, Check, X } from 'lucide-react';
 import { LabSelector } from '@/components/common/LabSelector';
 
@@ -486,7 +493,14 @@ function FilterBar({
   setSelectedTestIds,
   periot,
   setPeriot,
-}: Omit<FilterBarProps, 'search' | 'setSearch'>) {
+  countPeriod,
+  setCountPeriod,
+  countPeriodOptions,
+}: Omit<FilterBarProps, 'search' | 'setSearch'> & {
+  countPeriod: string;
+  setCountPeriod: (p: string) => void;
+  countPeriodOptions: { key: string; label: string }[];
+}) {
   const isMobile = useIsMobile();
   const periodOpts: { k: PeriotConfig['type']; label: string }[] = [
     { k: 'gunluk', label: 'Günlük' },
@@ -496,6 +510,31 @@ function FilterBar({
 
   return (
     <div style={{ display: 'flex', gap: isMobile ? 8 : 12, alignItems: isMobile ? 'stretch' : 'center', flexWrap: 'wrap', flexDirection: isMobile ? 'column' : 'row' }}>
+      {/* Veri kaynağı: anlık stok veya sayım dönemi */}
+      <select
+        value={countPeriod}
+        onChange={(e) => setCountPeriod(e.target.value)}
+        title="Test hacmi kaynağı: anlık sevk edilmiş stok veya seçili dönemin maliyet sayımı"
+        style={{
+          padding: isMobile ? '9px 12px' : '8px 12px',
+          borderRadius: 10,
+          background: countPeriod === 'live' ? 'var(--mg-surface-2)' : 'var(--mg-accent)',
+          color: countPeriod === 'live' ? 'var(--mg-text)' : '#0a0a0c',
+          border: '1px solid var(--mg-border)',
+          fontFamily: 'inherit',
+          fontSize: 11,
+          fontWeight: 700,
+          cursor: 'pointer',
+          outline: 'none',
+          width: isMobile ? '100%' : undefined,
+        }}
+      >
+        <option value="live">Anlık Stok</option>
+        {countPeriodOptions.map((p) => (
+          <option key={p.key} value={p.key}>Sayım: {p.label}</option>
+        ))}
+      </select>
+
       {/* Periyot toggle */}
       <div
         style={{
@@ -577,9 +616,11 @@ interface TestRowProps {
   expanded: boolean;
   onToggle: () => void;
   maxTotal: number;
+  /** Stok bileşeni etiketi — veri kaynağına göre "Stok (anlık)" ya da "Stok (Sayım …)". */
+  stockLabel?: string;
 }
 
-function TestRow({ result, expanded, onToggle, maxTotal }: TestRowProps) {
+function TestRow({ result, expanded, onToggle, maxTotal, stockLabel = 'Stok (anlık)' }: TestRowProps) {
   const isMobile = useIsMobile();
   const totalPct = (result.testTotalCostTL / Math.max(maxTotal, 1)) * 100;
   const c = result.marjTL >= 0 ? 'var(--mg-success)' : 'var(--mg-danger)';
@@ -655,7 +696,7 @@ function TestRow({ result, expanded, onToggle, maxTotal }: TestRowProps) {
           <div style={{ background: 'var(--mg-surface-2)', borderRadius: 12, padding: '12px 14px 14px', marginTop: -4, marginBottom: 8, border: `1px solid ${c}33` }}>
             <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--mg-muted)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 8 }}>Maliyet Bileşenleri</div>
             {[
-              { label: 'Stok (anlık)', v: result.stockCostTL, color: '#fb923c' },
+              { label: stockLabel, v: result.stockCostTL, color: '#fb923c' },
               { label: 'Envanter', v: result.inventoryCostTL, color: '#3b82f6' },
               { label: 'Cihaz', v: result.deviceCostMonthlyTL, color: '#a78bfa' },
               { label: 'Personel (hacim payı)', v: result.personnelCostMonthlyTL, color: '#10b981' },
@@ -846,7 +887,7 @@ function TestRow({ result, expanded, onToggle, maxTotal }: TestRowProps) {
                 Maliyet Bileşenleri (Periyot)
               </div>
               {[
-                { label: 'Stok (anlık)', v: result.stockCostTL, color: '#fb923c' },
+                { label: stockLabel, v: result.stockCostTL, color: '#fb923c' },
                 { label: 'Envanter', v: result.inventoryCostTL, color: '#3b82f6' },
                 { label: 'Cihaz', v: result.deviceCostMonthlyTL, color: '#a78bfa' },
                 { label: 'Personel (hacim payı)', v: result.personnelCostMonthlyTL, color: '#10b981' },
@@ -1000,10 +1041,13 @@ interface TestTabProps {
   currency: Currency;
   search: string;
   setSearch: (s: string) => void;
+  /** Header'daki Excel/PDF butonlarının çağıracağı işleyicileri kaydeder. */
+  registerExportHandlers?: (handlers: TabExportHandlers) => void;
 }
 
-export function TestTab({ currency: _currency, search, setSearch }: TestTabProps) {
+export function TestTab({ currency: _currency, search, setSearch, registerExportHandlers }: TestTabProps) {
   const { currentCompanyId, isSuperAdmin } = useAuth();
+  const { toast } = useToast();
   const isMobile = useIsMobile();
 
   const [loading, setLoading] = useState(true);
@@ -1017,17 +1061,29 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
   const [assets, setAssets] = useState<Asset[]>([]);
   const [personnel, setPersonnel] = useState<Personnel[]>([]);
   const [depoStokCounts, setDepoStokCounts] = useState<DepoStokCount[]>([]);
+  const [countSessions, setCountSessions] = useState<SayimSession[]>([]);
+  const [personnelConfig, setPersonnelConfig] = useState<PersonnelCostConfigInput | null>(null);
+  const [labPools, setLabPools] = useState<LabPoolLite[]>([]);
   const [rates, setRates] = useState<Record<Currency, number>>({ EUR: 1, USD: 1.08, TRY: 38.5 });
 
   // Filtreler
   const [selectedLabIds, setSelectedLabIds] = useState<string[]>([]);
   const [selectedTestIds, setSelectedTestIds] = useState<string[]>([]);
   const [periot, setPeriot] = useState<PeriotConfig>({ type: 'aylik' });
+  /** Test hacmi kaynağı: 'live' = anlık sevk edilmiş stok, aksi halde 'YYYY-MM' sayım dönemi */
+  const [countPeriod, setCountPeriod] = useState<string>('live');
+  /** Kullanıcı kaynak (anlık/dönem) seçmeden veri YÜKLENMEZ. */
+  const [sourceChosen, setSourceChosen] = useState(false);
+  const [pendingMonth, setPendingMonth] = useState(new Date().getMonth());
+  const [pendingYear, setPendingYear] = useState(new Date().getFullYear());
+  /** KPI kartına tıklanınca gösterilen alt kırılım */
+  const [kpiModal, setKpiModal] = useState<{ title: string; subtitle?: string; rows: KpiBreakdownRow[] } | null>(null);
   const [sortBy, setSortBy] = useState<'total' | 'unit' | 'volume'>('total');
   const [expandedTestId, setExpandedTestId] = useState<string | null>(null);
 
-  // Veri yükleme
+  // Veri yükleme — kaynak (anlık/dönem) seçilmeden hiçbir veri çekilmez
   useEffect(() => {
+    if (!sourceChosen) return;
     let cancelled = false;
     (async () => {
       setLoading(true);
@@ -1043,8 +1099,13 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
           stokCounts,
           testDefsSnap,
           ratesValue,
+          sayimSessionsSnap,
+          personnelCfgSnap,
+          labPoolsSnap,
         ] = await Promise.all([
-          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin, orderBy('stokAdi', 'asc'))),
+          // Legacy-aware: companyId'si eksik ya da __legacy__ etiketli ürün
+          // kayıtları da gelsin — aksi halde maliyet hesapları 0 çıkıyor.
+          getScopedDocs('productCodes', currentCompanyId, isSuperAdmin),
           getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin, orderBy('name', 'asc'))),
           getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
           getDocs(scopedQuery('hospitalDeviceAssignments', currentCompanyId, isSuperAdmin)),
@@ -1061,10 +1122,13 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
           }),
           getDocs(scopedQuery('testDefinitions', currentCompanyId, isSuperAdmin, orderBy('sutKodu', 'asc'))),
           getExchangeRates().catch(() => ({ EUR: 1, USD: 1.08, TRY: 38.5 })),
+          getDocs(scopedQuery('maliyetSayimSessions', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))).catch(() => null),
+          getDocs(scopedQuery('personnelCostConfig', currentCompanyId, isSuperAdmin)).catch(() => null),
+          getDocs(scopedQuery('labPools', currentCompanyId, isSuperAdmin)).catch(() => null),
         ]);
         if (cancelled) return;
 
-        const products = productsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ProductCode));
+        const products = productsSnap.map((d) => ({ id: d.id, ...d.data() } as ProductCode));
         const pMap = new Map<string, ProductCode>();
         products.forEach((p) => pMap.set(p.stokKodu, p));
         setProductMap(pMap);
@@ -1099,6 +1163,39 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
         );
         setDepoStokCounts(stokCounts);
 
+        if (sayimSessionsSnap) {
+          setCountSessions(
+            filterByCompanyScope(
+              sayimSessionsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as SayimSession)),
+              currentCompanyId,
+              isSuperAdmin,
+            ),
+          );
+        }
+
+        // Basitleştirilmiş personel gider modeli + havuz tanımları
+        if (personnelCfgSnap && !personnelCfgSnap.empty) {
+          const cfg = filterByCompanyScope(
+            personnelCfgSnap.docs.map((d) => ({ id: d.id, ...d.data() } as any)),
+            currentCompanyId,
+            isSuperAdmin,
+          )[0];
+          setPersonnelConfig(
+            cfg && Number(cfg.costPerPersonTL) > 0
+              ? { costPerPersonTL: Number(cfg.costPerPersonTL), labCounts: cfg.labCounts || {} }
+              : null,
+          );
+        }
+        if (labPoolsSnap) {
+          setLabPools(
+            filterByCompanyScope(
+              labPoolsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as any)),
+              currentCompanyId,
+              isSuperAdmin,
+            ).map((p: any) => ({ mainLabId: p.mainLabId, memberIds: p.memberIds || [], active: p.active })),
+          );
+        }
+
         setTestDefs(
           filterByCompanyScope(
             testDefsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as TestDefinitionGlobal)),
@@ -1118,7 +1215,54 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
     return () => {
       cancelled = true;
     };
-  }, [currentCompanyId, isSuperAdmin, reloadKey]);
+  }, [currentCompanyId, isSuperAdmin, reloadKey, sourceChosen]);
+
+  // Sayım oturumlarında bulunan dönemler (yeniden eskiye)
+  const countPeriodOptions = useMemo(() => {
+    const keys = new Map<string, string>();
+    countSessions.forEach((s) => {
+      const d = getSessionDate(s);
+      if (!d) return;
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      if (!keys.has(key)) {
+        keys.set(key, d.toLocaleDateString('tr-TR', { month: 'long', year: 'numeric' }));
+      }
+    });
+    return Array.from(keys.entries())
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([key, label]) => ({ key, label }));
+  }, [countSessions]);
+
+  // Stok bileşeni etiketi — kaynak dönem sayımıysa "Stok (anlık)" yanıltıcı olur
+  const stockSourceLabel = countPeriod === 'live'
+    ? 'Stok (anlık)'
+    : `Stok (Sayım: ${countPeriodOptions.find((p) => p.key === countPeriod)?.label || countPeriod})`;
+
+  // Test hacmi kaynağı: anlık stok özeti veya seçili dönemin sayım oturumları.
+  // Dönem seçildiğinde her lab için o ayın en güncel oturumu esas alınır;
+  // stokAdedi kutu sayısı, cihazUstuAdedi test adedi olarak hesaba girer.
+  const effectiveStokCounts = useMemo<DepoStokCount[]>(() => {
+    if (countPeriod === 'live') return depoStokCounts;
+    const monthSessions = countSessions.filter((s) => {
+      if (s.locationType !== 'lab') return false;
+      const d = getSessionDate(s);
+      if (!d) return false;
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` === countPeriod;
+    });
+    const latestByLab = getLatestByLocation(monthSessions);
+    const rows: DepoStokCount[] = [];
+    Array.from(latestByLab.values()).forEach((session) => {
+      session.items.forEach((item) => {
+        rows.push({
+          hedefKurumId: session.locationId,
+          stokKodu: item.stokKodu,
+          count: Number(item.stokAdedi) || 0,
+          cihazUstuAdedi: Number(item.cihazUstuAdedi) || 0,
+        });
+      });
+    });
+    return rows;
+  }, [countPeriod, depoStokCounts, countSessions]);
 
   // Hesap motoru — tüm testler tek paylaşılan bağlamla hesaplanır
   // (test başına ayrı ayrı hesaplamak veri büyüdüğünde ana thread'i kilitliyordu)
@@ -1132,12 +1276,17 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
       deviceDefs,
       assets,
       personnel,
-      depoStokCounts,
+      depoStokCounts: effectiveStokCounts,
       rates,
       periot,
+      // Ortak giderler test hacmine göre dağıtılır — full_burden her testte
+      // aynı toplamı (grandTotal) gösterip tabloyu anlamsızlaştırıyordu.
+      mode: 'volume_weighted',
+      personnelConfig: personnelConfig ?? undefined,
+      labPools,
       filterLabIds: selectedLabIds.length > 0 ? selectedLabIds : undefined,
     });
-  }, [testDefs, productMap, labs, assignedDevices, deviceDefs, assets, personnel, depoStokCounts, rates, periot, selectedLabIds]);
+  }, [testDefs, productMap, labs, assignedDevices, deviceDefs, assets, personnel, effectiveStokCounts, rates, periot, selectedLabIds, personnelConfig, labPools]);
 
   const systemTotal = useMemo(() => {
     if (testDefs.length === 0) return null;
@@ -1149,12 +1298,14 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
       deviceDefs,
       assets,
       personnel,
-      depoStokCounts,
+      depoStokCounts: effectiveStokCounts,
       rates,
       periot,
+      personnelConfig: personnelConfig ?? undefined,
+      labPools,
       filterLabIds: selectedLabIds.length > 0 ? selectedLabIds : undefined,
     });
-  }, [testDefs, productMap, labs, assignedDevices, deviceDefs, assets, personnel, depoStokCounts, rates, periot, selectedLabIds]);
+  }, [testDefs, productMap, labs, assignedDevices, deviceDefs, assets, personnel, effectiveStokCounts, rates, periot, selectedLabIds, personnelConfig, labPools]);
 
   // Filtreleme + sıralama
   const filtered = useMemo(() => {
@@ -1174,6 +1325,65 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
     });
     return list;
   }, [breakdowns, selectedTestIds, search, sortBy]);
+
+  // Header'daki Excel/PDF butonları için dışa aktarma işleyicilerini kaydet
+  useEffect(() => {
+    if (!registerExportHandlers) return;
+    const sourceName = countPeriod === 'live'
+      ? 'Anlık Stok'
+      : `Sayım ${countPeriodOptions.find((p) => p.key === countPeriod)?.label || countPeriod}`;
+    const periotName = periot.type === 'gunluk' ? 'Günlük' : periot.type === 'yillik' ? 'Yıllık' : 'Aylık';
+
+    const rows = filtered.map((b) => ({
+      'SUT Kodu': b.sutKodu,
+      'Test Adı': b.sutTestAdi,
+      'Test Adedi': Math.round(b.totalTestUnits),
+      'Stok Maliyeti (TL)': Math.round(b.stockCostTL),
+      'Ortak Giderler (TL)': Math.round(b.ortakGiderlerTL),
+      'Toplam Maliyet (TL)': Math.round(b.testTotalCostTL),
+      'Birim Maliyet (TL)': Number(b.costPerTestTL.toFixed(2)),
+      'Hak Ediş (TL)': Number(b.hakEdisTL.toFixed(2)),
+      'Marj (TL)': Number(b.marjTL.toFixed(2)),
+    }));
+
+    registerExportHandlers({
+      excel: () => {
+        exportDataToExcel(
+          {
+            'Test Maliyetleri': rows,
+            'Özet': [
+              { Alan: 'Veri Kaynağı', Değer: sourceName },
+              { Alan: 'Periyot', Değer: periotName },
+              { Alan: 'Test Sayısı', Değer: filtered.length },
+              { Alan: 'Toplam Harcama (TL)', Değer: Math.round(systemTotal?.realTotalSpendTL ?? 0) },
+              { Alan: 'Envanter Maliyeti (TL)', Değer: Math.round(systemTotal?.inventoryCostTL ?? 0) },
+              { Alan: 'Cihaz Maliyeti (TL/ay)', Değer: Math.round(systemTotal?.deviceCostMonthlyTL ?? 0) },
+              { Alan: 'Personel Gideri (TL/ay)', Değer: Math.round(systemTotal?.personnelCostMonthlyTL ?? 0) },
+              { Alan: 'Tüm Stok Maliyeti (TL)', Değer: Math.round(systemTotal?.allStockCostTL ?? 0) },
+            ],
+          },
+          `Maliyet_Gozlem_Test_${sourceName}`,
+          toast,
+        );
+      },
+      pdf: () => {
+        exportDataToPdf(
+          rows.map((r) => ({
+            ...r,
+            'Stok Maliyeti (TL)': r['Stok Maliyeti (TL)'].toLocaleString('tr-TR'),
+            'Ortak Giderler (TL)': r['Ortak Giderler (TL)'].toLocaleString('tr-TR'),
+            'Toplam Maliyet (TL)': r['Toplam Maliyet (TL)'].toLocaleString('tr-TR'),
+            'Birim Maliyet (TL)': r['Birim Maliyet (TL)'].toLocaleString('tr-TR'),
+            'Hak Ediş (TL)': r['Hak Ediş (TL)'].toLocaleString('tr-TR'),
+            'Marj (TL)': r['Marj (TL)'].toLocaleString('tr-TR'),
+          })),
+          `Maliyet_Gozlem_Test_${sourceName}`,
+          `Maliyet Gözlem — Test Bazlı Maliyet (${sourceName} · ${periotName})`,
+          toast,
+        );
+      },
+    });
+  }, [registerExportHandlers, filtered, systemTotal, countPeriod, countPeriodOptions, periot.type, toast]);
 
   const maxTotal = Math.max(...filtered.map((t) => t.testTotalCostTL), 1);
   const filteredTotal = filtered.reduce((s, t) => s + t.testTotalCostTL, 0);
@@ -1282,6 +1492,74 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
     rates,
   ]);
 
+  // ---- Kaynak (anlık/dönem) seçilmeden veri yüklenmez ----
+  if (!sourceChosen) {
+    const btnBase: React.CSSProperties = {
+      padding: '10px 18px',
+      borderRadius: 12,
+      border: '1px solid var(--mg-border)',
+      fontFamily: 'inherit',
+      fontSize: 13,
+      fontWeight: 700,
+      cursor: 'pointer',
+    };
+    const selBase: React.CSSProperties = {
+      padding: '9px 12px',
+      borderRadius: 10,
+      background: 'var(--mg-surface-2)',
+      color: 'var(--mg-text)',
+      border: '1px solid var(--mg-border)',
+      fontFamily: 'inherit',
+      fontSize: 13,
+      fontWeight: 600,
+      outline: 'none',
+      cursor: 'pointer',
+    };
+    return (
+      <Card>
+        <div style={{ padding: '40px 24px', textAlign: 'center' }}>
+          <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--mg-text)', marginBottom: 6 }}>
+            Veri Kaynağı Seçin
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--mg-muted)', marginBottom: 24 }}>
+            Veriler seçim yapılana kadar yüklenmez. Test maliyetleri seçili sayım döneminin verisiyle ya da anlık stokla hesaplanır.
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <select value={pendingMonth} onChange={(e) => setPendingMonth(Number(e.target.value))} style={selBase}>
+              {Array.from({ length: 12 }, (_, i) => (
+                <option key={i} value={i}>{new Date(0, i, 1).toLocaleString('tr-TR', { month: 'long' })}</option>
+              ))}
+            </select>
+            <select value={pendingYear} onChange={(e) => setPendingYear(Number(e.target.value))} style={selBase}>
+              {Array.from({ length: 7 }, (_, i) => new Date().getFullYear() - 3 + i).map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => {
+                setCountPeriod(`${pendingYear}-${String(pendingMonth + 1).padStart(2, '0')}`);
+                setSourceChosen(true);
+              }}
+              style={{ ...btnBase, background: 'var(--mg-accent)', color: '#0a0a0c', boxShadow: '0 2px 12px rgba(251,146,60,0.35)' }}
+            >
+              Sayım Dönemini Yükle
+            </button>
+            <span style={{ fontSize: 12, color: 'var(--mg-muted)' }}>veya</span>
+            <button
+              onClick={() => {
+                setCountPeriod('live');
+                setSourceChosen(true);
+              }}
+              style={{ ...btnBase, background: 'var(--mg-surface-2)', color: 'var(--mg-text-2)' }}
+            >
+              Anlık Stok
+            </button>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
   if (loading) {
     return (
       <div style={{ padding: 60, textAlign: 'center', color: 'var(--mg-muted)' }}>
@@ -1385,6 +1663,9 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
         setSelectedTestIds={setSelectedTestIds}
         periot={periot}
         setPeriot={setPeriot}
+        countPeriod={countPeriod}
+        setCountPeriod={setCountPeriod}
+        countPeriodOptions={countPeriodOptions}
       />
 
       {/* KPI Row */}
@@ -1406,14 +1687,60 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
-          <MiniStat label={`Toplam Test Maliyeti (${periot.type})`} value={filteredTotal} sub={`${filteredVolume.toLocaleString('tr-TR')} test`} color="#fb923c" />
-          <MiniStat label="Test Başına Ort." value={filteredAvgUnit} sub="Ağırlıklı" color="#6ea8ff" decimals={2} />
+          <MiniStat
+            label={`Toplam Test Maliyeti (${periot.type})`}
+            value={filteredTotal}
+            sub={`${filteredVolume.toLocaleString('tr-TR')} test`}
+            color="#fb923c"
+            onClick={() => setKpiModal({
+              title: 'Toplam Test Maliyeti — Test Kırılımı',
+              subtitle: `₺${Math.round(filteredTotal).toLocaleString('tr-TR')} · ${filtered.length} test`,
+              rows: [...filtered]
+                .sort((a, b) => b.testTotalCostTL - a.testTotalCostTL)
+                .map((b) => ({
+                  label: b.sutTestAdi,
+                  sub: `SUT ${b.sutKodu} · ${b.totalTestUnits.toLocaleString('tr-TR')} test · Stok ₺${Math.round(b.stockCostTL).toLocaleString('tr-TR')} + Ortak ₺${Math.round(b.ortakGiderlerTL).toLocaleString('tr-TR')}`,
+                  value: `₺${Math.round(b.testTotalCostTL).toLocaleString('tr-TR')}`,
+                })),
+            })}
+          />
+          <MiniStat
+            label="Test Başına Ort."
+            value={filteredAvgUnit}
+            sub="Ağırlıklı"
+            color="#6ea8ff"
+            decimals={2}
+            onClick={() => setKpiModal({
+              title: 'Birim Maliyet Kırılımı',
+              subtitle: 'Test başına maliyet (yüksekten düşüğe)',
+              rows: [...filtered]
+                .sort((a, b) => b.costPerTestTL - a.costPerTestTL)
+                .map((b) => ({
+                  label: b.sutTestAdi,
+                  sub: `SUT ${b.sutKodu} · ${b.totalTestUnits.toLocaleString('tr-TR')} test`,
+                  value: `₺${b.costPerTestTL.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}`,
+                })),
+            })}
+          />
           <MiniStat
             label="En Pahalı Test"
             value={mostExpensive?.costPerTestTL || 0}
             sub={mostExpensive?.sutTestAdi || ''}
             color="#a78bfa"
             decimals={2}
+            onClick={() => mostExpensive && setKpiModal({
+              title: `${mostExpensive.sutTestAdi} — Maliyet Bileşenleri`,
+              subtitle: `SUT ${mostExpensive.sutKodu}`,
+              rows: [
+                { label: 'Test Adedi', value: (mostExpensive.totalTestUnits || 0).toLocaleString('tr-TR') },
+                { label: 'Stok Maliyeti', value: `₺${Math.round(mostExpensive.stockCostTL || 0).toLocaleString('tr-TR')}` },
+                { label: 'Ortak Gider Payı', sub: 'Envanter + cihaz + personel (hacim payı)', value: `₺${Math.round(mostExpensive.ortakGiderlerTL || 0).toLocaleString('tr-TR')}` },
+                { label: 'Toplam Maliyet', value: `₺${Math.round(mostExpensive.testTotalCostTL || 0).toLocaleString('tr-TR')}` },
+                { label: 'Birim Maliyet', value: `₺${(mostExpensive.costPerTestTL || 0).toLocaleString('tr-TR', { maximumFractionDigits: 2 })}` },
+                { label: 'Hak Ediş', value: `₺${(mostExpensive.hakEdisTL || 0).toLocaleString('tr-TR', { maximumFractionDigits: 2 })}` },
+                { label: 'Marj', value: `₺${(mostExpensive.marjTL || 0).toLocaleString('tr-TR', { maximumFractionDigits: 2 })}` },
+              ],
+            })}
           />
           <MiniStat
             label="En Çok Test"
@@ -1422,6 +1749,17 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
             color="#42e46d"
             isCount
             unit="adet"
+            onClick={() => setKpiModal({
+              title: 'Test Hacmi Kırılımı',
+              subtitle: 'Test adedi (çoktan aza)',
+              rows: [...filtered]
+                .sort((a, b) => b.totalTestUnits - a.totalTestUnits)
+                .map((b) => ({
+                  label: b.sutTestAdi,
+                  sub: `SUT ${b.sutKodu}`,
+                  value: `${b.totalTestUnits.toLocaleString('tr-TR')} test`,
+                })),
+            })}
           />
         </div>
       )}
@@ -1463,8 +1801,7 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
                       format: (v: number) => (
                         <>
                           <span style={{ fontSize: 20, color: 'var(--mg-muted)', fontWeight: 300, marginRight: 2 }}>₺</span>
-                          {Math.round(v / 1000).toLocaleString('tr-TR')}
-                          <span style={{ fontSize: 20, color: 'var(--mg-muted)', marginLeft: 1, fontWeight: 300 }}>k</span>
+                          {formatCompactTL(v)}
                         </>
                       ),
                     },
@@ -1476,8 +1813,7 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
                       format: (v: number) => (
                         <>
                           <span style={{ fontSize: 20, color: 'var(--mg-muted)', fontWeight: 300, marginRight: 2 }}>₺</span>
-                          {Math.round(v / 1000).toLocaleString('tr-TR')}
-                          <span style={{ fontSize: 20, color: 'var(--mg-muted)', marginLeft: 1, fontWeight: 300 }}>k</span>
+                          {formatCompactTL(v)}
                         </>
                       ),
                     },
@@ -1496,7 +1832,7 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
                     {
                       value: systemTotal.allStockCostTL,
                       label: 'Stok',
-                      sublabel: 'Anlık değer',
+                      sublabel: countPeriod === 'live' ? 'Anlık değer' : 'Sayım dönemi',
                       color: '#fb923c',
                       format: (v: number) => (
                         <>
@@ -1647,11 +1983,21 @@ export function TestTab({ currency: _currency, search, setSearch }: TestTabProps
                 expanded={expandedTestId === b.testId}
                 onToggle={() => setExpandedTestId(expandedTestId === b.testId ? null : b.testId)}
                 maxTotal={maxTotal}
+                stockLabel={stockSourceLabel}
               />
             ))
           )}
         </div>
       </Card>
+
+      {kpiModal && (
+        <KpiBreakdownModal
+          title={kpiModal.title}
+          subtitle={kpiModal.subtitle}
+          rows={kpiModal.rows}
+          onClose={() => setKpiModal(null)}
+        />
+      )}
     </div>
   );
 }

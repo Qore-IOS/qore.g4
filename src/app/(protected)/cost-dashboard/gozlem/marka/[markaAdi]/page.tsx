@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { collection, getDocs, orderBy, query } from 'firebase/firestore';
 import { ArrowLeft, FileSpreadsheet, FileText, Loader2 } from 'lucide-react';
 import { db } from '@/lib/firebase';
@@ -19,6 +19,9 @@ const CURRENCY_SYMBOLS: Record<Currency, string> = { EUR: '€', USD: '$', TRY: 
 export default function BrandObservationPage() {
   const params = useParams<{ markaAdi: string }>();
   const brand = decodeURIComponent(params?.markaAdi || '');
+  const searchParams = useSearchParams();
+  /** Gözlem panelinden seçili dönemle gelindiyse (YYYY-MM) yalnızca o ay analiz edilir. */
+  const period = /^\d{4}-\d{2}$/.test(searchParams?.get('period') || '') ? searchParams!.get('period')! : null;
   const router = useRouter();
   const { toast } = useToast();
   const productsQuery = useProductCodes();
@@ -47,8 +50,33 @@ export default function BrandObservationPage() {
 
   const sym = CURRENCY_SYMBOLS[currency];
 
+  // Dönem seçiliyse yalnızca o ayın oturumları; en güncel oturum önce gelecek
+  // şekilde analitik tarihe (dönem > createdAt) göre sıralanır — aşağıdaki
+  // latestRows dedup'ı ilk görüneni aldığı için sıralama kritik.
+  const periodSessions = useMemo(() => {
+    const monthKey = (s: SayimSession) => {
+      const d = getSessionDate(s);
+      return d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` : null;
+    };
+    const list = period ? sessions.filter((s) => monthKey(s) === period) : sessions;
+    const createdAtMs = (s: SayimSession) => {
+      const c: any = s.createdAt;
+      if (!c) return 0;
+      if (c.toDate) return c.toDate().getTime();
+      if (c.seconds) return c.seconds * 1000;
+      const d = new Date(c);
+      return Number.isNaN(d.getTime()) ? 0 : d.getTime();
+    };
+    return [...list].sort((a, b) => {
+      const ad = getSessionDate(a)?.getTime() ?? 0;
+      const bd = getSessionDate(b)?.getTime() ?? 0;
+      if (bd !== ad) return bd - ad;
+      return createdAtMs(b) - createdAtMs(a);
+    });
+  }, [sessions, period]);
+
   const rows = useMemo(() => {
-    return sessions.flatMap((s) => s.items
+    return periodSessions.flatMap((s) => s.items
       .filter((i) => (i.marka || 'Diğer') === brand)
       .map((i) => ({
         sessionId: s.id,
@@ -59,9 +87,9 @@ export default function BrandObservationPage() {
         stokAdi: i.stokAdi,
         stokAdedi: i.stokAdedi,
         cihazUstuAdedi: i.cihazUstuAdedi,
-        totalCost: getProductCostInCurrency(i.stokKodu, i.stokAdedi, i.cihazUstuAdedi, productMap, rates, currency),
+        totalCost: getProductCostInCurrency(i.stokKodu, i.stokAdedi, i.cihazUstuAdedi, productMap, rates, currency, i),
       })));
-  }, [sessions, brand, productMap, rates, currency]);
+  }, [periodSessions, brand, productMap, rates, currency]);
 
   const latestRows = useMemo(() => {
     const seen = new Set<string>();
@@ -312,7 +340,14 @@ export default function BrandObservationPage() {
           </div>
         </div>
 
-        <h1 className="text-2xl font-bold text-[var(--dashboard-text)]">{brand} — Marka Gözlem Paneli</h1>
+        <h1 className="text-2xl font-bold text-[var(--dashboard-text)]">
+          {brand} — Marka Gözlem Paneli
+          {period && (
+            <span className="ml-3 align-middle inline-block px-2.5 py-1 rounded-lg text-sm font-semibold bg-[var(--dashboard-accent)]/10 text-[var(--dashboard-accent)]">
+              {new Date(Number(period.slice(0, 4)), Number(period.slice(5, 7)) - 1, 1).toLocaleDateString('tr-TR', { month: 'long', year: 'numeric' })} dönemi
+            </span>
+          )}
+        </h1>
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
           <div className="cihaz-card-strong p-5">
