@@ -5,7 +5,7 @@ import { Search, X, Plus, BarChart2, CalendarCheck } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { db } from '@/lib/firebase';
 import {
-  collection, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, doc, serverTimestamp,
+  collection, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, doc, getDoc, setDoc, serverTimestamp,
 } from 'firebase/firestore';
 import {
   AC, PlStyles, PlIconBtn, PlToast, useContainerMode, uid,
@@ -24,9 +24,10 @@ import {
 } from '@/lib/google-calendar';
 
 const COLLECTION = 'planlamaGorevler';
+const GOOGLE_ACCOUNT_COLLECTION = 'userGoogleCalendarAccounts';
 
 /* header (segmented Bugün/Takvim + action buttons) */
-const PlHeader = ({ ac, mode, view, setView, onSearch, onAdd, onAnalytics, onCalendarConnect, calendarConnected, calendarConfigured }: any) => {
+const PlHeader = ({ ac, mode, view, setView, onSearch, onAdd, onAnalytics, onCalendarConnect, calendarConnected, calendarConfigured, googleAccount }: any) => {
   const mobile = mode === 'mobile';
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: mobile ? 8 : 12, marginBottom: mobile ? 18 : 22 }}>
@@ -41,9 +42,12 @@ const PlHeader = ({ ac, mode, view, setView, onSearch, onAdd, onAnalytics, onCal
       <div style={{ flex: 1 }} />
       <PlIconBtn onClick={onSearch} ac={ac} ariaLabel="Ara"><Search size={19} /></PlIconBtn>
       <PlIconBtn onClick={onAnalytics} ac={ac} ariaLabel="Analiz"><BarChart2 size={19} /></PlIconBtn>
-      <PlIconBtn onClick={onCalendarConnect} ac={ac} ariaLabel={calendarConfigured ? (calendarConnected ? 'Google Takvim bağlı' : 'Google Takvim bağla') : 'Google Takvim yapılandırılmamış'}>
-        <CalendarCheck size={19} color={calendarConnected ? '#2f8f5b' : undefined} />
-      </PlIconBtn>
+      <div title={googleAccount?.email || (calendarConfigured ? 'Google Takvim bağla' : 'Google Takvim yapılandırılmamış')} style={{ position: 'relative' }}>
+        <PlIconBtn onClick={onCalendarConnect} ac={ac} ariaLabel={calendarConfigured ? (calendarConnected ? `Google Takvim bağlı: ${googleAccount?.email || ''}` : 'Google Takvim bağla') : 'Google Takvim yapılandırılmamış'}>
+          <span style={{ fontSize: 17, fontWeight: 900, color: calendarConnected ? '#2f8f5b' : 'var(--ink-2)', fontFamily: 'Arial, sans-serif' }}>G</span>
+        </PlIconBtn>
+        {calendarConnected && <span style={{ position: 'absolute', right: 4, top: 4, width: 9, height: 9, borderRadius: '50%', background: '#2f8f5b', boxShadow: '0 0 0 2px var(--surface-hi)' }} />}
+      </div>
       {!mobile && <PlIconBtn onClick={onAdd} hot ac={ac} ariaLabel="Görev ekle"><Plus size={22} /></PlIconBtn>}
     </div>
   );
@@ -83,6 +87,7 @@ export default function PlanlamaPanel() {
   const [toast, setToast] = React.useState<any>(null);
   const [calendarConnected, setCalendarConnected] = React.useState(false);
   const [calendarSyncEnabled, setCalendarSyncEnabled] = React.useState(false);
+  const [googleAccount, setGoogleAccount] = React.useState<{ email: string; name?: string; picture?: string } | null>(null);
   const toastRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fire = (t: any) => {
@@ -104,6 +109,37 @@ export default function PlanlamaPanel() {
     }, (err) => { console.error('PlanlamaPanel Firestore error:', err); setLoading(false); });
     return unsub;
   }, [currentUser, currentCompanyId]);
+
+
+  React.useEffect(() => {
+    if (!currentUser) return;
+    let cancelled = false;
+
+    const restoreGoogleCalendarAccount = async () => {
+      try {
+        const snap = await getDoc(doc(db, GOOGLE_ACCOUNT_COLLECTION, currentUser.uid));
+        if (!snap.exists()) return;
+
+        const saved = snap.data() as { email?: string; name?: string; picture?: string; calendarSyncEnabled?: boolean };
+        if (saved.email && !cancelled) {
+          setGoogleAccount({ email: saved.email, name: saved.name, picture: saved.picture });
+          setCalendarSyncEnabled(saved.calendarSyncEnabled !== false);
+        }
+
+        const account = await connectGoogleCalendar({ silent: true });
+        if (cancelled) return;
+        setGoogleAccount(account);
+        setCalendarConnected(hasGoogleCalendarToken());
+        setCalendarSyncEnabled(true);
+      } catch (e) {
+        console.info('Google Calendar silent restore skipped:', e);
+        if (!cancelled) setCalendarConnected(false);
+      }
+    };
+
+    restoreGoogleCalendarAccount();
+    return () => { cancelled = true; };
+  }, [currentUser]);
 
   /* task operations → optimistic local update + Firestore write.
      Optimistic keeps the UI instant even if the snapshot round-trips. */
@@ -142,10 +178,22 @@ export default function PlanlamaPanel() {
   const connectCalendar = async () => {
     if (!isGoogleCalendarConfigured()) { fire({ title: 'Google Takvim hazır değil', sub: 'NEXT_PUBLIC_GOOGLE_CLIENT_ID tanımlanmalı.' }); return; }
     try {
-      await connectGoogleCalendar();
+      const account = await connectGoogleCalendar();
+      if (currentUser) {
+        await setDoc(doc(db, GOOGLE_ACCOUNT_COLLECTION, currentUser.uid), {
+          userId: currentUser.uid,
+          email: account.email,
+          name: account.name || '',
+          picture: account.picture || '',
+          provider: 'google',
+          calendarSyncEnabled: true,
+          updatedAt: serverTimestamp(),
+        }, { merge: true });
+      }
+      setGoogleAccount(account);
       setCalendarConnected(hasGoogleCalendarToken());
       setCalendarSyncEnabled(true);
-      fire({ tone: 'ok', title: 'Google Takvim Bağlandı', sub: 'Mevcut görevler ve yeni değişiklikler eşitlenecek.' });
+      fire({ tone: 'ok', title: 'Google Takvim Bağlandı', sub: `${account.email} bu kullanıcıya kaydedildi.` });
       await Promise.all(tasks.filter((task) => task.date).map((task) => syncTaskToCalendar(task, task.id, true)));
     }
     catch (e) { console.error(e); fire({ title: 'Google Takvim bağlanamadı', sub: e instanceof Error ? e.message : 'Yetkilendirme tamamlanamadı.' }); }
@@ -236,7 +284,7 @@ export default function PlanlamaPanel() {
       <PlStyles />
       <div style={{ maxWidth: 1080, margin: '0 auto', padding: pad }}>
         <PlHeader ac={AC} mode={mode} view={view} setView={setView}
-          onSearch={() => setSearchOpen((v) => !v)} onAdd={() => setTaskModal({})} onAnalytics={() => setAnalytics(true)} onCalendarConnect={connectCalendar} calendarConnected={calendarConnected} calendarConfigured={isGoogleCalendarConfigured()} />
+          onSearch={() => setSearchOpen((v) => !v)} onAdd={() => setTaskModal({})} onAnalytics={() => setAnalytics(true)} onCalendarConnect={connectCalendar} calendarConnected={calendarConnected} calendarConfigured={isGoogleCalendarConfigured()} googleAccount={googleAccount} />
 
         {searchOpen && (
           <div style={{ position: 'relative', marginBottom: 16, animation: 'plPopIn 240ms var(--ease-fluid)' }}>

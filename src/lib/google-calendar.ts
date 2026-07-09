@@ -1,12 +1,19 @@
 import type { Task } from '@/components/purchasing/planlama/pl-primitives';
 
 const GOOGLE_IDENTITY_SCRIPT = 'https://accounts.google.com/gsi/client';
-const GOOGLE_CALENDAR_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
+const GOOGLE_CALENDAR_SCOPE = 'openid email profile https://www.googleapis.com/auth/calendar.events';
 const CALENDAR_API_BASE = 'https://www.googleapis.com/calendar/v3/calendars/primary/events';
+const GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v3/userinfo';
 
 export interface GoogleCalendarSyncResult {
   eventId: string;
   htmlLink?: string;
+}
+
+export interface GoogleCalendarAccount {
+  email: string;
+  name?: string;
+  picture?: string;
 }
 
 type GoogleTokenClient = {
@@ -33,6 +40,7 @@ declare global {
 let tokenClient: GoogleTokenClient | null = null;
 let accessToken: string | null = null;
 let scriptPromise: Promise<void> | null = null;
+let connectedAccount: GoogleCalendarAccount | null = null;
 
 const loadGoogleIdentityScript = () => {
   if (typeof window === 'undefined') return Promise.reject(new Error('Google Calendar yalnızca tarayıcıda kullanılabilir.'));
@@ -69,8 +77,9 @@ const getClientId = () => {
 
 export const isGoogleCalendarConfigured = () => Boolean(process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID);
 export const hasGoogleCalendarToken = () => Boolean(accessToken);
+export const getGoogleCalendarAccount = () => connectedAccount;
 
-export async function connectGoogleCalendar(): Promise<void> {
+export async function connectGoogleCalendar(options: { silent?: boolean } = {}): Promise<GoogleCalendarAccount> {
   await loadGoogleIdentityScript();
   const clientId = getClientId();
 
@@ -97,8 +106,11 @@ export async function connectGoogleCalendar(): Promise<void> {
       return;
     }
 
-    tokenClient.requestAccessToken({ prompt: accessToken ? '' : 'consent' });
+    tokenClient.requestAccessToken({ prompt: options.silent || accessToken ? '' : 'consent' });
   });
+
+  connectedAccount = await fetchGoogleCalendarAccount();
+  return connectedAccount;
 }
 
 const normalizeTime = (value?: string, fallback = '09:00') => /^\d{2}:\d{2}$/.test(value || '') ? value as string : fallback;
@@ -143,9 +155,26 @@ const taskToGoogleEvent = (task: Task) => {
 };
 
 async function ensureToken() {
-  if (!accessToken) await connectGoogleCalendar();
+  if (!accessToken) await connectGoogleCalendar({ silent: true });
   if (!accessToken) throw new Error('Google Calendar bağlantısı kurulamadı.');
   return accessToken;
+}
+
+async function fetchGoogleCalendarAccount(): Promise<GoogleCalendarAccount> {
+  const token = accessToken;
+  if (!token) throw new Error('Google hesabı bilgisi için erişim anahtarı bulunamadı.');
+
+  const response = await fetch(GOOGLE_USERINFO_URL, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!response.ok) {
+    throw new Error('Google hesap bilgisi alınamadı.');
+  }
+
+  const profile = await response.json() as { email?: string; name?: string; picture?: string };
+  if (!profile.email) throw new Error('Google hesabı e-posta bilgisi alınamadı.');
+  return { email: profile.email, name: profile.name, picture: profile.picture };
 }
 
 async function requestCalendar<T>(url: string, init: RequestInit): Promise<T> {
