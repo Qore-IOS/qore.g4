@@ -20,7 +20,11 @@ export interface Task {
   done: boolean;
   subs: SubTask[];
   createdAt?: any;
+  googleCalendarEventId?: string;
+  googleCalendarHtmlLink?: string;
+  googleCalendarSyncedAt?: number;
 }
+
 export type Mode = 'mobile' | 'tablet' | 'wide';
 export interface Accent { primary: string; accent: string; glow: string; }
 
