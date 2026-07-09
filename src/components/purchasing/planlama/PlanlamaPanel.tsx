@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Search, X, Plus, BarChart2 } from 'lucide-react';
+import { Search, X, Plus, BarChart2, CalendarCheck } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { db } from '@/lib/firebase';
 import {
@@ -15,11 +15,18 @@ import PlList from './PlList';
 import PlCalendar from './PlCalendar';
 import PlTaskModal from './PlTaskModal';
 import PlAnalytics from './PlAnalytics';
+import {
+  connectGoogleCalendar,
+  deleteGoogleCalendarEvent,
+  hasGoogleCalendarToken,
+  isGoogleCalendarConfigured,
+  upsertGoogleCalendarEvent,
+} from '@/lib/google-calendar';
 
 const COLLECTION = 'planlamaGorevler';
 
 /* header (segmented Bugün/Takvim + action buttons) */
-const PlHeader = ({ ac, mode, view, setView, onSearch, onAdd, onAnalytics }: any) => {
+const PlHeader = ({ ac, mode, view, setView, onSearch, onAdd, onAnalytics, onCalendarConnect, calendarConnected, calendarConfigured }: any) => {
   const mobile = mode === 'mobile';
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: mobile ? 8 : 12, marginBottom: mobile ? 18 : 22 }}>
@@ -34,6 +41,9 @@ const PlHeader = ({ ac, mode, view, setView, onSearch, onAdd, onAnalytics }: any
       <div style={{ flex: 1 }} />
       <PlIconBtn onClick={onSearch} ac={ac} ariaLabel="Ara"><Search size={19} /></PlIconBtn>
       <PlIconBtn onClick={onAnalytics} ac={ac} ariaLabel="Analiz"><BarChart2 size={19} /></PlIconBtn>
+      <PlIconBtn onClick={onCalendarConnect} ac={ac} ariaLabel={calendarConfigured ? (calendarConnected ? 'Google Takvim bağlı' : 'Google Takvim bağla') : 'Google Takvim yapılandırılmamış'}>
+        <CalendarCheck size={19} color={calendarConnected ? '#2f8f5b' : undefined} />
+      </PlIconBtn>
       {!mobile && <PlIconBtn onClick={onAdd} hot ac={ac} ariaLabel="Görev ekle"><Plus size={22} /></PlIconBtn>}
     </div>
   );
@@ -50,6 +60,9 @@ const toTask = (id: string, d: any): Task => ({
   done: !!d.done,
   subs: Array.isArray(d.subs) ? d.subs : [],
   createdAt: typeof d.createdAt === 'number' ? d.createdAt : (d.createdAt?.toMillis?.() ?? 0),
+  googleCalendarEventId: d.googleCalendarEventId || '',
+  googleCalendarHtmlLink: d.googleCalendarHtmlLink || '',
+  googleCalendarSyncedAt: typeof d.googleCalendarSyncedAt === 'number' ? d.googleCalendarSyncedAt : (d.googleCalendarSyncedAt?.toMillis?.() ?? 0),
 });
 
 const sortTasks = (arr: Task[]) => arr.slice().sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
@@ -68,6 +81,8 @@ export default function PlanlamaPanel() {
   const [search, setSearch] = React.useState('');
   const [searchOpen, setSearchOpen] = React.useState(false);
   const [toast, setToast] = React.useState<any>(null);
+  const [calendarConnected, setCalendarConnected] = React.useState(false);
+  const [calendarSyncEnabled, setCalendarSyncEnabled] = React.useState(false);
   const toastRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fire = (t: any) => {
@@ -98,43 +113,92 @@ export default function PlanlamaPanel() {
   const toggleTask = async (id: string) => {
     const t = tasks.find((x) => x.id === id); if (!t) return;
     patchLocal(id, (x) => ({ ...x, done: !x.done }));
-    try { await updateDoc(doc(db, COLLECTION, id), { done: !t.done, updatedAt: serverTimestamp() }); }
+    try {
+      await updateDoc(doc(db, COLLECTION, id), { done: !t.done, updatedAt: serverTimestamp() });
+      await syncTaskToCalendar({ ...t, done: !t.done }, id);
+    }
     catch (e) { console.error(e); }
   };
   const toggleSub = async (tid: string, sid: string) => {
     const t = tasks.find((x) => x.id === tid); if (!t) return;
     const subs = t.subs.map((s) => s.id === sid ? { ...s, done: !s.done } : s);
     patchLocal(tid, (x) => ({ ...x, subs }));
-    try { await updateDoc(doc(db, COLLECTION, tid), { subs, updatedAt: serverTimestamp() }); }
+    try {
+      await updateDoc(doc(db, COLLECTION, tid), { subs, updatedAt: serverTimestamp() });
+      await syncTaskToCalendar({ ...t, subs }, tid);
+    }
     catch (e) { console.error(e); }
   };
   const addSub = async (tid: string, title: string) => {
     const t = tasks.find((x) => x.id === tid); if (!t) return;
     const subs: SubTask[] = [...t.subs, { id: 's' + uid(), title, done: false }];
     patchLocal(tid, (x) => ({ ...x, subs }));
-    try { await updateDoc(doc(db, COLLECTION, tid), { subs, updatedAt: serverTimestamp() }); }
+    try {
+      await updateDoc(doc(db, COLLECTION, tid), { subs, updatedAt: serverTimestamp() });
+      await syncTaskToCalendar({ ...t, subs }, tid);
+    }
     catch (e) { console.error(e); }
   };
+  const connectCalendar = async () => {
+    if (!isGoogleCalendarConfigured()) { fire({ title: 'Google Takvim hazır değil', sub: 'NEXT_PUBLIC_GOOGLE_CLIENT_ID tanımlanmalı.' }); return; }
+    try {
+      await connectGoogleCalendar();
+      setCalendarConnected(hasGoogleCalendarToken());
+      setCalendarSyncEnabled(true);
+      fire({ tone: 'ok', title: 'Google Takvim Bağlandı', sub: 'Mevcut görevler ve yeni değişiklikler eşitlenecek.' });
+      await Promise.all(tasks.filter((task) => task.date).map((task) => syncTaskToCalendar(task, task.id, true)));
+    }
+    catch (e) { console.error(e); fire({ title: 'Google Takvim bağlanamadı', sub: e instanceof Error ? e.message : 'Yetkilendirme tamamlanamadı.' }); }
+  };
+
+  const syncTaskToCalendar = async (task: Task, taskId: string, force = false) => {
+    if (!force && !calendarSyncEnabled) return;
+    try {
+      const result = await upsertGoogleCalendarEvent({ ...task, id: taskId });
+      await updateDoc(doc(db, COLLECTION, taskId), {
+        googleCalendarEventId: result.eventId,
+        googleCalendarHtmlLink: result.htmlLink || '',
+        googleCalendarSyncedAt: Date.now(),
+        updatedAt: serverTimestamp(),
+      });
+      setCalendarConnected(true);
+      fire({ tone: 'ok', title: 'Google Takvim eşitlendi', sub: task.title });
+    } catch (e) {
+      console.error(e);
+      setCalendarConnected(hasGoogleCalendarToken());
+      fire({ title: 'Google Takvim eşitlenemedi', sub: e instanceof Error ? e.message : task.title });
+    }
+  };
+
   const delTask = async (id: string) => {
+    const task = tasks.find((x) => x.id === id);
     setTasks((cur) => cur.filter((t) => t.id !== id));
-    try { await deleteDoc(doc(db, COLLECTION, id)); fire({ title: 'Görev Silindi' }); }
+    try {
+      await deleteDoc(doc(db, COLLECTION, id));
+      if (calendarSyncEnabled && task?.googleCalendarEventId) await deleteGoogleCalendarEvent(task.googleCalendarEventId);
+      fire({ title: 'Görev Silindi' });
+    }
     catch (e) { console.error(e); }
   };
   const saveTask = async (data: any) => {
     try {
       if (data.id) {
-        patchLocal(data.id, (x) => ({ ...x, title: data.title, note: data.note, pri: data.pri, date: data.date, time: data.time || '', end: data.end || '' }));
+        const existing = tasks.find((x) => x.id === data.id);
+        const nextTask = { ...(existing || {}), id: data.id, title: data.title, note: data.note, pri: data.pri, date: data.date, time: data.time || '', end: data.end || '', done: existing?.done || false, subs: existing?.subs || [] } as Task;
+        patchLocal(data.id, (x) => ({ ...x, ...nextTask }));
         await updateDoc(doc(db, COLLECTION, data.id), {
           title: data.title, note: data.note, pri: data.pri, date: data.date, time: data.time || '', end: data.end || '', updatedAt: serverTimestamp(),
         });
         fire({ tone: 'ok', title: 'Görev Güncellendi' });
+        await syncTaskToCalendar(nextTask, data.id);
       } else {
         const now = Date.now();
-        await addDoc(collection(db, COLLECTION), {
+        const docRef = await addDoc(collection(db, COLLECTION), {
           title: data.title, note: data.note, pri: data.pri, date: data.date, time: data.time || '', end: data.end || '',
           done: false, subs: [], companyId: currentCompanyId, userId: currentUser?.uid || '',
           createdAt: now, updatedAt: serverTimestamp(),
         });
+        await syncTaskToCalendar({ id: docRef.id, title: data.title, note: data.note, pri: data.pri, date: data.date, time: data.time || '', end: data.end || '', done: false, subs: [], createdAt: now }, docRef.id);
         fire({ tone: 'ok', title: 'Görev Eklendi', sub: data.title });
       }
     } catch (e) { console.error(e); }
@@ -172,7 +236,7 @@ export default function PlanlamaPanel() {
       <PlStyles />
       <div style={{ maxWidth: 1080, margin: '0 auto', padding: pad }}>
         <PlHeader ac={AC} mode={mode} view={view} setView={setView}
-          onSearch={() => setSearchOpen((v) => !v)} onAdd={() => setTaskModal({})} onAnalytics={() => setAnalytics(true)} />
+          onSearch={() => setSearchOpen((v) => !v)} onAdd={() => setTaskModal({})} onAnalytics={() => setAnalytics(true)} onCalendarConnect={connectCalendar} calendarConnected={calendarConnected} calendarConfigured={isGoogleCalendarConfigured()} />
 
         {searchOpen && (
           <div style={{ position: 'relative', marginBottom: 16, animation: 'plPopIn 240ms var(--ease-fluid)' }}>
