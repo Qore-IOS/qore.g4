@@ -18,6 +18,7 @@ import {
   type DepoStokCount,
   type PersonnelCostConfigInput,
   type LabPoolLite,
+  type LabBreakdown,
 } from '../../lib/test-cost-calculator';
 import { fetchDepoStokCounts, aggregateDepoStokRows } from '@/lib/depo-stok-ozet';
 import type {
@@ -611,6 +612,77 @@ function fmtTL(n: number, decimals = 2): string {
   return `₺${n.toLocaleString('tr-TR', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`;
 }
 
+/**
+ * Gerçek birim fiyat satırı — birim maliyetin % kaçının stoktan, % kaçının
+ * personelden (ve varsa cihaz/envanterden) geldiğini gösterir.
+ */
+function UnitPriceSplit({ result }: { result: TestCostBreakdown }) {
+  const total = result.testTotalCostTL;
+  if (!(total > 0) || !(result.costPerTestTL > 0)) return null;
+  const parts = [
+    { label: 'stok', v: result.stockCostTL, color: '#fb923c' },
+    { label: 'personel', v: result.personnelCostMonthlyTL, color: '#10b981' },
+    { label: 'cihaz', v: result.deviceCostMonthlyTL, color: '#a78bfa' },
+    { label: 'envanter', v: result.inventoryCostTL, color: '#3b82f6' },
+  ].filter((p) => p.v > 0);
+  return (
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', padding: '8px 10px', background: 'var(--mg-surface)', borderRadius: 8, border: '1px solid var(--mg-border)', marginTop: 10 }}>
+      <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--mg-muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+        Gerçek Birim Fiyat
+      </span>
+      <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--mg-accent)', fontVariantNumeric: 'tabular-nums' }}>
+        {fmtTL(result.costPerTestTL)}
+      </span>
+      {parts.map((p) => (
+        <span key={p.label} style={{ fontSize: 11, fontWeight: 700, color: p.color, fontVariantNumeric: 'tabular-nums' }}>
+          %{((p.v / total) * 100).toFixed(1)} {p.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Lab lab kırılım — her labda testin adedi, stok maliyeti, o labdan bu teste
+ * düşen personel payı ve lab başına birim maliyet. Birimlerin hacim ağırlıklı
+ * ortalaması testin gerçek birim fiyatına eşittir.
+ */
+function LabKirilimList({ perLab }: { perLab: LabBreakdown[] }) {
+  const rows = [...perLab].filter((l) => l.testUnits > 0).sort((a, b) => b.testUnits - a.testUnits);
+  if (rows.length === 0) return null;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+      {rows.map((l) => (
+        <div
+          key={l.labId}
+          style={{
+            display: 'flex',
+            alignItems: 'baseline',
+            justifyContent: 'space-between',
+            gap: 10,
+            padding: '7px 10px',
+            background: 'var(--mg-surface)',
+            borderRadius: 8,
+            fontSize: 11,
+          }}
+        >
+          <span style={{ fontWeight: 700, color: 'var(--mg-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+            {l.labName}
+          </span>
+          <span style={{ display: 'flex', gap: 10, flexShrink: 0, fontVariantNumeric: 'tabular-nums', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <span style={{ color: 'var(--mg-muted)' }}>{l.testUnits.toLocaleString('tr-TR')} test</span>
+            <span style={{ color: '#fb923c', fontWeight: 600 }}>stok {fmtTL(l.stockCostTL, 0)}</span>
+            {l.personnelCostMonthlyTL > 0 && (
+              <span style={{ color: '#10b981', fontWeight: 600 }}>personel {fmtTL(l.personnelCostMonthlyTL, 0)}</span>
+            )}
+            <span style={{ color: 'var(--mg-accent)', fontWeight: 800 }}>birim {fmtTL(l.unitCostTL ?? 0)}</span>
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 interface TestRowProps {
   result: TestCostBreakdown;
   expanded: boolean;
@@ -717,21 +789,13 @@ function TestRow({ result, expanded, onToggle, maxTotal, stockLabel = 'Stok (anl
                 </div>
               );
             })}
+            <UnitPriceSplit result={result} />
             {result.perLab.length > 0 && (
               <>
                 <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--mg-muted)', letterSpacing: '0.1em', textTransform: 'uppercase', marginTop: 10, marginBottom: 6 }}>
                   Lab Kırılımı
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  {result.perLab.map((l) => (
-                    <div key={l.labId} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 8px', background: 'var(--mg-surface)', borderRadius: 6, fontSize: 11 }}>
-                      <span style={{ fontWeight: 600, color: 'var(--mg-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.labName}</span>
-                      <span style={{ color: 'var(--mg-muted)', fontVariantNumeric: 'tabular-nums', flexShrink: 0, marginLeft: 8 }}>
-                        {l.testUnits.toLocaleString('tr-TR')}t
-                      </span>
-                    </div>
-                  ))}
-                </div>
+                <LabKirilimList perLab={result.perLab} />
               </>
             )}
           </div>
@@ -960,7 +1024,7 @@ function TestRow({ result, expanded, onToggle, maxTotal, stockLabel = 'Stok (anl
                       marginBottom: 4,
                     }}
                   >
-                    Periyot Toplam (Full Burden)
+                    Periyot Toplam (Teste Düşen)
                   </div>
                   <div style={{ fontSize: 24, fontWeight: 800, color: c, fontVariantNumeric: 'tabular-nums' }}>
                     {fmtTL(result.testTotalCostTL, 0)}
@@ -984,6 +1048,7 @@ function TestRow({ result, expanded, onToggle, maxTotal, stockLabel = 'Stok (anl
                 </div>
               </div>
 
+              <UnitPriceSplit result={result} />
               {result.perLab.length > 0 && (
                 <div>
                   <div
@@ -999,26 +1064,7 @@ function TestRow({ result, expanded, onToggle, maxTotal, stockLabel = 'Stok (anl
                   >
                     Lab Kırılımı
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {result.perLab.map((l) => (
-                      <div
-                        key={l.labId}
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          padding: '6px 10px',
-                          background: 'var(--mg-surface)',
-                          borderRadius: 8,
-                          fontSize: 12,
-                        }}
-                      >
-                        <span style={{ fontWeight: 600, color: 'var(--mg-text)' }}>{l.labName}</span>
-                        <span style={{ color: 'var(--mg-muted)', fontVariantNumeric: 'tabular-nums' }}>
-                          {l.testUnits.toLocaleString('tr-TR')} test · {fmtTL(l.stockCostTL, 0)} stok
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+                  <LabKirilimList perLab={result.perLab} />
                 </div>
               )}
             </div>
