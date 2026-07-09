@@ -16,6 +16,8 @@ import {
   type TestCostBreakdown,
   type PeriotConfig,
   type DepoStokCount,
+  type PersonnelCostConfigInput,
+  type LabPoolLite,
 } from '../../lib/test-cost-calculator';
 import { fetchDepoStokCounts, aggregateDepoStokRows } from '@/lib/depo-stok-ozet';
 import type {
@@ -614,9 +616,11 @@ interface TestRowProps {
   expanded: boolean;
   onToggle: () => void;
   maxTotal: number;
+  /** Stok bileşeni etiketi — veri kaynağına göre "Stok (anlık)" ya da "Stok (Sayım …)". */
+  stockLabel?: string;
 }
 
-function TestRow({ result, expanded, onToggle, maxTotal }: TestRowProps) {
+function TestRow({ result, expanded, onToggle, maxTotal, stockLabel = 'Stok (anlık)' }: TestRowProps) {
   const isMobile = useIsMobile();
   const totalPct = (result.testTotalCostTL / Math.max(maxTotal, 1)) * 100;
   const c = result.marjTL >= 0 ? 'var(--mg-success)' : 'var(--mg-danger)';
@@ -692,7 +696,7 @@ function TestRow({ result, expanded, onToggle, maxTotal }: TestRowProps) {
           <div style={{ background: 'var(--mg-surface-2)', borderRadius: 12, padding: '12px 14px 14px', marginTop: -4, marginBottom: 8, border: `1px solid ${c}33` }}>
             <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--mg-muted)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 8 }}>Maliyet Bileşenleri</div>
             {[
-              { label: 'Stok (anlık)', v: result.stockCostTL, color: '#fb923c' },
+              { label: stockLabel, v: result.stockCostTL, color: '#fb923c' },
               { label: 'Envanter', v: result.inventoryCostTL, color: '#3b82f6' },
               { label: 'Cihaz', v: result.deviceCostMonthlyTL, color: '#a78bfa' },
               { label: 'Personel', v: result.personnelCostMonthlyTL, color: '#10b981' },
@@ -883,7 +887,7 @@ function TestRow({ result, expanded, onToggle, maxTotal }: TestRowProps) {
                 Maliyet Bileşenleri (Periyot)
               </div>
               {[
-                { label: 'Stok (anlık)', v: result.stockCostTL, color: '#fb923c' },
+                { label: stockLabel, v: result.stockCostTL, color: '#fb923c' },
                 { label: 'Envanter', v: result.inventoryCostTL, color: '#3b82f6' },
                 { label: 'Cihaz', v: result.deviceCostMonthlyTL, color: '#a78bfa' },
                 { label: 'Personel', v: result.personnelCostMonthlyTL, color: '#10b981' },
@@ -1055,6 +1059,8 @@ export function TestTab({ currency: _currency, search, setSearch, registerExport
   const [personnel, setPersonnel] = useState<Personnel[]>([]);
   const [depoStokCounts, setDepoStokCounts] = useState<DepoStokCount[]>([]);
   const [countSessions, setCountSessions] = useState<SayimSession[]>([]);
+  const [personnelConfig, setPersonnelConfig] = useState<PersonnelCostConfigInput | null>(null);
+  const [labPools, setLabPools] = useState<LabPoolLite[]>([]);
   const [rates, setRates] = useState<Record<Currency, number>>({ EUR: 1, USD: 1.08, TRY: 38.5 });
 
   // Filtreler
@@ -1091,6 +1097,8 @@ export function TestTab({ currency: _currency, search, setSearch, registerExport
           testDefsSnap,
           ratesValue,
           sayimSessionsSnap,
+          personnelCfgSnap,
+          labPoolsSnap,
         ] = await Promise.all([
           // Legacy-aware: companyId'si eksik ya da __legacy__ etiketli ürün
           // kayıtları da gelsin — aksi halde maliyet hesapları 0 çıkıyor.
@@ -1112,6 +1120,8 @@ export function TestTab({ currency: _currency, search, setSearch, registerExport
           getDocs(scopedQuery('testDefinitions', currentCompanyId, isSuperAdmin, orderBy('sutKodu', 'asc'))),
           getExchangeRates().catch(() => ({ EUR: 1, USD: 1.08, TRY: 38.5 })),
           getDocs(scopedQuery('maliyetSayimSessions', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))).catch(() => null),
+          getDocs(scopedQuery('personnelCostConfig', currentCompanyId, isSuperAdmin)).catch(() => null),
+          getDocs(scopedQuery('labPools', currentCompanyId, isSuperAdmin)).catch(() => null),
         ]);
         if (cancelled) return;
 
@@ -1160,6 +1170,29 @@ export function TestTab({ currency: _currency, search, setSearch, registerExport
           );
         }
 
+        // Basitleştirilmiş personel gider modeli + havuz tanımları
+        if (personnelCfgSnap && !personnelCfgSnap.empty) {
+          const cfg = filterByCompanyScope(
+            personnelCfgSnap.docs.map((d) => ({ id: d.id, ...d.data() } as any)),
+            currentCompanyId,
+            isSuperAdmin,
+          )[0];
+          setPersonnelConfig(
+            cfg && Number(cfg.costPerPersonTL) > 0
+              ? { costPerPersonTL: Number(cfg.costPerPersonTL), labCounts: cfg.labCounts || {} }
+              : null,
+          );
+        }
+        if (labPoolsSnap) {
+          setLabPools(
+            filterByCompanyScope(
+              labPoolsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as any)),
+              currentCompanyId,
+              isSuperAdmin,
+            ).map((p: any) => ({ mainLabId: p.mainLabId, memberIds: p.memberIds || [], active: p.active })),
+          );
+        }
+
         setTestDefs(
           filterByCompanyScope(
             testDefsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as TestDefinitionGlobal)),
@@ -1196,6 +1229,11 @@ export function TestTab({ currency: _currency, search, setSearch, registerExport
       .sort((a, b) => b[0].localeCompare(a[0]))
       .map(([key, label]) => ({ key, label }));
   }, [countSessions]);
+
+  // Stok bileşeni etiketi — kaynak dönem sayımıysa "Stok (anlık)" yanıltıcı olur
+  const stockSourceLabel = countPeriod === 'live'
+    ? 'Stok (anlık)'
+    : `Stok (Sayım: ${countPeriodOptions.find((p) => p.key === countPeriod)?.label || countPeriod})`;
 
   // Test hacmi kaynağı: anlık stok özeti veya seçili dönemin sayım oturumları.
   // Dönem seçildiğinde her lab için o ayın en güncel oturumu esas alınır;
@@ -1241,9 +1279,11 @@ export function TestTab({ currency: _currency, search, setSearch, registerExport
       // Ortak giderler test hacmine göre dağıtılır — full_burden her testte
       // aynı toplamı (grandTotal) gösterip tabloyu anlamsızlaştırıyordu.
       mode: 'volume_weighted',
+      personnelConfig: personnelConfig ?? undefined,
+      labPools,
       filterLabIds: selectedLabIds.length > 0 ? selectedLabIds : undefined,
     });
-  }, [testDefs, productMap, labs, assignedDevices, deviceDefs, assets, personnel, effectiveStokCounts, rates, periot, selectedLabIds]);
+  }, [testDefs, productMap, labs, assignedDevices, deviceDefs, assets, personnel, effectiveStokCounts, rates, periot, selectedLabIds, personnelConfig, labPools]);
 
   const systemTotal = useMemo(() => {
     if (testDefs.length === 0) return null;
@@ -1258,9 +1298,11 @@ export function TestTab({ currency: _currency, search, setSearch, registerExport
       depoStokCounts: effectiveStokCounts,
       rates,
       periot,
+      personnelConfig: personnelConfig ?? undefined,
+      labPools,
       filterLabIds: selectedLabIds.length > 0 ? selectedLabIds : undefined,
     });
-  }, [testDefs, productMap, labs, assignedDevices, deviceDefs, assets, personnel, effectiveStokCounts, rates, periot, selectedLabIds]);
+  }, [testDefs, productMap, labs, assignedDevices, deviceDefs, assets, personnel, effectiveStokCounts, rates, periot, selectedLabIds, personnelConfig, labPools]);
 
   // Filtreleme + sıralama
   const filtered = useMemo(() => {
@@ -1787,7 +1829,7 @@ export function TestTab({ currency: _currency, search, setSearch, registerExport
                     {
                       value: systemTotal.allStockCostTL,
                       label: 'Stok',
-                      sublabel: 'Anlık değer',
+                      sublabel: countPeriod === 'live' ? 'Anlık değer' : 'Sayım dönemi',
                       color: '#fb923c',
                       format: (v: number) => (
                         <>
@@ -1938,6 +1980,7 @@ export function TestTab({ currency: _currency, search, setSearch, registerExport
                 expanded={expandedTestId === b.testId}
                 onToggle={() => setExpandedTestId(expandedTestId === b.testId ? null : b.testId)}
                 maxTotal={maxTotal}
+                stockLabel={stockSourceLabel}
               />
             ))
           )}

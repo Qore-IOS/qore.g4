@@ -128,6 +128,7 @@ service cloud.firestore {
     match /notifications/{id}                 { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /orders/{id}                        { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /personnel/{id}                     { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /personnelCostConfig/{id}           { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /personnelHistoryLogs/{id}          { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /personelGruplari/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /personalStock/{id}                 { allow read: if inCompany(); allow write: if writingInCompany(); }

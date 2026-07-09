@@ -89,6 +89,21 @@ export interface DepoStokCount {
   cihazUstuAdedi?: number;
 }
 
+/** Basitleştirilmiş personel gider konfigürasyonu (personnelCostConfig dokümanı). */
+export interface PersonnelCostConfigInput {
+  /** Personel başına aylık gider (TL) */
+  costPerPersonTL: number;
+  /** labId → personel sayısı (havuzlarda yalnızca ana laba girilir) */
+  labCounts: Record<string, number>;
+}
+
+/** Ortak stok havuzu — personel giderinin üye lablara dağıtımı için. */
+export interface LabPoolLite {
+  mainLabId?: string;
+  memberIds: string[];
+  active?: boolean;
+}
+
 export interface TestCostInputs {
   testDef: TestDefinitionGlobal;
   /** Tüm testler — diğer testlerin stoğu da grandTotal'a girer */
@@ -99,6 +114,14 @@ export interface TestCostInputs {
   deviceDefs: Map<string, Device>;
   assets: Asset[];
   personnel: Personnel[];
+  /**
+   * Verilirse personel gideri Personnel kayıtları yerine bu konfigürasyondan
+   * hesaplanır: lab gideri = kişi sayısı × kişi başı gider. Havuzlarda ana
+   * laba girilen toplam, üye lablara test hacmi payıyla dağıtılır.
+   */
+  personnelConfig?: PersonnelCostConfigInput;
+  /** Havuz tanımları — personnelConfig ile birlikte kullanılır. */
+  labPools?: LabPoolLite[];
   /** Ham sevk edilmiş stok satırları — `depoStokCounts` verilmişse gerekmez */
   depoStok?: DepoStokItem[];
   /** Sunucuda özetlenmiş stok sayıları — verilirse `depoStok` yerine kullanılır */
@@ -557,6 +580,55 @@ export function buildTestCostContext(inputs: Omit<TestCostInputs, 'testDef'>): T
     labShared.set(lab.id, { ...shared, warnings });
   }
 
+  // ── Personel gideri (basitleştirilmiş model) ─────────────────────────────
+  // personnelConfig verildiyse Personnel kayıtları yerine kullanılır:
+  //   lab gideri = kişi sayısı × kişi başı aylık gider (TL)
+  // Havuz kuralı: ortak stok havuzlarında personel sayısı yalnızca ANA laba
+  // girilir; ana labın toplam gideri havuzun üye lablarına o labların TEST
+  // HACMİ payıyla dağıtılır (hacim yoksa eşit bölünür). Böylece havuzdan
+  // beslenen her lab, ürettiği test kadar personel yükü taşır.
+  const personnelCfg = inputs.personnelConfig;
+  if (personnelCfg && personnelCfg.costPerPersonTL > 0) {
+    // Lab başına toplam test hacmi (stok indeksinden)
+    const labVolume = new Map<string, number>();
+    for (const lab of labs) {
+      let vol = 0;
+      const inner = stockIndex.get(lab.id);
+      if (inner) for (const agg of inner.values()) vol += agg.units;
+      labVolume.set(lab.id, vol);
+    }
+
+    const perLabPersonnelTL = new Map<string, number>();
+    const pooledLabIds = new Set<string>();
+
+    for (const pool of inputs.labPools || []) {
+      if (pool.active === false || !pool.mainLabId) continue;
+      const memberIdSet = new Set<string>([...(pool.memberIds || []), pool.mainLabId]);
+      const members = labs.filter((l) => memberIdSet.has(l.id));
+      if (members.length === 0) continue;
+
+      const headcount = Number(personnelCfg.labCounts[pool.mainLabId]) || 0;
+      const poolTotalTL = headcount * personnelCfg.costPerPersonTL;
+      const poolVolume = members.reduce((s, l) => s + (labVolume.get(l.id) || 0), 0);
+
+      for (const m of members) {
+        const share = poolVolume > 0 ? (labVolume.get(m.id) || 0) / poolVolume : 1 / members.length;
+        perLabPersonnelTL.set(m.id, (perLabPersonnelTL.get(m.id) || 0) + poolTotalTL * share);
+        pooledLabIds.add(m.id);
+      }
+    }
+
+    for (const lab of labs) {
+      if (pooledLabIds.has(lab.id)) continue;
+      perLabPersonnelTL.set(lab.id, (Number(personnelCfg.labCounts[lab.id]) || 0) * personnelCfg.costPerPersonTL);
+    }
+
+    for (const lab of labs) {
+      const shared = labShared.get(lab.id);
+      if (shared) shared.personnelCostMonthlyTL = perLabPersonnelTL.get(lab.id) || 0;
+    }
+  }
+
   // 3) Test başına stok maliyeti + adedi (otherTestsStock ve volume_weighted için)
   const perTestStockTL = new Map<string, number>();
   const perTestStockUnits = new Map<string, number>();
@@ -919,6 +991,27 @@ export function calculateSystemTotal(inputs: Omit<TestCostInputs, 'testDef'>): S
     deviceCount += (ctx.labDevices.get(lab.id) || []).length;
     assetCount += assets.filter((a) => a.konum === lab.id || a.konum === lab.name).length;
     personnelCount += personnel.filter((p) => p.assignedLabIds?.includes(lab.id)).length;
+  }
+
+  // Basitleştirilmiş personel modeli: kişi sayısı konfigürasyondan gelir
+  // (havuzlarda ana labın sayısı havuzun tamamını temsil eder — bir kez sayılır).
+  if (inputs.personnelConfig) {
+    const cfg = inputs.personnelConfig;
+    const labIdSet = new Set(labs.map((l) => l.id));
+    const countedViaPool = new Set<string>();
+    personnelCount = 0;
+    for (const pool of inputs.labPools || []) {
+      if (pool.active === false || !pool.mainLabId) continue;
+      const memberIds = [...(pool.memberIds || []), pool.mainLabId];
+      if (memberIds.some((id) => labIdSet.has(id))) {
+        personnelCount += Number(cfg.labCounts[pool.mainLabId]) || 0;
+        memberIds.forEach((id) => countedViaPool.add(id));
+      }
+    }
+    for (const lab of labs) {
+      if (countedViaPool.has(lab.id)) continue;
+      personnelCount += Number(cfg.labCounts[lab.id]) || 0;
+    }
   }
 
   const allStokKodlari = new Set<string>();
