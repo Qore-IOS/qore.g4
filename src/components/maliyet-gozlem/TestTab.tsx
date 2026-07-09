@@ -771,7 +771,7 @@ function TestRow({ result, expanded, onToggle, maxTotal, stockLabel = 'Stok (anl
               { label: stockLabel, v: result.stockCostTL, color: '#fb923c' },
               { label: 'Envanter', v: result.inventoryCostTL, color: '#3b82f6' },
               { label: 'Cihaz', v: result.deviceCostMonthlyTL, color: '#a78bfa' },
-              { label: 'Personel', v: result.personnelCostMonthlyTL, color: '#10b981' },
+              { label: 'Personel (hacim payı)', v: result.personnelCostMonthlyTL, color: '#10b981' },
               { label: 'Diğer testler stoğu', v: result.otherTestsStockCostTL, color: '#71717a' },
             ].map((comp, i) => {
               const pct = result.testTotalCostTL > 0 ? (comp.v / result.testTotalCostTL) * 100 : 0;
@@ -954,7 +954,7 @@ function TestRow({ result, expanded, onToggle, maxTotal, stockLabel = 'Stok (anl
                 { label: stockLabel, v: result.stockCostTL, color: '#fb923c' },
                 { label: 'Envanter', v: result.inventoryCostTL, color: '#3b82f6' },
                 { label: 'Cihaz', v: result.deviceCostMonthlyTL, color: '#a78bfa' },
-                { label: 'Personel', v: result.personnelCostMonthlyTL, color: '#10b981' },
+                { label: 'Personel (hacim payı)', v: result.personnelCostMonthlyTL, color: '#10b981' },
                 { label: 'Diğer testler stoğu', v: result.otherTestsStockCostTL, color: '#71717a' },
               ].map((comp, i) => {
                 const pct = result.testTotalCostTL > 0 ? (comp.v / result.testTotalCostTL) * 100 : 0;
@@ -994,6 +994,9 @@ function TestRow({ result, expanded, onToggle, maxTotal, stockLabel = 'Stok (anl
                   </div>
                   <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--mg-text)', fontVariantNumeric: 'tabular-nums' }}>
                     {fmtTL(result.costPerTestTL)}
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--mg-muted)', marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>
+                    Stok %{(result.stockSharePct || 0).toFixed(0)} · Personel %{(result.personnelSharePct || 0).toFixed(0)}
                   </div>
                 </div>
                 <div style={{ background: 'var(--mg-surface)', padding: '12px 14px', borderRadius: 10, border: '1px solid var(--mg-border)' }}>

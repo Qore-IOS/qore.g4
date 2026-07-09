@@ -363,11 +363,13 @@ export default function LaboratuvarYonetimiPanel() {
       const headerKeys = jsonData.length > 0 ? Object.keys(jsonData[0]) : [];
       const colMap = detectExcelColumns(headerKeys);
 
-      // Positional fallback when the file has no recognizable headers.
-      // Order: A=Stok Kodu, B=Barkod Seri, C=Miat, D=Lot, E=Adet.
+      // Use positional fallback only when none of the headers are recognizable.
+      // This prevents a headered LOT column in B from being interpreted as Seri No.
+      // Legacy headerless order remains: A=Stok Kodu, B=Barkod Seri, C=Miat, D=Lot, E=Adet.
+      const hasRecognizedHeaders = Object.keys(colMap).length > 0;
       const positional = headerKeys;
       const positionalRole = (role: ColumnRole, index: number): string | undefined =>
-        colMap[role] ?? positional[index];
+        colMap[role] ?? (hasRecognizedHeaders ? undefined : positional[index]);
 
       const rows: ParsedExcelRow[] = [];
 
@@ -377,7 +379,7 @@ export default function LaboratuvarYonetimiPanel() {
         const seriHeader = positionalRole('seri', 1);
         const miadHeader = positionalRole('miad', 2);
         const lotHeader = positionalRole('lot', 3);
-        const adetHeader = colMap.adet; // No positional default; presence is optional
+        const adetHeader = positionalRole('adet', 4);
         const stokAdiHeader = colMap.stokAdi;
 
         const stokKodu = String((stokKoduHeader && rawRow[stokKoduHeader]) || '').trim();

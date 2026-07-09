@@ -197,8 +197,16 @@ export interface TestCostBreakdown {
   inventoryCostTL: number;
   /** Toplam cihaz aylık maliyeti (TL/ay) */
   deviceCostMonthlyTL: number;
-  /** Toplam personel aylık gideri (TL/ay) */
+  /** Bu teste hacim ağırlığıyla dağıtılan personel gideri (seçili periyot, TL) */
   personnelCostMonthlyTL: number;
+  /** Bu testin stoktan gelen birim maliyeti (TL/test) */
+  stockUnitCostTL?: number;
+  /** Bu testin personelden gelen birim maliyeti (TL/test) */
+  personnelUnitCostTL?: number;
+  /** Birim maliyetin stoktan gelen yüzdesi */
+  stockSharePct?: number;
+  /** Birim maliyetin personelden gelen yüzdesi */
+  personnelSharePct?: number;
   /** Bireysel teste yüklenen ortak giderler = grandTotal - bu testin stok maliyeti */
   ortakGiderlerTL: number;
   /** Full Burden test maliyeti (= grandTotal) */
@@ -469,11 +477,11 @@ export interface TestCostContext {
   labDevices: Map<string, AssignedDevice[]>;
   /** testId → testin filtrelenmiş lablardaki toplam stok maliyeti (TL) */
   perTestStockTL: Map<string, number>;
+  /** testId → testin filtrelenmiş lablardaki toplam stok hacmi (test adedi) */
+  perTestStockUnits: Map<string, number>;
   /** Tüm testlerin stok maliyetleri toplamı (TL) */
   allTestsStockTL: number;
-  /** testId → testin filtrelenmiş lablardaki toplam test adedi */
-  perTestStockUnits: Map<string, number>;
-  /** Tüm testlerin test adetleri toplamı (volume_weighted dağıtım payı için) */
+  /** Tüm testlerin stoktan gelen toplam test hacmi */
   allTestsStockUnits: number;
   /**
    * labId → o labdaki test-bağlantılı toplam hacim (tüm testlerin o labdaki
@@ -677,8 +685,8 @@ export function buildTestCostContext(inputs: Omit<TestCostInputs, 'testDef'>): T
     labShared,
     labDevices,
     perTestStockTL,
-    allTestsStockTL,
     perTestStockUnits,
+    allTestsStockTL,
     allTestsStockUnits,
     labTestVolume,
     inputs,
@@ -765,9 +773,16 @@ export function calculateTestCostWithContext(ctx: TestCostContext, testDef: Test
     for (const w of shared.warnings) warningSet.add(w);
 
     const hasStock = units > 0 || costTL > 0;
-    const hasShared =
-      shared.inventoryCostTL > 0 || shared.deviceCostMonthlyTL > 0 || shared.personnelCostMonthlyTL > 0;
-    if (!hasStock && !hasShared) continue;
+    // Lab-level personnel allocation must only include labs where this test has volume.
+    // Otherwise every test inherits every lab's payroll line with a zero share.
+    if (!hasStock) continue;
+
+    const totalLabTestUnits = ctx.labTotalTestUnits.get(lab.id) || 0;
+    const testVolumeShare = totalLabTestUnits > 0 && units > 0 ? units / totalLabTestUnits : 0;
+    const allocatedPersonnelMonthlyTL = shared.personnelCostMonthlyTL * testVolumeShare;
+    const allocatedPersonnelCostTL = allocatedPersonnelMonthlyTL * periotAy;
+    const stockUnitCostTL = units > 0 ? costTL / units : 0;
+    const personnelUnitCostTL = units > 0 ? allocatedPersonnelCostTL / units : 0;
 
     // Lab içi hacim payı: adet(test, lab) / toplam test-bağlantılı adet(lab)
     const labVolume = ctx.labTestVolume.get(lab.id) || 0;
@@ -834,6 +849,8 @@ export function calculateTestCostWithContext(ctx: TestCostContext, testDef: Test
   // volume_weighted'da bu değer, lab başına birim maliyetlerin hacim
   // ağırlıklı ortalamasına eşittir — testin "gerçek birim fiyatı".
   const costPerTest = totalStockUnits > 0 ? testTotalCost / totalStockUnits : 0;
+  const stockUnitCostTL = totalStockUnits > 0 ? totalStockCostTL / totalStockUnits : 0;
+  const personnelUnitCostTL = totalStockUnits > 0 ? personnelPeriotTL / totalStockUnits : 0;
 
   if (totalStockUnits === 0) {
     warnings.push('Bu testin stoğunda hiç test adedi yok — birim maliyet hesaplanamadı');
@@ -998,6 +1015,10 @@ export function calculateTestCostWithContext(ctx: TestCostContext, testDef: Test
     perLab,
     warnings,
     periotAy,
+    stockUnitCostTL,
+    personnelUnitCostTL,
+    stockSharePct: finalCostPerTest > 0 ? (stockUnitCostTL / finalCostPerTest) * 100 : 0,
+    personnelSharePct: finalCostPerTest > 0 ? (personnelUnitCostTL / finalCostPerTest) * 100 : 0,
     capacity,
     costMode: costModeResolved,
   };
