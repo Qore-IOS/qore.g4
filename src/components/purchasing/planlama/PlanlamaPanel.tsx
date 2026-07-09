@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Search, X, Plus, BarChart2 } from 'lucide-react';
+import { Search, X, Plus, BarChart2, CalendarCheck } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { db } from '@/lib/firebase';
 import {
