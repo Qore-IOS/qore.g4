@@ -486,8 +486,12 @@ export interface TestCostContext {
   labDevices: Map<string, AssignedDevice[]>;
   /** testId → testin filtrelenmiş lablardaki toplam stok maliyeti (TL) */
   perTestStockTL: Map<string, number>;
+  /** testId → testin filtrelenmiş lablardaki toplam stok hacmi (test adedi) */
+  perTestStockUnits: Map<string, number>;
   /** Tüm testlerin stok maliyetleri toplamı (TL) */
   allTestsStockTL: number;
+  /** Tüm testlerin stoktan gelen toplam test hacmi */
+  allTestsStockUnits: number;
   /** labId → o labdaki tüm tanımlı testlerin stoktan gelen toplam test hacmi */
   labTotalTestUnits: Map<string, number>;
   inputs: Omit<TestCostInputs, 'testDef'>;
@@ -600,6 +604,7 @@ export function buildTestCostContext(inputs: Omit<TestCostInputs, 'testDef'>): T
 
   // 3) Test başına stok maliyeti ve lab toplam hacmi (küçük lookuplar)
   const perTestStockTL = new Map<string, number>();
+  const perTestStockUnits = new Map<string, number>();
   const labTotalTestUnits = new Map<string, number>();
   let allTestsStockTL = 0;
   let allTestsStockUnits = 0;
@@ -620,6 +625,7 @@ export function buildTestCostContext(inputs: Omit<TestCostInputs, 'testDef'>): T
       }
       if (labUnitsForTest > 0) {
         labTotalTestUnits.set(lab.id, (labTotalTestUnits.get(lab.id) || 0) + labUnitsForTest);
+        units += labUnitsForTest;
       }
     }
     perTestStockTL.set(t.id, costTL);
@@ -635,7 +641,9 @@ export function buildTestCostContext(inputs: Omit<TestCostInputs, 'testDef'>): T
     labShared,
     labDevices,
     perTestStockTL,
+    perTestStockUnits,
     allTestsStockTL,
+    allTestsStockUnits,
     labTotalTestUnits,
     inputs,
   };
