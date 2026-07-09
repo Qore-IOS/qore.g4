@@ -777,7 +777,7 @@ export function calculateTestCostWithContext(ctx: TestCostContext, testDef: Test
     // Otherwise every test inherits every lab's payroll line with a zero share.
     if (!hasStock) continue;
 
-    const totalLabTestUnits = ctx.labTotalTestUnits.get(lab.id) || 0;
+    const totalLabTestUnits = ctx.labTestVolume.get(lab.id) || 0;
     const testVolumeShare = totalLabTestUnits > 0 && units > 0 ? units / totalLabTestUnits : 0;
     const allocatedPersonnelMonthlyTL = shared.personnelCostMonthlyTL * testVolumeShare;
     const allocatedPersonnelCostTL = allocatedPersonnelMonthlyTL * periotAy;
