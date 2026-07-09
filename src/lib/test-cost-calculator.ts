@@ -82,6 +82,26 @@ export interface DepoStokCount {
   stokKodu: string;
   /** Bu lab + stok kodu için sevk edilmiş kutu/seri sayısı */
   count: number;
+  /**
+   * Cihaz üstü test adedi (maliyet sayım oturumlarından). Test hacmine doğrudan
+   * eklenir; maliyeti test başına birim fiyat (cost/ambalaj) üzerinden hesaplanır.
+   */
+  cihazUstuAdedi?: number;
+}
+
+/** Basitleştirilmiş personel gider konfigürasyonu (personnelCostConfig dokümanı). */
+export interface PersonnelCostConfigInput {
+  /** Personel başına aylık gider (TL) */
+  costPerPersonTL: number;
+  /** labId → personel sayısı (havuzlarda yalnızca ana laba girilir) */
+  labCounts: Record<string, number>;
+}
+
+/** Ortak stok havuzu — personel giderinin üye lablara dağıtımı için. */
+export interface LabPoolLite {
+  mainLabId?: string;
+  memberIds: string[];
+  active?: boolean;
 }
 
 export interface TestCostInputs {
@@ -94,6 +114,14 @@ export interface TestCostInputs {
   deviceDefs: Map<string, Device>;
   assets: Asset[];
   personnel: Personnel[];
+  /**
+   * Verilirse personel gideri Personnel kayıtları yerine bu konfigürasyondan
+   * hesaplanır: lab gideri = kişi sayısı × kişi başı gider. Havuzlarda ana
+   * laba girilen toplam, üye lablara test hacmi payıyla dağıtılır.
+   */
+  personnelConfig?: PersonnelCostConfigInput;
+  /** Havuz tanımları — personnelConfig ile birlikte kullanılır. */
+  labPools?: LabPoolLite[];
   /** Ham sevk edilmiş stok satırları — `depoStokCounts` verilmişse gerekmez */
   depoStok?: DepoStokItem[];
   /** Sunucuda özetlenmiş stok sayıları — verilirse `depoStok` yerine kullanılır */
@@ -515,7 +543,8 @@ export function buildTestCostContext(inputs: Omit<TestCostInputs, 'testDef'>): T
     for (const row of depoStokCounts) {
       if (!labIdSet.has(row.hedefKurumId)) continue;
       const n = Number(row.count) || 0;
-      if (n <= 0) continue;
+      const cihazUstu = Number(row.cihazUstuAdedi) || 0;
+      if (n <= 0 && cihazUstu <= 0) continue;
 
       const agg = getAgg(row.hedefKurumId, row.stokKodu);
       const product = productMap.get(row.stokKodu);
@@ -523,8 +552,14 @@ export function buildTestCostContext(inputs: Omit<TestCostInputs, 'testDef'>): T
         agg.missingProduct = true;
         continue;
       }
-      agg.units += n * (Number(product.ambalajDegeri) || 0);
-      agg.costTL += n * toTRY(Number(product.cost) || 0, product.currency as Currency, rates);
+      const ambalaj = Number(product.ambalajDegeri) || 0;
+      const costTL = toTRY(Number(product.cost) || 0, product.currency as Currency, rates);
+      agg.units += n * ambalaj + cihazUstu;
+      agg.costTL += n * costTL;
+      // Cihaz üstü testler açılmış kutudan gelir — test başına birim maliyetle eklenir
+      if (cihazUstu > 0 && ambalaj > 0) {
+        agg.costTL += (costTL / ambalaj) * cihazUstu;
+      }
     }
   } else {
     for (const item of depoStok || []) {
@@ -728,8 +763,27 @@ export function calculateTestCostWithContext(ctx: TestCostContext, testDef: Test
 
   // Grand total: stok (anlık değer) + diğer testlerin stoğu + ortak giderler × periyot
   const grandTotal = totalStockCostTL + otherStockTL + inventoryPeriotTL + devicePeriotTL + personnelPeriotTL;
-  const ortakGiderler = grandTotal - totalStockCostTL;
-  const testTotalCost = totalStockCostTL + ortakGiderler; // = grandTotal
+
+  // Dağıtım modu:
+  //  - full_burden (varsayılan, geriye uyumlu): her testin toplamı grandTotal'a
+  //    eşittir — testler arasında AYNI toplam görünür.
+  //  - volume_weighted: ortak giderler (envanter + cihaz + personel × periyot)
+  //    testin hacim payına göre dağıtılır — test toplamları hacimle farklılaşır
+  //    ve tüm testlerin toplamı sistem toplamına yaklaşır.
+  //  - equal_alloc: ortak giderler test sayısına eşit bölünür.
+  const allocationMode: AllocationMode = ctx.inputs.mode || 'full_burden';
+  const sharedPeriotTL = inventoryPeriotTL + devicePeriotTL + personnelPeriotTL;
+  let ortakGiderler: number;
+  if (allocationMode === 'volume_weighted') {
+    const volumeShare = ctx.allTestsStockUnits > 0 ? totalStockUnits / ctx.allTestsStockUnits : 0;
+    ortakGiderler = sharedPeriotTL * volumeShare;
+  } else if (allocationMode === 'equal_alloc') {
+    const testCount = Math.max(ctx.inputs.allTestDefs.length, 1);
+    ortakGiderler = sharedPeriotTL / testCount;
+  } else {
+    ortakGiderler = grandTotal - totalStockCostTL;
+  }
+  const testTotalCost = totalStockCostTL + ortakGiderler; // full_burden'da = grandTotal
   const costPerTest = totalStockUnits > 0 ? testTotalCost / totalStockUnits : 0;
   const stockUnitCostTL = totalStockUnits > 0 ? totalStockCostTL / totalStockUnits : 0;
   const personnelUnitCostTL = totalStockUnits > 0 ? personnelPeriotTL / totalStockUnits : 0;
@@ -839,7 +893,9 @@ export function calculateTestCostWithContext(ctx: TestCostContext, testDef: Test
     // CAWC = stok birim + (deviceShareToTest + nonDeviceOrtak) / stockUnits
     if (totalStockUnits > 0) {
       const stockUnitCost = totalStockCostTL / totalStockUnits;
-      const nonDeviceOrtak = ortakGiderler - devicePeriotTL;
+      // volume_weighted/equal_alloc dağıtımında pay cihaz maliyetinin altına
+      // düşebilir — negatif ortak gider hesaba karışmasın.
+      const nonDeviceOrtak = Math.max(0, ortakGiderler - devicePeriotTL);
       const cawcCost = stockUnitCost + (deviceShareToTestTL + nonDeviceOrtak) / totalStockUnits;
       // capacity modu CAWC kullansın (en gerçekçi), hybrid optimistik kalsın
       if (costModeResolved === 'capacity') {
@@ -937,6 +993,27 @@ export function calculateSystemTotal(inputs: Omit<TestCostInputs, 'testDef'>): S
     deviceCount += (ctx.labDevices.get(lab.id) || []).length;
     assetCount += assets.filter((a) => a.konum === lab.id || a.konum === lab.name).length;
     personnelCount += personnel.filter((p) => p.assignedLabIds?.includes(lab.id)).length;
+  }
+
+  // Basitleştirilmiş personel modeli: kişi sayısı konfigürasyondan gelir
+  // (havuzlarda ana labın sayısı havuzun tamamını temsil eder — bir kez sayılır).
+  if (inputs.personnelConfig) {
+    const cfg = inputs.personnelConfig;
+    const labIdSet = new Set(labs.map((l) => l.id));
+    const countedViaPool = new Set<string>();
+    personnelCount = 0;
+    for (const pool of inputs.labPools || []) {
+      if (pool.active === false || !pool.mainLabId) continue;
+      const memberIds = [...(pool.memberIds || []), pool.mainLabId];
+      if (memberIds.some((id) => labIdSet.has(id))) {
+        personnelCount += Number(cfg.labCounts[pool.mainLabId]) || 0;
+        memberIds.forEach((id) => countedViaPool.add(id));
+      }
+    }
+    for (const lab of labs) {
+      if (countedViaPool.has(lab.id)) continue;
+      personnelCount += Number(cfg.labCounts[lab.id]) || 0;
+    }
   }
 
   const allStokKodlari = new Set<string>();

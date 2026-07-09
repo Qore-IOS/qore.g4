@@ -9,11 +9,12 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { collection, getDocs, orderBy, query } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery, getScopedDocs } from '@/lib/firestore-helpers';
 import { getExchangeRates } from '@/lib/exchange-rates';
 import type { ProductCode, Currency } from '@/lib/types';
 import {
@@ -22,21 +23,29 @@ import {
   getLocationCostBreakdown,
   getProductGroupBreakdown,
   getMonthlyTrend,
+  getSessionDate,
   type SayimSession,
 } from '@/lib/cost-analytics';
-import { ActivitiesPanel, InsightsCard, MiniStat, SectionHeader, Card, HBarList } from './primitives';
-import { DonutChart } from './charts';
+import { ActivitiesPanel, InsightsCard, MiniStat, SectionHeader, Card, HBarList, KpiBreakdownModal, type KpiBreakdownRow } from './primitives';
+import { DonutChart, formatCompactTL } from './charts';
 import { useIsMobile } from './useIsMobile';
 import { Loader2 } from 'lucide-react';
+import { exportDataToExcel, exportDataToPdf } from '@/lib/utils';
+import { useToast } from '@/hooks/use-toast';
+import type { TabExportHandlers } from './MaliyetGozlemMerkezi';
 
 interface StokTabProps {
   currency: Currency;
+  /** Header'daki Excel/PDF butonlarının çağıracağı işleyicileri kaydeder. */
+  registerExportHandlers?: (handlers: TabExportHandlers) => void;
 }
 
 const BRAND_COLORS = ['#fb923c', '#a78bfa', '#3b82f6', '#42e46d', '#6ea8ff', '#fc7272', '#f59e0b', '#06b6d4'];
 
-export function StokTab({ currency }: StokTabProps) {
+export function StokTab({ currency, registerExportHandlers }: StokTabProps) {
   const { currentCompanyId, isSuperAdmin } = useAuth();
+  const router = useRouter();
+  const { toast } = useToast();
   const isMobile = useIsMobile();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -44,21 +53,34 @@ export function StokTab({ currency }: StokTabProps) {
   const [sessions, setSessions] = useState<SayimSession[]>([]);
   const [productMap, setProductMap] = useState<Map<string, ProductCode>>(new Map());
   const [rates, setRates] = useState<Record<Currency, number>>({ EUR: 1, USD: 1.08, TRY: 38.5 });
+  /** Seçili sayım dönemi ('all' = tüm dönemler, aksi halde 'YYYY-MM') */
+  const [selectedPeriod, setSelectedPeriod] = useState<string>('all');
+  /** Kullanıcı kaynak/dönem seçmeden veri YÜKLENMEZ (performans + netlik). */
+  const [sourceChosen, setSourceChosen] = useState(false);
+  const [pendingMonth, setPendingMonth] = useState(new Date().getMonth());
+  const [pendingYear, setPendingYear] = useState(new Date().getFullYear());
+  /** KPI kartına tıklanınca gösterilen alt kırılım */
+  const [kpiModal, setKpiModal] = useState<{ title: string; subtitle?: string; rows: KpiBreakdownRow[] } | null>(null);
 
   useEffect(() => {
+    // Kaynak/dönem seçilmeden hiçbir veri çekilmez.
+    if (!sourceChosen) return;
     let cancelled = false;
     (async () => {
       setLoading(true);
       setLoadError(null);
       try {
-        const [sessionsSnap, productsSnap, ratesValue] = await Promise.all([
+        const [sessionsSnap, productDocs, ratesValue] = await Promise.all([
           getDocs(scopedQuery('maliyetSayimSessions', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
-          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin, orderBy('stokAdi', 'asc'))),
+          // Legacy-aware: companyId'si eksik ya da __legacy__ etiketli ürün
+          // kayıtları da gelsin — scopedQuery'nin where('companyId') filtresi
+          // eski ürünleri dışarıda bırakınca tüm maliyetler 0 hesaplanıyordu.
+          getScopedDocs('productCodes', currentCompanyId, isSuperAdmin),
           getExchangeRates().catch(() => ({ EUR: 1, USD: 1.08, TRY: 38.5 })),
         ]);
         if (cancelled) return;
 
-        const products = productsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ProductCode));
+        const products = productDocs.map((d) => ({ id: d.id, ...d.data() } as ProductCode));
         const pMap = new Map<string, ProductCode>();
         products.forEach((p) => pMap.set(p.stokKodu, p));
         setProductMap(pMap);
@@ -82,24 +104,50 @@ export function StokTab({ currency }: StokTabProps) {
     return () => {
       cancelled = true;
     };
-  }, [currentCompanyId, isSuperAdmin, reloadKey]);
+  }, [currentCompanyId, isSuperAdmin, reloadKey, sourceChosen]);
+
+  // Oturumlarda bulunan sayım dönemleri (yeniden eskiye)
+  const periodOptions = useMemo(() => {
+    const keys = new Map<string, string>(); // key -> label
+    sessions.forEach((s) => {
+      const d = getSessionDate(s);
+      if (!d) return;
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      if (!keys.has(key)) {
+        keys.set(key, d.toLocaleDateString('tr-TR', { month: 'long', year: 'numeric' }));
+      }
+    });
+    return Array.from(keys.entries())
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([key, label]) => ({ key, label }));
+  }, [sessions]);
+
+  // Dönem seçiliyse yalnızca o ayın oturumları analiz edilir
+  const periodSessions = useMemo(() => {
+    if (selectedPeriod === 'all') return sessions;
+    return sessions.filter((s) => {
+      const d = getSessionDate(s);
+      if (!d) return false;
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` === selectedPeriod;
+    });
+  }, [sessions, selectedPeriod]);
 
   const total = useMemo(
-    () => calculateTotalCostForRange(sessions, productMap, rates, currency, 'all'),
-    [sessions, productMap, rates, currency],
+    () => calculateTotalCostForRange(periodSessions, productMap, rates, currency, 'all'),
+    [periodSessions, productMap, rates, currency],
   );
 
   const brands = useMemo(
-    () => getBrandCostBreakdown(sessions, productMap, rates, currency),
-    [sessions, productMap, rates, currency],
+    () => getBrandCostBreakdown(periodSessions, productMap, rates, currency),
+    [periodSessions, productMap, rates, currency],
   );
   const locations = useMemo(
-    () => getLocationCostBreakdown(sessions, productMap, rates, currency),
-    [sessions, productMap, rates, currency],
+    () => getLocationCostBreakdown(periodSessions, productMap, rates, currency),
+    [periodSessions, productMap, rates, currency],
   );
   const groups = useMemo(
-    () => getProductGroupBreakdown(sessions, productMap, rates, currency),
-    [sessions, productMap, rates, currency],
+    () => getProductGroupBreakdown(periodSessions, productMap, rates, currency),
+    [periodSessions, productMap, rates, currency],
   );
   const trend = useMemo(
     () => getMonthlyTrend(sessions, productMap, rates, currency),
@@ -108,7 +156,80 @@ export function StokTab({ currency }: StokTabProps) {
 
   const groupLabel = (g: string) =>
     g === 'kit' ? 'Kit' : g === 'sarf' ? 'Sarf' : g === 'yedek_parca' ? 'Yedek Parça' : 'Diğer';
+
+  // Header'daki Excel/PDF butonları için dışa aktarma işleyicilerini kaydet
+  useEffect(() => {
+    if (!registerExportHandlers) return;
+    const periodName = selectedPeriod === 'all'
+      ? 'Tüm Dönemler'
+      : periodOptions.find((p) => p.key === selectedPeriod)?.label || selectedPeriod;
+
+    registerExportHandlers({
+      excel: () => {
+        exportDataToExcel(
+          {
+            'Özet': [
+              { Alan: 'Dönem', Değer: periodName },
+              { Alan: `Toplam Envanter (${currency})`, Değer: Math.round(total) },
+              { Alan: 'Lokasyon Sayısı', Değer: locations.length },
+              { Alan: 'Marka Sayısı', Değer: brands.length },
+              { Alan: 'Sayım Oturumu', Değer: periodSessions.length },
+            ],
+            'Markalar': brands.map((b) => ({
+              Marka: b.name,
+              [`Maliyet (${currency})`]: Math.round(b.value),
+              'Ürün Sayısı': b.productCount,
+            })),
+            'Lokasyonlar': locations.map((l) => ({
+              Lokasyon: l.locationName,
+              Tip: l.locationType === 'lab' ? 'Lab' : 'Depo',
+              [`Maliyet (${currency})`]: Math.round(l.totalCost),
+              'Ürün Sayısı': l.productCount,
+              'Son Sayım': l.lastSessionDate ? l.lastSessionDate.toLocaleDateString('tr-TR') : '',
+            })),
+            'Ürün Grupları': groups.map((g) => ({
+              Grup: groupLabel(g.group),
+              [`Maliyet (${currency})`]: Math.round(g.value),
+            })),
+            'Aylık Trend': trend.map((t) => ({
+              Ay: t.monthLabel,
+              [`Maliyet (${currency})`]: Math.round(t.cost),
+            })),
+          },
+          `Maliyet_Gozlem_Stok_${periodName}`,
+          toast,
+        );
+      },
+      pdf: () => {
+        exportDataToPdf(
+          locations.map((l) => ({
+            'Lokasyon': l.locationName,
+            'Tip': l.locationType === 'lab' ? 'Lab' : 'Depo',
+            [`Maliyet (${currency})`]: Math.round(l.totalCost).toLocaleString('tr-TR'),
+            'Ürün Sayısı': l.productCount,
+            'Son Sayım': l.lastSessionDate ? l.lastSessionDate.toLocaleDateString('tr-TR') : '',
+          })),
+          `Maliyet_Gozlem_Stok_${periodName}`,
+          `Maliyet Gözlem — Stok Maliyeti (${periodName})`,
+          toast,
+        );
+      },
+    });
+  }, [registerExportHandlers, selectedPeriod, periodOptions, currency, total, brands, locations, groups, trend, periodSessions.length, toast]);
   const symbol = currency === 'TRY' ? '₺' : currency === 'EUR' ? '€' : '$';
+
+  /** Tam Türkçe tutar formatı (kırılım modalı ve alt metinler için) */
+  const fmtFull = (v: number) => `${symbol}${Math.round(v).toLocaleString('tr-TR')}`;
+
+  // Aktivite kartlarında ortak tutar formatı — milyonlar "5,2M", binler "298k"
+  const cardMoneyFormat = (v: number) => (
+    <>
+      <span style={{ fontSize: 20, color: 'var(--mg-muted)', fontWeight: 300, marginRight: 2 }}>
+        {symbol}
+      </span>
+      {formatCompactTL(v)}
+    </>
+  );
 
   const assistantContext = useMemo(() => ({
     panel: 'stok' as const,
@@ -167,6 +288,74 @@ export function StokTab({ currency }: StokTabProps) {
     },
   }), [currency, total, sessions, locations, brands, groups, trend, rates, productMap.size]);
 
+  // ---- Kaynak/dönem seçilmeden veri yüklenmez ----
+  if (!sourceChosen) {
+    const btnBase: React.CSSProperties = {
+      padding: '10px 18px',
+      borderRadius: 12,
+      border: '1px solid var(--mg-border)',
+      fontFamily: 'inherit',
+      fontSize: 13,
+      fontWeight: 700,
+      cursor: 'pointer',
+    };
+    const selBase: React.CSSProperties = {
+      padding: '9px 12px',
+      borderRadius: 10,
+      background: 'var(--mg-surface-2)',
+      color: 'var(--mg-text)',
+      border: '1px solid var(--mg-border)',
+      fontFamily: 'inherit',
+      fontSize: 13,
+      fontWeight: 600,
+      outline: 'none',
+      cursor: 'pointer',
+    };
+    return (
+      <Card>
+        <div style={{ padding: '40px 24px', textAlign: 'center' }}>
+          <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--mg-text)', marginBottom: 6 }}>
+            Sayım Dönemi Seçin
+          </div>
+          <div style={{ fontSize: 13, color: 'var(--mg-muted)', marginBottom: 24 }}>
+            Veriler seçim yapılana kadar yüklenmez. Belirli bir dönemin sayımını ya da tüm dönemleri görüntüleyebilirsiniz.
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <select value={pendingMonth} onChange={(e) => setPendingMonth(Number(e.target.value))} style={selBase}>
+              {Array.from({ length: 12 }, (_, i) => (
+                <option key={i} value={i}>{new Date(0, i, 1).toLocaleString('tr-TR', { month: 'long' })}</option>
+              ))}
+            </select>
+            <select value={pendingYear} onChange={(e) => setPendingYear(Number(e.target.value))} style={selBase}>
+              {Array.from({ length: 7 }, (_, i) => new Date().getFullYear() - 3 + i).map((y) => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => {
+                setSelectedPeriod(`${pendingYear}-${String(pendingMonth + 1).padStart(2, '0')}`);
+                setSourceChosen(true);
+              }}
+              style={{ ...btnBase, background: 'var(--mg-accent)', color: '#0a0a0c', boxShadow: '0 2px 12px rgba(251,146,60,0.35)' }}
+            >
+              Dönemi Yükle
+            </button>
+            <span style={{ fontSize: 12, color: 'var(--mg-muted)' }}>veya</span>
+            <button
+              onClick={() => {
+                setSelectedPeriod('all');
+                setSourceChosen(true);
+              }}
+              style={{ ...btnBase, background: 'var(--mg-surface-2)', color: 'var(--mg-text-2)' }}
+            >
+              Tüm Dönemler
+            </button>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
   if (loading) {
     return (
       <div style={{ padding: 60, textAlign: 'center', color: 'var(--mg-muted)' }}>
@@ -217,12 +406,104 @@ export function StokTab({ currency }: StokTabProps) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? 12 : 20 }}>
-      {/* KPI Row */}
+      {/* Dönem seçici */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--mg-muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+          Sayım Dönemi
+        </span>
+        <select
+          value={selectedPeriod}
+          onChange={(e) => setSelectedPeriod(e.target.value)}
+          style={{
+            padding: '7px 12px',
+            borderRadius: 10,
+            background: 'var(--mg-card)',
+            color: 'var(--mg-text)',
+            border: '1px solid var(--mg-border)',
+            fontFamily: 'inherit',
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer',
+            outline: 'none',
+          }}
+        >
+          <option value="all">Tüm Dönemler</option>
+          {periodOptions.map((p) => (
+            <option key={p.key} value={p.key}>{p.label}</option>
+          ))}
+        </select>
+        {selectedPeriod !== 'all' && periodSessions.length === 0 && (
+          <span style={{ fontSize: 12, color: 'var(--mg-muted)' }}>
+            Bu dönemde sayım oturumu bulunamadı.
+          </span>
+        )}
+      </div>
+
+      {/* KPI Row — kartlara tıklayınca hesabın alt kırılımı açılır */}
       <div style={{ display: 'grid', gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(220px, 1fr))', gap: isMobile ? 8 : 16 }}>
-        <MiniStat label={`Toplam Envanter (${currency})`} value={total} sub="Son sayımlar" color="#fb923c" />
-        <MiniStat label="Lokasyon Sayısı" value={locations.length} sub="aktif" color="#6ea8ff" isCount unit="lab/depo" />
-        <MiniStat label="Marka Sayısı" value={brands.length} sub="aktif" color="#a78bfa" isCount unit="marka" />
-        <MiniStat label="Sayım Oturumu" value={sessions.length} sub="tamamlandı" color="#42e46d" isCount unit="oturum" />
+        <MiniStat
+          label={`Toplam Envanter (${currency})`}
+          value={total}
+          sub={selectedPeriod === 'all' ? 'Son sayımlar' : periodOptions.find((p) => p.key === selectedPeriod)?.label || 'Dönem'}
+          color="#fb923c"
+          onClick={() => setKpiModal({
+            title: 'Toplam Envanter — Lokasyon Kırılımı',
+            subtitle: `${fmtFull(total)} · ${locations.length} lokasyon`,
+            rows: locations.map((l) => ({
+              label: l.locationName,
+              sub: `${l.locationType === 'lab' ? 'Lab' : 'Depo'} · ${l.productCount} ürün`,
+              value: fmtFull(l.totalCost),
+            })),
+          })}
+        />
+        <MiniStat
+          label="Lokasyon Sayısı"
+          value={locations.length}
+          sub="aktif"
+          color="#6ea8ff"
+          isCount
+          unit="lab/depo"
+          onClick={() => setKpiModal({
+            title: 'Aktif Lokasyonlar',
+            rows: locations.map((l) => ({
+              label: l.locationName,
+              sub: `${l.productCount} ürün · Son sayım: ${l.lastSessionDate ? l.lastSessionDate.toLocaleDateString('tr-TR') : '—'}`,
+              value: fmtFull(l.totalCost),
+            })),
+          })}
+        />
+        <MiniStat
+          label="Marka Sayısı"
+          value={brands.length}
+          sub="aktif"
+          color="#a78bfa"
+          isCount
+          unit="marka"
+          onClick={() => setKpiModal({
+            title: 'Marka Kırılımı',
+            subtitle: `Toplam ${fmtFull(total)}`,
+            rows: brands.map((b) => ({
+              label: b.name,
+              sub: `${b.productCount} ürün · %${total > 0 ? ((b.value / total) * 100).toFixed(1) : 0} pay`,
+              value: fmtFull(b.value),
+            })),
+          })}
+        />
+        <MiniStat
+          label="Sayım Oturumu"
+          value={periodSessions.length}
+          sub={selectedPeriod === 'all' ? 'tamamlandı' : 'bu dönemde'}
+          color="#42e46d"
+          isCount
+          unit="oturum"
+          onClick={() => setKpiModal({
+            title: 'Sayım Oturumları',
+            rows: periodSessions.map((s) => ({
+              label: s.locationName,
+              sub: `${s.items.length} ürün · ${getSessionDate(s)?.toLocaleDateString('tr-TR') ?? ''}`,
+            })),
+          })}
+        />
       </div>
 
       {/* Activities + Insights */}
@@ -244,23 +525,7 @@ export function StokTab({ currency }: StokTabProps) {
                   sublabel: isCurrent ? 'Bu Ay' : 'Geçen',
                   color: isCurrent ? 'var(--mg-accent)' : '#6ea8ff',
                   delta: m.cost === 0 ? null : delta > 0 ? `+${delta}%` : `${delta}%`,
-                  format: (v) =>
-                    v >= 1000 ? (
-                      <>
-                        <span style={{ fontSize: 20, color: 'var(--mg-muted)', fontWeight: 300, marginRight: 2 }}>
-                          {symbol}
-                        </span>
-                        {Math.round(v / 1000).toLocaleString('tr-TR')}
-                        <span style={{ fontSize: 20, color: 'var(--mg-muted)', marginLeft: 1, fontWeight: 300 }}>k</span>
-                      </>
-                    ) : (
-                      <>
-                        <span style={{ fontSize: 20, color: 'var(--mg-muted)', fontWeight: 300, marginRight: 2 }}>
-                          {symbol}
-                        </span>
-                        {Math.round(v).toLocaleString('tr-TR')}
-                      </>
-                    ),
+                  format: cardMoneyFormat,
                   sparkData: spark.length > 1 ? spark : null,
                   active: isCurrent,
                 };
@@ -274,15 +539,7 @@ export function StokTab({ currency }: StokTabProps) {
                 sublabel: `${loc.productCount} ürün`,
                 color: BRAND_COLORS[i % BRAND_COLORS.length],
                 delta: null,
-                format: (v) => (
-                  <>
-                    <span style={{ fontSize: 20, color: 'var(--mg-muted)', fontWeight: 300, marginRight: 2 }}>
-                      {symbol}
-                    </span>
-                    {Math.round(v / 1000).toLocaleString('tr-TR')}
-                    <span style={{ fontSize: 20, color: 'var(--mg-muted)', marginLeft: 1, fontWeight: 300 }}>k</span>
-                  </>
-                ),
+                format: cardMoneyFormat,
                 sparkData: null,
               })),
             },
@@ -294,15 +551,7 @@ export function StokTab({ currency }: StokTabProps) {
                 sublabel: `${b.productCount} ürün`,
                 color: BRAND_COLORS[i % BRAND_COLORS.length],
                 delta: `%${total > 0 ? ((b.value / total) * 100).toFixed(0) : 0}`,
-                format: (v) => (
-                  <>
-                    <span style={{ fontSize: 20, color: 'var(--mg-muted)', fontWeight: 300, marginRight: 2 }}>
-                      {symbol}
-                    </span>
-                    {Math.round(v / 1000).toLocaleString('tr-TR')}
-                    <span style={{ fontSize: 20, color: 'var(--mg-muted)', marginLeft: 1, fontWeight: 300 }}>k</span>
-                  </>
-                ),
+                format: cardMoneyFormat,
                 sparkData: null,
               })),
             },
@@ -359,6 +608,9 @@ export function StokTab({ currency }: StokTabProps) {
                 value: b.value,
                 color: BRAND_COLORS[i % BRAND_COLORS.length],
               }))}
+              onSelect={(name) => router.push(
+                `/cost-dashboard/gozlem/marka/${encodeURIComponent(name)}${selectedPeriod !== 'all' ? `?period=${selectedPeriod}` : ''}`,
+              )}
             />
           ) : (
             <div style={{ padding: 40, textAlign: 'center', color: 'var(--mg-muted)' }}>Veri yok</div>
@@ -385,6 +637,15 @@ export function StokTab({ currency }: StokTabProps) {
           />
         </Card>
       </div>
+
+      {kpiModal && (
+        <KpiBreakdownModal
+          title={kpiModal.title}
+          subtitle={kpiModal.subtitle}
+          rows={kpiModal.rows}
+          onClose={() => setKpiModal(null)}
+        />
+      )}
     </div>
   );
 }

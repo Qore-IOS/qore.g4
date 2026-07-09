@@ -1194,6 +1194,24 @@ export interface TestDefinitionGlobal {
 }
 
 /**
+ * Basitleştirilmiş personel gider modeli: tek bir kişi başı aylık gider (TL)
+ * ve lab başına personel sayısı. Ortak stok havuzlarında sayı yalnızca ana
+ * laba girilir; toplam gider havuz üyesi lablara test hacmine göre dağıtılır.
+ * Şirket başına tek doküman (personnelCostConfig koleksiyonu).
+ */
+export interface PersonnelCostConfig {
+  id?: string;
+  /** Personel başına aylık gider (TL) */
+  costPerPersonTL: number;
+  /** labId → personel sayısı (havuzlu lablarda yalnızca ana laba girilir) */
+  labCounts: Record<string, number>;
+  companyId?: string;
+  updatedAt?: TimestampLike;
+  updatedByUid?: string;
+  updatedByName?: string;
+}
+
+/**
  * Personel (laboratuvarda çalışan) modeli.
  *
  * Sisteme login olan kullanıcı `User` ile karıştırılmamalıdır; bir personel

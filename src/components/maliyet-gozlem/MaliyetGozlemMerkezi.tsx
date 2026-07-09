@@ -12,7 +12,7 @@
  * class'ı üzerinden otomatik takip edilir.
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Search, Settings, Download, X } from 'lucide-react';
 import type { Currency } from '@/lib/types';
 import { TestTab } from './TestTab';
@@ -20,6 +20,12 @@ import { StokTab } from './StokTab';
 import { useIsMobile } from './useIsMobile';
 
 type TabKey = 'stok' | 'test';
+
+/** Aktif tab'ın kayıt ettiği Excel/PDF dışa aktarma işleyicileri. */
+export interface TabExportHandlers {
+  excel: () => void;
+  pdf: () => void;
+}
 
 const NavStock = (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -201,9 +207,11 @@ interface HeaderProps {
   setSearch: (s: string) => void;
   currency: Currency;
   setCurrency: (c: Currency) => void;
+  onExportExcel?: () => void;
+  onExportPdf?: () => void;
 }
 
-function Header({ search, setSearch, currency, setCurrency }: HeaderProps) {
+function Header({ search, setSearch, currency, setCurrency, onExportExcel, onExportPdf }: HeaderProps) {
   const isMobile = useIsMobile();
   return (
     <header
@@ -279,7 +287,7 @@ function Header({ search, setSearch, currency, setCurrency }: HeaderProps) {
 
       {!isMobile && <div style={{ flex: 1 }} />}
 
-      <SettingsMenu currency={currency} setCurrency={setCurrency} />
+      <SettingsMenu currency={currency} setCurrency={setCurrency} onExportExcel={onExportExcel} onExportPdf={onExportPdf} />
     </header>
   );
 }
@@ -403,9 +411,11 @@ interface MobileHeaderProps {
   setCurrency: (c: Currency) => void;
   search: string;
   setSearch: (s: string) => void;
+  onExportExcel?: () => void;
+  onExportPdf?: () => void;
 }
 
-function MobileHeader({ tab, setTab, currency, setCurrency, search, setSearch }: MobileHeaderProps) {
+function MobileHeader({ tab, setTab, currency, setCurrency, search, setSearch, onExportExcel, onExportPdf }: MobileHeaderProps) {
   const [searchOpen, setSearchOpen] = useState(false);
   const activeLabel = tab === 'stok' ? 'Stok' : 'Test';
   const otherKey: TabKey = tab === 'stok' ? 'test' : 'stok';
@@ -452,7 +462,7 @@ function MobileHeader({ tab, setTab, currency, setCurrency, search, setSearch }:
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <SettingsMenu currency={currency} setCurrency={setCurrency} />
+          <SettingsMenu currency={currency} setCurrency={setCurrency} onExportExcel={onExportExcel} onExportPdf={onExportPdf} />
           <button
             onClick={() => setSearchOpen((v) => !v)}
             style={{
@@ -583,6 +593,19 @@ export default function MaliyetGozlemMerkezi({ initialTab = 'test' }: MaliyetGoz
   // basitlik için 0 veriyoruz, UI'da sembolik.
   const [counts] = useState({ stok: 0, test: 0 });
 
+  // Aktif tab mount olduğunda kendi Excel/PDF dışa aktarma işleyicilerini
+  // kaydeder; header'daki butonlar bu ref üzerinden çağırır.
+  const exportHandlersRef = useRef<Partial<TabExportHandlers>>({});
+  const registerExportHandlers = useCallback((handlers: TabExportHandlers) => {
+    exportHandlersRef.current = handlers;
+  }, []);
+  const handleExportExcel = useCallback(() => {
+    exportHandlersRef.current.excel?.();
+  }, []);
+  const handleExportPdf = useCallback(() => {
+    exportHandlersRef.current.pdf?.();
+  }, []);
+
   return (
     <div
       className="mg-root"
@@ -598,10 +621,10 @@ export default function MaliyetGozlemMerkezi({ initialTab = 'test' }: MaliyetGoz
       }}
     >
       {isMobile ? (
-        <MobileHeader tab={tab} setTab={setTab} currency={currency} setCurrency={setCurrency} search={search} setSearch={setSearch} />
+        <MobileHeader tab={tab} setTab={setTab} currency={currency} setCurrency={setCurrency} search={search} setSearch={setSearch} onExportExcel={handleExportExcel} onExportPdf={handleExportPdf} />
       ) : (
         <>
-          <Header search={search} setSearch={setSearch} currency={currency} setCurrency={setCurrency} />
+          <Header search={search} setSearch={setSearch} currency={currency} setCurrency={setCurrency} onExportExcel={handleExportExcel} onExportPdf={handleExportPdf} />
           <TabSwitcher value={tab} onChange={setTab} counts={counts} />
         </>
       )}
@@ -613,9 +636,9 @@ export default function MaliyetGozlemMerkezi({ initialTab = 'test' }: MaliyetGoz
         }}
       >
         {tab === 'stok' ? (
-          <StokTab currency={currency} />
+          <StokTab currency={currency} registerExportHandlers={registerExportHandlers} />
         ) : (
-          <TestTab currency={currency} search={search} setSearch={setSearch} />
+          <TestTab currency={currency} search={search} setSearch={setSearch} registerExportHandlers={registerExportHandlers} />
         )}
 
         <div style={{ height: 40 }} />
