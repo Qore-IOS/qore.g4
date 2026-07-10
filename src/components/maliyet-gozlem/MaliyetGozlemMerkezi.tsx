@@ -636,7 +636,7 @@ export default function MaliyetGozlemMerkezi({ initialTab = 'test' }: MaliyetGoz
         }}
       >
         {tab === 'stok' ? (
-          <StokTab currency={currency} registerExportHandlers={registerExportHandlers} />
+          <StokTab currency={currency} search={search} setSearch={setSearch} registerExportHandlers={registerExportHandlers} />
         ) : (
           <TestTab currency={currency} search={search} setSearch={setSearch} registerExportHandlers={registerExportHandlers} />
         )}
