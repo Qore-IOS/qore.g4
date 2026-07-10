@@ -191,6 +191,99 @@ export function StokTab({ currency, search, setSearch, registerExportHandlers }:
 
   const groupLabel = (g: string) =>
     g === 'kit' ? 'Kit' : g === 'sarf' ? 'Sarf' : g === 'yedek_parca' ? 'Yedek Parça' : 'Diğer';
+  const productDetails = useMemo<StockProductDetail[]>(() => {
+    const latestSessions = Array.from(getLatestByLocation(periodSessions).values());
+    return latestSessions.flatMap((session) => session.items.map((item) => {
+      const product = productMap.get(item.stokKodu);
+      const sessionDate = getSessionDate(session);
+      const rawGroup = (product?.urunGrubu || 'diger') as StockProductDetail['group'];
+      const normalizedGroup = ['kit', 'sarf', 'yedek_parca'].includes(rawGroup) ? rawGroup : 'diger';
+      return {
+        stokKodu: item.stokKodu,
+        stokAdi: item.stokAdi,
+        marka: item.marka || 'Diğer',
+        group: normalizedGroup,
+        locationId: session.locationId,
+        locationName: session.locationName,
+        locationType: session.locationType,
+        stockQty: Number(item.stokAdedi) || 0,
+        cihazQty: Number(item.cihazUstuAdedi) || 0,
+        quantity: (Number(item.stokAdedi) || 0) + (Number(item.cihazUstuAdedi) || 0),
+        cost: getProductCostInCurrency(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi, productMap, rates, currency, item),
+        monthKey: sessionDate ? `${sessionDate.getFullYear()}-${String(sessionDate.getMonth() + 1).padStart(2, '0')}` : null,
+      };
+    }));
+  }, [periodSessions, productMap, rates, currency]);
+
+  const aggregateDetails = (details: StockProductDetail[], keyFn: (d: StockProductDetail) => string, labelFn: (d: StockProductDetail) => string, subFn?: (rows: StockProductDetail[]) => string) => {
+    const map = new Map<string, { label: string; rows: StockProductDetail[]; cost: number; products: Set<string>; quantity: number }>();
+    details.forEach((detail) => {
+      const key = keyFn(detail);
+      const row = map.get(key) || { label: labelFn(detail), rows: [], cost: 0, products: new Set<string>(), quantity: 0 };
+      row.rows.push(detail);
+      row.cost += detail.cost;
+      row.products.add(detail.stokKodu);
+      row.quantity += detail.quantity;
+      map.set(key, row);
+    });
+    return Array.from(map.values()).sort((a, b) => b.cost - a.cost).map((row) => ({
+      ...row,
+      sub: subFn ? subFn(row.rows) : `${row.products.size} ürün · ${row.quantity.toLocaleString('tr-TR')} adet`,
+    }));
+  };
+
+  const productRows = (details: StockProductDetail[]): KpiBreakdownRow[] => aggregateDetails(
+    details,
+    (d) => d.stokKodu,
+    (d) => d.stokAdi,
+    (rows) => {
+      const first = rows[0];
+      const locationCount = new Set(rows.map((r) => r.locationId)).size;
+      const qty = rows.reduce((sum, r) => sum + r.quantity, 0);
+      return `${first.stokKodu} · ${locationCount} lokasyon · ${qty.toLocaleString('tr-TR')} adet`;
+    },
+  ).map((row) => ({ label: row.label, sub: row.sub, value: fmtFull(row.cost) }));
+
+  const openProducts = (title: string, details: StockProductDetail[], subtitle?: string) => setKpiModal({
+    title,
+    subtitle: subtitle || `${details.length} ürün satırı`,
+    rows: productRows(details),
+  });
+
+  const openBrandProducts = (brand: string, details = productDetails.filter((d) => d.marka === brand)) => {
+    const sum = details.reduce((acc, d) => acc + d.cost, 0);
+    openProducts(`${brand} — Ürün Kırılımı`, details, fmtFull(sum));
+  };
+
+  const openLocationBrands = (locationId: string, locationName: string) => {
+    const details = productDetails.filter((d) => d.locationId === locationId);
+    setKpiModal({
+      title: `${locationName} — Marka Kırılımı`,
+      subtitle: fmtFull(details.reduce((acc, d) => acc + d.cost, 0)),
+      rows: aggregateDetails(details, (d) => d.marka, (d) => d.marka).map((row) => ({
+        label: row.label,
+        sub: row.sub,
+        value: fmtFull(row.cost),
+        onClick: () => openProducts(`${locationName} / ${row.label} — Ürün Kırılımı`, row.rows, fmtFull(row.cost)),
+      })),
+    });
+  };
+
+  const openGroupBrands = (group: StockProductDetail['group']) => {
+    const details = productDetails.filter((d) => d.group === group);
+    const label = groupLabel(group);
+    setKpiModal({
+      title: `${label} — Marka Kırılımı`,
+      subtitle: fmtFull(details.reduce((acc, d) => acc + d.cost, 0)),
+      rows: aggregateDetails(details, (d) => d.marka, (d) => d.marka).map((row) => ({
+        label: row.label,
+        sub: row.sub,
+        value: fmtFull(row.cost),
+        onClick: () => openProducts(`${label} / ${row.label} — Ürün Kırılımı`, row.rows, fmtFull(row.cost)),
+      })),
+    });
+  };
+
 
   const normalizeSearch = (value: string) => value.toLocaleLowerCase('tr').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
   const buildProductDetails = (sourceSessions: SayimSession[]): StockProductDetail[] => {
