@@ -200,6 +200,16 @@ function getProductsForBrandFromRules(
     .sort((a, b) => a.stokAdi.localeCompare(b.stokAdi, 'tr'));
 }
 
+
+function parsePeriodParam(period: string | null): { month: number; year: number } | null {
+  const match = period?.match(/^(\d{4})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]) - 1;
+  if (!Number.isFinite(year) || month < 0 || month > 11) return null;
+  return { month, year };
+}
+
 function normalizeText(value: string): string {
   return value
     .toLocaleLowerCase('tr')
@@ -638,6 +648,21 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
 
   // Toplu (bulk) sayım girişi
   const [bulkMode, setBulkMode] = useState(false);
+
+  // Tekil lab/depo sayım dönemi
+  const initialPeriod = useMemo(() => parsePeriodParam(searchParams.get('period')), [searchParams]);
+  const [countMonth, setCountMonth] = useState(() => initialPeriod?.month ?? new Date().getMonth());
+  const [countYear, setCountYear] = useState(() => initialPeriod?.year ?? new Date().getFullYear());
+  const countMonthOptions = useMemo(() => Array.from({ length: 12 }, (_, i) => ({
+    value: i,
+    label: new Date(0, i, 1).toLocaleString('tr-TR', { month: 'long' }),
+  })), []);
+  const countYearOptions = useMemo(() => {
+    const y = new Date().getFullYear();
+    return Array.from({ length: 7 }, (_, i) => y - 3 + i);
+  }, []);
+  const selectedPeriod = useMemo(() => `${countYear}-${String(countMonth + 1).padStart(2, '0')}`, [countMonth, countYear]);
+  const selectedPeriodLabel = useMemo(() => `${countMonthOptions[countMonth]?.label ?? ''} ${countYear}`, [countMonth, countYear, countMonthOptions]);
 
   // Voice counting
   const [voiceActive, setVoiceActive] = useState(false);
@@ -1191,7 +1216,7 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
                 cihazUstuAdedi: parseInt(entry.cihazUstuAdedi) || 0,
                 cost: productCodes.find(p => p.stokKodu === entry.stokKodu)?.cost ?? 0,
                 currency: productCodes.find(p => p.stokKodu === entry.stokKodu)?.currency || 'TRY',
-                ambalajDegeri: Number(productCodes.find(p => p.stokKodu === entry.stokKodu)?.ambalajDegeri) || 0,
+                ambalajDegeri: Number(productCodes.find(p => p.stokKodu === entry.stokKodu)?.ambalajDegeri) || 1,
                 countedByUid: sessionItem?.countedByUid || currentUserProfile?.uid || '',
                 countedByName: sessionItem?.countedByName || currentUserProfile?.name || '',
                 updates: sessionItem?.updates || [],
@@ -1207,6 +1232,9 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
               totalBrands,
               participants: activeSession.participants,
               companyId: currentCompanyId,
+              period: activeSession.period || selectedPeriod,
+              month: typeof activeSession.month === 'number' ? activeSession.month : countMonth,
+              year: typeof activeSession.year === 'number' ? activeSession.year : countYear,
             });
           } else {
             // Solo mode: legacy save
@@ -1218,7 +1246,7 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
               cihazUstuAdedi: parseInt(entry.cihazUstuAdedi) || 0,
               cost: productCodes.find(p => p.stokKodu === entry.stokKodu)?.cost ?? 0,
               currency: productCodes.find(p => p.stokKodu === entry.stokKodu)?.currency || 'TRY',
-              ambalajDegeri: Number(productCodes.find(p => p.stokKodu === entry.stokKodu)?.ambalajDegeri) || 0,
+              ambalajDegeri: Number(productCodes.find(p => p.stokKodu === entry.stokKodu)?.ambalajDegeri) || 1,
             }));
 
             await addDoc(collection(db, 'maliyetSayimSessions'), {
@@ -1232,6 +1260,10 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
               totalBrands,
               totalProducts: items.length,
               companyId: normalizeCompanyId(currentCompanyId),
+              period: selectedPeriod,
+              month: countMonth,
+              year: countYear,
+              entryMethod: 'tekil',
             });
           }
 
@@ -1254,7 +1286,7 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
       setIsSaving(false);
       return false;
     }
-  }, [locationType, selectedLocationId, locationName, countData, currentUserProfile, totalBrands, isSaving, toast, sessionMode, activeSessionId, activeSession, resetToLocationSelection, currentCompanyId]);
+  }, [locationType, selectedLocationId, locationName, countData, currentUserProfile, totalBrands, isSaving, toast, sessionMode, activeSessionId, activeSession, resetToLocationSelection, currentCompanyId, selectedPeriod, countMonth, countYear]);
 
   const flashFeedback = useCallback((type: 'success' | 'error', message: string) => {
     if (scanFeedbackTimer.current) clearTimeout(scanFeedbackTimer.current);
@@ -1629,8 +1661,8 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
   const handleStartSolo = useCallback(() => {
     setShowParticipantSelection(false);
     setSessionMode('solo');
-    router.replace(`/maliyet-sayim?type=${locationType}&id=${selectedLocationId}`, { scroll: false });
-  }, [router, locationType, selectedLocationId]);
+    router.replace(`/maliyet-sayim?type=${locationType}&id=${selectedLocationId}&period=${selectedPeriod}`, { scroll: false });
+  }, [router, locationType, selectedLocationId, selectedPeriod]);
 
   const handleStartCollaborative = useCallback(async () => {
     if (!locationType || !selectedLocationId || !currentUserProfile?.uid) return;
@@ -1652,6 +1684,9 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
         creatorName: currentUserProfile.name || '',
         invitedUsers,
         companyId: currentCompanyId,
+        period: selectedPeriod,
+        month: countMonth,
+        year: countYear,
       });
 
       // Send notifications to invited users
@@ -1667,7 +1702,7 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
       setActiveSessionId(sessionId);
       setSessionMode('collaborative');
       setShowParticipantSelection(false);
-      router.replace(`/maliyet-sayim?type=${locationType}&id=${selectedLocationId}&session=${sessionId}`, { scroll: false });
+      router.replace(`/maliyet-sayim?type=${locationType}&id=${selectedLocationId}&session=${sessionId}&period=${selectedPeriod}`, { scroll: false });
 
       toast({ title: 'Oturum oluşturuldu', description: `${invitedUsers.length} kişiye davet gönderildi.` });
     } catch (err) {
@@ -1676,7 +1711,7 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
     } finally {
       setIsCreatingSession(false);
     }
-  }, [locationType, selectedLocationId, currentUserProfile, locationUsers, selectedParticipants, hospitals, depots, router, toast]);
+  }, [locationType, selectedLocationId, currentUserProfile, locationUsers, selectedParticipants, hospitals, depots, router, toast, selectedPeriod, countMonth, countYear]);
 
   const handleJoinInvitation = useCallback(async (session: MaliyetSayimOturum) => {
     if (!currentUserProfile?.uid) return;
@@ -1731,6 +1766,42 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
               <h1 className="text-xl font-bold text-[var(--dashboard-text)]">Katılımcı Seçimi</h1>
               <p className="text-xs text-[var(--dashboard-muted)]">{selectedLocName} — Sayıma davet edeceğiniz kişileri seçin</p>
             </div>
+          </div>
+
+          {/* Period selection */}
+          <div className="cihaz-card-strong rounded-2xl p-4 mb-4">
+            <div className="flex items-center gap-2 mb-3">
+              <CalendarDays className="w-4 h-4 text-[var(--dashboard-accent)]" />
+              <span className="text-xs font-semibold text-[var(--dashboard-text)]">Sayım Dönemi</span>
+              <span className="ml-auto text-[11px] font-medium text-[var(--dashboard-accent)]">{selectedPeriodLabel}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="space-y-1">
+                <span className="text-[11px] text-[var(--dashboard-muted)]">Ay</span>
+                <select
+                  value={countMonth}
+                  onChange={(e) => setCountMonth(Number(e.target.value))}
+                  className="w-full h-10 rounded-xl bg-[var(--dashboard-surface-2)] px-3 text-sm text-[var(--dashboard-text)] outline-none shadow-[var(--dashboard-pressed)]"
+                >
+                  {countMonthOptions.map(m => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1">
+                <span className="text-[11px] text-[var(--dashboard-muted)]">Yıl</span>
+                <select
+                  value={countYear}
+                  onChange={(e) => setCountYear(Number(e.target.value))}
+                  className="w-full h-10 rounded-xl bg-[var(--dashboard-surface-2)] px-3 text-sm text-[var(--dashboard-text)] outline-none shadow-[var(--dashboard-pressed)]"
+                >
+                  {countYearOptions.map(y => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <p className="mt-2 text-[11px] text-[var(--dashboard-muted)]">Solo veya eşlik edecek personel ile başlatılan sayım bu döneme kaydedilir.</p>
           </div>
 
           {/* User list */}
