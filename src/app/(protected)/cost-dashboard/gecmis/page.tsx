@@ -4,12 +4,12 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
+import { doc, getDocs, orderBy, limit, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Loader2, History, Search, ChevronRight, ArrowLeft,
   Calendar, User, MapPin, Tag, X, Filter, ChevronDown,
-  Building2, TestTube, Users,
+  Building2, TestTube, Users, Trash2,
 } from 'lucide-react';
 import { format, isValid } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -19,6 +19,7 @@ import { filterByCompanyScope } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { useDateRangeFilter } from '@/hooks/useDateRangeFilter';
 import { DateRangeFilterBar } from '@/components/common/DateRangeFilterBar';
+import { useToast } from '@/hooks/use-toast';
 
 // ============================================================================
 // TYPES
@@ -47,6 +48,7 @@ interface SayimSession {
   createdByName?: string;
   items: SayimSessionItem[];
   participants?: SessionParticipantInfo[];
+  isDeleted?: boolean;
   totalBrands: number;
   totalProducts: number;
 }
@@ -272,6 +274,7 @@ function DateRangeFilter({ startDate, endDate, onStartChange, onEndChange, onCle
 
 export default function MaliyetSayimGecmisPage() {
   const router = useRouter();
+  const { toast } = useToast();
   const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
   const isAdminRole = ['admin', 'admin_developer', 'super_admin'].includes(currentUserProfile?.role ?? '');
   const assignedLabs = useMemo(
@@ -280,6 +283,7 @@ export default function MaliyetSayimGecmisPage() {
   );
   const [sessions, setSessions] = useState<SayimSession[]>([]);
   const [loading, setLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Maliyet sayım geçmişi penceresi — varsayılan son 180 gün.
   const dateFilter = useDateRangeFilter({
@@ -309,7 +313,7 @@ export default function MaliyetSayimGecmisPage() {
           orderBy('createdAt', 'desc'),
           limit(1000),
         ));
-        const allSessions = snap.docs.map(d => ({ id: d.id, ...d.data() } as SayimSession));
+        const allSessions = snap.docs.map(d => ({ id: d.id, ...d.data() } as SayimSession)).filter(s => !s.isDeleted);
         const companyScoped = filterByCompanyScope(allSessions, currentCompanyId, isSuperAdmin);
         // Lab sessions are restricted to the user's assigned labs; depot
         // sessions stay visible. Admins keep full visibility.
@@ -405,6 +409,42 @@ export default function MaliyetSayimGecmisPage() {
       return true;
     });
   }, [sessions, searchQuery, selectedLocations, selectedBrands, selectedUsers, selectedTypes, startDate, endDate]);
+
+
+  const handleDeleteSession = useCallback(async (session: SayimSession) => {
+    const sessionDate = getSessionDate(session);
+    const periodLabel = sessionDate ? format(sessionDate, 'MMMM yyyy', { locale: tr }) : 'ilgili dönem';
+    const ok = window.confirm(
+      `${session.locationName} için ${periodLabel} maliyet sayımını silmek istiyor musunuz?
+
+Bu işlem ilgili dönem + lokasyon maliyetini sıfırlar ve maliyet gözlem hesaplarına dahil etmez.`
+    );
+    if (!ok) return;
+
+    setDeletingId(session.id);
+    try {
+      await updateDoc(doc(db, 'maliyetSayimSessions', session.id), {
+        isDeleted: true,
+        deletedAt: serverTimestamp(),
+        deletedByUid: currentUserProfile?.uid ?? null,
+        deletedByName: currentUserProfile?.displayName || currentUserProfile?.email || null,
+      });
+      setSessions(prev => prev.filter(s => s.id !== session.id));
+      toast({
+        title: 'Sayım silindi',
+        description: `${session.locationName} için ${periodLabel} maliyet sayımı sıfırlandı.`,
+      });
+    } catch (err) {
+      console.error('Error deleting maliyet sayim session:', err);
+      toast({
+        title: 'Sayım silinemedi',
+        description: 'Lütfen tekrar deneyin.',
+        variant: 'destructive',
+      });
+    } finally {
+      setDeletingId(null);
+    }
+  }, [currentUserProfile?.displayName, currentUserProfile?.email, currentUserProfile?.uid, toast]);
 
   const activeFilterCount = [
     selectedLocations.length > 0,
@@ -556,10 +596,13 @@ export default function MaliyetSayimGecmisPage() {
               const brands = getBrandsFromSession(session);
 
               return (
-                <button
+                <div
                   key={session.id}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => router.push(`/cost-dashboard/gecmis/${session.id}`)}
-                  className="w-full cihaz-card hover:shadow-[var(--dashboard-raised)] rounded-2xl p-4 sm:p-5 text-left transition-all duration-200 group"
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') router.push(`/cost-dashboard/gecmis/${session.id}`); }}
+                  className="w-full cihaz-card hover:shadow-[var(--dashboard-raised)] rounded-2xl p-4 sm:p-5 text-left transition-all duration-200 group cursor-pointer"
                 >
                   <div className="flex items-start sm:items-center justify-between gap-3">
                     {/* Left: Main info */}
@@ -627,10 +670,25 @@ export default function MaliyetSayimGecmisPage() {
                       )}
                     </div>
 
-                    {/* Right: Arrow */}
-                    <ChevronRight className="w-5 h-5 text-[var(--dashboard-muted)] opacity-0 group-hover:opacity-100 group-hover:translate-x-1 transition-all duration-200 shrink-0 mt-1 sm:mt-0" />
+                    {/* Right: Actions */}
+                    <div className="flex items-center gap-2 shrink-0 mt-1 sm:mt-0">
+                      <button
+                        type="button"
+                        disabled={deletingId === session.id}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteSession(session);
+                        }}
+                        className="flex items-center justify-center w-9 h-9 rounded-xl text-red-500 hover:text-white hover:bg-red-500 transition-colors disabled:opacity-50"
+                        title="Sayımı sil ve ilgili dönem/lokasyon maliyetini sıfırla"
+                        aria-label="Sayımı sil"
+                      >
+                        {deletingId === session.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                      </button>
+                      <ChevronRight className="w-5 h-5 text-[var(--dashboard-muted)] opacity-0 group-hover:opacity-100 group-hover:translate-x-1 transition-all duration-200" />
+                    </div>
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>

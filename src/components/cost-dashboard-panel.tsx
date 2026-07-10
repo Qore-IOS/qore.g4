@@ -78,6 +78,7 @@ function getSessionCost(
   rates: Record<Currency, number>,
   currency: Currency
 ): number {
+  if (session.isDeleted) return 0;
   return session.items.reduce((sum, item) => {
     const product = productMap.get(item.stokKodu);
     if (!product?.cost) return sum;
@@ -101,10 +102,16 @@ function getSessionCost(
 /** Get latest session per location */
 function getLatestPerLocation(sessions: SayimSession[]): SayimSession[] {
   const map = new Map<string, SayimSession>();
+  const resetKeys = new Set<string>();
   // sessions already sorted desc by createdAt
   for (const s of sessions) {
     const key = `${s.locationType}-${s.locationId}`;
-    if (!map.has(key)) map.set(key, s);
+    if (map.has(key) || resetKeys.has(key)) continue;
+    if (s.isDeleted) {
+      resetKeys.add(key);
+      continue;
+    }
+    map.set(key, s);
   }
   return Array.from(map.values());
 }
