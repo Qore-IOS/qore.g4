@@ -84,6 +84,9 @@ export interface MaliyetSayimOturum {
   completedAt?: any;
   totalBrands?: number;
   totalProducts?: number;
+  period?: string;
+  month?: number;
+  year?: number;
 }
 
 // User colors for presence indicators
@@ -111,6 +114,9 @@ export async function createSession(params: {
   creatorName: string;
   invitedUsers: { uid: string; name: string }[];
   companyId?: string | null;
+  period?: string;
+  month?: number;
+  year?: number;
 }): Promise<string> {
   const now = new Date().toISOString();
   const participants: SessionParticipant[] = [
@@ -140,6 +146,9 @@ export async function createSession(params: {
     presence: {},
     countData: {},
     companyId: normalizeCompanyId(params.companyId),
+    period: params.period,
+    month: params.month,
+    year: params.year,
   });
 
   return docRef.id;
@@ -261,6 +270,9 @@ export async function completeSession(
     totalBrands: number;
     participants: SessionParticipant[];
     companyId?: string | null;
+    period?: string;
+    month?: number;
+    year?: number;
   }
 ): Promise<void> {
   const ref = doc(db, COLLECTION, sessionId);
@@ -293,6 +305,9 @@ export async function completeSession(
     totalBrands: sessionMeta.totalBrands,
     totalProducts: finalItems.length,
     companyId: normalizeCompanyId(sessionMeta.companyId),
+    period: sessionMeta.period,
+    month: sessionMeta.month,
+    year: sessionMeta.year,
   });
 
   // Mark the oturum as completed
