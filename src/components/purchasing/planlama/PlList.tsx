@@ -12,14 +12,15 @@ type Filter = 'today' | 'all' | 'done';
 interface ListProps {
   ac: Accent; mode: Mode; tasks: Task[];
   filter: Filter; setFilter: (f: Filter) => void;
+  selectedDate?: string; setSelectedDate?: (date: string) => void;
   onToggle: (id: string) => void; onToggleSub: (tid: string, sid: string) => void;
   onAddSub: (tid: string, title: string) => void;
   onEdit: (t: Task) => void; onDelete: (id: string) => void; onAdd: () => void;
 }
 
-const PlList: React.FC<ListProps> = ({ ac, mode, tasks, filter, setFilter, onToggle, onToggleSub, onAddSub, onEdit, onDelete, onAdd }) => {
+const PlList: React.FC<ListProps> = ({ ac, mode, tasks, filter, setFilter, selectedDate, setSelectedDate, onToggle, onToggleSub, onAddSub, onEdit, onDelete, onAdd }) => {
   const mobile = mode === 'mobile';
-  const today = plToday();
+  const today = selectedDate || plToday();
   const td = plParse(today);
   const now = new Date();
   const clock = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
@@ -38,9 +39,27 @@ const PlList: React.FC<ListProps> = ({ ac, mode, tasks, filter, setFilter, onTog
     ((a.time || '99').localeCompare(b.time || '99')) || (w[a.pri] - w[b.pri]));
 
   const scopes: { v: Filter; l: string }[] = [{ v: 'today', l: 'Bugün' }, { v: 'all', l: 'Açık' }, { v: 'done', l: 'Tamamlanan' }];
+  const touchStart = React.useRef<{ x: number; y: number } | null>(null);
+  const shiftDay = (delta: number) => {
+    if (!setSelectedDate) return;
+    const d = plParse(today);
+    d.setDate(d.getDate() + delta);
+    const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    setSelectedDate(iso);
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) navigator.vibrate?.(18);
+  };
+  const swipeHandlers = mobile ? {
+    onTouchStart: (e: React.TouchEvent) => { const t = e.touches[0]; touchStart.current = { x: t.clientX, y: t.clientY }; },
+    onTouchEnd: (e: React.TouchEvent) => {
+      const st = touchStart.current; if (!st) return;
+      const t = e.changedTouches[0]; const dx = t.clientX - st.x; const dy = t.clientY - st.y;
+      if (Math.abs(dx) > 58 && Math.abs(dx) > Math.abs(dy) * 1.35) shiftDay(dx < 0 ? 1 : -1);
+      touchStart.current = null;
+    },
+  } : {};
 
   return (
-    <div>
+    <div {...swipeHandlers} style={{ touchAction: mobile ? 'pan-y' : undefined, animation: mobile ? 'plSlideDay 260ms var(--ease-fluid)' : undefined }}>
       {/* serif date hero */}
       <div style={{ display: 'flex', alignItems: 'stretch', gap: mobile ? 16 : 28, marginBottom: mobile ? 22 : 30, padding: '4px 4px 0' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
