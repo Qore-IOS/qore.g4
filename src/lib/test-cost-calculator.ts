@@ -177,7 +177,7 @@ export interface LabBreakdown {
   inventoryCostTL: number;
   deviceCostMonthlyTL: number;
   personnelCostMonthlyTL: number;
-  /** Lab başına birim test maliyeti = (stok + ortak paylar) / adet */
+  /** Lab başına birim test maliyeti = stok / adet (personel/envanter dahil edilmez) */
   unitCostTL?: number;
 }
 
@@ -730,25 +730,34 @@ export function calculateTestCostWithContext(ctx: TestCostContext, testDef: Test
   // Dağıtım modu:
   //  - full_burden (varsayılan, geriye uyumlu): her testin toplamı grandTotal'a
   //    eşittir — testler arasında AYNI toplam görünür.
-  //  - volume_weighted: ortak giderler (envanter + cihaz + personel) LAB LAB
-  //    dağıtılır — her labın ortak gideri, o labdaki testlere lab içi hacim
-  //    payıyla bölünür: pay(test, lab) = adet(test, lab) / toplamAdet(lab).
-  //    Örn. X labında A=500, B=200 test ve 1.000 TL personel varsa A'ya 714 TL
-  //    (500/700), B'ye 286 TL düşer; birim = pay / test adedi.
-  //  - equal_alloc: ortak giderler test sayısına eşit bölünür.
+  //  - volume_weighted (TestTab): TEST MALİYETİ = YALNIZCA STOK. Personel devlet
+  //    tarafından geri ödendiğinden hiçbir ortak gider (personel/cihaz/envanter)
+  //    test toplamına ve birim maliyete KATILMAZ; yine de lab lab, lab içi hacim
+  //    payıyla hesaplanır ve AYRI bilgi kalemleri olarak raporlanır:
+  //    pay(test, lab) = adet(test, lab) / toplam test-bağlantılı adet(lab).
+  //  - equal_alloc: bilgi payı test sayısına eşit bölünür (toplama katılmaz).
   const allocationMode: AllocationMode = ctx.inputs.mode || 'full_burden';
 
   const perLab: LabBreakdown[] = [];
   let totalStockUnits = 0;
   let totalStockCostTL = 0;
-  // Tam lab toplamları (grand total / full_burden referansı)
+  // Bu teste düşen BİLGİ payları (lab içi hacim payıyla — toplama katılmaz)
+  let allocInventoryPeriotTL = 0;
+  let allocDevicePeriotTL = 0;
+  let allocPersonnelPeriotTL = 0;
+
+  // Tam lab toplamları (full_burden/grandTotal referansı) — testin hacmi
+  // olmayan lablar da dahil, tüm filtreli lablar üzerinden.
   let totalInventoryMonthlyTL = 0;
   let totalDeviceMonthlyTL = 0;
   let totalPersonnelMonthlyTL = 0;
-  // Bu teste düşen paylar (volume_weighted: lab içi hacim payıyla)
-  let allocInventoryMonthlyTL = 0;
-  let allocDeviceMonthlyTL = 0;
-  let allocPersonnelMonthlyTL = 0;
+  for (const lab of labs) {
+    const shared = ctx.labShared.get(lab.id);
+    if (!shared) continue;
+    totalInventoryMonthlyTL += shared.inventoryCostTL;
+    totalDeviceMonthlyTL += shared.deviceCostMonthlyTL;
+    totalPersonnelMonthlyTL += shared.personnelCostMonthlyTL;
+  }
 
   for (const lab of labs) {
     let units = 0;
@@ -772,50 +781,36 @@ export function calculateTestCostWithContext(ctx: TestCostContext, testDef: Test
     };
     for (const w of shared.warnings) warningSet.add(w);
 
+    // Testin bu labda hacmi yoksa satır da pay da yok — her test her labın
+    // personel/gider satırını sıfır payla miras almasın.
     const hasStock = units > 0 || costTL > 0;
-    // Lab-level personnel allocation must only include labs where this test has volume.
-    // Otherwise every test inherits every lab's payroll line with a zero share.
     if (!hasStock) continue;
-
-    const totalLabTestUnits = ctx.labTestVolume.get(lab.id) || 0;
-    const testVolumeShare = totalLabTestUnits > 0 && units > 0 ? units / totalLabTestUnits : 0;
-    const allocatedPersonnelMonthlyTL = shared.personnelCostMonthlyTL * testVolumeShare;
-    const allocatedPersonnelCostTL = allocatedPersonnelMonthlyTL * periotAy;
-    const stockUnitCostTL = units > 0 ? costTL / units : 0;
-    const personnelUnitCostTL = units > 0 ? allocatedPersonnelCostTL / units : 0;
 
     // Lab içi hacim payı: adet(test, lab) / toplam test-bağlantılı adet(lab)
     const labVolume = ctx.labTestVolume.get(lab.id) || 0;
-    const labShare = allocationMode === 'volume_weighted'
-      ? (labVolume > 0 ? units / labVolume : 0)
-      : 1;
+    const labShare = labVolume > 0 ? units / labVolume : 0;
 
-    const labInvAlloc = shared.inventoryCostTL * labShare;
-    const labDevAlloc = shared.deviceCostMonthlyTL * labShare;
-    const labPerAlloc = shared.personnelCostMonthlyTL * labShare;
-
-    // Lab başına birim maliyet: (stok + ortak pay × periyot) / adet
-    const labTotalTL = costTL + (labInvAlloc + labDevAlloc + labPerAlloc) * periotAy;
+    const labInvAllocTL = shared.inventoryCostTL * labShare * periotAy;
+    const labDevAllocTL = shared.deviceCostMonthlyTL * labShare * periotAy;
+    const labPerAllocTL = shared.personnelCostMonthlyTL * labShare * periotAy;
 
     perLab.push({
       labId: lab.id,
       labName: lab.name,
       testUnits: units,
       stockCostTL: costTL,
-      inventoryCostTL: labInvAlloc * periotAy,
-      deviceCostMonthlyTL: labDevAlloc * periotAy,
-      personnelCostMonthlyTL: labPerAlloc * periotAy,
-      unitCostTL: units > 0 ? labTotalTL / units : 0,
+      inventoryCostTL: labInvAllocTL,
+      deviceCostMonthlyTL: labDevAllocTL,
+      personnelCostMonthlyTL: labPerAllocTL,
+      // Birim = yalnızca stok — personel/envanter teste katılmaz (ayrı bilgi)
+      unitCostTL: units > 0 ? costTL / units : 0,
     });
 
     totalStockUnits += units;
     totalStockCostTL += costTL;
-    totalInventoryMonthlyTL += shared.inventoryCostTL;
-    totalDeviceMonthlyTL += shared.deviceCostMonthlyTL;
-    totalPersonnelMonthlyTL += shared.personnelCostMonthlyTL;
-    allocInventoryMonthlyTL += labInvAlloc;
-    allocDeviceMonthlyTL += labDevAlloc;
-    allocPersonnelMonthlyTL += labPerAlloc;
+    allocInventoryPeriotTL += labInvAllocTL;
+    allocDevicePeriotTL += labDevAllocTL;
+    allocPersonnelPeriotTL += labPerAllocTL;
   }
 
   // Diğer testlerin stok maliyeti (filtrelenmiş labs üzerinde) — indeksle O(1)
@@ -824,20 +819,20 @@ export function calculateTestCostWithContext(ctx: TestCostContext, testDef: Test
   const warnings = Array.from(warningSet);
   const inputs = { ...ctx.inputs, testDef } as TestCostInputs;
 
-  // Periyot uygulanan tutarlar — volume_weighted'da testin PAYI, diğer
-  // modlarda tam lab toplamları raporlanır.
+  // Bilgi kalemleri — volume_weighted'da testin lab lab hesaplanan payı,
+  // diğer modlarda tam lab toplamları (geriye uyumlu raporlama).
   const useAlloc = allocationMode === 'volume_weighted';
-  const inventoryPeriotTL = (useAlloc ? allocInventoryMonthlyTL : totalInventoryMonthlyTL) * periotAy;
-  const devicePeriotTL = (useAlloc ? allocDeviceMonthlyTL : totalDeviceMonthlyTL) * periotAy;
-  const personnelPeriotTL = (useAlloc ? allocPersonnelMonthlyTL : totalPersonnelMonthlyTL) * periotAy;
+  const inventoryPeriotTL = useAlloc ? allocInventoryPeriotTL : totalInventoryMonthlyTL * periotAy;
+  const devicePeriotTL = useAlloc ? allocDevicePeriotTL : totalDeviceMonthlyTL * periotAy;
+  const personnelPeriotTL = useAlloc ? allocPersonnelPeriotTL : totalPersonnelMonthlyTL * periotAy;
 
   // Grand total (full burden referansı): stok + diğer testlerin stoğu + TAM ortak giderler × periyot
   const fullSharedPeriotTL = (totalInventoryMonthlyTL + totalDeviceMonthlyTL + totalPersonnelMonthlyTL) * periotAy;
   const grandTotal = totalStockCostTL + otherStockTL + fullSharedPeriotTL;
 
+  // Bilgi amaçlı "ortak gider" tutarı (test toplamına DAHİL DEĞİL)
   let ortakGiderler: number;
   if (allocationMode === 'volume_weighted') {
-    // Lab lab hesaplanan payların toplamı — testin gerçek ortak gider yükü
     ortakGiderler = inventoryPeriotTL + devicePeriotTL + personnelPeriotTL;
   } else if (allocationMode === 'equal_alloc') {
     const testCount = Math.max(ctx.inputs.allTestDefs.length, 1);
@@ -845,9 +840,12 @@ export function calculateTestCostWithContext(ctx: TestCostContext, testDef: Test
   } else {
     ortakGiderler = grandTotal - totalStockCostTL;
   }
-  const testTotalCost = totalStockCostTL + ortakGiderler; // full_burden'da = grandTotal
-  // volume_weighted'da bu değer, lab başına birim maliyetlerin hacim
-  // ağırlıklı ortalamasına eşittir — testin "gerçek birim fiyatı".
+
+  // TEST MALİYETİ: full_burden geriye uyumlu (grandTotal); diğer modlarda
+  // YALNIZCA STOK — personel/envanter/cihaz ayrı kalem olarak raporlanır.
+  const testTotalCost = allocationMode === 'full_burden'
+    ? totalStockCostTL + ortakGiderler // = grandTotal
+    : totalStockCostTL;
   const costPerTest = totalStockUnits > 0 ? testTotalCost / totalStockUnits : 0;
   const stockUnitCostTL = totalStockUnits > 0 ? totalStockCostTL / totalStockUnits : 0;
   const personnelUnitCostTL = totalStockUnits > 0 ? personnelPeriotTL / totalStockUnits : 0;
@@ -1017,8 +1015,15 @@ export function calculateTestCostWithContext(ctx: TestCostContext, testDef: Test
     periotAy,
     stockUnitCostTL,
     personnelUnitCostTL,
-    stockSharePct: finalCostPerTest > 0 ? (stockUnitCostTL / finalCostPerTest) * 100 : 0,
-    personnelSharePct: finalCostPerTest > 0 ? (personnelUnitCostTL / finalCostPerTest) * 100 : 0,
+    // Bilgi amaçlı oran: stok + personel birim tabanına göre (personel test maliyetine DAHİL DEĞİL)
+    stockSharePct:
+      stockUnitCostTL + personnelUnitCostTL > 0
+        ? (stockUnitCostTL / (stockUnitCostTL + personnelUnitCostTL)) * 100
+        : 0,
+    personnelSharePct:
+      stockUnitCostTL + personnelUnitCostTL > 0
+        ? (personnelUnitCostTL / (stockUnitCostTL + personnelUnitCostTL)) * 100
+        : 0,
     capacity,
     costMode: costModeResolved,
   };
