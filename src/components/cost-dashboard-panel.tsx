@@ -78,6 +78,7 @@ function getSessionCost(
   rates: Record<Currency, number>,
   currency: Currency
 ): number {
+  if (session.isDeleted) return 0;
   return session.items.reduce((sum, item) => {
     const product = productMap.get(item.stokKodu);
     if (!product?.cost) return sum;
@@ -101,10 +102,16 @@ function getSessionCost(
 /** Get latest session per location */
 function getLatestPerLocation(sessions: SayimSession[]): SayimSession[] {
   const map = new Map<string, SayimSession>();
+  const resetKeys = new Set<string>();
   // sessions already sorted desc by createdAt
   for (const s of sessions) {
     const key = `${s.locationType}-${s.locationId}`;
-    if (!map.has(key)) map.set(key, s);
+    if (map.has(key) || resetKeys.has(key)) continue;
+    if (s.isDeleted) {
+      resetKeys.add(key);
+      continue;
+    }
+    map.set(key, s);
   }
   return Array.from(map.values());
 }
@@ -686,9 +693,10 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
       // ── Helper: calculate item cost in selected currency ──
       const calcItemCost = (item: any) => {
         const product = productMap.get(item.stokKodu);
-        if (!product?.cost || !product?.ambalajDegeri) return 0;
-        const totalTest = (item.stokAdedi * product.ambalajDegeri) + item.cihazUstuAdedi;
-        const costPerTest = product.cost / product.ambalajDegeri;
+        if (!product?.cost) return 0;
+        const ambalaj = Number(product.ambalajDegeri) > 0 ? Number(product.ambalajDegeri) : 1;
+        const totalTest = (item.stokAdedi * ambalaj) + item.cihazUstuAdedi;
+        const costPerTest = product.cost / ambalaj;
         const totalNative = costPerTest * totalTest;
         const productCurrency = (product.currency || 'TRY') as Currency;
         let costEUR: number;
