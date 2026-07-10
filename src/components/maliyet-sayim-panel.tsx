@@ -1216,7 +1216,7 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
                 cihazUstuAdedi: parseInt(entry.cihazUstuAdedi) || 0,
                 cost: productCodes.find(p => p.stokKodu === entry.stokKodu)?.cost ?? 0,
                 currency: productCodes.find(p => p.stokKodu === entry.stokKodu)?.currency || 'TRY',
-                ambalajDegeri: Number(productCodes.find(p => p.stokKodu === entry.stokKodu)?.ambalajDegeri) || 0,
+                ambalajDegeri: Number(productCodes.find(p => p.stokKodu === entry.stokKodu)?.ambalajDegeri) || 1,
                 countedByUid: sessionItem?.countedByUid || currentUserProfile?.uid || '',
                 countedByName: sessionItem?.countedByName || currentUserProfile?.name || '',
                 updates: sessionItem?.updates || [],
@@ -1246,7 +1246,7 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
               cihazUstuAdedi: parseInt(entry.cihazUstuAdedi) || 0,
               cost: productCodes.find(p => p.stokKodu === entry.stokKodu)?.cost ?? 0,
               currency: productCodes.find(p => p.stokKodu === entry.stokKodu)?.currency || 'TRY',
-              ambalajDegeri: Number(productCodes.find(p => p.stokKodu === entry.stokKodu)?.ambalajDegeri) || 0,
+              ambalajDegeri: Number(productCodes.find(p => p.stokKodu === entry.stokKodu)?.ambalajDegeri) || 1,
             }));
 
             await addDoc(collection(db, 'maliyetSayimSessions'), {

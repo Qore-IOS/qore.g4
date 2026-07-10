@@ -132,8 +132,9 @@ export function getProductCostInCurrency(
 ): number {
   const product = productMap.get(stokKodu);
   const productCost = Number(product?.cost ?? snapshot?.cost ?? 0);
-  const packageSize = Number(product?.ambalajDegeri ?? snapshot?.ambalajDegeri ?? 0);
-  if (!productCost || !packageSize) return 0;
+  const rawPackageSize = Number(product?.ambalajDegeri ?? snapshot?.ambalajDegeri ?? 0);
+  const packageSize = rawPackageSize > 0 ? rawPackageSize : 1;
+  if (!productCost) return 0;
 
   const totalTest = (quantity * packageSize) + cihazUstu;
   const costPerTest = productCost / packageSize;

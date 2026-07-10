@@ -293,7 +293,7 @@ export async function completeSession(
       cihazUstuAdedi: item.cihazUstuAdedi,
       cost: item.cost ?? 0,
       currency: item.currency || 'TRY',
-      ambalajDegeri: Number(item.ambalajDegeri) || 0,
+      ambalajDegeri: Number(item.ambalajDegeri) || 1,
     })),
     // Enhanced data for history
     itemsDetailed: finalItems,

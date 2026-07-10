@@ -230,10 +230,11 @@ export default function MaliyetSayimDetayPage() {
   const getProductCost = useCallback((stokKodu: string, quantity: number, cihazUstu: number) => {
     if (!rates) return 0;
     const product = productMap.get(stokKodu);
-    if (!product?.cost || !product?.ambalajDegeri) return 0;
+    if (!product?.cost) return 0;
+    const ambalajDegeri = Number(product.ambalajDegeri) > 0 ? Number(product.ambalajDegeri) : 1;
 
-    const totalTest = (quantity * product.ambalajDegeri) + cihazUstu;
-    const costPerTest = product.cost / product.ambalajDegeri;
+    const totalTest = (quantity * ambalajDegeri) + cihazUstu;
+    const costPerTest = product.cost / ambalajDegeri;
     const totalCostNative = costPerTest * totalTest;
     const productCurrency = (product.currency || 'TRY') as Currency;
 

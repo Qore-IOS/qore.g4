@@ -368,7 +368,7 @@ export default function TopluMaliyetSayimPanel({
               cihazUstuAdedi: parseInt(e.cihazUstuAdedi, 10) || 0,
               cost: p.cost ?? 0,
               currency: p.currency || 'TRY',
-              ambalajDegeri: Number(p.ambalajDegeri) || 0,
+              ambalajDegeri: Number(p.ambalajDegeri) || 1,
             };
           });
         return { loc, items };
