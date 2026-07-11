@@ -41,3 +41,29 @@ env:
     value: "europe-west1"
   - variable: NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
     value: "AIzaSyDW59zZ7YY_z-Vg_M-FjZ4i1i7F-P0KQqQ"
+
+  # --- TAKVİM ENTEGRASYONU (Satın-Alma Planlama → Google Takvim / Outlook) ---
+  # Gizli değerler Secret Manager'dan yüklenir. Önce secret'ları oluşturun
+  # (aksi hâlde deploy başarısız olur), sonra bu blok aktifleşir:
+  #   printf "DEĞER" | gcloud secrets create GOOGLE_CALENDAR_CLIENT_ID     --data-file=- --project=invpilot
+  #   printf "DEĞER" | gcloud secrets create GOOGLE_CALENDAR_CLIENT_SECRET --data-file=- --project=invpilot
+  #   printf "DEĞER" | gcloud secrets create MICROSOFT_CALENDAR_CLIENT_ID     --data-file=- --project=invpilot
+  #   printf "DEĞER" | gcloud secrets create MICROSOFT_CALENDAR_CLIENT_SECRET --data-file=- --project=invpilot
+  #   openssl rand -hex 32 | gcloud secrets create CALENDAR_TOKEN_SECRET      --data-file=- --project=invpilot
+  # Yönlendirme URI'leri (Google Cloud / Azure kaydına eklenmeli):
+  #   https://<canlı-alan-adınız>/api/calendar/google/callback
+  #   https://<canlı-alan-adınız>/api/calendar/microsoft/callback
+  - variable: GOOGLE_CALENDAR_CLIENT_ID
+    secret: GOOGLE_CALENDAR_CLIENT_ID
+  - variable: GOOGLE_CALENDAR_CLIENT_SECRET
+    secret: GOOGLE_CALENDAR_CLIENT_SECRET
+  - variable: MICROSOFT_CALENDAR_CLIENT_ID
+    secret: MICROSOFT_CALENDAR_CLIENT_ID
+  - variable: MICROSOFT_CALENDAR_CLIENT_SECRET
+    secret: MICROSOFT_CALENDAR_CLIENT_SECRET
+  # Refresh token'ları AES-256-GCM ile şifrelemek için (önerilir):
+  - variable: CALENDAR_TOKEN_SECRET
+    secret: CALENDAR_TOKEN_SECRET
+  # Etkinliklerin saat dilimi (opsiyonel; varsayılan Europe/Istanbul):
+  - variable: CALENDAR_TIMEZONE
+    value: "Europe/Istanbul"
