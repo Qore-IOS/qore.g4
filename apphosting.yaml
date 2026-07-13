@@ -43,20 +43,23 @@ env:
     value: "AIzaSyDW59zZ7YY_z-Vg_M-FjZ4i1i7F-P0KQqQ"
 
   # --- TAKVİM ENTEGRASYONU (Satın-Alma Planlama → Google Takvim / Outlook) ---
-  # NOT: Bir env satırı 'secret:' referansı içeriyorsa, o secret Secret
-  # Manager'da MUTLAKA var olmalıdır; yoksa deploy başarısız olur. Bu yüzden
-  # şu an yalnızca GOOGLE aktif. Microsoft/token secret'ları oluşturduğunuzda
-  # ilgili satırların yorumunu kaldırın.
-  #
-  # Aktif etmeden önce oluşturulacak Google secret'ları:
-  #   printf "DEĞER" | gcloud secrets create GOOGLE_CALENDAR_CLIENT_ID     --data-file=- --project=invpilot
-  #   printf "DEĞER" | gcloud secrets create GOOGLE_CALENDAR_CLIENT_SECRET --data-file=- --project=invpilot
+  # NOT: Değerler düz metin (value) olarak girildi; böylece Secret Manager +
+  # grantaccess adımına gerek kalmadan deploy çalışır. GÜVENLİK: client secret
+  # bu dosyada/depoda açık durur. Daha güvenli yöntem Secret Manager'dır
+  # (bkz. aşağıdaki yorumlu alternatif). Secret'ın gizliliği önemliyse Google
+  # Cloud'dan rotate edip Secret Manager'a geçmeniz önerilir.
   # Google Cloud OAuth kaydına eklenecek redirect URI:
   #   https://qorengine.com/api/calendar/google/callback
   - variable: GOOGLE_CALENDAR_CLIENT_ID
-    secret: GOOGLE_CALENDAR_CLIENT_ID
+    value: "929852527053-kl2dvlrvvh54ulg0s6kgkf2h1raajlpj.apps.googleusercontent.com"
   - variable: GOOGLE_CALENDAR_CLIENT_SECRET
-    secret: GOOGLE_CALENDAR_CLIENT_SECRET
+    value: "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"
+  # Güvenli alternatif (Secret Manager kullanmak isterseniz yukarıdaki iki
+  # 'value' satırını silip bunları açın; secret'ları oluşturup grantaccess verin):
+  # - variable: GOOGLE_CALENDAR_CLIENT_ID
+  #   secret: GOOGLE_CALENDAR_CLIENT_ID
+  # - variable: GOOGLE_CALENDAR_CLIENT_SECRET
+  #   secret: GOOGLE_CALENDAR_CLIENT_SECRET
 
   # Etkinliklerin saat dilimi (opsiyonel; varsayılan Europe/Istanbul):
   - variable: CALENDAR_TIMEZONE
