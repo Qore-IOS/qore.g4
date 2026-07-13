@@ -1305,12 +1305,18 @@ export interface KpiBreakdownRow {
 export function KpiBreakdownModal({
   title,
   subtitle,
-  rows,
+  rows = [],
+  content,
+  width = 560,
   onClose,
 }: {
   title: string;
   subtitle?: string;
-  rows: KpiBreakdownRow[];
+  rows?: KpiBreakdownRow[];
+  /** Satır listesinin altında gösterilecek zengin içerik (ekstre, dağıtım tablosu vb.) */
+  content?: React.ReactNode;
+  /** Modal genişliği (px) — geniş tablolar için artırılabilir */
+  width?: number;
   onClose: () => void;
 }) {
   return (
@@ -1334,8 +1340,8 @@ export function KpiBreakdownModal({
           background: 'var(--mg-surface)',
           border: '1px solid var(--mg-border)',
           borderRadius: 18,
-          width: 'min(560px, 100%)',
-          maxHeight: '72vh',
+          width: `min(${width}px, 100%)`,
+          maxHeight: '80vh',
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
@@ -1367,7 +1373,7 @@ export function KpiBreakdownModal({
           </button>
         </div>
         <div style={{ overflowY: 'auto', padding: '8px 20px 16px' }}>
-          {rows.length === 0 ? (
+          {rows.length === 0 && !content ? (
             <div style={{ padding: 24, textAlign: 'center', fontSize: 13, color: 'var(--mg-muted)' }}>Kırılım verisi yok.</div>
           ) : (
             rows.map((r, i) => (
@@ -1397,6 +1403,7 @@ export function KpiBreakdownModal({
               </div>
             ))
           )}
+          {content}
         </div>
       </div>
     </div>
