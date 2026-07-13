@@ -2,15 +2,14 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { collection, getDocs, orderBy, query } from 'firebase/firestore';
+import { getDocs, orderBy } from 'firebase/firestore';
 import { ArrowLeft, FileSpreadsheet, FileText, Loader2 } from 'lucide-react';
-import { db } from '@/lib/firebase';
 import { useProductCodes } from '@/hooks/useFirebaseQueries';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import type { Currency, ProductCode } from '@/lib/types';
-import { getProductCostInCurrency, getSessionDate, type SayimSession } from '@/lib/cost-analytics';
+import { getLatestByLocation, getProductCostInCurrency, getSessionDate, type SayimSession } from '@/lib/cost-analytics';
 import TrendChart from '@/components/cost-observation/TrendChart';
 import { useToast } from '@/hooks/use-toast';
 
@@ -76,7 +75,7 @@ export default function BrandObservationPage() {
   }, [sessions, period]);
 
   const rows = useMemo(() => {
-    return periodSessions.flatMap((s) => s.items
+    return Array.from(getLatestByLocation(periodSessions).values()).flatMap((s) => s.items
       .filter((i) => (i.marka || 'Diğer') === brand)
       .map((i) => ({
         sessionId: s.id,
