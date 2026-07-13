@@ -175,10 +175,13 @@ function formatCosts(costs: CostByCurrency): string {
 
 function getBrandsFromRules(
   minMaxRules: MinMaxRule[],
-  productCodes: ProductCode[]
+  productCodes: ProductCode[],
+  // Şablon dışı (min-max tanımsız) ama sayıma eklenmiş — Excel'den gelen — stok kodları
+  extraStokKodlari?: Set<string>
 ): string[] {
-  if (minMaxRules.length === 0) return [];
   const stokKoduSet = new Set(minMaxRules.map(r => r.stokKodu));
+  if (extraStokKodlari) extraStokKodlari.forEach(k => stokKoduSet.add(k));
+  if (stokKoduSet.size === 0) return [];
   const brands = new Set<string>();
   productCodes.forEach(p => {
     if (stokKoduSet.has(p.stokKodu) && p.marka) {
@@ -191,10 +194,12 @@ function getBrandsFromRules(
 function getProductsForBrandFromRules(
   brand: string,
   minMaxRules: MinMaxRule[],
-  productCodes: ProductCode[]
+  productCodes: ProductCode[],
+  extraStokKodlari?: Set<string>
 ): ProductCode[] {
-  if (minMaxRules.length === 0) return [];
   const stokKoduSet = new Set(minMaxRules.map(r => r.stokKodu));
+  if (extraStokKodlari) extraStokKodlari.forEach(k => stokKoduSet.add(k));
+  if (stokKoduSet.size === 0) return [];
   return productCodes
     .filter(p => p.marka === brand && stokKoduSet.has(p.stokKodu))
     .sort((a, b) => a.stokAdi.localeCompare(b.stokAdi, 'tr'));
@@ -645,6 +650,11 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
   // Excel-based count entry
   const [isExcelBusy, setIsExcelBusy] = useState(false);
   const excelInputRef = useRef<HTMLInputElement | null>(null);
+  /** Excel aktarım raporu — başarıyla aktarılan ve stok kartı bulunamayan kodlar */
+  const [importReport, setImportReport] = useState<{
+    ok: { stokKodu: string; stokAdi: string; scope: boolean }[];
+    failed: string[];
+  } | null>(null);
 
   // Toplu (bulk) sayım girişi
   const [bulkMode, setBulkMode] = useState(false);
@@ -864,15 +874,29 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
     return depots.find(d => d.id === selectedLocationId)?.name ?? '';
   }, [selectedLocationId, locationType, hospitals, depots]);
 
+  // Şablon dışı ama sayıma eklenmiş (Excel/barkod ile) stok kodları — min-max
+  // kapsamında olmayıp countData'da yer alan, stok kartı bulunan ürünler. Marka
+  // sekmeleri ve ürün listeleri bunları da göstersin ki kullanıcı kaydetmeden
+  // önce inceleyebilsin.
+  const productCodeSet = useMemo(() => new Set(productCodes.map(p => p.stokKodu)), [productCodes]);
+  const extraScopeCodes = useMemo(() => {
+    const minMaxSet = new Set(locationMinMaxRules.map(r => r.stokKodu));
+    const extra = new Set<string>();
+    Object.keys(countData).forEach(code => {
+      if (!minMaxSet.has(code) && productCodeSet.has(code)) extra.add(code);
+    });
+    return extra;
+  }, [countData, locationMinMaxRules, productCodeSet]);
+
   const brands = useMemo(() => {
     if (!selectedLocationId || !locationType) return [];
-    return getBrandsFromRules(locationMinMaxRules, productCodes);
-  }, [selectedLocationId, locationType, locationMinMaxRules, productCodes]);
+    return getBrandsFromRules(locationMinMaxRules, productCodes, extraScopeCodes);
+  }, [selectedLocationId, locationType, locationMinMaxRules, productCodes, extraScopeCodes]);
 
   const brandProducts = useMemo(() => {
     if (!activeBrand || !selectedLocationId || !locationType) return [];
-    return getProductsForBrandFromRules(activeBrand, locationMinMaxRules, productCodes);
-  }, [activeBrand, selectedLocationId, locationType, locationMinMaxRules, productCodes]);
+    return getProductsForBrandFromRules(activeBrand, locationMinMaxRules, productCodes, extraScopeCodes);
+  }, [activeBrand, selectedLocationId, locationType, locationMinMaxRules, productCodes, extraScopeCodes]);
 
   // Initialize count data when brand products change
   useEffect(() => {
@@ -901,7 +925,7 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
   // Brand progress
   const brandProgressList = useMemo((): BrandProgress[] => {
     return brands.map(brand => {
-      const products = getProductsForBrandFromRules(brand, locationMinMaxRules, productCodes);
+      const products = getProductsForBrandFromRules(brand, locationMinMaxRules, productCodes, extraScopeCodes);
       const completed = products.filter(p => countData[p.stokKodu]?.counted).length;
       let status: BrandProgress['status'] = 'idle';
       if (completed > 0 && completed < products.length) status = 'in_progress';
@@ -914,7 +938,7 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
       });
       return { brand, total: products.length, completed, status, costs };
     });
-  }, [brands, countData, locationMinMaxRules, productCodes]);
+  }, [brands, countData, locationMinMaxRules, productCodes, extraScopeCodes]);
 
   const totalBrands = brandProgressList.length;
   const completedBrands = brandProgressList.filter(b => b.status === 'completed').length;
@@ -1049,10 +1073,8 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
   const handleDownloadExcelTemplate = useCallback(async () => {
     const stokKoduSet = new Set(locationMinMaxRules.map(r => r.stokKodu));
     const scopeProducts = productCodes.filter(p => stokKoduSet.has(p.stokKodu));
-    if (scopeProducts.length === 0) {
-      toast({ title: 'Ürün yok', description: 'Bu lokasyonda sayıma dahil ürün bulunmuyor.' });
-      return;
-    }
+    // Min-max tanımlı ürün yoksa bile boş (yalnız başlıklı) şablon indirilir;
+    // kullanıcı "Stok Kodu" sütununa stok kartı olan herhangi bir ürünü ekleyebilir.
     setIsExcelBusy(true);
     try {
       const rows = scopeProducts
@@ -1069,7 +1091,12 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
         });
       const safeName = (locationName || 'Lokasyon').replace(/[^\p{L}\p{N}]+/gu, '_');
       await downloadMaliyetSayimTemplate(rows, `Maliyet_Sayim_Sablonu_${safeName}.xlsx`);
-      toast({ title: 'Şablon indirildi', description: 'Maliyet sayım şablonu Excel olarak indirildi.' });
+      toast({
+        title: 'Şablon indirildi',
+        description: rows.length > 0
+          ? `${rows.length} tanımlı ürün eklendi. Stok kartı olan başka ürünleri "Stok Kodu" sütununa ekleyebilirsiniz.`
+          : 'Bu lokasyonda tanımlı ürün yok — boş şablon indirildi. "Stok Kodu" sütununa stok kartı olan ürünleri ekleyebilirsiniz.',
+      });
     } catch (err: any) {
       console.error('Maliyet sayım template download error:', err);
       toast({ title: 'Hata', description: err?.message || 'Şablon oluşturulamadı.', variant: 'destructive' });
@@ -1088,23 +1115,27 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
         return;
       }
 
-      const stokKoduSet = new Set(locationMinMaxRules.map(r => r.stokKodu));
+      // Min-max kapsamı ARTIK sınırlayıcı değil — stok kartı (productCodes) olan
+      // her ürün aktarılabilir. Yalnızca stok kartı bulunmayan kodlar eklenemez.
+      const minMaxSet = new Set(locationMinMaxRules.map(r => r.stokKodu));
       const productByCode = new Map(productCodes.map(p => [p.stokKodu, p]));
 
       const next: Record<string, ProductCountEntry> = { ...countData };
       const appliedEntries: ProductCountEntry[] = [];
-      let unknown = 0;
+      const okList: { stokKodu: string; stokAdi: string; scope: boolean }[] = [];
+      const failList: string[] = [];
 
       parsed.forEach(({ stokKodu, stokAdedi, cihazUstuAdedi }) => {
-        if (!stokKoduSet.has(stokKodu)) {
-          unknown++;
+        const product = productByCode.get(stokKodu);
+        if (!product) {
+          // Stok kartı yok — aktarılamadı
+          failList.push(stokKodu);
           return;
         }
-        const product = productByCode.get(stokKodu);
         const base: ProductCountEntry = next[stokKodu] ?? {
           stokKodu,
-          stokAdi: product?.stokAdi || stokKodu,
-          marka: product?.marka || '',
+          stokAdi: product.stokAdi || stokKodu,
+          marka: product.marka || '',
           stokAdedi: '',
           cihazUstuAdedi: '',
           counted: false,
@@ -1120,6 +1151,7 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
         };
         next[stokKodu] = updated;
         appliedEntries.push(updated);
+        okList.push({ stokKodu, stokAdi: product.stokAdi || stokKodu, scope: minMaxSet.has(stokKodu) });
       });
 
       const applied = appliedEntries.length;
@@ -1132,10 +1164,14 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
         });
       }
 
-      const parts: string[] = [`${applied} ürün için sayım girildi`];
-      if (unknown > 0) parts.push(`${unknown} tanımsız satır atlandı`);
+      const extraCount = okList.filter(o => !o.scope).length;
+      // Detaylı aktarım raporu — hangi ürünler geldi, hangi stok kodları eklenemedi
+      setImportReport({ ok: okList, failed: failList });
+      const parts: string[] = [`${applied} ürün aktarıldı`];
+      if (extraCount > 0) parts.push(`${extraCount} tanımsız ürün eklendi`);
+      if (failList.length > 0) parts.push(`${failList.length} stok kodu bulunamadı`);
       toast({
-        title: applied > 0 ? 'Excel ile sayım yüklendi' : 'Eşleşen ürün yok',
+        title: applied > 0 ? 'Excel ile sayım yüklendi' : 'Aktarılabilecek ürün yok',
         description: parts.join(' · '),
         variant: applied > 0 ? 'default' : 'destructive',
       });
@@ -2581,6 +2617,65 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
           )}
         </main>
       </div>
+
+      {/* ===== EXCEL AKTARIM RAPORU ===== */}
+      <Dialog open={!!importReport} onOpenChange={(o) => { if (!o) setImportReport(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Excel Aktarım Raporu</DialogTitle>
+          </DialogHeader>
+          {importReport && (
+            <div className="space-y-4 py-1">
+              <div className="flex gap-3">
+                <div className="flex-1 cihaz-card p-3 text-center">
+                  <div className="text-2xl font-bold text-emerald-500">{importReport.ok.length}</div>
+                  <div className="text-xs text-[var(--dashboard-muted)]">aktarıldı</div>
+                </div>
+                <div className="flex-1 cihaz-card p-3 text-center">
+                  <div className={cn('text-2xl font-bold', importReport.failed.length > 0 ? 'text-red-500' : 'text-[var(--dashboard-muted)]')}>{importReport.failed.length}</div>
+                  <div className="text-xs text-[var(--dashboard-muted)]">aktarılamadı</div>
+                </div>
+              </div>
+
+              {importReport.failed.length > 0 && (
+                <div>
+                  <div className="text-xs font-semibold text-red-500 mb-1.5">Stok kartı bulunamadı — aktarılamayan kodlar</div>
+                  <div className="max-h-40 overflow-y-auto rounded-lg border border-red-500/20 bg-red-500/5 p-2 space-y-1">
+                    {importReport.failed.map((code) => (
+                      <div key={code} className="text-xs font-mono text-[var(--dashboard-text)]">{code}</div>
+                    ))}
+                  </div>
+                  <div className="text-[11px] text-[var(--dashboard-muted)] mt-1">Bu kodlar ürün kataloğunda (stok kartı) yok. Doğru stok kodunu girin ya da önce stok kartını oluşturun.</div>
+                </div>
+              )}
+
+              {importReport.ok.length > 0 && (
+                <div>
+                  <div className="text-xs font-semibold text-emerald-600 mb-1.5">Aktarılan ürünler</div>
+                  <div className="max-h-52 overflow-y-auto rounded-lg border border-[var(--dashboard-stroke)] divide-y divide-[var(--dashboard-stroke)]/60">
+                    {importReport.ok.map((o) => (
+                      <div key={o.stokKodu} className="flex items-center justify-between gap-2 px-2.5 py-1.5">
+                        <div className="min-w-0">
+                          <div className="text-xs font-medium text-[var(--dashboard-text)] truncate">{o.stokAdi}</div>
+                          <div className="text-[11px] font-mono text-[var(--dashboard-muted)]">{o.stokKodu}</div>
+                        </div>
+                        {!o.scope && (
+                          <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600">tanımsız</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="text-[11px] text-[var(--dashboard-muted)] mt-1">"tanımsız" etiketi min-max kapsamında olmayan ama stok kartı bulunan ürünleri gösterir; ilgili marka sekmesinde görünür.</div>
+                </div>
+              )}
+
+              <div className="flex justify-end">
+                <Button size="sm" onClick={() => setImportReport(null)}>Kapat</Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* ===== FINISH MODAL ===== */}
       <Dialog open={showFinishModal} onOpenChange={setShowFinishModal}>
