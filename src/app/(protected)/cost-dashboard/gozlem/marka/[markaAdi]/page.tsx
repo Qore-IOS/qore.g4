@@ -4,10 +4,10 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { getDocs, orderBy } from 'firebase/firestore';
 import { ArrowLeft, FileSpreadsheet, FileText, Loader2 } from 'lucide-react';
-import { useProductCodes } from '@/hooks/useFirebaseQueries';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery, getScopedDocs } from '@/lib/firestore-helpers';
+import { getExchangeRates } from '@/lib/exchange-rates';
 import type { Currency, ProductCode } from '@/lib/types';
 import { getLatestByLocation, getProductCostInCurrency, getSessionDate, type SayimSession } from '@/lib/cost-analytics';
 import TrendChart from '@/components/cost-observation/TrendChart';
@@ -23,29 +23,43 @@ export default function BrandObservationPage() {
   const period = /^\d{4}-\d{2}$/.test(searchParams?.get('period') || '') ? searchParams!.get('period')! : null;
   const router = useRouter();
   const { toast } = useToast();
-  const productsQuery = useProductCodes();
   const { currentCompanyId, isSuperAdmin } = useAuth();
 
   const [currency, setCurrency] = useState<Currency>('TRY');
-  const [rates] = useState<Record<Currency, number>>({ EUR: 1, USD: 1.08, TRY: 38.5 });
+  // Gözlem paneliyle birebir aynı olsun diye kurlar da canlı çekilir; önceden
+  // sabit {EUR:1,USD:1.08,TRY:38.5} idi ve TRY dışı ürünlerde toplam sapıyordu.
+  const [rates, setRates] = useState<Record<Currency, number>>({ EUR: 1, USD: 1.08, TRY: 38.5 });
   const [sessions, setSessions] = useState<SayimSession[]>([]);
+  const [productMap, setProductMap] = useState<Map<string, ProductCode>>(new Map());
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
     const run = async () => {
-      const snap = await getDocs(scopedQuery('maliyetSayimSessions', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc')));
+      // Gözlem paneli (StokTab) ile AYNI kaynaklar: oturumlar + legacy-aware
+      // ürün kodları + canlı kurlar. useProductCodes strict scope + 1 saatlik
+      // önbellek kullandığından güncellenen/legacy ürün maliyetlerini yansıtmıyor,
+      // bu da marka toplamının gözlem panelinden sapmasına yol açıyordu.
+      const [snap, productDocs, ratesValue] = await Promise.all([
+        getDocs(scopedQuery('maliyetSayimSessions', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
+        getScopedDocs('productCodes', currentCompanyId, isSuperAdmin),
+        getExchangeRates().catch(() => ({ EUR: 1, USD: 1.08, TRY: 38.5 })),
+      ]);
+      if (cancelled) return;
       const all = snap.docs.map((d) => ({ id: d.id, ...d.data() } as SayimSession));
       setSessions(filterByCompanyScope(all, currentCompanyId, isSuperAdmin));
+      const pMap = new Map<string, ProductCode>();
+      productDocs.forEach((d) => {
+        const p = { id: d.id, ...d.data() } as ProductCode;
+        pMap.set(p.stokKodu, p);
+      });
+      setProductMap(pMap);
+      setRates(ratesValue as Record<Currency, number>);
       setLoading(false);
     };
     run();
+    return () => { cancelled = true; };
   }, [currentCompanyId, isSuperAdmin]);
-
-  const productMap = useMemo(() => {
-    const m = new Map<string, ProductCode>();
-    (productsQuery.data || []).forEach((p) => m.set(p.stokKodu, p));
-    return m;
-  }, [productsQuery.data]);
 
   const sym = CURRENCY_SYMBOLS[currency];
 
@@ -323,7 +337,7 @@ export default function BrandObservationPage() {
     }
   }, [brand, createPieChartDataUrl, currency, latestRows, loadLogoDataUrl, locationSummary, monthly, pareto.share, sanitizePdfText, sym, toast, total, unitCostAvg]);
 
-  if (loading || productsQuery.isLoading) {
+  if (loading) {
     return <div className="min-h-screen flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)]" /></div>;
   }
 
