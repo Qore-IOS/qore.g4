@@ -879,14 +879,20 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
   // sekmeleri ve ürün listeleri bunları da göstersin ki kullanıcı kaydetmeden
   // önce inceleyebilsin.
   const productCodeSet = useMemo(() => new Set(productCodes.map(p => p.stokKodu)), [productCodes]);
-  const extraScopeCodes = useMemo(() => {
+  // İçerik-kararlı imza: countData her değiştiğinde yeniden hesaplanır ama DEĞER
+  // aynı kaldıkça extraScopeCodes referansı değişmez → brands/brandProducts
+  // gereksiz yere yeniden üretilmez (döngü ve gereksiz render önlenir).
+  const extraScopeSignature = useMemo(() => {
     const minMaxSet = new Set(locationMinMaxRules.map(r => r.stokKodu));
-    const extra = new Set<string>();
-    Object.keys(countData).forEach(code => {
-      if (!minMaxSet.has(code) && productCodeSet.has(code)) extra.add(code);
-    });
-    return extra;
+    return Object.keys(countData)
+      .filter(code => !minMaxSet.has(code) && productCodeSet.has(code))
+      .sort()
+      .join('|');
   }, [countData, locationMinMaxRules, productCodeSet]);
+  const extraScopeCodes = useMemo(
+    () => new Set(extraScopeSignature ? extraScopeSignature.split('|') : []),
+    [extraScopeSignature],
+  );
 
   const brands = useMemo(() => {
     if (!selectedLocationId || !locationType) return [];
@@ -898,13 +904,19 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
     return getProductsForBrandFromRules(activeBrand, locationMinMaxRules, productCodes, extraScopeCodes);
   }, [activeBrand, selectedLocationId, locationType, locationMinMaxRules, productCodes, extraScopeCodes]);
 
-  // Initialize count data when brand products change
+  // Initialize count data when brand products change.
+  // ÖNEMLİ: Yalnızca gerçekten yeni ürün eklendiğinde YENİ nesne döndür; aksi
+  // halde `prev` referansını koru. countData referansı her seferinde değişirse
+  // extraScopeCodes → brands → brandProducts → bu effect zinciri sonsuz döngüye
+  // girip "Maximum update depth exceeded" hatası veriyordu.
   useEffect(() => {
     if (brandProducts.length === 0) return;
     setCountData(prev => {
+      let changed = false;
       const next = { ...prev };
       brandProducts.forEach(p => {
         if (!next[p.stokKodu]) {
+          changed = true;
           next[p.stokKodu] = {
             stokKodu: p.stokKodu,
             stokAdi: p.stokAdi,
@@ -918,7 +930,7 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
           };
         }
       });
-      return next;
+      return changed ? next : prev;
     });
   }, [brandProducts]);
 
