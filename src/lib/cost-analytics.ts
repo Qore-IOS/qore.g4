@@ -30,7 +30,13 @@ export interface SayimSession {
   /** Optional year saved by the bulk count flow. */
   year?: number;
   items: SayimSessionItem[];
+  /** Soft-deleted sessions act as a reset marker for the same period + location. */
+  isDeleted?: boolean;
+  deletedAt?: any;
+  deletedByUid?: string;
+  deletedByName?: string;
 }
+
 
 export interface BrandCostData {
   name: string;
@@ -78,12 +84,16 @@ export interface TurnoverMetrics {
   dio: number;
 }
 
-function getCreatedAtDate(session: SayimSession): Date | null {
-  if (!session.createdAt) return null;
-  if (session.createdAt.toDate) return session.createdAt.toDate();
-  if (session.createdAt.seconds) return new Date(session.createdAt.seconds * 1000);
-  const d = new Date(session.createdAt);
+function toDateValue(value: any): Date | null {
+  if (!value) return null;
+  if (value.toDate) return value.toDate();
+  if (value.seconds) return new Date(value.seconds * 1000);
+  const d = new Date(value);
   return isValid(d) ? d : null;
+}
+
+function getCreatedAtDate(session: SayimSession): Date | null {
+  return toDateValue(session.createdAt);
 }
 
 function getSessionPeriodDate(session: SayimSession): Date | null {
@@ -122,8 +132,9 @@ export function getProductCostInCurrency(
 ): number {
   const product = productMap.get(stokKodu);
   const productCost = Number(product?.cost ?? snapshot?.cost ?? 0);
-  const packageSize = Number(product?.ambalajDegeri ?? snapshot?.ambalajDegeri ?? 0);
-  if (!productCost || !packageSize) return 0;
+  const rawPackageSize = Number(product?.ambalajDegeri ?? snapshot?.ambalajDegeri ?? 0);
+  const packageSize = rawPackageSize > 0 ? rawPackageSize : 1;
+  if (!productCost) return 0;
 
   const totalTest = (quantity * packageSize) + cihazUstu;
   const costPerTest = productCost / packageSize;
@@ -141,13 +152,61 @@ function compareSessionsByAnalyticsDateDesc(a: SayimSession, b: SayimSession): n
   const ad = getSessionDate(a)?.getTime() ?? 0;
   const bd = getSessionDate(b)?.getTime() ?? 0;
   if (bd !== ad) return bd - ad;
-  const ac = getCreatedAtDate(a)?.getTime() ?? 0;
-  const bc = getCreatedAtDate(b)?.getTime() ?? 0;
+  const ac = (toDateValue(a.deletedAt) || getCreatedAtDate(a))?.getTime() ?? 0;
+  const bc = (toDateValue(b.deletedAt) || getCreatedAtDate(b))?.getTime() ?? 0;
   return bc - ac;
 }
 
 function sortSessionsByAnalyticsDateDesc(sessions: SayimSession[]): SayimSession[] {
   return [...sessions].sort(compareSessionsByAnalyticsDateDesc);
+}
+
+function mergeSessionItem(target: SayimSessionItem, source: SayimSessionItem): SayimSessionItem {
+  return {
+    ...target,
+    stokAdedi: (Number(target.stokAdedi) || 0) + (Number(source.stokAdedi) || 0),
+    cihazUstuAdedi: (Number(target.cihazUstuAdedi) || 0) + (Number(source.cihazUstuAdedi) || 0),
+  };
+}
+
+function mergeSessionsByLocation(sessions: SayimSession[]): Map<string, SayimSession> {
+  const consolidatedByLocation = new Map<string, SayimSession>();
+  const resetKeys = new Set<string>();
+
+  sortSessionsByAnalyticsDateDesc(sessions).forEach((session) => {
+    const key = `${session.locationType}-${session.locationId}`;
+    if (resetKeys.has(key)) return;
+    if (session.isDeleted) {
+      resetKeys.add(key);
+      return;
+    }
+
+    const current = consolidatedByLocation.get(key);
+    if (!current) {
+      consolidatedByLocation.set(key, {
+        ...session,
+        items: session.items.map((item) => ({ ...item })),
+      });
+      return;
+    }
+
+    const itemsByStockCode = new Map<string, SayimSessionItem>(
+      current.items.map((item) => [item.stokKodu, { ...item }]),
+    );
+
+    session.items.forEach((item) => {
+      const existing = itemsByStockCode.get(item.stokKodu);
+      itemsByStockCode.set(item.stokKodu, existing ? mergeSessionItem(existing, item) : { ...item });
+    });
+
+    consolidatedByLocation.set(key, {
+      ...current,
+      id: `${current.id}+${session.id}`,
+      items: Array.from(itemsByStockCode.values()),
+    });
+  });
+
+  return consolidatedByLocation;
 }
 
 export function getSessionsInRange(
@@ -184,12 +243,7 @@ export function getSessionsInRange(
 }
 
 export function getLatestByLocation(sessions: SayimSession[]): Map<string, SayimSession> {
-  const latestByLocation = new Map<string, SayimSession>();
-  sortSessionsByAnalyticsDateDesc(sessions).forEach((session) => {
-    const key = `${session.locationType}-${session.locationId}`;
-    if (!latestByLocation.has(key)) latestByLocation.set(key, session);
-  });
-  return latestByLocation;
+  return mergeSessionsByLocation(sessions);
 }
 
 export function getSessionCost(
@@ -198,6 +252,7 @@ export function getSessionCost(
   rates: Record<Currency, number>,
   currency: Currency
 ): number {
+  if (session.isDeleted) return 0;
   return session.items.reduce((sum, item) => sum + getProductCostInCurrency(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi, productMap, rates, currency, item), 0);
 }
 

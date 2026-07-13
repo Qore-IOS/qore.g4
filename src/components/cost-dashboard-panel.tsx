@@ -78,6 +78,7 @@ function getSessionCost(
   rates: Record<Currency, number>,
   currency: Currency
 ): number {
+  if (session.isDeleted) return 0;
   return session.items.reduce((sum, item) => {
     const product = productMap.get(item.stokKodu);
     if (!product?.cost) return sum;
@@ -98,13 +99,34 @@ function getSessionCost(
   }, 0);
 }
 
-/** Get latest session per location */
+/** Get latest counted stock per location, consolidating multiple active counts in the same window. */
 function getLatestPerLocation(sessions: SayimSession[]): SayimSession[] {
   const map = new Map<string, SayimSession>();
+  const resetKeys = new Set<string>();
   // sessions already sorted desc by createdAt
   for (const s of sessions) {
     const key = `${s.locationType}-${s.locationId}`;
-    if (!map.has(key)) map.set(key, s);
+    if (resetKeys.has(key)) continue;
+    if (s.isDeleted) {
+      resetKeys.add(key);
+      continue;
+    }
+    const current = map.get(key);
+    if (!current) {
+      map.set(key, { ...s, items: s.items.map((item) => ({ ...item })) });
+      continue;
+    }
+
+    const itemsByStockCode = new Map(current.items.map((item) => [item.stokKodu, { ...item }]));
+    s.items.forEach((item) => {
+      const existing = itemsByStockCode.get(item.stokKodu);
+      itemsByStockCode.set(item.stokKodu, existing ? {
+        ...existing,
+        stokAdedi: (Number(existing.stokAdedi) || 0) + (Number(item.stokAdedi) || 0),
+        cihazUstuAdedi: (Number(existing.cihazUstuAdedi) || 0) + (Number(item.cihazUstuAdedi) || 0),
+      } : { ...item });
+    });
+    map.set(key, { ...current, id: `${current.id}+${s.id}`, items: Array.from(itemsByStockCode.values()) });
   }
   return Array.from(map.values());
 }
@@ -686,9 +708,10 @@ export default function CostDashboardPanel({ productCodes }: CostDashboardPanelP
       // ── Helper: calculate item cost in selected currency ──
       const calcItemCost = (item: any) => {
         const product = productMap.get(item.stokKodu);
-        if (!product?.cost || !product?.ambalajDegeri) return 0;
-        const totalTest = (item.stokAdedi * product.ambalajDegeri) + item.cihazUstuAdedi;
-        const costPerTest = product.cost / product.ambalajDegeri;
+        if (!product?.cost) return 0;
+        const ambalaj = Number(product.ambalajDegeri) > 0 ? Number(product.ambalajDegeri) : 1;
+        const totalTest = (item.stokAdedi * ambalaj) + item.cihazUstuAdedi;
+        const costPerTest = product.cost / ambalaj;
         const totalNative = costPerTest * totalTest;
         const productCurrency = (product.currency || 'TRY') as Currency;
         let costEUR: number;

@@ -429,7 +429,7 @@ export function ActivityCard({
             justifyContent: 'center',
             transition: 'all 0.2s',
           }}
-          onClick={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); onClick?.(); }}
         >
           <svg width={isMobile ? 10 : 12} height={isMobile ? 10 : 12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M7 17 17 7M7 7h10v10" />
@@ -1299,6 +1299,7 @@ export interface KpiBreakdownRow {
   label: string;
   value?: string;
   sub?: string;
+  onClick?: () => void;
 }
 
 export function KpiBreakdownModal({
@@ -1372,6 +1373,10 @@ export function KpiBreakdownModal({
             rows.map((r, i) => (
               <div
                 key={`${r.label}-${i}`}
+                role={r.onClick ? 'button' : undefined}
+                tabIndex={r.onClick ? 0 : undefined}
+                onClick={r.onClick}
+                onKeyDown={(e) => { if (r.onClick && (e.key === 'Enter' || e.key === ' ')) r.onClick(); }}
                 style={{
                   display: 'flex',
                   alignItems: 'baseline',
@@ -1379,6 +1384,7 @@ export function KpiBreakdownModal({
                   gap: 12,
                   padding: '10px 0',
                   borderBottom: i < rows.length - 1 ? '1px solid var(--mg-border)' : 'none',
+                  cursor: r.onClick ? 'pointer' : 'default',
                 }}
               >
                 <div style={{ minWidth: 0 }}>
