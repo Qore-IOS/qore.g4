@@ -43,27 +43,33 @@ env:
     value: "AIzaSyDW59zZ7YY_z-Vg_M-FjZ4i1i7F-P0KQqQ"
 
   # --- TAKVİM ENTEGRASYONU (Satın-Alma Planlama → Google Takvim / Outlook) ---
-  # Gizli değerler Secret Manager'dan yüklenir. Önce secret'ları oluşturun
-  # (aksi hâlde deploy başarısız olur), sonra bu blok aktifleşir:
+  # NOT: Bir env satırı 'secret:' referansı içeriyorsa, o secret Secret
+  # Manager'da MUTLAKA var olmalıdır; yoksa deploy başarısız olur. Bu yüzden
+  # şu an yalnızca GOOGLE aktif. Microsoft/token secret'ları oluşturduğunuzda
+  # ilgili satırların yorumunu kaldırın.
+  #
+  # Aktif etmeden önce oluşturulacak Google secret'ları:
   #   printf "DEĞER" | gcloud secrets create GOOGLE_CALENDAR_CLIENT_ID     --data-file=- --project=invpilot
   #   printf "DEĞER" | gcloud secrets create GOOGLE_CALENDAR_CLIENT_SECRET --data-file=- --project=invpilot
-  #   printf "DEĞER" | gcloud secrets create MICROSOFT_CALENDAR_CLIENT_ID     --data-file=- --project=invpilot
-  #   printf "DEĞER" | gcloud secrets create MICROSOFT_CALENDAR_CLIENT_SECRET --data-file=- --project=invpilot
-  #   openssl rand -hex 32 | gcloud secrets create CALENDAR_TOKEN_SECRET      --data-file=- --project=invpilot
-  # Yönlendirme URI'leri (Google Cloud / Azure kaydına eklenmeli):
-  #   https://<canlı-alan-adınız>/api/calendar/google/callback
-  #   https://<canlı-alan-adınız>/api/calendar/microsoft/callback
+  # Google Cloud OAuth kaydına eklenecek redirect URI:
+  #   https://qorengine.com/api/calendar/google/callback
   - variable: GOOGLE_CALENDAR_CLIENT_ID
     secret: GOOGLE_CALENDAR_CLIENT_ID
   - variable: GOOGLE_CALENDAR_CLIENT_SECRET
     secret: GOOGLE_CALENDAR_CLIENT_SECRET
-  - variable: MICROSOFT_CALENDAR_CLIENT_ID
-    secret: MICROSOFT_CALENDAR_CLIENT_ID
-  - variable: MICROSOFT_CALENDAR_CLIENT_SECRET
-    secret: MICROSOFT_CALENDAR_CLIENT_SECRET
-  # Refresh token'ları AES-256-GCM ile şifrelemek için (önerilir):
-  - variable: CALENDAR_TOKEN_SECRET
-    secret: CALENDAR_TOKEN_SECRET
+
   # Etkinliklerin saat dilimi (opsiyonel; varsayılan Europe/Istanbul):
   - variable: CALENDAR_TIMEZONE
     value: "Europe/Istanbul"
+
+  # --- SONRA EKLENECEK (secret'ları oluşturunca yorumu kaldırın) ---
+  # Microsoft Outlook:
+  #   redirect URI: https://qorengine.com/api/calendar/microsoft/callback
+  # - variable: MICROSOFT_CALENDAR_CLIENT_ID
+  #   secret: MICROSOFT_CALENDAR_CLIENT_ID
+  # - variable: MICROSOFT_CALENDAR_CLIENT_SECRET
+  #   secret: MICROSOFT_CALENDAR_CLIENT_SECRET
+  # Refresh token'ları AES-256-GCM ile şifrelemek için (önerilir):
+  #   openssl rand -hex 32 | gcloud secrets create CALENDAR_TOKEN_SECRET --data-file=- --project=invpilot
+  # - variable: CALENDAR_TOKEN_SECRET
+  #   secret: CALENDAR_TOKEN_SECRET
