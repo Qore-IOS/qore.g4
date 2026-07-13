@@ -259,11 +259,6 @@ export function StokTab({ currency, search, setSearch, registerExportHandlers }:
     rows: productRows(details),
   });
 
-  const openBrandProducts = (brand: string, details = productDetails.filter((d) => d.marka === brand)) => {
-    const sum = details.reduce((acc, d) => acc + d.cost, 0);
-    openProducts(`${brand} — Ürün Kırılımı`, details, fmtFull(sum));
-  };
-
   // Marka detay paneline git — kurum kurum ürün detayı + Excel/PDF çıktısı orada.
   // Seçili dönem varsa ?period ile taşınır (sayfa yalnızca o ayı analiz eder).
   const goToBrand = (brand: string) => {
@@ -769,7 +764,7 @@ export function StokTab({ currency, search, setSearch, registerExportHandlers }:
                 delta: `%${total > 0 ? ((b.value / total) * 100).toFixed(0) : 0}`,
                 format: cardMoneyFormat,
                 sparkData: null,
-                onClick: () => openBrandProducts(b.name),
+                onClick: () => goToBrand(b.name),
               })),
             },
           ]}
