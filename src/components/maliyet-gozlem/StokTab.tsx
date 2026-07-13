@@ -264,13 +264,6 @@ export function StokTab({ currency, search, setSearch, registerExportHandlers }:
     openProducts(`${brand} — Ürün Kırılımı`, details, fmtFull(sum));
   };
 
-  // Marka detay paneline git — kurum kurum ürün detayı + Excel/PDF çıktısı orada.
-  // Seçili dönem varsa ?period ile taşınır (sayfa yalnızca o ayı analiz eder).
-  const goToBrand = (brand: string) => {
-    const qs = selectedPeriod !== 'all' ? `?period=${encodeURIComponent(selectedPeriod)}` : '';
-    router.push(`/cost-dashboard/gozlem/marka/${encodeURIComponent(brand)}${qs}`);
-  };
-
   const openLocationBrands = (locationId: string, locationName: string) => {
     const details = productDetails.filter((d) => d.locationId === locationId);
     setKpiModal({
@@ -694,7 +687,7 @@ export function StokTab({ currency, search, setSearch, registerExportHandlers }:
               label: b.name,
               sub: `${b.productCount} ürün · %${total > 0 ? ((b.value / total) * 100).toFixed(1) : 0} pay · detay ›`,
               value: fmtFull(b.value),
-              onClick: () => goToBrand(b.name),
+              onClick: () => openBrandProducts(b.name),
             })),
           })}
         />
@@ -825,7 +818,7 @@ export function StokTab({ currency, search, setSearch, registerExportHandlers }:
                 value: b.value,
                 color: BRAND_COLORS[i % BRAND_COLORS.length],
               }))}
-              onSelect={(name) => goToBrand(name)}
+              onSelect={(name) => openBrandProducts(name)}
             />
           ) : (
             <div style={{ padding: 40, textAlign: 'center', color: 'var(--mg-muted)' }}>Veri yok</div>

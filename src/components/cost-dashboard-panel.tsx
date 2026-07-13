@@ -99,19 +99,34 @@ function getSessionCost(
   }, 0);
 }
 
-/** Get latest session per location */
+/** Get latest counted stock per location, consolidating multiple active counts in the same window. */
 function getLatestPerLocation(sessions: SayimSession[]): SayimSession[] {
   const map = new Map<string, SayimSession>();
   const resetKeys = new Set<string>();
   // sessions already sorted desc by createdAt
   for (const s of sessions) {
     const key = `${s.locationType}-${s.locationId}`;
-    if (map.has(key) || resetKeys.has(key)) continue;
+    if (resetKeys.has(key)) continue;
     if (s.isDeleted) {
       resetKeys.add(key);
       continue;
     }
-    map.set(key, s);
+    const current = map.get(key);
+    if (!current) {
+      map.set(key, { ...s, items: s.items.map((item) => ({ ...item })) });
+      continue;
+    }
+
+    const itemsByStockCode = new Map(current.items.map((item) => [item.stokKodu, { ...item }]));
+    s.items.forEach((item) => {
+      const existing = itemsByStockCode.get(item.stokKodu);
+      itemsByStockCode.set(item.stokKodu, existing ? {
+        ...existing,
+        stokAdedi: (Number(existing.stokAdedi) || 0) + (Number(item.stokAdedi) || 0),
+        cihazUstuAdedi: (Number(existing.cihazUstuAdedi) || 0) + (Number(item.cihazUstuAdedi) || 0),
+      } : { ...item });
+    });
+    map.set(key, { ...current, id: `${current.id}+${s.id}`, items: Array.from(itemsByStockCode.values()) });
   }
   return Array.from(map.values());
 }
