@@ -685,7 +685,7 @@ export function StokTab({ currency, search, setSearch, registerExportHandlers }:
             subtitle: `Toplam ${fmtFull(total)}`,
             rows: brands.map((b) => ({
               label: b.name,
-              sub: `${b.productCount} ürün · %${total > 0 ? ((b.value / total) * 100).toFixed(1) : 0} pay`,
+              sub: `${b.productCount} ürün · %${total > 0 ? ((b.value / total) * 100).toFixed(1) : 0} pay · detay ›`,
               value: fmtFull(b.value),
               onClick: () => openBrandProducts(b.name),
             })),

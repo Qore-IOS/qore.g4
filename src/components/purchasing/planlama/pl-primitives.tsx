@@ -255,6 +255,8 @@ body.mg-edge-body:has(.pl-root) { background: #EFEAE0 !important; }
 @keyframes plGrowH { from { height: 0; } }
 @keyframes plModalPop { from { opacity: 0; transform: translateY(16px) scale(0.97); } to { opacity: 1; transform: none; } }
 @keyframes plSheetUp { from { opacity: 0; transform: translateY(100%); } to { opacity: 1; transform: none; } }
+@keyframes plSpin { to { transform: rotate(360deg); } }
+.pl-root .pl-spin, .pl-spin { animation: plSpin 0.8s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .pl-root *, .pl-root *::before, .pl-root *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
 `;
 

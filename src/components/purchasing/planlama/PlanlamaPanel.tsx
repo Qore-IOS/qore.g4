@@ -15,11 +15,12 @@ import {
 import PlList from './PlList';
 import PlTaskModal from './PlTaskModal';
 import PlAnalytics from './PlAnalytics';
+import CalendarConnect from './CalendarConnect';
 
 const COLLECTION = 'planlamaGorevler';
 
 /* header (mobile actions, desktop keeps the canvas tabless) */
-const PlHeader = ({ ac, mode, onSearch, onAdd, onAnalytics }: any) => {
+const PlHeader = ({ ac, mode, onSearch, onAdd, onAnalytics, calendarSlot }: any) => {
   const mobile = mode === 'mobile';
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: mobile ? 8 : 12, marginBottom: mobile ? 18 : 22 }}>
@@ -29,6 +30,7 @@ const PlHeader = ({ ac, mode, onSearch, onAdd, onAnalytics }: any) => {
             <button style={{ all: 'unset', height: 42, padding: '0 18px', borderRadius: 'var(--radius-pill)', display: 'grid', placeItems: 'center', fontSize: 15, fontWeight: 800, color: '#fff', background: 'linear-gradient(180deg, #4A4034, #3D382F)', boxShadow: 'var(--clay-flat)' }}>Bugün</button>
           </div>
           <div style={{ flex: 1 }} />
+          {calendarSlot}
           <PlIconBtn onClick={onSearch} ac={ac} ariaLabel="Ara"><Search size={19} /></PlIconBtn>
           <PlIconBtn onClick={onAnalytics} ac={ac} ariaLabel="Analiz"><BarChart2 size={19} /></PlIconBtn>
           <PlIconBtn onClick={onAdd} hot ac={ac} ariaLabel="Görev ekle"><Plus size={22} /></PlIconBtn>
@@ -37,6 +39,7 @@ const PlHeader = ({ ac, mode, onSearch, onAdd, onAnalytics }: any) => {
       {!mobile && (
         <>
           <div style={{ flex: 1 }} />
+          {calendarSlot}
           <PlIconBtn onClick={onSearch} ac={ac} ariaLabel="Ara"><Search size={19} /></PlIconBtn>
           <PlIconBtn onClick={onAnalytics} ac={ac} ariaLabel="Analiz"><BarChart2 size={19} /></PlIconBtn>
           <PlIconBtn onClick={onAdd} hot ac={ac} ariaLabel="Görev ekle"><Plus size={22} /></PlIconBtn>
@@ -83,6 +86,60 @@ export default function PlanlamaPanel() {
     toastRef.current = setTimeout(() => setToast(null), 2400);
   };
 
+  /* ── takvim entegrasyonu ─────────────────────────────────────────
+     Bir kez bağlanan Google/Outlook takvimine görev senkronizasyonu.
+     Bağlantı durumu CalendarConnect'ten yukarı taşınır; hiçbir takvim
+     bağlı değilse sync çağrısı tümden atlanır (gereksiz istek yok). */
+  const [calConnected, setCalConnected] = React.useState(false);
+  const calConnectedRef = React.useRef(false);
+  const [oauthSignal, setOauthSignal] = React.useState(0);
+  React.useEffect(() => { calConnectedRef.current = calConnected; }, [calConnected]);
+
+  const syncTask = React.useCallback(async (task: Task, action: 'upsert' | 'delete') => {
+    if (!calConnectedRef.current) return;
+    try {
+      const token = await currentUser?.getIdToken();
+      if (!token) return;
+      const payload = {
+        id: task.id, title: task.title, note: task.note, pri: task.pri,
+        date: task.date, time: task.time, end: task.end, done: task.done,
+        subs: (task.subs || []).map((s) => ({ title: s.title, done: s.done })),
+      };
+      await fetch('/api/calendar/sync', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, task: payload }),
+      });
+    } catch (e) {
+      console.error('Takvim senkronizasyonu başarısız:', e);
+    }
+  }, [currentUser]);
+
+  /* OAuth dönüşünü (?calendar=...) yakala: toast göster, URL'yi temizle,
+     bağlantı durumunu yeniden oku. */
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const c = params.get('calendar');
+    if (!c) return;
+    const messages: Record<string, { tone?: string; title: string; sub?: string }> = {
+      'google-connected': { tone: 'ok', title: 'Google Takvim bağlandı', sub: 'Görevleriniz artık takvime işlenecek' },
+      'microsoft-connected': { tone: 'ok', title: 'Outlook Takvim bağlandı', sub: 'Görevleriniz artık takvime işlenecek' },
+      'google-error': { title: 'Google Takvim bağlanamadı', sub: 'Lütfen tekrar deneyin' },
+      'microsoft-error': { title: 'Outlook Takvim bağlanamadı', sub: 'Lütfen tekrar deneyin' },
+      'google-unconfigured': { title: 'Google entegrasyonu yapılandırılmadı' },
+      'microsoft-unconfigured': { title: 'Outlook entegrasyonu yapılandırılmadı' },
+      'google-auth-required': { title: 'Oturum gerekli', sub: 'Lütfen tekrar giriş yapın' },
+      'microsoft-auth-required': { title: 'Oturum gerekli', sub: 'Lütfen tekrar giriş yapın' },
+    };
+    if (messages[c]) fire(messages[c]);
+    params.delete('calendar');
+    const clean = window.location.pathname + (params.toString() ? `?${params}` : '');
+    window.history.replaceState(null, '', clean);
+    setOauthSignal((v) => v + 1);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   /* Firestore subscription, company-scoped.
      No orderBy → no composite index needed, and pending local writes
      (latency compensation) surface immediately; we sort client-side. */
@@ -107,6 +164,7 @@ export default function PlanlamaPanel() {
     patchLocal(id, (x) => ({ ...x, done: !x.done }));
     try { await updateDoc(doc(db, COLLECTION, id), { done: !t.done, updatedAt: serverTimestamp() }); }
     catch (e) { console.error(e); }
+    syncTask({ ...t, done: !t.done }, 'upsert');
   };
   const toggleSub = async (tid: string, sid: string) => {
     const t = tasks.find((x) => x.id === tid); if (!t) return;
@@ -114,6 +172,7 @@ export default function PlanlamaPanel() {
     patchLocal(tid, (x) => ({ ...x, subs }));
     try { await updateDoc(doc(db, COLLECTION, tid), { subs, updatedAt: serverTimestamp() }); }
     catch (e) { console.error(e); }
+    syncTask({ ...t, subs }, 'upsert');
   };
   const addSub = async (tid: string, title: string) => {
     const t = tasks.find((x) => x.id === tid); if (!t) return;
@@ -121,11 +180,14 @@ export default function PlanlamaPanel() {
     patchLocal(tid, (x) => ({ ...x, subs }));
     try { await updateDoc(doc(db, COLLECTION, tid), { subs, updatedAt: serverTimestamp() }); }
     catch (e) { console.error(e); }
+    syncTask({ ...t, subs }, 'upsert');
   };
   const delTask = async (id: string) => {
-    setTasks((cur) => cur.filter((t) => t.id !== id));
+    const t = tasks.find((x) => x.id === id);
+    setTasks((cur) => cur.filter((x) => x.id !== id));
     try { await deleteDoc(doc(db, COLLECTION, id)); fire({ title: 'Görev Silindi' }); }
     catch (e) { console.error(e); }
+    if (t) syncTask(t, 'delete');
   };
   const saveTask = async (data: any) => {
     try {
@@ -135,14 +197,17 @@ export default function PlanlamaPanel() {
           title: data.title, note: data.note, pri: data.pri, date: data.date, time: data.time || '', end: data.end || '', updatedAt: serverTimestamp(),
         });
         fire({ tone: 'ok', title: 'Görev Güncellendi' });
+        const prev = tasks.find((x) => x.id === data.id);
+        syncTask({ id: data.id, title: data.title, note: data.note, pri: data.pri, date: data.date, time: data.time || '', end: data.end || '', done: !!prev?.done, subs: prev?.subs || [] }, 'upsert');
       } else {
         const now = Date.now();
-        await addDoc(collection(db, COLLECTION), {
+        const ref = await addDoc(collection(db, COLLECTION), {
           title: data.title, note: data.note, pri: data.pri, date: data.date, time: data.time || '', end: data.end || '',
           done: false, subs: [], companyId: currentCompanyId, userId: currentUser?.uid || '',
           createdAt: now, updatedAt: serverTimestamp(),
         });
         fire({ tone: 'ok', title: 'Görev Eklendi', sub: data.title });
+        syncTask({ id: ref.id, title: data.title, note: data.note, pri: data.pri, date: data.date, time: data.time || '', end: data.end || '', done: false, subs: [] }, 'upsert');
       }
     } catch (e) { console.error(e); }
   };
@@ -179,7 +244,8 @@ export default function PlanlamaPanel() {
       <PlStyles />
       <div style={{ maxWidth: mode === 'wide' ? 'none' : 1080, margin: mode === 'wide' ? '0' : '0 auto', padding: pad }}>
         <PlHeader ac={AC} mode={mode}
-          onSearch={() => setSearchOpen((v) => !v)} onAdd={() => setTaskModal({ presetDate: selectedDate })} onAnalytics={() => setAnalytics(true)} />
+          onSearch={() => setSearchOpen((v) => !v)} onAdd={() => setTaskModal({ presetDate: selectedDate })} onAnalytics={() => setAnalytics(true)}
+          calendarSlot={<CalendarConnect ac={AC} compact={mode === 'mobile'} refreshSignal={oauthSignal} onConnectedChange={setCalConnected} />} />
 
         {searchOpen && (
           <div style={{ position: 'relative', marginBottom: 16, animation: 'plPopIn 240ms var(--ease-fluid)' }}>

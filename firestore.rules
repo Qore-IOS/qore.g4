@@ -303,6 +303,15 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Satın-Alma Planlama görevleri (to-do / takvim).
+    match /planlamaGorevler/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
+
+    // Takvim entegrasyonu — OAuth refresh token'ları ve etkinlik eşlemeleri.
+    // Hassas kimlik bilgileri içerir; TÜM client erişimi reddedilir. Yalnızca
+    // Admin SDK (sunucu tarafı API route'ları) okur/yazar.
+    match /calendarConnections/{uid}/{document=**} { allow read, write: if false; }
+    match /calendarOAuthStates/{id}            { allow read, write: if false; }
+
     // Faz 1 placeholder — koleksiyonlar oluşturulunca aktifleştirilecek:
     // match /cariInvoices/{id}      { allow read: if inCompany(); allow write: if writingInCompany(); }
     // match /cariReceipts/{id}      { allow read: if inCompany(); allow write: if writingInCompany(); }
