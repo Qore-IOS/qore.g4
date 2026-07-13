@@ -19,6 +19,7 @@ import {
   type PersonnelCostConfigInput,
   type LabPoolLite,
   type LabBreakdown,
+  toTRY,
 } from '../../lib/test-cost-calculator';
 import { fetchDepoStokCounts, aggregateDepoStokRows } from '@/lib/depo-stok-ozet';
 import type {
@@ -35,7 +36,7 @@ import type {
 import { ActivitiesPanel, InsightsCard, MiniStat, SectionHeader, Card, KpiBreakdownModal, type KpiBreakdownRow } from './primitives';
 import { formatCompactTL } from './charts';
 import { useIsMobile } from './useIsMobile';
-import { collection, getDocs, query, orderBy, where } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, where, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { scopedQuery, getScopedDocs } from '@/lib/firestore-helpers';
@@ -613,31 +614,25 @@ function fmtTL(n: number, decimals = 2): string {
 }
 
 /**
- * Gerçek birim fiyat satırı — birim maliyetin % kaçının stoktan, % kaçının
- * personelden (ve varsa cihaz/envanterden) geldiğini gösterir.
+ * Gerçek birim fiyat satırı — test maliyeti YALNIZCA ürün stoğundan hesaplanır.
+ * Personel (devlet geri ödemeli) bilgi amaçlı ayrıca gösterilir, maliyete dahil edilmez.
  */
 function UnitPriceSplit({ result }: { result: TestCostBreakdown }) {
-  const total = result.testTotalCostTL;
-  if (!(total > 0) || !(result.costPerTestTL > 0)) return null;
-  const parts = [
-    { label: 'stok', v: result.stockCostTL, color: '#fb923c' },
-    { label: 'personel', v: result.personnelCostMonthlyTL, color: '#10b981' },
-    { label: 'cihaz', v: result.deviceCostMonthlyTL, color: '#a78bfa' },
-    { label: 'envanter', v: result.inventoryCostTL, color: '#3b82f6' },
-  ].filter((p) => p.v > 0);
+  if (!(result.costPerTestTL > 0)) return null;
+  const personnelUnit = result.personnelUnitCostTL || 0;
   return (
     <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', padding: '8px 10px', background: 'var(--mg-surface)', borderRadius: 8, border: '1px solid var(--mg-border)', marginTop: 10 }}>
       <span style={{ fontSize: 10, fontWeight: 800, color: 'var(--mg-muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-        Gerçek Birim Fiyat
+        Gerçek Birim Fiyat (Yalnız Stok)
       </span>
       <span style={{ fontSize: 14, fontWeight: 800, color: 'var(--mg-accent)', fontVariantNumeric: 'tabular-nums' }}>
         {fmtTL(result.costPerTestTL)}
       </span>
-      {parts.map((p) => (
-        <span key={p.label} style={{ fontSize: 11, fontWeight: 700, color: p.color, fontVariantNumeric: 'tabular-nums' }}>
-          %{((p.v / total) * 100).toFixed(1)} {p.label}
+      {personnelUnit > 0 && (
+        <span style={{ fontSize: 11, fontWeight: 700, color: '#10b981', fontVariantNumeric: 'tabular-nums' }}>
+          + personel {fmtTL(personnelUnit)}/test · maliyete dahil değil
         </span>
-      ))}
+      )}
     </div>
   );
 }
@@ -673,7 +668,7 @@ function LabKirilimList({ perLab }: { perLab: LabBreakdown[] }) {
             <span style={{ color: 'var(--mg-muted)' }}>{l.testUnits.toLocaleString('tr-TR')} test</span>
             <span style={{ color: '#fb923c', fontWeight: 600 }}>stok {fmtTL(l.stockCostTL, 0)}</span>
             {l.personnelCostMonthlyTL > 0 && (
-              <span style={{ color: '#10b981', fontWeight: 600 }}>personel {fmtTL(l.personnelCostMonthlyTL, 0)}</span>
+              <span style={{ color: '#10b981', fontWeight: 600 }}>personel {fmtTL(l.personnelCostMonthlyTL, 0)} (ayrı)</span>
             )}
             <span style={{ color: 'var(--mg-accent)', fontWeight: 800 }}>birim {fmtTL(l.unitCostTL ?? 0)}</span>
           </span>
@@ -690,12 +685,30 @@ interface TestRowProps {
   maxTotal: number;
   /** Stok bileşeni etiketi — veri kaynağına göre "Stok (anlık)" ya da "Stok (Sayım …)". */
   stockLabel?: string;
+  /** Dönem içi envanter kayıtları (satın alma): labId → TL. Ayrı kalem, teste dahil edilmez. */
+  periodInventoryByLab?: Map<string, number>;
+  /** Dönem içi yedek parça değişimleri (işlem formları): labId → TL. Ayrı kalem. */
+  periodSpareByLab?: Map<string, number>;
 }
 
-function TestRow({ result, expanded, onToggle, maxTotal, stockLabel = 'Stok (anlık)' }: TestRowProps) {
+function TestRow({ result, expanded, onToggle, maxTotal, stockLabel = 'Stok (anlık)', periodInventoryByLab, periodSpareByLab }: TestRowProps) {
   const isMobile = useIsMobile();
   const totalPct = (result.testTotalCostTL / Math.max(maxTotal, 1)) * 100;
   const c = result.marjTL >= 0 ? 'var(--mg-success)' : 'var(--mg-danger)';
+
+  // Ayrı kalemler — test maliyetine DAHİL EDİLMEZ, bilgi amaçlı listelenir.
+  // Dönem içi envanter/yedek parça: testin çalıştığı labların dönem toplamları.
+  const testLabIds = result.perLab.filter((l) => l.testUnits > 0).map((l) => l.labId);
+  const periodInventoryTL = testLabIds.reduce((s, id) => s + (periodInventoryByLab?.get(id) || 0), 0);
+  const periodSpareTL = testLabIds.reduce((s, id) => s + (periodSpareByLab?.get(id) || 0), 0);
+  const separateItems = [
+    { label: 'Personel (hacim payı)', sub: 'Devlet geri ödemeli', v: result.personnelCostMonthlyTL, color: '#10b981' },
+    { label: 'Envanter payı (aylık)', sub: 'Demirbaş amortisman payı', v: result.inventoryCostTL, color: '#3b82f6' },
+    { label: 'Cihaz payı (aylık)', sub: 'Cihaz maliyet payı', v: result.deviceCostMonthlyTL, color: '#a78bfa' },
+    { label: 'Envanter kaydı (dönem)', sub: 'Testin lablarına dönem içi alım', v: periodInventoryTL, color: '#22d3ee' },
+    { label: 'Yedek parça (dönem)', sub: 'İşlem formu parça değişimleri', v: periodSpareTL, color: '#f472b6' },
+  ];
+  const maxSeparate = Math.max(...separateItems.map((s) => s.v), 1);
 
   // Mobil: dikey kart yapısı
   if (isMobile) {
@@ -766,29 +779,36 @@ function TestRow({ result, expanded, onToggle, maxTotal, stockLabel = 'Stok (anl
         </div>
         {expanded && (
           <div style={{ background: 'var(--mg-surface-2)', borderRadius: 12, padding: '12px 14px 14px', marginTop: -4, marginBottom: 8, border: `1px solid ${c}33` }}>
-            <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--mg-muted)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 8 }}>Maliyet Bileşenleri</div>
-            {[
-              { label: stockLabel, v: result.stockCostTL, color: '#fb923c' },
-              { label: 'Envanter', v: result.inventoryCostTL, color: '#3b82f6' },
-              { label: 'Cihaz', v: result.deviceCostMonthlyTL, color: '#a78bfa' },
-              { label: 'Personel (hacim payı)', v: result.personnelCostMonthlyTL, color: '#10b981' },
-              { label: 'Diğer testler stoğu', v: result.otherTestsStockCostTL, color: '#71717a' },
-            ].map((comp, i) => {
-              const pct = result.testTotalCostTL > 0 ? (comp.v / result.testTotalCostTL) * 100 : 0;
-              return (
-                <div key={i} style={{ marginBottom: 8 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-                    <span style={{ fontSize: 11, color: 'var(--mg-text-2)', fontWeight: 600 }}>{comp.label}</span>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: comp.color, fontVariantNumeric: 'tabular-nums' }}>
-                      {fmtTL(comp.v, 0)} · %{pct.toFixed(0)}
-                    </span>
-                  </div>
-                  <div style={{ height: 5, background: 'var(--mg-surface)', borderRadius: 3, overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${pct}%`, background: comp.color, borderRadius: 3 }} />
-                  </div>
+            <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--mg-muted)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 8 }}>
+              Test Maliyeti (Yalnız Ürün Stoğu)
+            </div>
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                <span style={{ fontSize: 11, color: 'var(--mg-text-2)', fontWeight: 600 }}>{stockLabel}</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#fb923c', fontVariantNumeric: 'tabular-nums' }}>
+                  {fmtTL(result.stockCostTL, 0)}
+                </span>
+              </div>
+              <div style={{ height: 5, background: 'var(--mg-surface)', borderRadius: 3, overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: '100%', background: '#fb923c', borderRadius: 3 }} />
+              </div>
+            </div>
+            <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--mg-muted)', letterSpacing: '0.1em', textTransform: 'uppercase', marginBottom: 8 }}>
+              Ayrı Kalemler · Teste Dahil Değildir
+            </div>
+            {separateItems.map((comp, i) => (
+              <div key={i} style={{ marginBottom: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3, gap: 8 }}>
+                  <span style={{ fontSize: 11, color: 'var(--mg-text-2)', fontWeight: 600 }}>{comp.label}</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: comp.color, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+                    {fmtTL(comp.v, 0)}
+                  </span>
                 </div>
-              );
-            })}
+                <div style={{ height: 5, background: 'var(--mg-surface)', borderRadius: 3, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: `${(comp.v / maxSeparate) * 100}%`, background: comp.color, borderRadius: 3, opacity: 0.7 }} />
+                </div>
+              </div>
+            ))}
             <UnitPriceSplit result={result} />
             {result.perLab.length > 0 && (
               <>
@@ -948,30 +968,47 @@ function TestRow({ result, expanded, onToggle, maxTotal, stockLabel = 'Stok (anl
                   marginBottom: 14,
                 }}
               >
-                Maliyet Bileşenleri (Periyot)
+                Test Maliyeti (Yalnız Ürün Stoğu)
               </div>
-              {[
-                { label: stockLabel, v: result.stockCostTL, color: '#fb923c' },
-                { label: 'Envanter', v: result.inventoryCostTL, color: '#3b82f6' },
-                { label: 'Cihaz', v: result.deviceCostMonthlyTL, color: '#a78bfa' },
-                { label: 'Personel (hacim payı)', v: result.personnelCostMonthlyTL, color: '#10b981' },
-                { label: 'Diğer testler stoğu', v: result.otherTestsStockCostTL, color: '#71717a' },
-              ].map((comp, i) => {
-                const pct = result.testTotalCostTL > 0 ? (comp.v / result.testTotalCostTL) * 100 : 0;
-                return (
-                  <div key={i} style={{ marginBottom: 10 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, alignItems: 'center' }}>
-                      <span style={{ fontSize: 12, color: 'var(--mg-text-2)', fontWeight: 600 }}>{comp.label}</span>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: comp.color, fontVariantNumeric: 'tabular-nums' }}>
-                        {fmtTL(comp.v, 0)} <span style={{ color: 'var(--mg-muted)', fontWeight: 500 }}>· %{pct.toFixed(0)}</span>
-                      </span>
-                    </div>
-                    <div style={{ height: 6, background: 'var(--mg-surface)', borderRadius: 3, overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${pct}%`, background: comp.color, borderRadius: 3, boxShadow: `0 0 6px ${comp.color}60` }} />
-                    </div>
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, alignItems: 'center' }}>
+                  <span style={{ fontSize: 12, color: 'var(--mg-text-2)', fontWeight: 600 }}>{stockLabel}</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: '#fb923c', fontVariantNumeric: 'tabular-nums' }}>
+                    {fmtTL(result.stockCostTL, 0)}
+                  </span>
+                </div>
+                <div style={{ height: 6, background: 'var(--mg-surface)', borderRadius: 3, overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: '100%', background: '#fb923c', borderRadius: 3, boxShadow: '0 0 6px #fb923c60' }} />
+                </div>
+              </div>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 800,
+                  color: 'var(--mg-muted)',
+                  letterSpacing: '0.1em',
+                  textTransform: 'uppercase',
+                  marginBottom: 12,
+                }}
+              >
+                Ayrı Kalemler · Teste Dahil Değildir
+              </div>
+              {separateItems.map((comp, i) => (
+                <div key={i} style={{ marginBottom: 10 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, alignItems: 'baseline', gap: 8 }}>
+                    <span style={{ fontSize: 12, color: 'var(--mg-text-2)', fontWeight: 600 }}>
+                      {comp.label}
+                      <span style={{ fontSize: 10, color: 'var(--mg-muted)', fontWeight: 500, marginLeft: 6 }}>{comp.sub}</span>
+                    </span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: comp.color, fontVariantNumeric: 'tabular-nums', flexShrink: 0 }}>
+                      {fmtTL(comp.v, 0)}
+                    </span>
                   </div>
-                );
-              })}
+                  <div style={{ height: 6, background: 'var(--mg-surface)', borderRadius: 3, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: `${(comp.v / maxSeparate) * 100}%`, background: comp.color, borderRadius: 3, opacity: 0.7 }} />
+                  </div>
+                </div>
+              ))}
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -996,7 +1033,8 @@ function TestRow({ result, expanded, onToggle, maxTotal, stockLabel = 'Stok (anl
                     {fmtTL(result.costPerTestTL)}
                   </div>
                   <div style={{ fontSize: 10, color: 'var(--mg-muted)', marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>
-                    Stok %{(result.stockSharePct || 0).toFixed(0)} · Personel %{(result.personnelSharePct || 0).toFixed(0)}
+                    Yalnız stok
+                    {(result.personnelUnitCostTL || 0) > 0 && <> · personel {fmtTL(result.personnelUnitCostTL || 0)}/test dahil değil</>}
                   </div>
                 </div>
                 <div style={{ background: 'var(--mg-surface)', padding: '12px 14px', borderRadius: 10, border: '1px solid var(--mg-border)' }}>
@@ -1027,7 +1065,7 @@ function TestRow({ result, expanded, onToggle, maxTotal, stockLabel = 'Stok (anl
                       marginBottom: 4,
                     }}
                   >
-                    Periyot Toplam (Teste Düşen)
+                    Periyot Toplam (Yalnız Stok)
                   </div>
                   <div style={{ fontSize: 24, fontWeight: 800, color: c, fontVariantNumeric: 'tabular-nums' }}>
                     {fmtTL(result.testTotalCostTL, 0)}
@@ -1110,6 +1148,8 @@ export function TestTab({ currency: _currency, search, setSearch, registerExport
   const [countSessions, setCountSessions] = useState<SayimSession[]>([]);
   const [personnelConfig, setPersonnelConfig] = useState<PersonnelCostConfigInput | null>(null);
   const [labPools, setLabPools] = useState<LabPoolLite[]>([]);
+  /** Dönem içi yedek parça değişimleri: labId → toplam TL (işlem formlarından) */
+  const [sparePartByLab, setSparePartByLab] = useState<Map<string, number>>(new Map());
   const [rates, setRates] = useState<Record<Currency, number>>({ EUR: 1, USD: 1.08, TRY: 38.5 });
 
   // Filtreler
@@ -1283,6 +1323,100 @@ export function TestTab({ currency: _currency, search, setSearch, registerExport
   const stockSourceLabel = countPeriod === 'live'
     ? 'Stok (anlık)'
     : `Stok (Sayım: ${countPeriodOptions.find((p) => p.key === countPeriod)?.label || countPeriod})`;
+
+  // Seçili dönemin [başlangıç, bitiş) tarih aralığı — 'YYYY-MM'
+  const periodRange = useMemo(() => {
+    const m = /^(\d{4})-(\d{2})$/.exec(countPeriod);
+    if (!m) return null;
+    const start = new Date(Number(m[1]), Number(m[2]) - 1, 1);
+    const end = new Date(Number(m[1]), Number(m[2]), 1);
+    return { start, end };
+  }, [countPeriod]);
+
+  // ── Dönem içi YEDEK PARÇA değişimleri (işlem formlarından) ────────────────
+  // deviceActionForms + teknikServisActionForms: createdAt döneme düşen
+  // formların actions[type='part_change'] satırları; maliyet stok kodunun
+  // ürün fiyatından TL'ye çevrilir. Test maliyetine DAHİL EDİLMEZ — ayrı kalem.
+  useEffect(() => {
+    if (!sourceChosen || !periodRange) {
+      setSparePartByLab(new Map());
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const startTs = Timestamp.fromDate(periodRange.start);
+        const endTs = Timestamp.fromDate(periodRange.end);
+        const fetchForms = (coll: string) =>
+          getDocs(query(
+            collection(db, coll),
+            where('createdAt', '>=', startTs),
+            where('createdAt', '<', endTs),
+          )).then((s) => s.docs.map((d) => d.data() as any)).catch(() => [] as any[]);
+
+        const [labForms, tsForms] = await Promise.all([
+          fetchForms('deviceActionForms'),
+          fetchForms('teknikServisActionForms'),
+        ]);
+        if (cancelled) return;
+
+        const map = new Map<string, number>();
+        filterByCompanyScope([...labForms, ...tsForms], currentCompanyId, isSuperAdmin).forEach((form: any) => {
+          const labId = form.hospitalId;
+          if (!labId) return;
+          (form.actions || []).forEach((a: any) => {
+            if (a?.type !== 'part_change' || !a.stokKodu) return;
+            const product = productMap.get(a.stokKodu);
+            if (!product) return;
+            const costTL = toTRY(Number(product.cost) || 0, (product.currency || 'TRY') as Currency, rates);
+            map.set(labId, (map.get(labId) || 0) + costTL);
+          });
+        });
+        setSparePartByLab(map);
+      } catch (e) {
+        console.error('Dönem yedek parça maliyetleri yüklenemedi', e);
+        if (!cancelled) setSparePartByLab(new Map());
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [sourceChosen, periodRange, productMap, rates, currentCompanyId, isSuperAdmin]);
+
+  // ── Dönem içi ENVANTER kayıtları (satın alma tarihi dönemde olan assetler) ─
+  // Test maliyetine DAHİL EDİLMEZ — ayrı bilgi kalemi. Kira kayıtları hariç
+  // (onlar aylık gider olarak zaten ayrıca izlenir).
+  const inventoryEntryByLab = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!periodRange) return map;
+    const inPeriod = (raw?: string) => {
+      if (!raw) return false;
+      // 'YYYY-MM-DD' veya 'dd.MM.yyyy' desteklenir
+      let d: Date | null = null;
+      if (/^\d{4}-\d{2}/.test(raw)) d = new Date(raw);
+      else {
+        const m = /^(\d{2})\.(\d{2})\.(\d{4})/.exec(raw);
+        if (m) d = new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+      }
+      return !!d && !Number.isNaN(d.getTime()) && d >= periodRange.start && d < periodRange.end;
+    };
+    for (const a of assets) {
+      if (a.mulkiyet === 'kira') continue;
+      if (!inPeriod(a.satinAlmaTarihi)) continue;
+      const lab = labs.find((l) => l.id === a.konum || l.name === a.konum);
+      if (!lab) continue;
+      // alimFiyatiTl uygulama genelinde TL olarak tutulur — kur çevrimi yapılmaz
+      const costTL = Number(a.alimFiyatiTl) || 0;
+      map.set(lab.id, (map.get(lab.id) || 0) + costTL);
+    }
+    return map;
+  }, [periodRange, assets, labs]);
+
+  const periodExtrasTotals = useMemo(() => {
+    let inventory = 0;
+    inventoryEntryByLab.forEach((v) => { inventory += v; });
+    let spare = 0;
+    sparePartByLab.forEach((v) => { spare += v; });
+    return { inventory, spare };
+  }, [inventoryEntryByLab, sparePartByLab]);
 
   // Test hacmi kaynağı: anlık stok özeti veya seçili dönemin sayım oturumları.
   // Dönem seçildiğinde her lab için o ayın en güncel oturumu esas alınır;
@@ -1780,8 +1914,8 @@ export function TestTab({ currency: _currency, search, setSearch, registerExport
               rows: [
                 { label: 'Test Adedi', value: (mostExpensive.totalTestUnits || 0).toLocaleString('tr-TR') },
                 { label: 'Stok Maliyeti', value: `₺${Math.round(mostExpensive.stockCostTL || 0).toLocaleString('tr-TR')}` },
-                { label: 'Ortak Gider Payı', sub: 'Envanter + cihaz + personel (hacim payı)', value: `₺${Math.round(mostExpensive.ortakGiderlerTL || 0).toLocaleString('tr-TR')}` },
-                { label: 'Toplam Maliyet', value: `₺${Math.round(mostExpensive.testTotalCostTL || 0).toLocaleString('tr-TR')}` },
+                { label: 'Ayrı Kalemler', sub: 'Envanter + cihaz + personel — teste dahil değil', value: `₺${Math.round(mostExpensive.ortakGiderlerTL || 0).toLocaleString('tr-TR')}` },
+                { label: 'Toplam Maliyet (Yalnız Stok)', value: `₺${Math.round(mostExpensive.testTotalCostTL || 0).toLocaleString('tr-TR')}` },
                 { label: 'Birim Maliyet', value: `₺${(mostExpensive.costPerTestTL || 0).toLocaleString('tr-TR', { maximumFractionDigits: 2 })}` },
                 { label: 'Hak Ediş', value: `₺${(mostExpensive.hakEdisTL || 0).toLocaleString('tr-TR', { maximumFractionDigits: 2 })}` },
                 { label: 'Marj', value: `₺${(mostExpensive.marjTL || 0).toLocaleString('tr-TR', { maximumFractionDigits: 2 })}` },
@@ -1853,8 +1987,8 @@ export function TestTab({ currency: _currency, search, setSearch, registerExport
                     },
                     {
                       value: systemTotal.personnelCostMonthlyTL,
-                      label: 'Personel',
-                      sublabel: `${systemTotal.counts.personnel} kişi`,
+                      label: 'Personel (ayrı)',
+                      sublabel: 'Teste dahil değil · devlet geri ödemeli',
                       color: '#10b981',
                       format: (v: number) => (
                         <>
@@ -1880,6 +2014,30 @@ export function TestTab({ currency: _currency, search, setSearch, registerExport
                       label: 'Stok',
                       sublabel: countPeriod === 'live' ? 'Anlık değer' : 'Sayım dönemi',
                       color: '#fb923c',
+                      format: (v: number) => (
+                        <>
+                          <span style={{ fontSize: 20, color: 'var(--mg-muted)', fontWeight: 300, marginRight: 2 }}>₺</span>
+                          {Math.round(v).toLocaleString('tr-TR')}
+                        </>
+                      ),
+                    },
+                    {
+                      value: periodExtrasTotals.inventory,
+                      label: 'Envanter Kaydı (Dönem)',
+                      sublabel: 'Dönem içi alımlar · teste dahil değil',
+                      color: '#22d3ee',
+                      format: (v: number) => (
+                        <>
+                          <span style={{ fontSize: 20, color: 'var(--mg-muted)', fontWeight: 300, marginRight: 2 }}>₺</span>
+                          {Math.round(v).toLocaleString('tr-TR')}
+                        </>
+                      ),
+                    },
+                    {
+                      value: periodExtrasTotals.spare,
+                      label: 'Yedek Parça (Dönem)',
+                      sublabel: 'İşlem formu değişimleri · teste dahil değil',
+                      color: '#f472b6',
                       format: (v: number) => (
                         <>
                           <span style={{ fontSize: 20, color: 'var(--mg-muted)', fontWeight: 300, marginRight: 2 }}>₺</span>
@@ -2030,6 +2188,8 @@ export function TestTab({ currency: _currency, search, setSearch, registerExport
                 onToggle={() => setExpandedTestId(expandedTestId === b.testId ? null : b.testId)}
                 maxTotal={maxTotal}
                 stockLabel={stockSourceLabel}
+                periodInventoryByLab={inventoryEntryByLab}
+                periodSpareByLab={sparePartByLab}
               />
             ))
           )}
