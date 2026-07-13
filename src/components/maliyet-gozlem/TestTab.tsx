@@ -574,16 +574,16 @@ function FilterBar({
         ))}
       </div>
 
-      {/* Lab seçici (aramalı multiselect) */}
+      {/* Lokasyon seçici (lab + depo, aramalı multiselect) */}
       <div style={{ width: isMobile ? '100%' : 280 }}>
         <LabSelector
           mode="multi"
-          label="Lab"
+          label="Lokasyon"
           labs={labs.map((l) => ({ id: l.id, name: l.name, kod: l.kod }))}
           values={selectedLabIds}
           onValuesChange={setSelectedLabIds}
-          placeholder="Laboratuvar seç..."
-          searchPlaceholder="Laboratuvar ara..."
+          placeholder="Lab / depo seç..."
+          searchPlaceholder="Lab veya depo ara..."
         />
       </div>
 
@@ -1275,6 +1275,7 @@ export function TestTab({ currency: _currency, search, setSearch, registerExport
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [labs, setLabs] = useState<Hospital[]>([]);
+  const [depots, setDepots] = useState<Hospital[]>([]);
   const [testDefs, setTestDefs] = useState<TestDefinitionGlobal[]>([]);
   const [productMap, setProductMap] = useState<Map<string, ProductCode>>(new Map());
   const [deviceDefs, setDeviceDefs] = useState<Map<string, Device>>(new Map());
@@ -1321,6 +1322,7 @@ export function TestTab({ currency: _currency, search, setSearch, registerExport
         const [
           productsSnap,
           labsSnap,
+          depotsSnap,
           devicesSnap,
           assignedSnap,
           assetsSnap,
@@ -1336,6 +1338,9 @@ export function TestTab({ currency: _currency, search, setSearch, registerExport
           // kayıtları da gelsin — aksi halde maliyet hesapları 0 çıkıyor.
           getScopedDocs('productCodes', currentCompanyId, isSuperAdmin),
           getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin, orderBy('name', 'asc'))),
+          // Depolar da stok hesabına dahil edilir — depo sayımlarındaki stok
+          // testin toplam stoğuna girer (yalnızca lab sayımı değil).
+          getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)).catch(() => null),
           getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
           getDocs(scopedQuery('hospitalDeviceAssignments', currentCompanyId, isSuperAdmin)),
           getDocs(scopedQuery('assets', currentCompanyId, isSuperAdmin)),
@@ -1368,6 +1373,16 @@ export function TestTab({ currency: _currency, search, setSearch, registerExport
             currentCompanyId,
             isSuperAdmin,
           ),
+        );
+
+        setDepots(
+          depotsSnap
+            ? filterByCompanyScope(
+                depotsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Hospital)),
+                currentCompanyId,
+                isSuperAdmin,
+              )
+            : [],
         );
 
         const devs = devicesSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Device));
@@ -1582,10 +1597,15 @@ export function TestTab({ currency: _currency, search, setSearch, registerExport
   // Test hacmi kaynağı: anlık stok özeti veya seçili dönemin sayım oturumları.
   // Dönem seçildiğinde her lab için o ayın en güncel oturumu esas alınır;
   // stokAdedi kutu sayısı, cihazUstuAdedi test adedi olarak hesaba girer.
+  // Hesaba dahil edilen lokasyonlar = laboratuvarlar + depolar. Depo sayımındaki
+  // stok da testin toplam stoğuna girsin diye hesaplayıcıya birlikte verilir.
+  const calcLocations = useMemo<Hospital[]>(() => [...labs, ...depots], [labs, depots]);
+
   const effectiveStokCounts = useMemo<DepoStokCount[]>(() => {
     if (countPeriod === 'live') return depoStokCounts;
     const monthSessions = countSessions.filter((s) => {
-      if (s.locationType !== 'lab') return false;
+      // Lab VE depo sayımları dahil — yalnız lab değil.
+      if (s.locationType !== 'lab' && s.locationType !== 'depot') return false;
       const d = getSessionDate(s);
       if (!d) return false;
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` === countPeriod;
@@ -1612,7 +1632,7 @@ export function TestTab({ currency: _currency, search, setSearch, registerExport
     return calculateAllTestCosts({
       allTestDefs: testDefs,
       productMap,
-      labs,
+      labs: calcLocations,
       assignedDevices,
       deviceDefs,
       assets,
@@ -1629,14 +1649,14 @@ export function TestTab({ currency: _currency, search, setSearch, registerExport
       inventoryEntryByLab: Object.fromEntries(inventoryEntryByLab),
       filterLabIds: selectedLabIds.length > 0 ? selectedLabIds : undefined,
     });
-  }, [testDefs, productMap, labs, assignedDevices, deviceDefs, assets, personnel, effectiveStokCounts, rates, periot, selectedLabIds, personnelConfig, labPools, sparePartByLab, inventoryEntryByLab]);
+  }, [testDefs, productMap, calcLocations, assignedDevices, deviceDefs, assets, personnel, effectiveStokCounts, rates, periot, selectedLabIds, personnelConfig, labPools, sparePartByLab, inventoryEntryByLab]);
 
   const systemTotal = useMemo(() => {
     if (testDefs.length === 0) return null;
     return calculateSystemTotal({
       allTestDefs: testDefs,
       productMap,
-      labs,
+      labs: calcLocations,
       assignedDevices,
       deviceDefs,
       assets,
@@ -1648,7 +1668,7 @@ export function TestTab({ currency: _currency, search, setSearch, registerExport
       labPools,
       filterLabIds: selectedLabIds.length > 0 ? selectedLabIds : undefined,
     });
-  }, [testDefs, productMap, labs, assignedDevices, deviceDefs, assets, personnel, effectiveStokCounts, rates, periot, selectedLabIds, personnelConfig, labPools]);
+  }, [testDefs, productMap, calcLocations, assignedDevices, deviceDefs, assets, personnel, effectiveStokCounts, rates, periot, selectedLabIds, personnelConfig, labPools]);
 
   // Filtreleme + sıralama
   const filtered = useMemo(() => {
@@ -1998,7 +2018,7 @@ export function TestTab({ currency: _currency, search, setSearch, registerExport
     <div style={{ display: 'flex', flexDirection: 'column', gap: isMobile ? 18 : 20 }}>
       {/* Filtre bar */}
       <FilterBar
-        labs={labs}
+        labs={calcLocations}
         selectedLabIds={selectedLabIds}
         setSelectedLabIds={setSelectedLabIds}
         testDefs={testDefs}
