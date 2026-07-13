@@ -79,6 +79,7 @@ export default function BrandObservationPage() {
       .filter((i) => (i.marka || 'Diğer') === brand)
       .map((i) => ({
         sessionId: s.id,
+        locationId: s.locationId,
         locationName: s.locationName,
         locationType: s.locationType,
         date: getSessionDate(s),
@@ -90,25 +91,24 @@ export default function BrandObservationPage() {
       })));
   }, [periodSessions, brand, productMap, rates, currency]);
 
-  const latestRows = useMemo(() => {
-    const seen = new Set<string>();
-    return rows.filter((r) => {
-      const key = `${r.locationType}-${r.locationName}-${r.stokKodu}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  }, [rows]);
+  // Gözlem panelindeki marka toplamı (getBrandCostBreakdown) her lokasyonun EN
+  // GÜNCEL oturumundaki tüm kalemleri toplar; ekstra bir stok-kodu tekilleştirmesi
+  // yapmaz. Marka detayı da aynı davranmalı — aksi halde aynı stoğun birden çok
+  // satırı (farklı lot/ambalaj) veya aynı isimli iki lokasyon yanlışlıkla elenip
+  // toplam düşük çıkıyordu (gözlem ₺40,6M vs detay ₺39,1M). getLatestByLocation
+  // zaten lokasyon başına tek oturum bıraktığı için burada dedup gerekmez.
+  const latestRows = rows;
 
   const total = latestRows.reduce((s, r) => s + r.totalCost, 0);
 
   const locationSummary = useMemo(() => {
     const m = new Map<string, { locationName: string; cost: number; count: number }>();
     latestRows.forEach((r) => {
-      const row = m.get(r.locationName) || { locationName: r.locationName, cost: 0, count: 0 };
+      const key = `${r.locationType}-${r.locationId || r.locationName}`;
+      const row = m.get(key) || { locationName: r.locationName, cost: 0, count: 0 };
       row.cost += r.totalCost;
       row.count += 1;
-      m.set(r.locationName, row);
+      m.set(key, row);
     });
     return Array.from(m.values()).sort((a, b) => b.cost - a.cost);
   }, [latestRows]);
@@ -388,8 +388,8 @@ export default function BrandObservationPage() {
               </tr>
             </thead>
             <tbody>
-              {latestRows.slice(0, 500).map((r) => (
-                <tr key={`${r.sessionId}-${r.stokKodu}-${r.locationName}`} className="border-b border-[var(--dashboard-stroke)]/50">
+              {latestRows.slice(0, 500).map((r, idx) => (
+                <tr key={`${r.sessionId}-${r.stokKodu}-${idx}`} className="border-b border-[var(--dashboard-stroke)]/50">
                   <td className="py-2 pr-3">{r.stokAdi}<div className="text-xs text-[var(--dashboard-muted)]">{r.stokKodu}</div></td>
                   <td className="py-2 pr-3">{r.locationName}</td>
                   <td className="py-2 pr-3">{r.stokAdedi}</td>
