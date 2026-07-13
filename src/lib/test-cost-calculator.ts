@@ -122,6 +122,16 @@ export interface TestCostInputs {
   personnelConfig?: PersonnelCostConfigInput;
   /** Havuz tanımları — personnelConfig ile birlikte kullanılır. */
   labPools?: LabPoolLite[];
+  /**
+   * labId → dönem içi yedek parça değişim toplamı (TL). Dönem sabit tutar;
+   * lab içi test hacmi payıyla testlere dağıtılır. Test maliyetine KATILMAZ.
+   */
+  sparePartByLab?: Record<string, number>;
+  /**
+   * labId → dönem içi envanter (satın alma) kaydı toplamı (TL). Dönem sabit
+   * tutar; lab içi test hacmi payıyla testlere dağıtılır. Maliyete KATILMAZ.
+   */
+  inventoryEntryByLab?: Record<string, number>;
   /** Ham sevk edilmiş stok satırları — `depoStokCounts` verilmişse gerekmez */
   depoStok?: DepoStokItem[];
   /** Sunucuda özetlenmiş stok sayıları — verilirse `depoStok` yerine kullanılır */
@@ -177,6 +187,12 @@ export interface LabBreakdown {
   inventoryCostTL: number;
   deviceCostMonthlyTL: number;
   personnelCostMonthlyTL: number;
+  /** Bu labdaki toplam test-bağlantılı hacim (tüm testler) — pay = testUnits/labVolume */
+  labVolume?: number;
+  /** Bu teste, bu labın dönem yedek parça giderinden düşen pay (TL) */
+  sparePartCostTL?: number;
+  /** Bu teste, bu labın dönem envanter kaydından düşen pay (TL) */
+  inventoryEntryCostTL?: number;
   /** Lab başına birim test maliyeti = stok / adet (personel/envanter dahil edilmez) */
   unitCostTL?: number;
 }
@@ -199,6 +215,12 @@ export interface TestCostBreakdown {
   deviceCostMonthlyTL: number;
   /** Bu teste hacim ağırlığıyla dağıtılan personel gideri (seçili periyot, TL) */
   personnelCostMonthlyTL: number;
+  /** Bu teste lab hacim payıyla dağıtılan dönem yedek parça gideri (TL) — maliyete dahil değil */
+  sparePartAllocTL?: number;
+  /** Yedek parça biriminin teste etkisi (TL/test) — bilgi amaçlı */
+  sparePartUnitTL?: number;
+  /** Bu teste lab hacim payıyla dağıtılan dönem envanter kaydı (TL) — maliyete dahil değil */
+  inventoryEntryAllocTL?: number;
   /** Bu testin stoktan gelen birim maliyeti (TL/test) */
   stockUnitCostTL?: number;
   /** Bu testin personelden gelen birim maliyeti (TL/test) */
@@ -216,7 +238,9 @@ export interface TestCostBreakdown {
 
   /** Hak ediş (SUT karşılığı) — TL */
   hakEdisTL: number;
-  /** Marj = hakEdis - costPerTest (negatif zarar) */
+  /** Hak ediş verisi girilmiş mi? false ise marj hesaplanamaz (0 ≠ veri yok) */
+  hakEdisTanimli?: boolean;
+  /** Marj = hakEdis - costPerTest (negatif zarar). hakEdisTanimli=false ise anlamsız */
   marjTL: number;
 
   perLab: LabBreakdown[];
@@ -738,6 +762,11 @@ export function calculateTestCostWithContext(ctx: TestCostContext, testDef: Test
   //  - equal_alloc: bilgi payı test sayısına eşit bölünür (toplama katılmaz).
   const allocationMode: AllocationMode = ctx.inputs.mode || 'full_burden';
 
+  // Dönem sabit tutarlar (yedek parça / envanter kaydı) — periyotla çarpılmaz,
+  // lab içi test hacmi payıyla testlere dağıtılır (aylık gider değil).
+  const sparePartByLab = ctx.inputs.sparePartByLab || {};
+  const inventoryEntryByLab = ctx.inputs.inventoryEntryByLab || {};
+
   const perLab: LabBreakdown[] = [];
   let totalStockUnits = 0;
   let totalStockCostTL = 0;
@@ -745,6 +774,8 @@ export function calculateTestCostWithContext(ctx: TestCostContext, testDef: Test
   let allocInventoryPeriotTL = 0;
   let allocDevicePeriotTL = 0;
   let allocPersonnelPeriotTL = 0;
+  let allocSparePartTL = 0;
+  let allocInventoryEntryTL = 0;
 
   // Tam lab toplamları (full_burden/grandTotal referansı) — testin hacmi
   // olmayan lablar da dahil, tüm filtreli lablar üzerinden.
@@ -793,6 +824,9 @@ export function calculateTestCostWithContext(ctx: TestCostContext, testDef: Test
     const labInvAllocTL = shared.inventoryCostTL * labShare * periotAy;
     const labDevAllocTL = shared.deviceCostMonthlyTL * labShare * periotAy;
     const labPerAllocTL = shared.personnelCostMonthlyTL * labShare * periotAy;
+    // Dönem sabit kalemler — periyotla çarpılmaz, yalnız hacim payı uygulanır
+    const labSpareAllocTL = (sparePartByLab[lab.id] || 0) * labShare;
+    const labInvEntryAllocTL = (inventoryEntryByLab[lab.id] || 0) * labShare;
 
     perLab.push({
       labId: lab.id,
@@ -802,6 +836,9 @@ export function calculateTestCostWithContext(ctx: TestCostContext, testDef: Test
       inventoryCostTL: labInvAllocTL,
       deviceCostMonthlyTL: labDevAllocTL,
       personnelCostMonthlyTL: labPerAllocTL,
+      labVolume,
+      sparePartCostTL: labSpareAllocTL,
+      inventoryEntryCostTL: labInvEntryAllocTL,
       // Birim = yalnızca stok — personel/envanter teste katılmaz (ayrı bilgi)
       unitCostTL: units > 0 ? costTL / units : 0,
     });
@@ -811,6 +848,8 @@ export function calculateTestCostWithContext(ctx: TestCostContext, testDef: Test
     allocInventoryPeriotTL += labInvAllocTL;
     allocDevicePeriotTL += labDevAllocTL;
     allocPersonnelPeriotTL += labPerAllocTL;
+    allocSparePartTL += labSpareAllocTL;
+    allocInventoryEntryTL += labInvEntryAllocTL;
   }
 
   // Diğer testlerin stok maliyeti (filtrelenmiş labs üzerinde) — indeksle O(1)
@@ -991,8 +1030,11 @@ export function calculateTestCostWithContext(ctx: TestCostContext, testDef: Test
     warnings.push('Kapasite verisi yok (cihaz TPH veya lab çalışma saati tanımlı değil) — stok moduna düşüldü');
   }
 
+  // Hak ediş: 0 ile "veri girilmemiş" ayrı — eksikse marj hesaplanmaz.
+  const hakEdisTanimli = typeof testDef.hakEdisMiktari === 'number' && testDef.hakEdisMiktari > 0;
   const hakEdisTL = toTRY(testDef.hakEdisMiktari || 0, (testDef.currency || 'TRY') as Currency, rates);
   const marj = hakEdisTL - finalCostPerTest;
+  const sparePartUnitTL = totalStockUnits > 0 ? allocSparePartTL / totalStockUnits : 0;
 
   return {
     testId: testDef.id,
@@ -1005,10 +1047,14 @@ export function calculateTestCostWithContext(ctx: TestCostContext, testDef: Test
     inventoryCostTL: inventoryPeriotTL,
     deviceCostMonthlyTL: devicePeriotTL,
     personnelCostMonthlyTL: personnelPeriotTL,
+    sparePartAllocTL: allocSparePartTL,
+    sparePartUnitTL,
+    inventoryEntryAllocTL: allocInventoryEntryTL,
     ortakGiderlerTL: ortakGiderler,
     testTotalCostTL: testTotalCost,
     costPerTestTL: finalCostPerTest,
     hakEdisTL,
+    hakEdisTanimli,
     marjTL: marj,
     perLab,
     warnings,
