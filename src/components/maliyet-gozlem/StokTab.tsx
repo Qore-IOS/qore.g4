@@ -32,7 +32,8 @@ import { ActivitiesPanel, InsightsCard, MiniStat, SectionHeader, Card, HBarList,
 import { DonutChart, formatCompactTL } from './charts';
 import { useIsMobile } from './useIsMobile';
 import { Loader2 } from 'lucide-react';
-import { exportDataToExcel, exportDataToPdf } from '@/lib/utils';
+import { exportDataToPdf } from '@/lib/utils';
+import { buildStokMaliyetModel, downloadStokMaliyetExcel, type StokExportLocationInfo } from '@/lib/maliyetGozlemExcel';
 import { useToast } from '@/hooks/use-toast';
 import type { TabExportHandlers } from './MaliyetGozlemMerkezi';
 
@@ -73,6 +74,8 @@ export function StokTab({ currency, search, setSearch, registerExportHandlers }:
   const [sessions, setSessions] = useState<SayimSession[]>([]);
   const [productMap, setProductMap] = useState<Map<string, ProductCode>>(new Map());
   const [rates, setRates] = useState<Record<Currency, number>>({ EUR: 1, USD: 1.08, TRY: 38.5 });
+  /** Lokasyon kimliği → ad/lab kodu/tip — Excel çıktısında lab kodları için. */
+  const [locationInfo, setLocationInfo] = useState<Map<string, StokExportLocationInfo>>(new Map());
   /** Seçili sayım dönemi ('all' = tüm dönemler, aksi halde 'YYYY-MM') */
   const [selectedPeriod, setSelectedPeriod] = useState<string>('all');
   /** Kullanıcı kaynak/dönem seçmeden veri YÜKLENMEZ (performans + netlik). */
@@ -126,6 +129,38 @@ export function StokTab({ currency, search, setSearch, registerExportHandlers }:
       cancelled = true;
     };
   }, [currentCompanyId, isSuperAdmin, reloadKey, sourceChosen]);
+
+  // Lab kodları + depo adları — Excel çıktısında kullanılır.
+  useEffect(() => {
+    if (!sourceChosen) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [hospSnap, depoSnap] = await Promise.all([
+          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)).catch(() => null),
+        ]);
+        if (cancelled) return;
+        const map = new Map<string, StokExportLocationInfo>();
+        filterByCompanyScope(
+          hospSnap.docs.map((d) => ({ id: d.id, ...d.data() } as any)),
+          currentCompanyId,
+          isSuperAdmin,
+        ).forEach((h: any) => map.set(h.id, { name: h.name || h.ad || h.id, kod: h.kod || '', type: 'lab' }));
+        if (depoSnap) {
+          filterByCompanyScope(
+            depoSnap.docs.map((d) => ({ id: d.id, ...d.data() } as any)),
+            currentCompanyId,
+            isSuperAdmin,
+          ).forEach((d: any) => map.set(d.id, { name: d.name || d.id, kod: d.kod || '', type: 'depot' }));
+        }
+        setLocationInfo(map);
+      } catch (e) {
+        console.error('Lokasyon bilgisi yüklenemedi', e);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [currentCompanyId, isSuperAdmin, sourceChosen]);
 
   // Oturumlarda bulunan sayım dönemleri (yeniden eskiye)
   const periodOptions = useMemo(() => {
@@ -326,40 +361,26 @@ export function StokTab({ currency, search, setSearch, registerExportHandlers }:
       : periodOptions.find((p) => p.key === selectedPeriod)?.label || selectedPeriod;
 
     registerExportHandlers({
-      excel: () => {
-        exportDataToExcel(
-          {
-            'Özet': [
-              { Alan: 'Dönem', Değer: periodName },
-              { Alan: `Toplam Envanter (${currency})`, Değer: Math.round(total) },
-              { Alan: 'Lokasyon Sayısı', Değer: locations.length },
-              { Alan: 'Marka Sayısı', Değer: brands.length },
-              { Alan: 'Sayım Oturumu', Değer: analysisSessions.length },
-            ],
-            'Markalar': brands.map((b) => ({
-              Marka: b.name,
-              [`Maliyet (${currency})`]: Math.round(b.value),
-              'Ürün Sayısı': b.productCount,
-            })),
-            'Lokasyonlar': locations.map((l) => ({
-              Lokasyon: l.locationName,
-              Tip: l.locationType === 'lab' ? 'Lab' : 'Depo',
-              [`Maliyet (${currency})`]: Math.round(l.totalCost),
-              'Ürün Sayısı': l.productCount,
-              'Son Sayım': l.lastSessionDate ? l.lastSessionDate.toLocaleDateString('tr-TR') : '',
-            })),
-            'Ürün Grupları': groups.map((g) => ({
-              Grup: groupLabel(g.group),
-              [`Maliyet (${currency})`]: Math.round(g.value),
-            })),
-            'Aylık Trend': trend.map((t) => ({
-              Ay: t.monthLabel,
-              [`Maliyet (${currency})`]: Math.round(t.cost),
-            })),
-          },
-          `Maliyet_Gozlem_Stok_${periodName}`,
-          toast,
-        );
+      excel: async () => {
+        try {
+          // Genel Tablo + marka-kurum dağılımları; tüm tutarlar TL, lab kodlu.
+          const model = buildStokMaliyetModel({
+            sessions: periodSessions,
+            productMap,
+            rates,
+            locationInfo,
+            periodLabel: periodName,
+          });
+          if (model.brands.length === 0) {
+            toast({ title: 'Veri yok', description: 'Bu dönemde dışa aktarılacak maliyet verisi bulunamadı.' });
+            return;
+          }
+          await downloadStokMaliyetExcel(model, `Maliyet_Gozlem_Stok_${periodName}`);
+          toast({ title: 'Excel indirildi', description: 'Genel tablo + marka-kurum dağılımları (TL) oluşturuldu.' });
+        } catch (e) {
+          console.error('Stok Excel export error', e);
+          toast({ title: 'Hata', description: 'Excel oluşturulamadı.', variant: 'destructive' });
+        }
       },
       pdf: () => {
         exportDataToPdf(
@@ -376,7 +397,7 @@ export function StokTab({ currency, search, setSearch, registerExportHandlers }:
         );
       },
     });
-  }, [registerExportHandlers, selectedPeriod, periodOptions, currency, total, brands, locations, groups, trend, analysisSessions.length, toast]);
+  }, [registerExportHandlers, selectedPeriod, periodOptions, currency, locations, periodSessions, productMap, rates, locationInfo, toast]);
   // Aktivite kartlarında ortak tutar formatı — milyonlar "5,2M", binler "298k"
   const cardMoneyFormat = (v: number) => (
     <>
