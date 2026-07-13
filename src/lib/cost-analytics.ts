@@ -194,17 +194,112 @@ export function getSessionsInRange(
   });
 }
 
-export function getLatestByLocation(sessions: SayimSession[]): Map<string, SayimSession> {
-  const latestByLocation = new Map<string, SayimSession>();
-  const resetKeys = new Set<string>();
+/** Dönem anahtarı (YYYY-MM) — sayımın analitik tarihinden türetilir. */
+function periodKeyOf(session: SayimSession): string {
+  const d = getSessionDate(session);
+  if (!d) return 'na';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
 
-  sortSessionsByAnalyticsDateDesc(sessions).forEach((session) => {
-    const key = `${session.locationType}-${session.locationId}`;
-    if (latestByLocation.has(key) || resetKeys.has(key)) return;
-    if (session.isDeleted) {
-      resetKeys.add(key);
-      return;
+/** İki kalem listesini stok koduna göre birleştirir; adetleri TOPLAR. */
+function mergeSessionItems(target: Map<string, SayimSessionItem>, items: SayimSessionItem[] | undefined): void {
+  (items || []).forEach((it) => {
+    if (!it || !it.stokKodu) return;
+    const existing = target.get(it.stokKodu);
+    if (existing) {
+      existing.stokAdedi = (Number(existing.stokAdedi) || 0) + (Number(it.stokAdedi) || 0);
+      existing.cihazUstuAdedi = (Number(existing.cihazUstuAdedi) || 0) + (Number(it.cihazUstuAdedi) || 0);
+      if (!existing.stokAdi && it.stokAdi) existing.stokAdi = it.stokAdi;
+      if (!existing.marka && it.marka) existing.marka = it.marka;
+      if (existing.cost == null && it.cost != null) existing.cost = it.cost;
+      if (existing.currency == null && it.currency != null) existing.currency = it.currency;
+      if (existing.ambalajDegeri == null && it.ambalajDegeri != null) existing.ambalajDegeri = it.ambalajDegeri;
+    } else {
+      target.set(it.stokKodu, {
+        ...it,
+        stokAdedi: Number(it.stokAdedi) || 0,
+        cihazUstuAdedi: Number(it.cihazUstuAdedi) || 0,
+      });
     }
+  });
+}
+
+/**
+ * Bir lokasyonun bir dönemdeki (ay) sayımlarını TOPLAR. Aynı kurum + aynı dönem
+ * için birden fazla sayım girildiyse üzerine yazmaz; aynı stok kodundaki adetleri
+ * toplar, farklı ürünleri ayrı kalem olarak tutar. Silinen (isDeleted) sayım, o
+ * döneme kadar biriken toplamı SIFIRLAR (reset marker); sonraki sayımlar yeniden
+ * birikmeye başlar. Her (lokasyon, dönem) için tek birleşik sayım döndürür.
+ */
+export function consolidateSessionsByLocationPeriod(sessions: SayimSession[]): SayimSession[] {
+  const groups = new Map<string, SayimSession[]>();
+  sessions.forEach((s) => {
+    const key = `${s.locationType}-${s.locationId}-${periodKeyOf(s)}`;
+    const arr = groups.get(key);
+    if (arr) arr.push(s);
+    else groups.set(key, [s]);
+  });
+
+  const result: SayimSession[] = [];
+  groups.forEach((groupSessions, key) => {
+    // Kronolojik (eskiden yeniye) — silme reset'i doğru sırayla uygulansın.
+    const ordered = [...groupSessions].sort((a, b) => {
+      const at = (toDateValue(a.deletedAt) || getCreatedAtDate(a))?.getTime() ?? 0;
+      const bt = (toDateValue(b.deletedAt) || getCreatedAtDate(b))?.getTime() ?? 0;
+      return at - bt;
+    });
+
+    const merged = new Map<string, SayimSessionItem>();
+    let representative: SayimSession | null = null;
+    let latestCreatedAt: any = null;
+    let latestCreatedMs = -Infinity;
+
+    ordered.forEach((s) => {
+      if (s.isDeleted) {
+        merged.clear(); // dönem sıfırlama
+        return;
+      }
+      mergeSessionItems(merged, s.items);
+      representative = s;
+      const ms = getCreatedAtDate(s)?.getTime() ?? 0;
+      if (ms >= latestCreatedMs) {
+        latestCreatedMs = ms;
+        latestCreatedAt = s.createdAt;
+      }
+    });
+
+    if (merged.size === 0 || !representative) return; // boş / tamamen resetlenmiş dönem
+    const rep = representative as SayimSession;
+    result.push({
+      id: key,
+      locationType: rep.locationType,
+      locationId: rep.locationId,
+      locationName: rep.locationName,
+      createdAt: latestCreatedAt ?? rep.createdAt,
+      period: rep.period,
+      month: rep.month,
+      year: rep.year,
+      items: Array.from(merged.values()),
+      isDeleted: false,
+    });
+  });
+
+  return result;
+}
+
+/**
+ * Her lokasyon için EN GÜNCEL DÖNEMİN birleşik (toplanmış) sayımını döndürür.
+ * Aynı dönemdeki birden çok sayım `consolidateSessionsByLocationPeriod` ile
+ * toplanır; ardından lokasyon başına en güncel dönem seçilir. Tek bir döneme
+ * filtrelenmiş girdi verilirse (dönem seçili gözlem) sonuç o dönemin toplamıdır.
+ */
+export function getLatestByLocation(sessions: SayimSession[]): Map<string, SayimSession> {
+  const consolidated = consolidateSessionsByLocationPeriod(sessions);
+  const latestByLocation = new Map<string, SayimSession>();
+
+  sortSessionsByAnalyticsDateDesc(consolidated).forEach((session) => {
+    const key = `${session.locationType}-${session.locationId}`;
+    if (latestByLocation.has(key)) return;
     latestByLocation.set(key, session);
   });
 
