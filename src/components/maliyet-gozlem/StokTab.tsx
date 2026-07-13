@@ -689,7 +689,7 @@ export function StokTab({ currency, search, setSearch, registerExportHandlers }:
               label: b.name,
               sub: `${b.productCount} ürün · %${total > 0 ? ((b.value / total) * 100).toFixed(1) : 0} pay · detay ›`,
               value: fmtFull(b.value),
-              onClick: () => goToBrand(b.name),
+              onClick: () => openBrandProducts(b.name),
             })),
           })}
         />
@@ -820,7 +820,7 @@ export function StokTab({ currency, search, setSearch, registerExportHandlers }:
                 value: b.value,
                 color: BRAND_COLORS[i % BRAND_COLORS.length],
               }))}
-              onSelect={(name) => goToBrand(name)}
+              onSelect={(name) => openBrandProducts(name)}
             />
           ) : (
             <div style={{ padding: 40, textAlign: 'center', color: 'var(--mg-muted)' }}>Veri yok</div>

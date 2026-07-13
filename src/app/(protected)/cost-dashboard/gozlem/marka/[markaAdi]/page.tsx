@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { getDocs, orderBy } from 'firebase/firestore';
 import { ArrowLeft, FileSpreadsheet, FileText, Loader2 } from 'lucide-react';
+import { useProductCodes } from '@/hooks/useFirebaseQueries';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { scopedQuery, getScopedDocs } from '@/lib/firestore-helpers';

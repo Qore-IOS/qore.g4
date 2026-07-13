@@ -161,6 +161,54 @@ function sortSessionsByAnalyticsDateDesc(sessions: SayimSession[]): SayimSession
   return [...sessions].sort(compareSessionsByAnalyticsDateDesc);
 }
 
+function mergeSessionItem(target: SayimSessionItem, source: SayimSessionItem): SayimSessionItem {
+  return {
+    ...target,
+    stokAdedi: (Number(target.stokAdedi) || 0) + (Number(source.stokAdedi) || 0),
+    cihazUstuAdedi: (Number(target.cihazUstuAdedi) || 0) + (Number(source.cihazUstuAdedi) || 0),
+  };
+}
+
+function mergeSessionsByLocation(sessions: SayimSession[]): Map<string, SayimSession> {
+  const consolidatedByLocation = new Map<string, SayimSession>();
+  const resetKeys = new Set<string>();
+
+  sortSessionsByAnalyticsDateDesc(sessions).forEach((session) => {
+    const key = `${session.locationType}-${session.locationId}`;
+    if (resetKeys.has(key)) return;
+    if (session.isDeleted) {
+      resetKeys.add(key);
+      return;
+    }
+
+    const current = consolidatedByLocation.get(key);
+    if (!current) {
+      consolidatedByLocation.set(key, {
+        ...session,
+        items: session.items.map((item) => ({ ...item })),
+      });
+      return;
+    }
+
+    const itemsByStockCode = new Map<string, SayimSessionItem>(
+      current.items.map((item) => [item.stokKodu, { ...item }]),
+    );
+
+    session.items.forEach((item) => {
+      const existing = itemsByStockCode.get(item.stokKodu);
+      itemsByStockCode.set(item.stokKodu, existing ? mergeSessionItem(existing, item) : { ...item });
+    });
+
+    consolidatedByLocation.set(key, {
+      ...current,
+      id: `${current.id}+${session.id}`,
+      items: Array.from(itemsByStockCode.values()),
+    });
+  });
+
+  return consolidatedByLocation;
+}
+
 export function getSessionsInRange(
   sessions: SayimSession[],
   range: TimeRange,
