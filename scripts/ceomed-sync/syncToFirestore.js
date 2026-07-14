@@ -78,6 +78,7 @@ async function syncOnce({ baslangic, bitis, statusFilter }) {
           {
             durumAciklama: irs.DURUM_ACIKLAMA,
             durumTipi: irs.DURUM_TIPI,
+            sevkAdresi: irs.ADRES || '',
             syncedAt: admin.firestore.FieldValue.serverTimestamp(),
           },
           { merge: true }
@@ -101,6 +102,7 @@ async function syncOnce({ baslangic, bitis, statusFilter }) {
           tarih: irs.TARIH,
           cariKodu: irs.CARI_KODU,
           cariUnvan: irs.CARI_UNVAN,
+          sevkAdresi: irs.ADRES || '',
           evrakSeq: irs.EVRAK_SEQ,
           depo: irs.DEPO,
           durumAciklama: irs.DURUM_ACIKLAMA,

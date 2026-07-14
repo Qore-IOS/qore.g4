@@ -61,12 +61,23 @@ interface PendingIrsaliye {
   tarih: string; // dd-MM-yyyy
   cariKodu: string;
   cariUnvan: string;
+  sevkAdresi?: string;
   durumAciklama: string;
   itemCount: number;
   items: CeomedItem[];
   status: 'pending' | 'approved' | 'rejected';
   syncedAt?: Timestamp;
   approvedAt?: Timestamp;
+}
+
+// Sevk adresini normalize et: küçük harf, Türkçe karakterler sadeleşir, noktalama/boşluk temizlenir.
+function normalizeAddress(s?: string): string {
+  if (!s) return '';
+  return s
+    .toLocaleLowerCase('tr-TR')
+    .replace(/ı/g, 'i').replace(/ş/g, 's').replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u').replace(/ö/g, 'o').replace(/ç/g, 'c')
+    .replace(/[^a-z0-9]/g, ''); // sadece harf+rakam kalsın
 }
 
 const STATUS_OPTIONS = [
@@ -144,6 +155,53 @@ export default function CeomedIrsaliyePanel() {
     }
     return map;
   }, [productCodes]);
+
+  const hospitalById = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const h of hospitals) map.set(h.id, h);
+    return map;
+  }, [hospitals]);
+
+  /**
+   * Bir irsaliye için hedef laboratuvarı çözer.
+   * - Ana eşleşme: cariKodu -> ceomedCariKodu
+   * - Ana hastanenin ek hizmetleri varsa, irsaliyenin sevkAdresi'ni ana + ek hizmetlerin
+   *   sevkAdresi ile karşılaştırır; birebir eşleşen varsa hedef odur (otomatik yönlendirme).
+   */
+  const resolveTarget = useMemo(() => {
+    return (irs: PendingIrsaliye) => {
+      const main = hospitalByCari.get((irs.cariKodu || '').trim().toUpperCase());
+      if (!main) return { mainId: null, mainName: null, routedId: null, routedName: null, matchedByAddress: false, ambiguous: false };
+      const mainHospital = hospitalById.get(main.id);
+      const ekIds = (mainHospital?.ekHizmetLabIds || []) as string[];
+      // Aday havuz: ana + ek hizmetler
+      const candidates = [mainHospital, ...ekIds.map((id) => hospitalById.get(id)).filter(Boolean)];
+      const irsAddr = normalizeAddress(irs.sevkAdresi);
+      let routed: any = null;
+      let ambiguous = false;
+      if (irsAddr && ekIds.length > 0) {
+        const matches = candidates.filter((c) => c?.sevkAdresi && normalizeAddress(c.sevkAdresi) === irsAddr);
+        if (matches.length === 1) routed = matches[0];
+        else if (matches.length > 1) { routed = matches[0]; ambiguous = true; }
+      }
+      const target = routed || mainHospital;
+      return {
+        mainId: mainHospital.id,
+        mainName: mainHospital.name,
+        routedId: target.id,
+        routedName: target.name,
+        matchedByAddress: !!routed && routed.id !== mainHospital.id,
+        ambiguous,
+      };
+    };
+  }, [hospitalByCari, hospitalById]);
+
+  // Detay açılınca sevk adresine göre hedefi otomatik seç
+  useEffect(() => {
+    if (!selected) { setTargetHospitalId(''); return; }
+    const t = resolveTarget(selected);
+    setTargetHospitalId(t.routedId || '');
+  }, [selected, resolveTarget]);
 
   const filtered = useMemo(() => {
     return list.filter((i) => {
@@ -446,11 +504,18 @@ export default function CeomedIrsaliyePanel() {
                         <span className="truncate">{i.cariUnvan}</span>
                       </div>
                       <div className="mt-1">
-                        {match ? (
-                          <span className="inline-flex items-center gap-1 text-[11px] text-emerald-600">
-                            <CheckCircle className="h-3 w-3" /> Eşleşti: {match.name}
-                          </span>
-                        ) : (
+                        {match ? (() => {
+                          const t = resolveTarget(i);
+                          return t.matchedByAddress ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] text-emerald-600">
+                              <CheckCircle className="h-3 w-3" /> Yönlendirildi: {t.routedName} <span className="text-[var(--dashboard-muted)]">(adres eşleşti)</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[11px] text-emerald-600">
+                              <CheckCircle className="h-3 w-3" /> Eşleşti: {match.name}
+                            </span>
+                          );
+                        })() : (
                           <span className="inline-flex items-center gap-1 text-[11px] text-amber-600">
                             <AlertTriangle className="h-3 w-3" /> Eşleşmedi (ceomedCariKodu yok)
                           </span>
@@ -499,11 +564,24 @@ export default function CeomedIrsaliyePanel() {
             const showRouting = selected.status === 'pending' && mainHospital && ekHizmetLabs.length > 0;
             return (
               <>
-                {showRouting && (
+                {showRouting && (() => {
+                  const t = resolveTarget(selected);
+                  return (
                   <div className="rounded-xl border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)] p-3 mb-2">
                     <label className="text-xs text-[var(--dashboard-muted)] mb-1 block">
                       Hedef Laboratuvar (yönlendirme)
                     </label>
+                    {selected.sevkAdresi && (
+                      <p className="text-[11px] text-[var(--dashboard-muted)] mb-1">
+                        İrsaliye sevk adresi: <span className="font-medium">{selected.sevkAdresi}</span>
+                      </p>
+                    )}
+                    {t.matchedByAddress && (
+                      <p className="text-[11px] text-emerald-600 mb-1 flex items-center gap-1">
+                        <CheckCircle className="h-3 w-3" /> Sevk adresi eşleşti — otomatik "{t.routedName}" seçildi.
+                        {t.ambiguous && ' (Birden fazla eşleşme, ilki seçildi — kontrol edin.)'}
+                      </p>
+                    )}
                     <Select
                       value={targetHospitalId || mainHospital!.id}
                       onValueChange={(v) => setTargetHospitalId(v)}
@@ -523,7 +601,8 @@ export default function CeomedIrsaliyePanel() {
                       </SelectContent>
                     </Select>
                   </div>
-                )}
+                  );
+                })()}
                 <div className="flex-1 overflow-y-auto space-y-2 pr-2">
               {(selected.items || []).map((item, idx) => {
                 const product = productByStokKodu.get(String(item.STOK_KODU).trim());
