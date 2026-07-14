@@ -55,15 +55,5 @@ qore-studio-work
 # Environment files
 .env.local
 .env*.local
-.test-dist-cost/
 
-# Multi-tenancy audit reports (may contain tenant data)
-audit-report.json
-reports/audit-*.json
-
-# Python bytecode (skill scripts)
-__pycache__/
-*.pyc
-
-# npm lockfile (repo uses pnpm)
-package-lock.json
+scripts/ceomed-sync/sevkiyat-watcher.log

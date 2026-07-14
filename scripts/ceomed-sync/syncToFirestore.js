@@ -166,7 +166,7 @@ async function syncOnce({ baslangic, bitis, statusFilter, auto = false, lastSucc
           {
             durumAciklama: irs.DURUM_ACIKLAMA,
             durumTipi: irs.DURUM_TIPI,
-            companyId, // multi-tenancy: eski tag'siz kayıtlar bu refresh sırasında da tag'lensin
+            sevkAdresi: irs.ADRES || '',
             syncedAt: admin.firestore.FieldValue.serverTimestamp(),
           },
           { merge: true }
@@ -190,6 +190,7 @@ async function syncOnce({ baslangic, bitis, statusFilter, auto = false, lastSucc
           tarih: irs.TARIH,
           cariKodu: irs.CARI_KODU,
           cariUnvan: irs.CARI_UNVAN,
+          sevkAdresi: irs.ADRES || '',
           evrakSeq: irs.EVRAK_SEQ,
           depo: irs.DEPO,
           durumAciklama: irs.DURUM_ACIKLAMA,

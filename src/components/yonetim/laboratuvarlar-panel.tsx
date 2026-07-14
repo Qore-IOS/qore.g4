@@ -223,6 +223,7 @@ export default function LaboratuvarPanel() {
         ceomedCariKodu: (currentHospital.ceomedCariKodu || '').trim().toUpperCase() || null,
         mahalKodu: (currentHospital.mahalKodu || '').trim().toUpperCase() || null,
         ekHizmetLabIds: currentHospital.ekHizmetLabIds || [],
+        sevkAdresi: (currentHospital.sevkAdresi || '').trim() || null,
         address: currentHospital.address || '',
         lat: currentHospital.lat || null,
         lng: currentHospital.lng || null,
@@ -761,11 +762,11 @@ export default function LaboratuvarPanel() {
             <div className="space-y-4">
               <Input placeholder="Laboratuvar Adı" value={currentHospital.name || ''} onChange={(e) => setCurrentHospital({ ...currentHospital, name: e.target.value })} />
               <Input placeholder="Laboratuvar Kodu (Max 3 Karakter)" value={currentHospital.kod || ''} onChange={(e) => setCurrentHospital({ ...currentHospital, kod: e.target.value.toUpperCase() })} maxLength={3} />
-              {currentHospital.isConsumablesHospital ? (
-                <Input placeholder="Mahal Kodu (örn. 152.06.A.001)" value={currentHospital.mahalKodu || ''} onChange={(e) => setCurrentHospital({ ...currentHospital, mahalKodu: e.target.value.trim().toUpperCase() })} />
-              ) : (
-                <Input placeholder="Ceomed Cari Kodu (örn. M51001)" value={currentHospital.ceomedCariKodu || ''} onChange={(e) => setCurrentHospital({ ...currentHospital, ceomedCariKodu: e.target.value.trim().toUpperCase() })} />
-              )}
+              <Input placeholder="Ceomed Cari Kodu (örn. M51001)" value={currentHospital.ceomedCariKodu || ''} onChange={(e) => setCurrentHospital({ ...currentHospital, ceomedCariKodu: e.target.value.trim().toUpperCase() })} />
+              <div>
+                <Input placeholder="Ceomed Sevk Adresi (irsaliye yönlendirmesi)" value={currentHospital.sevkAdresi || ''} onChange={(e) => setCurrentHospital({ ...currentHospital, sevkAdresi: e.target.value })} />
+                <p className="text-xs text-muted-foreground mt-1">Ceomed irsaliyesindeki sevk adresi ile birebir eşleşirse irsaliye bu laboratuvara yönlendirilir. Ek hizmet binaları için doldurun.</p>
+              </div>
               <Input placeholder="Adres" value={currentHospital.address || ''} onChange={(e) => handleAddressInputChange(e.target.value)} />
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />

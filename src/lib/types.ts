@@ -78,10 +78,7 @@ export interface Hospital {
   ceomedCariKodu?: string; // Ceomed ERP'deki cari kodu (örn. M51001) - irsaliye eşlemesi için
   mahalKodu?: string; // Hastane Sarf kategorisindeki lablar için mahal kodu (örn. 152.06.A.001) — QR teslimat doğrulamasında kullanılır
   ekHizmetLabIds?: string[]; // Bu ana laboratuvara bağlı ek hizmet laboratuvarlarının id'leri
-  /** Acil statüsü — true ise 7/24 (Pazartesi-Pazar 00:00-24:00) çalışır kabul edilir, calismaSaatleri yok sayılır. */
-  acilStatusu?: boolean;
-  /** Lab çalışma saatleri — kapasite ve atıl maliyet hesabında kullanılır. */
-  calismaSaatleri?: LabCalismaSaatleri;
+  sevkAdresi?: string; // Ceomed irsaliyesindeki sevk adresi ile eşleştirme için (ek hizmet yönlendirmesi)
   [k: string]: any;
 }
 
@@ -147,13 +144,7 @@ export interface Depot {
   // Ceomed entegrasyonu
   ceomedEnabled?: boolean; // true ise bu depo Ceomed ERP'den senkronize edilir
   ceomedDepoKodu?: string; // Ceomed'deki depo kodu (örn. "77") — selectMerkezDepoListesi'ndeki DEPO{kod} alanını okur
-  ceomedCariKodu?: string; // Ceomed cari kodu (örn. M51001) — Ceomed irsaliye eşleştirmesi için
-  orderLimitEnabled?: boolean; // Manuel depo talebinde max stok üstü siparişi engeller
-  // Total Verimlilik: bağlı laboratuvarların "Ay Başı Sevk (Kutu)" verisi,
-  // laboratuvara yapılan sevkler yerine bu deponun dönem içi mal kabul
-  // geçmişinden (depoStok eklenmeTarihi) alınır. Depo mal kabulünü uygulama
-  // içinde kendisi yapan (Ceomed'e bakılmayan) kurulumlar için kullanılır.
-  verimlilikMalKabulEnabled?: boolean;
+  sevkiyatMalKabulden?: boolean; // true ise total verimlilik ay başı sevkiyat bu depoya bağlı lablar için mal kabul/transfer geçmişinden alınır (Ceomed sorgusundan hariç)
   [k: string]: any;
 }
 
