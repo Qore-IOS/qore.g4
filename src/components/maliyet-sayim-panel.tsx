@@ -1800,7 +1800,7 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
       : depots.find(d => d.id === selectedLocationId)?.name ?? '';
 
     return (
-      <div className="cihaz-shell min-h-screen">
+      <div className="cihaz-shell maliyet-clay min-h-screen">
         <div className="max-w-2xl mx-auto px-4 sm:px-6 pt-8 sm:pt-12 pb-24">
           {/* Header */}
           <div className="flex items-center gap-3 mb-8">
@@ -1972,7 +1972,7 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
     );
 
     return (
-      <div className="cihaz-shell min-h-screen">
+      <div className="cihaz-shell maliyet-clay min-h-screen">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 pt-8 sm:pt-12 pb-24">
           {/* Header */}
           <div className="flex items-center gap-3 mb-6 px-1">
@@ -2238,7 +2238,7 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
     : 0;
 
   return (
-    <div className="cihaz-shell min-h-screen flex flex-col">
+    <div className="cihaz-shell maliyet-clay min-h-screen flex flex-col">
       {/* ===== TOP STATUS BAR ===== */}
       <div className="sticky top-0 z-[var(--z-sticky)] bg-[var(--dashboard-bg)]/95 backdrop-blur-md border-b border-[var(--dashboard-stroke)]">
         <div className="px-4 sm:px-6 py-3 flex items-center gap-4 flex-wrap">
