@@ -466,7 +466,7 @@ Bu işlem ilgili dönem + lokasyon maliyetini sıfırlar ve maliyet gözlem hesa
   };
 
   return (
-    <div className="cihaz-shell min-h-screen">
+    <div className="cihaz-shell maliyet-clay min-h-screen">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-6 sm:pt-8 pb-24">
 
         {/* Header */}

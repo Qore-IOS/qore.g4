@@ -427,7 +427,7 @@ export default function TopluMaliyetSayimPanel({
       ? locations.filter(l => normalizeText(l.name).includes(normalizeText(locationSearch)))
       : locations;
     return (
-      <div className="cihaz-shell min-h-screen">
+      <div className="cihaz-shell maliyet-clay min-h-screen">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 pt-8 sm:pt-12 pb-24">
           <div className="flex items-center gap-3 mb-6 px-1">
             <button
@@ -540,7 +540,7 @@ export default function TopluMaliyetSayimPanel({
   // ---- Adım 2: Marka + ürün grubu + dönem ----
   if (step === 'filters') {
     return (
-      <div className="cihaz-shell min-h-screen">
+      <div className="cihaz-shell maliyet-clay min-h-screen">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 pt-8 sm:pt-12 pb-24">
           <div className="flex items-center gap-3 mb-6 px-1">
             <button
@@ -694,7 +694,7 @@ export default function TopluMaliyetSayimPanel({
     : activeProducts;
 
   return (
-    <div className="cihaz-shell min-h-screen flex flex-col">
+    <div className="cihaz-shell maliyet-clay min-h-screen flex flex-col">
       {/* Üst çubuk */}
       <div className="sticky top-0 z-[var(--z-sticky)] bg-[var(--dashboard-bg)]/95 backdrop-blur-md border-b border-[var(--dashboard-stroke)]">
         <div className="px-4 sm:px-6 py-3 flex items-center gap-4 flex-wrap">

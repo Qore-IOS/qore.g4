@@ -503,7 +503,7 @@ export default function MaliyetSayimDetayPage() {
 
   if (!session) {
     return (
-      <div className="cihaz-shell min-h-screen flex items-center justify-center">
+      <div className="cihaz-shell maliyet-clay min-h-screen flex items-center justify-center">
         <div className="text-center">
           <p className="text-sm text-[var(--dashboard-muted)] mb-4">Sayim oturumu bulunamadi.</p>
           <button
@@ -520,7 +520,7 @@ export default function MaliyetSayimDetayPage() {
   const sessionDate = getSessionDate(session);
 
   return (
-    <div className="cihaz-shell min-h-screen">
+    <div className="cihaz-shell maliyet-clay min-h-screen">
       <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-6 sm:pt-8 pb-24">
 
         {/* Header */}
