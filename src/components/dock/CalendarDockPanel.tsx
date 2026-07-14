@@ -134,11 +134,10 @@ export function CalendarDockPanel({ onClose }: { onClose: () => void }) {
         aria-label="Takvim"
         onClick={(e) => e.stopPropagation()}
         className={cn(
-          'fixed w-[360px] max-w-[94vw] rounded-[22px] p-4 flex flex-col gap-3',
+          'fixed left-1/2 w-[calc(100vw-32px)] max-w-[360px] -translate-x-1/2 rounded-[22px] p-4 flex flex-col gap-3 sm:left-auto sm:right-4 sm:w-[360px] sm:translate-x-0',
           'bg-white/40 dark:bg-zinc-900/35',
         )}
         style={{
-          right: 16,
           bottom: 'calc(var(--dock-gap) + var(--dock-h) + 12px)',
           zIndex: 511,
           boxShadow:
